@@ -6,6 +6,10 @@ name: Build neurodesktop-test
 # DockerHub: https://hub.docker.com/r/vnmd/neurodesktop
 # Github Packages: https://github.com/NeuroDesk/neurodesktop/pkgs/container/neurodesktop%2Fneurodesktop
 
+permissions:
+  contents: read
+  pull-requests: write
+
 on:
   workflow_dispatch:
     inputs:
