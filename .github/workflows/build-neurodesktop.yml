@@ -8,6 +8,7 @@ name: Build neurodesktop
 
 permissions:
   contents: read
+  issues: write
   pull-requests: write
   packages: write
 
