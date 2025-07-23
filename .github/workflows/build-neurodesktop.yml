@@ -9,6 +9,7 @@ name: Build neurodesktop
 permissions:
   contents: read
   pull-requests: write
+  packages: write
 
 on:
   workflow_dispatch:
