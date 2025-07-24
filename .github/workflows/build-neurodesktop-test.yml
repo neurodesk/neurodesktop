@@ -7,7 +7,7 @@ name: Build neurodesktop-test
 # Github Packages: https://github.com/NeuroDesk/neurodesktop/pkgs/container/neurodesktop%2Fneurodesktop
 
 permissions:
-  contents: read
+  contents: write
   issues: write
   pull-requests: write
   packages: write
