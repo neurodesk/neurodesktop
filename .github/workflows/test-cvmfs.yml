@@ -47,7 +47,8 @@ jobs:
                         "s1perth-cvmfs.openhtc.io",
                         "cvmfs-frankfurt.neurodesk.org",
                         "cvmfs-jetstream.neurodesk.org",
-                        "s1ral-cvmfs.openhtc.io"]
+                        "s1ral-cvmfs.openhtc.io",
+                        "cvmfs-geoproximity.neurodesk.org"]
 
                         # "cvmfs-s1.hpc.swin.edu.au",
                         # "cvmfs-stratum-one.ihep.ac.cn",
