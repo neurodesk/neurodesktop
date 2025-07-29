@@ -51,8 +51,11 @@ jobs:
                         "cvmfs1.neurodesk.org",
                         "cvmfs2.neurodesk.org",
                         "cvmfs3.neurodesk.org",
+                        "cvmfs-egi.gridpp.rl.ac.uk",
+                        "cvmfs-s1.hpc.swin.edu.au",
+                        "cvmfs-stratum-one.ihep.ac.cn",
+                        "s1nikhef-cvmfs.openhtc.io",
                         "cvmfs.neurodesk.org"]
-                        # "s1nikhef-cvmfs.openhtc.io",
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
     - name: check if ${{ matrix.cvmfs-servers }} is online and up-to-date
