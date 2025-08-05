@@ -280,6 +280,7 @@ RUN chown -R ${NB_UID}:${NB_GID} /etc/guacamole
 RUN chown -R ${NB_UID}:${NB_GID} /usr/local/tomcat
 COPY --chown=${NB_UID}:${NB_GID} config/guacamole/user-mapping-vnc.xml /etc/guacamole/user-mapping-vnc.xml
 COPY --chown=${NB_UID}:${NB_GID} config/guacamole/user-mapping-vnc-rdp.xml /etc/guacamole/user-mapping-vnc-rdp.xml
+RUN ln -sf /etc/guacamole/user-mapping-vnc.xml /etc/guacamole/user-mapping.xml
 
 # Add NB_USER to sudoers
 RUN echo "${NB_USER} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/notebook \

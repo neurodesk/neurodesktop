@@ -62,10 +62,9 @@ then
 fi
 
 if sudo -n true 2>/dev/null; then
-    ln -s /etc/guacamole/user-mapping-vnc-rdp.xml /etc/guacamole/user-mapping.xml
-else 
-    ln -s /etc/guacamole/user-mapping-vnc.xml /etc/guacamole/user-mapping.xml
+    ln -sf /etc/guacamole/user-mapping-vnc-rdp.xml /etc/guacamole/user-mapping.xml
 fi
+
 # Insert guacamole private key into user-mapping for ssh/sftp support
 if ! grep 'BEGIN RSA PRIVATE KEY' /etc/guacamole/user-mapping.xml; then
     sed -i "/private-key/ r /home/${NB_USER}/.ssh/guacamole_rsa" /etc/guacamole/user-mapping.xml
