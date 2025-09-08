@@ -127,3 +127,13 @@ fi
 
 conda init bash
 mamba init bash
+
+# Create and setup .vnc dir if not existing
+if [ ! -d "/home/${NB_USER}/.vnc" ]; then
+    mkdir /home/${NB_USER}/.vnc \
+        && chown ${NB_USER} /home/${NB_USER}/.vnc \
+        && /usr/bin/printf '%s\n%s\n%s\n' 'password' 'password' 'n' | vncpasswd
+
+    printf '%s\n' '#!/bin/sh' '/usr/bin/startlxde' 'vncconfig -nowin -noiconic &' > "/home/${NB_USER}/.vnc/xstartup"
+    chmod +x "/home/${NB_USER}/.vnc/xstartup"
+fi
