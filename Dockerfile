@@ -176,6 +176,30 @@ RUN apt-get update --yes \
         yarn \
         zip \
         tcsh \
+        r-base-dev \
+        cmake \
+        libabsl-dev \
+        libudunits2-dev \
+        libgdal-dev \
+        gdal-bin \
+        libgeos-dev \
+        libproj-dev \
+        libcurl4-openssl-dev \
+        libxml2-dev \
+        libjson-c-dev \
+        libgit2-dev \
+        libfontconfig1-dev \
+        libharfbuzz-dev \
+        libfribidi-dev \
+        libfreetype6-dev \
+        libtiff5-dev \
+        libjpeg-dev \
+        libicu-dev \
+        libgsl-dev \
+        libopenblas-dev \
+        liblapack-dev \
+        zlib1g-dev \
+        pkg-config \
         && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install firefox
