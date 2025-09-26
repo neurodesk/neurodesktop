@@ -212,17 +212,18 @@ BASHRC_FILE="/home/${NB_USER}/.bashrc"
 INIT_MODULES="if [ -f '/usr/share/module.sh' ]; then source /usr/share/module.sh; fi"
 INIT_ENVARS="if [ -f '/opt/neurodesktop/environment_variables.sh' ]; then source /opt/neurodesktop/environment_variables.sh; fi"
 
-if [ -f "$BASHRC_FILE" ]; then
-    # Add module.sh if not already in .bashrc
-    if ! grep -qF "$INIT_MODULES" "$BASHRC_FILE"; then
-        echo "$INIT_MODULES" >> "$BASHRC_FILE"
-    fi
-
-    # Add environment_variables.sh if not already in .bashrc
-    if ! grep -qF "$INIT_ENVARS" "$BASHRC_FILE"; then
-        echo "$INIT_ENVARS" >> "$BASHRC_FILE"
-    fi
+# if [ -f "$BASHRC_FILE" ]; then
+touch "$BASHRC_FILE"
+# Add module.sh if not already in .bashrc
+if ! grep -qF "$INIT_MODULES" "$BASHRC_FILE"; then
+    echo "$INIT_MODULES" >> "$BASHRC_FILE"
 fi
+
+# Add environment_variables.sh if not already in .bashrc
+if ! grep -qF "$INIT_ENVARS" "$BASHRC_FILE"; then
+    echo "$INIT_ENVARS" >> "$BASHRC_FILE"
+fi
+# fi
 
 source /opt/neurodesktop/environment_variables.sh
 
