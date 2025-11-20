@@ -269,3 +269,16 @@ if [ -f "/home/${NB_USER}/.vnc/passwd" ] && [ "$(stat -c %a /home/${NB_USER}/.vn
     chmod 600 "/home/${NB_USER}/.vnc/passwd"
 fi
 
+apply_chown_if_needed() {
+    local dir=$1
+    local recursive=$2
+    if [ -d "$dir" ]; then
+        current_uid=$(stat -c "%u" "$dir")
+        current_gid=$(stat -c "%g" "$dir")
+        if [ "$current_uid" != "$NB_UID" ] || [ "$current_gid" != "$NB_GID" ]; then
+            chown -R "${NB_UID}:${NB_GID}" "$dir"
+        fi
+    fi
+}
+apply_chown_if_needed "/etc/guacamole"
+apply_chown_if_needed "/usr/local/tomcat"

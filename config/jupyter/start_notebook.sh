@@ -37,8 +37,6 @@ apply_chown_if_needed() {
 }
 
 apply_chown_if_needed "${HOME}" true
-apply_chown_if_needed "/etc/guacamole" true
-apply_chown_if_needed "/usr/local/tomcat" true
 # apply_chown_if_needed "${HOME}" false
 # apply_chown_if_needed "${HOME}/.local" false
 # apply_chown_if_needed "${HOME}/.local/share" false
