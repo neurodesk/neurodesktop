@@ -109,14 +109,22 @@ RUN mv /usr/bin/systemctl /usr/bin/systemctl.orig \
     && chmod +x /usr/bin/systemctl
 
 # Install CVMFS
-RUN wget -q https://ecsft.cern.ch/dist/cvmfs/cvmfs-release/cvmfs-release-latest_all.deb -P /tmp \
+RUN wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb -P /tmp \
     && dpkg -i /tmp/cvmfs-release-latest_all.deb \
-    && rm /tmp/cvmfs-release-latest_all.deb
-
-# Install CVMFS Packages
-RUN apt-get update --yes \
+    && rm /tmp/cvmfs-release-latest_all.deb \
+    && apt-get update --yes \
     && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends cvmfs \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# # Install CVMFS
+# RUN wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb -P /tmp \
+#     && dpkg -i /tmp/cvmfs-release-latest_all.deb \
+#     && rm /tmp/cvmfs-release-latest_all.deb
+
+# # Install CVMFS Packages
+# RUN apt-get update --yes \
+#     && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends cvmfs \
+#     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Tools and Libs
 RUN apt-get update --yes \
