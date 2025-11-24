@@ -1,0 +1,21 @@
+name: Self-hosted Runner Test
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  run-on-self-hosted:
+    runs-on: ["self-hosted", "linux", "arc-base"]
+    steps:
+      - name: Show runner name
+        run: |
+          echo "Running on self-hosted runner"
+          echo "Runner hostname: $(hostname)"
+      - name: Show environment
+        run: |
+          echo "Runner container environment:"
+          env | sort
+      - name: Test docker
+        run: |
+          echo "If docker is enabled, show docker version"
+          docker --version || true
