@@ -5,7 +5,7 @@ on:
 
 jobs:
   run-on-self-hosted:
-    runs-on: ["self-hosted", "linux", "arc-cpu"]
+    runs-on: ["self-hosted", "linux", "arc-base"]
     steps:
       - name: Show runner name
         run: |
