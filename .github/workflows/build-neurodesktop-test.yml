@@ -40,6 +40,7 @@ jobs:
         sudo mkdir -p /mnt/tmp
         sudo chown $(whoami) /mnt/tmp
         sudo mkdir -p /mnt/docker
+        sudo mkdir -p /etc/docker
         echo '{"data-root": "/mnt/docker"}' | sudo tee /etc/docker/daemon.json
         sudo systemctl restart docker
     - name: Checkout repository
