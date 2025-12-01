@@ -28,20 +28,13 @@ env:
 
 jobs:
   build-image:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, arc-base]
     steps:
     - name: Fetch github api rate limit
       run: |
         GITHUB_RATE_REMAINING=$(curl -H "Accept: application/vnd.github.v3+json" https://api.github.com/rate_limit | jq '.rate.remaining')
         echo "GITHUB_RATE_REMAINING=${GITHUB_RATE_REMAINING}"
         echo "GITHUB_RATE_REMAINING=$GITHUB_RATE_REMAINING" >> $GITHUB_ENV
-    - name: Configure runner
-      run: |
-        sudo mkdir -p /mnt/tmp
-        sudo chown $USER /mnt/tmp
-        sudo mkdir -p /mnt/docker
-        echo '{"data-root": "/mnt/docker"}' | sudo tee /etc/docker/daemon.json
-        sudo systemctl restart docker
     - name: Checkout repository
       if: ${{ env.GITHUB_RATE_REMAINING > 0 }}
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
