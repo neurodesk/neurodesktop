@@ -62,7 +62,7 @@ jobs:
       #change to if else later, this is for testing the arc runners.
       with:
         driver-opts: |
-          network.mtu=1400
+          network=host
     - name: Login to GHCR
       uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
       with:
