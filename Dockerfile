@@ -220,6 +220,7 @@ RUN /opt/conda/bin/pip install jupyter-server-proxy \
     && /opt/conda/bin/pip install notebook_intelligence \
     && /opt/conda/bin/pip install jupyterlab_rise \
     && /opt/conda/bin/pip install jupyterlab-niivue \
+    && /opt/conda/bin/pip install jupyterlab_myst \
     && /opt/conda/bin/pip install papermill \
     && /opt/conda/bin/pip install ipycanvas \
     && /opt/conda/bin/pip install jupyter-resource-usage \
