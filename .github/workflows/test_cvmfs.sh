@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # set -e
 
 SERVERIP=$1

@@ -34,12 +34,11 @@ jobs:
         update_existing: true
         search_existing: open
   test_cvmfs:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         cvmfs-servers: ["s1fnal-cvmfs.openhtc.io:8080",
-                        "s1sampa-cvmfs.openhtc.io:8080",
                         "s1bnl-cvmfs.openhtc.io",
                         "s1osggoc-cvmfs.openhtc.io:8080",
                         "s1brisbane-cvmfs.openhtc.io",
@@ -50,6 +49,9 @@ jobs:
                         "cvmfs-jetstream.neurodesk.org",
                         "s1ral-cvmfs.openhtc.io",
                         "cvmfs-geoproximity.neurodesk.org"]
+        
+        # currently down:
+        # "s1sampa-cvmfs.openhtc.io:8080",
 
                         # "cvmfs-s1.hpc.swin.edu.au",
                         # "cvmfs-stratum-one.ihep.ac.cn",
