@@ -22,3 +22,6 @@ c.ServerApp.preferred_dir = os.getcwd()
 c.FileContentsManager.allow_hidden = True
 
 before_notebook = subprocess.call("/opt/neurodesktop/jupyterlab_startup.sh")
+
+# Fix for Rise extension: https://github.com/neurodesk/neurodesktop/issues/327
+c.NotebookApp.tornado_settings = { "headers": { "Content-Security-Policy": "frame-ancestors 'self'" } }
