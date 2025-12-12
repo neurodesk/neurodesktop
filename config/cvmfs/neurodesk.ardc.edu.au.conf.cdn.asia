@@ -1,3 +1,3 @@
 CVMFS_USE_GEOAPI=yes
-CVMFS_SERVER_URL="http://s1brisbane-cvmfs.openhtc.io/cvmfs/@fqrn@;http://s1perth-cvmfs.openhtc.io/cvmfs/@fqrn@"
+CVMFS_SERVER_URL="http://s1melbourne-cvmfs.openhtc.io/cvmfs/@fqrn@;http://s1sydney-cvmfs.openhtc.io/cvmfs/@fqrn@;http://s1brisbane-cvmfs.openhtc.io/cvmfs/@fqrn@;http://s1perth-cvmfs.openhtc.io/cvmfs/@fqrn@"
 CVMFS_KEYS_DIR="/etc/cvmfs/keys/ardc.edu.au/"
