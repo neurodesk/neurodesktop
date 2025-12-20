@@ -393,6 +393,9 @@ USER ${NB_UID}
 WORKDIR "${HOME}"
 
 # Install example notebooks
-ADD "https://api.github.com/repos/neurodesk/example-notebooks/git/refs/heads/main" /home/${NB_USER}/skipcache
+ADD "https://api.github.com/repos/neurodesk/neurodeskedu/git/refs/heads/main" /home/${NB_USER}/skipcache
 RUN rm /home/${NB_USER}/skipcache \
-    && git clone --depth 1 https://github.com/neurodesk/example-notebooks
+    && git clone --depth 1 --filter=blob:none https://github.com/neurodesk/neurodeskedu.git \
+    && cd neurodeskedu \
+    && git sparse-checkout init --cone \
+    && git sparse-checkout set books/examples
