@@ -25,8 +25,9 @@ on:
     
 env:
   DOCKERHUB_ORG: ${{ vars.DOCKERHUB_ORG }}
-  MAKEFLAGS: "-j4"
-  NINJA_STATUS: "[%f/%t] "
+  # Set only for self-hosted runners to optimize build performance
+  # MAKEFLAGS: "-j4"
+  # NINJA_STATUS: "[%f/%t] "
 jobs:
   build-image:
     # runs-on: [self-hosted, linux, arc-base]
