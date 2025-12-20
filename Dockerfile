@@ -227,7 +227,7 @@ RUN /opt/conda/bin/pip install jupyter-server-proxy \
     && /opt/conda/bin/pip install jupyter-resource-usage \
     && /opt/conda/bin/pip install jupyter_scheduler \
     && /opt/conda/bin/pip install httpx \
-    && /opt/conda/bin/pip install ipywidgets ipyvolume jupyterlab_widgets \
+    && /opt/conda/bin/pip install ipywidgets==7.8.5 ipyvolume jupyterlab_widgets \
     && /opt/conda/bin/pip install nbgitpuller \
     && rm -rf /home/${NB_USER}/.cache
 
