@@ -208,7 +208,7 @@ RUN conda install -c conda-forge nb_conda_kernels \
 RUN conda config --system --prepend envs_dirs '~/conda-environments'
 
 # Add datalad-container datalad-osf osfclient ipyniivue to the conda environment
-RUN /opt/conda/bin/pip install datalad nipype nbdev pydra>=1.0a nipoppy matplotlib datalad-container datalad-osf osfclient watermark ipyniivue  \
+RUN /opt/conda/bin/pip install datalad nipype nbdev pydra==1.0a7 nipoppy matplotlib datalad-container datalad-osf osfclient watermark ipyniivue  \
     && rm -rf /home/${NB_USER}/.cache
 
 
