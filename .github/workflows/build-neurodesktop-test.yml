@@ -81,9 +81,9 @@ jobs:
       uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4
       with:
           context: .
-          load: true
-          platforms: linux/amd64
-          # platforms: linux/amd64,linux/arm64
+          # load: true
+          # platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           provenance: false # fixes unknown/unknown arch builds
           no-cache: true
           tags: ${{ env.IMAGEID }}:${{ env.BUILDDATE }}
