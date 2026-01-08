@@ -12,16 +12,16 @@ permissions:
   pull-requests: write
   packages: write
 
-on:
-  workflow_dispatch:
-    inputs:
-      force_push:
-        description: 'Force push?'
-        type: boolean
-        required: true
-        default: false
-  schedule:
-    - cron:  '0 17 * * *'
+# on:                                             # Trigger disabled - archived workflow
+#   workflow_dispatch:                             # Disabled to ensure this archived file does not execute
+#     inputs:
+#       force_push:
+#         description: 'Force push?'
+#         type: boolean
+#         required: true
+#         default: false
+#   schedule:
+#     - cron:  '0 17 * * *'
     
 env:
   DOCKERHUB_ORG: ${{ vars.DOCKERHUB_ORG }}
