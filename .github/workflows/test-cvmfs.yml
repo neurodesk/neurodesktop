@@ -49,11 +49,12 @@ jobs:
                         "cvmfs-jetstream.neurodesk.org",
                         "s1ral-cvmfs.openhtc.io",
                         "s1nikhef-cvmfs.openhtc.io",
-                        "s1sampa-cvmfs.openhtc.io:8080",
                         "cvmfs-geoproximity.neurodesk.org"]
-        # not yet active:
-                        # "cvmfs-s1.hpc.swin.edu.au",
-                        # "cvmfs-stratum-one.ihep.ac.cn",
+                        # not yet active:
+                          # "cvmfs-s1.hpc.swin.edu.au",
+                          # "cvmfs-stratum-one.ihep.ac.cn",
+                        # currently down:
+                          # "s1sampa-cvmfs.openhtc.io:8080",
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
     - name: check if ${{ matrix.cvmfs-servers }} is online and up-to-date
