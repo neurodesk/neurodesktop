@@ -207,28 +207,38 @@ RUN conda install -c conda-forge nb_conda_kernels \
     && rm -rf /home/${NB_USER}/.cache
 RUN conda config --system --prepend envs_dirs '~/conda-environments'
 
-# Add datalad-container datalad-osf osfclient ipyniivue to the conda environment
-RUN /opt/conda/bin/pip install datalad nipype nbdev pydra==1.0a7 nipoppy matplotlib datalad-container datalad-osf osfclient watermark ipyniivue  \
-    && rm -rf /home/${NB_USER}/.cache
-
-
-# Install jupyter-server-proxy and disable announcements
-RUN /opt/conda/bin/pip install jupyter-server-proxy \
+# Install Python packages and JupyterLab extensions
+RUN /opt/conda/bin/pip install \
+        datalad \
+        nipype \
+        nbdev \
+        pydra==1.0a7 \
+        nipoppy \
+        matplotlib \
+        datalad-container \
+        datalad-osf \
+        osfclient \
+        watermark \
+        ipyniivue \
+        jupyter-server-proxy \
+        jupyterlmod \
+        jupyterlab-git \
+        notebook_intelligence \
+        jupyterlab_rise \
+        jupyterlab-niivue \
+        jupyterlab_myst \
+        jupyter-sshd-proxy \
+        papermill \
+        ipycanvas \
+        jupyter-resource-usage \
+        jupyter_scheduler \
+        httpx \
+        ipywidgets==7.8.5 \
+        ipyvolume \
+        jupyterlab_widgets \
+        nbgitpuller \
+        xnat \
     && /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
-    && /opt/conda/bin/pip install jupyterlmod \
-    && /opt/conda/bin/pip install jupyterlab-git \
-    && /opt/conda/bin/pip install notebook_intelligence \
-    && /opt/conda/bin/pip install jupyterlab_rise \
-    && /opt/conda/bin/pip install jupyterlab-niivue \
-    && /opt/conda/bin/pip install jupyterlab_myst \
-    && /opt/conda/bin/pip install jupyter-sshd-proxy \
-    && /opt/conda/bin/pip install papermill \
-    && /opt/conda/bin/pip install ipycanvas \
-    && /opt/conda/bin/pip install jupyter-resource-usage \
-    && /opt/conda/bin/pip install jupyter_scheduler \
-    && /opt/conda/bin/pip install httpx \
-    && /opt/conda/bin/pip install ipywidgets==7.8.5 ipyvolume jupyterlab_widgets \
-    && /opt/conda/bin/pip install nbgitpuller \
     && rm -rf /home/${NB_USER}/.cache
 
 #========================================#
