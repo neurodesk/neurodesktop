@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Loading ezBIDS...</title>
+    <title>Loading ${app_title}...</title>
     <style>
         * {
             margin: 0;
@@ -172,8 +172,8 @@
             <path d="M35 60 Q50 55 65 60" fill="none" stroke="url(#brainGrad)" stroke-width="1.5"/>
         </svg>
 
-        <h1>ezBIDS</h1>
-        <p class="subtitle">Easy BIDS Conversion Tool</p>
+        <h1>${app_title}</h1>
+        <p class="subtitle">${app_description}</p>
 
         <div class="loader-container">
             <div class="progress-bar">
@@ -192,7 +192,7 @@
         <div class="info-box">
             <h3>What's happening?</h3>
             <p>
-                ezBIDS is loading from the Neurodesk container system.
+                ${app_title} is loading from the Neurodesk container system.
                 This may take a moment on first launch as the container image is fetched and started.
                 The page will automatically refresh when ready.
             </p>
@@ -210,10 +210,10 @@
 
         const statusMessages = [
             'Initializing container...',
-            'Loading neuroimaging tools...',
-            'Starting MongoDB database...',
-            'Launching API server...',
-            'Starting web interface...'
+            'Loading application...',
+            'Starting services...',
+            'Preparing interface...',
+            'Almost ready...'
         ];
 
         let messageIndex = 0;
@@ -231,7 +231,7 @@
             if (!basePath.endsWith('/')) {
                 basePath += '/';
             }
-            return basePath + 'ezbids-wrapper-status';
+            return basePath + '${status_endpoint}';
         }
 
         // Poll for actual status
@@ -245,16 +245,16 @@
                     const mins = Math.floor(data.elapsed_seconds / 60);
                     const secs = Math.floor(data.elapsed_seconds % 60);
                     if (mins > 0) {
-                        elapsedEl.textContent = `Loading for ${mins}m ${secs}s...`;
+                        elapsedEl.textContent = `Loading for $${mins}m $${secs}s...`;
                     } else {
-                        elapsedEl.textContent = `Loading for ${secs}s...`;
+                        elapsedEl.textContent = `Loading for $${secs}s...`;
                     }
                 }
 
                 // Check if ready
                 if (data.ready) {
                     statusText.textContent = 'Ready! Redirecting...';
-                    elapsedEl.textContent = `Loaded in ${Math.round(data.elapsed_seconds)}s`;
+                    elapsedEl.textContent = `Loaded in $${Math.round(data.elapsed_seconds)}s`;
 
                     // Small delay then reload to show the actual app
                     setTimeout(() => {
@@ -267,7 +267,7 @@
                 if (data.error) {
                     errorContainer.innerHTML = `
                         <div class="error">
-                            <strong>Error:</strong> ${data.error}
+                            <strong>Error:</strong> $${data.error}
                             <br><br>
                             Please try refreshing the page or contact support if the issue persists.
                         </div>
