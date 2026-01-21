@@ -280,16 +280,35 @@ COPY config/jupyter/start_notebook.sh /usr/local/bin/start-notebook.d/
 COPY config/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/
 
 # Add jupyter notebook and startup scripts for system-wide configuration
-COPY --chown=root:users config/jupyter/jupyter_notebook_config.py /etc/jupyter/jupyter_notebook_config.py
+# Note: jupyter_notebook_config.py is generated from template + webapps.json below
 COPY --chown=root:users config/jupyter/jupyterlab_startup.sh /opt/neurodesktop/jupyterlab_startup.sh
 COPY --chown=root:users config/guacamole/guacamole.sh /opt/neurodesktop/guacamole.sh
 COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
 # COPY --chown=root:users config/guacamole/user-mapping.xml /etc/guacamole/user-mapping.xml
 
-RUN chmod +x /etc/jupyter/jupyter_notebook_config.py \
+# Generic webapp infrastructure
+COPY --chown=root:users scripts/generate_jupyter_config.py /opt/neurodesktop/scripts/generate_jupyter_config.py
+COPY --chown=root:users config/jupyter/webapp_wrapper /opt/neurodesktop/webapp_wrapper
+COPY --chown=root:users config/jupyter/webapp_launcher.sh /opt/neurodesktop/webapp_launcher.sh
+COPY --chown=root:users config/jupyter/jupyter_notebook_config.py.template /opt/neurodesktop/jupyter_notebook_config.py.template
+
+# Fetch webapps.json and generate jupyter config
+RUN curl -fsSL https://raw.githubusercontent.com/neurodesk/neurocommand/main/neurodesk/webapps.json \
+    -o /opt/neurodesktop/webapps.json || echo '{"version":"1.0","webapps":{}}' > /opt/neurodesktop/webapps.json
+RUN python3 /opt/neurodesktop/scripts/generate_jupyter_config.py \
+    /opt/neurodesktop/webapps.json \
+    /opt/neurodesktop/jupyter_notebook_config.py.template \
+    /etc/jupyter/jupyter_notebook_config.py
+
+RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/jupyterlab_startup.sh \
     /opt/neurodesktop/guacamole.sh \
-    /opt/neurodesktop/environment_variables.sh
+    /opt/neurodesktop/environment_variables.sh \
+    /opt/neurodesktop/webapp_launcher.sh \
+    /opt/neurodesktop/webapp_wrapper/webapp_wrapper.py \
+    /opt/neurodesktop/scripts/generate_jupyter_config.py \
+    && chmod +r /opt/neurodesktop/webapp_wrapper/splash_template.html \
+    /opt/neurodesktop/webapps.json
 
 # Create Guacamole configurations (user-mapping.xml gets filled in the startup.sh script)
 RUN mkdir -p /etc/guacamole \

@@ -14,7 +14,7 @@ c.ServerProxy.servers = {
         'title': 'Neurodesktop',
         'icon_path': '/opt/neurodesk_brain_logo.svg'
       }
-    }
+    }# {{WEBAPP_SERVERS}}
 }
 
 # c.ServerApp.root_dir = '/' # this causes an error when clicking on the little house icon when being located in the home directory
