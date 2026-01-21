@@ -276,10 +276,17 @@ COPY --chown=root:users config/guacamole/guacamole.sh /opt/neurodesktop/guacamol
 COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
 # COPY --chown=root:users config/guacamole/user-mapping.xml /etc/guacamole/user-mapping.xml
 
-RUN chmod +x /etc/jupyter/jupyter_notebook_config.py \
+# ezBIDS launcher and wrapper
+COPY --chown=root:users config/jupyter/ezbids_launcher.sh /opt/neurodesktop/ezbids_launcher.sh
+COPY --chown=root:users config/jupyter/ezbids_wrapper /opt/neurodesktop/ezbids_wrapper
+
+RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/jupyterlab_startup.sh \
     /opt/neurodesktop/guacamole.sh \
-    /opt/neurodesktop/environment_variables.sh
+    /opt/neurodesktop/environment_variables.sh \
+    /opt/neurodesktop/ezbids_launcher.sh \
+    /opt/neurodesktop/ezbids_wrapper/ezbids_wrapper.py \
+    && chmod +r /opt/neurodesktop/ezbids_wrapper/splash.html
 
 # Create Guacamole configurations (user-mapping.xml gets filled in the startup.sh script)
 RUN mkdir -p /etc/guacamole \

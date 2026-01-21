@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loading ezBIDS...</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #fff;
+        }
+
+        .container {
+            text-align: center;
+            padding: 40px;
+            max-width: 500px;
+        }
+
+        .logo {
+            width: 120px;
+            height: 120px;
+            margin-bottom: 30px;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.05); opacity: 0.8; }
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #00d4ff, #7c3aed);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: #94a3b8;
+            font-size: 1.1rem;
+            margin-bottom: 40px;
+        }
+
+        .loader-container {
+            margin-bottom: 30px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 15px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d4ff, #7c3aed);
+            border-radius: 3px;
+            width: 0%;
+            animation: indeterminate 2s ease-in-out infinite;
+        }
+
+        @keyframes indeterminate {
+            0% { width: 0%; margin-left: 0%; }
+            50% { width: 60%; margin-left: 20%; }
+            100% { width: 0%; margin-left: 100%; }
+        }
+
+        .status {
+            font-size: 1rem;
+            color: #cbd5e1;
+        }
+
+        .status-icon {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #00d4ff;
+            margin-right: 8px;
+            animation: blink 1s ease-in-out infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .elapsed {
+            font-size: 0.9rem;
+            color: #64748b;
+            margin-top: 20px;
+        }
+
+        .error {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid rgba(239, 68, 68, 0.5);
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin-top: 20px;
+            color: #fca5a5;
+        }
+
+        .info-box {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 30px;
+            text-align: left;
+        }
+
+        .info-box h3 {
+            font-size: 0.9rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+
+        .info-box p {
+            font-size: 0.9rem;
+            color: #64748b;
+            line-height: 1.6;
+        }
+
+        .footer {
+            margin-top: 40px;
+            font-size: 0.8rem;
+            color: #475569;
+        }
+
+        .footer a {
+            color: #00d4ff;
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <svg class="logo" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+                <linearGradient id="brainGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#00d4ff"/>
+                    <stop offset="100%" style="stop-color:#7c3aed"/>
+                </linearGradient>
+            </defs>
+            <circle cx="50" cy="50" r="45" fill="none" stroke="url(#brainGrad)" stroke-width="3"/>
+            <path d="M30 50 Q35 30 50 30 Q65 30 70 50 Q65 70 50 70 Q35 70 30 50"
+                  fill="none" stroke="url(#brainGrad)" stroke-width="2.5"/>
+            <path d="M50 30 Q50 50 50 70" fill="none" stroke="url(#brainGrad)" stroke-width="2"/>
+            <path d="M35 40 Q50 45 65 40" fill="none" stroke="url(#brainGrad)" stroke-width="1.5"/>
+            <path d="M35 60 Q50 55 65 60" fill="none" stroke="url(#brainGrad)" stroke-width="1.5"/>
+        </svg>
+
+        <h1>ezBIDS</h1>
+        <p class="subtitle">Easy BIDS Conversion Tool</p>
+
+        <div class="loader-container">
+            <div class="progress-bar">
+                <div class="progress-fill"></div>
+            </div>
+            <p class="status">
+                <span class="status-icon"></span>
+                <span id="status-text">Initializing container...</span>
+            </p>
+        </div>
+
+        <p class="elapsed" id="elapsed">Starting up...</p>
+
+        <div id="error-container"></div>
+
+        <div class="info-box">
+            <h3>What's happening?</h3>
+            <p>
+                ezBIDS is loading from the Neurodesk container system.
+                This may take a moment on first launch as the container image is fetched and started.
+                The page will automatically refresh when ready.
+            </p>
+        </div>
+
+        <div class="footer">
+            <p>Part of <a href="https://neurodesk.org" target="_blank">Neurodesk</a></p>
+        </div>
+    </div>
+
+    <script>
+        const statusText = document.getElementById('status-text');
+        const elapsedEl = document.getElementById('elapsed');
+        const errorContainer = document.getElementById('error-container');
+
+        const statusMessages = [
+            'Initializing container...',
+            'Loading neuroimaging tools...',
+            'Starting MongoDB database...',
+            'Launching API server...',
+            'Starting web interface...'
+        ];
+
+        let messageIndex = 0;
+
+        // Rotate status messages for visual feedback
+        setInterval(() => {
+            messageIndex = (messageIndex + 1) % statusMessages.length;
+            statusText.textContent = statusMessages[messageIndex];
+        }, 3000);
+
+        // Determine the base path for API calls
+        function getStatusUrl() {
+            // Get the current path and ensure it ends with /
+            let basePath = window.location.pathname;
+            if (!basePath.endsWith('/')) {
+                basePath += '/';
+            }
+            return basePath + 'ezbids-wrapper-status';
+        }
+
+        // Poll for actual status
+        async function checkStatus() {
+            try {
+                const response = await fetch(getStatusUrl());
+                const data = await response.json();
+
+                // Update elapsed time
+                if (data.elapsed_seconds > 0) {
+                    const mins = Math.floor(data.elapsed_seconds / 60);
+                    const secs = Math.floor(data.elapsed_seconds % 60);
+                    if (mins > 0) {
+                        elapsedEl.textContent = `Loading for ${mins}m ${secs}s...`;
+                    } else {
+                        elapsedEl.textContent = `Loading for ${secs}s...`;
+                    }
+                }
+
+                // Check if ready
+                if (data.ready) {
+                    statusText.textContent = 'Ready! Redirecting...';
+                    elapsedEl.textContent = `Loaded in ${Math.round(data.elapsed_seconds)}s`;
+
+                    // Small delay then reload to show the actual app
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 500);
+                    return;
+                }
+
+                // Check for errors
+                if (data.error) {
+                    errorContainer.innerHTML = `
+                        <div class="error">
+                            <strong>Error:</strong> ${data.error}
+                            <br><br>
+                            Please try refreshing the page or contact support if the issue persists.
+                        </div>
+                    `;
+                    return;
+                }
+
+            } catch (e) {
+                console.error('Status check failed:', e);
+            }
+
+            // Poll again
+            setTimeout(checkStatus, 2000);
+        }
+
+        // Start polling
+        checkStatus();
+    </script>
+</body>
+</html>

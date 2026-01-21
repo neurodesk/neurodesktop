@@ -14,7 +14,27 @@ c.ServerProxy.servers = {
         'title': 'Neurodesktop',
         'icon_path': '/opt/neurodesk_brain_logo.svg'
       }
+    },
+  'ezbids': {
+    'command': ['/opt/neurodesktop/ezbids_launcher.sh'],
+    'port': 13000,
+    'timeout': 300,
+    'absolute_url': True,
+    'new_browser_tab': True,
+    'launcher_entry': {
+      'path_info': 'ezbids',
+      'title': 'ezBIDS',
+      'icon_path': '/opt/neurodesk_brain_icon.svg'
     }
+  },
+  'api/ezbids': {
+    'port': 8082,
+    'timeout': 300,
+    'absolute_url': False,
+    'launcher_entry': {
+      'enabled': False
+    }
+  }
 }
 
 # c.ServerApp.root_dir = '/' # this causes an error when clicking on the little house icon when being located in the home directory
