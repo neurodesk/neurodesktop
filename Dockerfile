@@ -170,6 +170,7 @@ RUN apt-get update --yes \
         python3-setuptools \
         qdirstat \
         rsync \
+        rclone \
         s3fs \
         screen \
         sshfs \
@@ -207,28 +208,38 @@ RUN conda install -c conda-forge nb_conda_kernels \
     && rm -rf /home/${NB_USER}/.cache
 RUN conda config --system --prepend envs_dirs '~/conda-environments'
 
-# Add datalad-container datalad-osf osfclient ipyniivue to the conda environment
-RUN /opt/conda/bin/pip install datalad nipype nbdev pydra==1.0a7 nipoppy matplotlib datalad-container datalad-osf osfclient watermark ipyniivue  \
-    && rm -rf /home/${NB_USER}/.cache
-
-
-# Install jupyter-server-proxy and disable announcements
-RUN /opt/conda/bin/pip install jupyter-server-proxy \
+# Install Python packages and JupyterLab extensions
+RUN /opt/conda/bin/pip install \
+        datalad \
+        nipype \
+        nbdev \
+        pydra==1.0a7 \
+        nipoppy \
+        matplotlib \
+        datalad-container \
+        datalad-osf \
+        osfclient \
+        watermark \
+        ipyniivue \
+        jupyter-server-proxy \
+        jupyterlmod \
+        jupyterlab-git \
+        notebook_intelligence \
+        jupyterlab_rise \
+        jupyterlab-niivue \
+        jupyterlab_myst \
+        jupyter-sshd-proxy \
+        papermill \
+        ipycanvas \
+        jupyter-resource-usage \
+        jupyter_scheduler \
+        httpx \
+        ipywidgets==7.8.5 \
+        ipyvolume \
+        jupyterlab_widgets \
+        nbgitpuller \
+        xnat \
     && /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
-    && /opt/conda/bin/pip install jupyterlmod \
-    && /opt/conda/bin/pip install jupyterlab-git \
-    && /opt/conda/bin/pip install notebook_intelligence \
-    && /opt/conda/bin/pip install jupyterlab_rise \
-    && /opt/conda/bin/pip install jupyterlab-niivue \
-    && /opt/conda/bin/pip install jupyterlab_myst \
-    && /opt/conda/bin/pip install jupyter-sshd-proxy \
-    && /opt/conda/bin/pip install papermill \
-    && /opt/conda/bin/pip install ipycanvas \
-    && /opt/conda/bin/pip install jupyter-resource-usage \
-    && /opt/conda/bin/pip install jupyter_scheduler \
-    && /opt/conda/bin/pip install httpx \
-    && /opt/conda/bin/pip install ipywidgets==7.8.5 ipyvolume jupyterlab_widgets \
-    && /opt/conda/bin/pip install nbgitpuller \
     && rm -rf /home/${NB_USER}/.cache
 
 #========================================#
@@ -270,16 +281,35 @@ COPY config/jupyter/start_notebook.sh /usr/local/bin/start-notebook.d/
 COPY config/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/
 
 # Add jupyter notebook and startup scripts for system-wide configuration
-COPY --chown=root:users config/jupyter/jupyter_notebook_config.py /etc/jupyter/jupyter_notebook_config.py
+# Note: jupyter_notebook_config.py is generated from template + webapps.json below
 COPY --chown=root:users config/jupyter/jupyterlab_startup.sh /opt/neurodesktop/jupyterlab_startup.sh
 COPY --chown=root:users config/guacamole/guacamole.sh /opt/neurodesktop/guacamole.sh
 COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
 # COPY --chown=root:users config/guacamole/user-mapping.xml /etc/guacamole/user-mapping.xml
 
-RUN chmod +x /etc/jupyter/jupyter_notebook_config.py \
+# Generic webapp infrastructure
+COPY --chown=root:users scripts/generate_jupyter_config.py /opt/neurodesktop/scripts/generate_jupyter_config.py
+COPY --chown=root:users config/jupyter/webapp_wrapper /opt/neurodesktop/webapp_wrapper
+COPY --chown=root:users config/jupyter/webapp_launcher.sh /opt/neurodesktop/webapp_launcher.sh
+COPY --chown=root:users config/jupyter/jupyter_notebook_config.py.template /opt/neurodesktop/jupyter_notebook_config.py.template
+
+# Fetch webapps.json and generate jupyter config
+RUN curl -fsSL https://raw.githubusercontent.com/neurodesk/neurocommand/main/neurodesk/webapps.json \
+    -o /opt/neurodesktop/webapps.json || echo '{"version":"1.0","webapps":{}}' > /opt/neurodesktop/webapps.json
+RUN python3 /opt/neurodesktop/scripts/generate_jupyter_config.py \
+    /opt/neurodesktop/webapps.json \
+    /opt/neurodesktop/jupyter_notebook_config.py.template \
+    /etc/jupyter/jupyter_notebook_config.py
+
+RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/jupyterlab_startup.sh \
     /opt/neurodesktop/guacamole.sh \
-    /opt/neurodesktop/environment_variables.sh
+    /opt/neurodesktop/environment_variables.sh \
+    /opt/neurodesktop/webapp_launcher.sh \
+    /opt/neurodesktop/webapp_wrapper/webapp_wrapper.py \
+    /opt/neurodesktop/scripts/generate_jupyter_config.py \
+    && chmod +r /opt/neurodesktop/webapp_wrapper/splash_template.html \
+    /opt/neurodesktop/webapps.json
 
 # Create Guacamole configurations (user-mapping.xml gets filled in the startup.sh script)
 RUN mkdir -p /etc/guacamole \
