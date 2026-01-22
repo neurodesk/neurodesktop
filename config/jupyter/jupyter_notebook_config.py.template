@@ -25,3 +25,11 @@ before_notebook = subprocess.call("/opt/neurodesktop/jupyterlab_startup.sh")
 
 # Fix for Rise extension: https://github.com/neurodesk/neurodesktop/issues/327
 c.NotebookApp.tornado_settings = { "headers": { "Content-Security-Policy": "frame-ancestors 'self'" } }
+
+# Enable resource monitoring with cgroup support
+# Resource limits are set via MEM_LIMIT and CPU_LIMIT environment variables
+# These are automatically detected from cgroup v2 files in before_notebook.sh
+c.ResourceUseDisplay.track_cpu_percent = True
+c.ResourceUseDisplay.mem_warning_threshold = 0.1  # Warn at 90% usage
+c.ResourceUseDisplay.track_disk_usage = True
+c.ResourceUseDisplay.disk_path = '/home/jovyan'

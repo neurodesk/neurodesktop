@@ -225,6 +225,38 @@ if ! grep -qF "$INIT_ENVARS" "$BASHRC_FILE"; then
 fi
 # fi
 
+# Read cgroup v2 limits and set environment variables for jupyter-resource-usage
+echo "Detecting container resource limits from cgroup v2..."
+if [ -f "/sys/fs/cgroup/memory.max" ]; then
+    CGROUP_MEM_LIMIT=$(cat /sys/fs/cgroup/memory.max)
+    # Check if it's not "max" (unlimited)
+    if [ "$CGROUP_MEM_LIMIT" != "max" ]; then
+        export MEM_LIMIT="$CGROUP_MEM_LIMIT"
+        echo "Memory limit detected: $(numfmt --to=iec "$CGROUP_MEM_LIMIT")"
+    else
+        echo "Memory limit: unlimited"
+    fi
+else
+    echo "cgroup v2 memory.max not found (may be running on older kernel or non-Linux system)"
+fi
+
+if [ -f "/sys/fs/cgroup/cpu.max" ]; then
+    # cpu.max format: "$MAX $PERIOD" (e.g., "200000 100000" = 2 CPUs)
+    CPU_MAX_LINE=$(cat /sys/fs/cgroup/cpu.max)
+    if [ "$CPU_MAX_LINE" != "max 100000" ]; then
+        CPU_QUOTA=$(echo "$CPU_MAX_LINE" | awk '{print $1}')
+        CPU_PERIOD=$(echo "$CPU_MAX_LINE" | awk '{print $2}')
+        # Calculate CPU limit as a decimal (e.g., 2.0 for 2 CPUs)
+        CPU_LIMIT=$(awk "BEGIN {printf \"%.2f\", $CPU_QUOTA/$CPU_PERIOD}")
+        export CPU_LIMIT="$CPU_LIMIT"
+        echo "CPU limit detected: $CPU_LIMIT CPUs"
+    else
+        echo "CPU limit: unlimited"
+    fi
+else
+    echo "cgroup v2 cpu.max not found (may be running on older kernel or non-Linux system)"
+fi
+
 source /opt/neurodesktop/environment_variables.sh
 
 # Set default value for START_LOCAL_LLMS
