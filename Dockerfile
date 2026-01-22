@@ -170,6 +170,7 @@ RUN apt-get update --yes \
         python3-setuptools \
         qdirstat \
         rsync \
+        rclone \
         s3fs \
         screen \
         sshfs \
