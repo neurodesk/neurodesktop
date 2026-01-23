@@ -75,8 +75,23 @@ class WebappConfig:
         self.socket_path = f"/tmp/neurodesk_webapp_{self.app_name}.sock"
 
         # Target port (where the actual app listens)
-        ports = config.get("ports", {})
-        self.target_port = ports.get("main", 3000)
+        self.target_port = config.get("port", 3000)
+
+        # Build routing table: list of (path_prefix, target_port) tuples
+        # More specific routes (longer prefixes) should be checked first
+        self.routes = []
+
+        # Additional proxies (e.g., API endpoints)
+        for proxy in config.get("additional_proxies", []):
+            prefix = f"/{proxy['path']}"
+            port = proxy['port']
+            self.routes.append((prefix, port))
+
+        # Main app route (least specific, checked last)
+        self.routes.append((f"/{self.app_name}", self.target_port))
+
+        # Sort by prefix length descending (most specific first)
+        self.routes.sort(key=lambda x: len(x[0]), reverse=True)
 
         # Startup check
         self.start_page = config.get("start_page", "/")
@@ -120,8 +135,8 @@ def start_container():
     log(f"Starting {config.app_name} container...")
 
     try:
-        # Check for local test image first
-        local_sif = f"/opt/{config.app_name}_test/{config.app_name}.sif"
+        # Check for local test image first (mounted via build_and_run.sh)
+        local_sif = f"/opt/neurodesktop-test-webapps/{config.app_name}/{config.app_name}.sif"
 
         if os.path.exists(local_sif):
             log(f"Using local test image: {local_sif}")
@@ -217,6 +232,9 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
     def do_PUT(self):
         self._handle_request("PUT")
 
+    def do_PATCH(self):
+        self._handle_request("PATCH")
+
     def do_DELETE(self):
         self._handle_request("DELETE")
 
@@ -232,7 +250,7 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
             self._send_status()
             return
 
-        # If container is ready, proxy the request
+        # If container is ready, proxy all requests
         if container_ready:
             self._proxy_request(method)
             return
@@ -256,6 +274,11 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
         """Check if path is a root-like path for the app."""
         path = self.path.rstrip("/")
         return path == "" or path == "/" or path == f"/{config.app_name}"
+
+    def _is_main_app_html(self):
+        """Check if this is a request for the main app HTML page."""
+        path = self.path.rstrip("/")
+        return path == f"/{config.app_name}" or path == f"/{config.app_name}/index.html"
 
     def _send_status(self):
         """Send current status as JSON."""
@@ -286,8 +309,20 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
     def _proxy_request(self, method):
         """Proxy request to the actual webapp server."""
         try:
+            # Find matching route and determine target port
+            path = self.path
+            target_port = config.target_port  # default
+            is_main_html = self._is_main_app_html()
+
+            # Check routes and strip prefixes
+            for prefix, port in config.routes:
+                if path.startswith(prefix):
+                    path = path[len(prefix):] or "/"
+                    target_port = port
+                    break
+
             # Build the target URL
-            target_url = f"http://localhost:{config.target_port}{self.path}"
+            target_url = f"http://localhost:{target_port}{path}"
 
             # Read request body if present
             content_length = self.headers.get("Content-Length")
@@ -306,19 +341,59 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
             # Make the request
             response = urllib.request.urlopen(req, timeout=300)
 
-            # Send response back
-            self.send_response(response.status)
-            for header, value in response.getheaders():
-                if header.lower() not in ("transfer-encoding", "connection"):
-                    self.send_header(header, value)
-            self.end_headers()
+            # Check if we need to inject URL rewriting script (for main HTML page)
+            content_type = response.getheader("Content-Type", "")
+            should_inject = (
+                is_main_html and
+                "text/html" in content_type
+            )
 
-            # Stream response body
-            while True:
-                chunk = response.read(8192)
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
+            if should_inject:
+                # Read full response to inject script
+                response_body = response.read()
+
+                # Inject base href to preserve relative URL resolution,
+                # plus script to rewrite URL for client-side routing
+                inject_script = f'''<base href="/{config.app_name}/">
+<script>
+(function() {{
+  // Rewrite URL for client-side routing frameworks (React Router, etc.)
+  // They see the full path and need it to appear as "/" for proper routing
+  var appPath = '/{config.app_name}';
+  if (window.location.pathname === appPath || window.location.pathname === appPath + '/') {{
+    window.history.replaceState(null, '', '/' + window.location.search + window.location.hash);
+  }}
+}})();
+</script>'''
+
+                # Inject after <head> tag
+                inject_bytes = inject_script.encode('utf-8')
+                if b'<head>' in response_body:
+                    response_body = response_body.replace(b'<head>', b'<head>' + inject_bytes, 1)
+                elif b'<HEAD>' in response_body:
+                    response_body = response_body.replace(b'<HEAD>', b'<HEAD>' + inject_bytes, 1)
+
+                # Send modified response
+                self.send_response(response.status)
+                for header, value in response.getheaders():
+                    if header.lower() not in ("transfer-encoding", "connection", "content-length"):
+                        self.send_header(header, value)
+                self.send_header("Content-Length", len(response_body))
+                self.end_headers()
+                self.wfile.write(response_body)
+            else:
+                # Stream response as-is
+                self.send_response(response.status)
+                for header, value in response.getheaders():
+                    if header.lower() not in ("transfer-encoding", "connection"):
+                        self.send_header(header, value)
+                self.end_headers()
+
+                while True:
+                    chunk = response.read(8192)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
 
         except urllib.error.HTTPError as e:
             self.send_response(e.code)
@@ -340,12 +415,6 @@ def signal_handler(_sig, _frame):
     log("Received shutdown signal")
     if container_process:
         container_process.terminate()
-    # Clean up socket file
-    if config and os.path.exists(config.socket_path):
-        try:
-            os.unlink(config.socket_path)
-        except OSError:
-            pass
     sys.exit(0)
 
 
@@ -373,25 +442,30 @@ def main():
     log(f"  Target port: {config.target_port}")
     log(f"  Start page: {config.start_page}")
 
-    # Remove existing socket file if present
+    # Set up signal handlers early
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    # Remove existing socket file if present (needed to bind)
     socket_path = config.socket_path
     if os.path.exists(socket_path):
         os.unlink(socket_path)
 
-    # Set up signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # Create and bind to socket
+    httpd = UnixSocketHTTPServer(socket_path, WebappHandler)
+    os.chmod(socket_path, 0o666)
+    log(f"Bound to Unix socket: {socket_path}")
 
     # Start the container in a background thread
     container_thread = threading.Thread(target=start_container, daemon=True)
     container_thread.start()
 
-    # Start the HTTP server on Unix socket
-    with UnixSocketHTTPServer(socket_path, WebappHandler) as httpd:
-        # Make socket readable/writable by all (needed for JupyterLab to connect)
-        os.chmod(socket_path, 0o666)
-        log(f"Serving on Unix socket: {socket_path}")
+    # Serve requests
+    log(f"Serving on Unix socket: {socket_path}")
+    try:
         httpd.serve_forever()
+    finally:
+        httpd.server_close()
 
 
 if __name__ == "__main__":

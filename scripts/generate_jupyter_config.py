@@ -48,12 +48,18 @@ def generate_server_proxy_entries(webapps: Dict[str, Any]) -> str:
   }}"""
         entries.append(entry)
 
-        # Additional proxy entries (e.g., API endpoints)
+        # Additional proxy entries - only register separately if they're NOT under the app's path
+        # Routes under the app path (e.g., ezbids/api) are handled by the main entry
         for proxy in config.get("additional_proxies", []):
-            proxy_entry = f"""  '{proxy['name']}': {{
-    'port': {proxy['port']},
+            proxy_path = proxy['path']
+            # Skip if the proxy path is under the main app path (will be handled by main entry)
+            if proxy_path.startswith(f"{name}/"):
+                continue
+            proxy_entry = f"""  '{proxy_path}': {{
+    'command': ['/opt/neurodesktop/webapp_launcher.sh', '{name}'],
+    'unix_socket': '{socket_path}',
     'timeout': {startup_timeout},
-    'absolute_url': False,
+    'absolute_url': True,
     'launcher_entry': {{
       'enabled': False
     }}

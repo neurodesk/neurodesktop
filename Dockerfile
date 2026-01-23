@@ -293,13 +293,13 @@ COPY --chown=root:users config/jupyter/webapp_wrapper /opt/neurodesktop/webapp_w
 COPY --chown=root:users config/jupyter/webapp_launcher.sh /opt/neurodesktop/webapp_launcher.sh
 COPY --chown=root:users config/jupyter/jupyter_notebook_config.py.template /opt/neurodesktop/jupyter_notebook_config.py.template
 
-# Fetch webapps.json and generate jupyter config
+# Fetch webapps.json from neurocommand and generate jupyter config
 RUN curl -fsSL https://raw.githubusercontent.com/neurodesk/neurocommand/main/neurodesk/webapps.json \
-    -o /opt/neurodesktop/webapps.json || echo '{"version":"1.0","webapps":{}}' > /opt/neurodesktop/webapps.json
-RUN python3 /opt/neurodesktop/scripts/generate_jupyter_config.py \
-    /opt/neurodesktop/webapps.json \
-    /opt/neurodesktop/jupyter_notebook_config.py.template \
-    /etc/jupyter/jupyter_notebook_config.py
+        -o /opt/neurodesktop/webapps.json \
+    && python3 /opt/neurodesktop/scripts/generate_jupyter_config.py \
+        /opt/neurodesktop/webapps.json \
+        /opt/neurodesktop/jupyter_notebook_config.py.template \
+        /etc/jupyter/jupyter_notebook_config.py
 
 RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/jupyterlab_startup.sh \
