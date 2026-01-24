@@ -32,6 +32,8 @@ RUN apt-get update --yes \
         tigervnc-tools \
         xorgxrdp \
         xrdp \
+        xpra \
+        xvfb \
         lxde \
         acl \
         wget \
@@ -222,6 +224,7 @@ RUN /opt/conda/bin/pip install \
         watermark \
         ipyniivue \
         jupyter-server-proxy \
+        jupyter-xprahtml5-proxy \
         jupyterlmod \
         jupyterlab-git \
         notebook_intelligence \
@@ -285,6 +288,10 @@ COPY config/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/
 COPY --chown=root:users config/jupyter/jupyterlab_startup.sh /opt/neurodesktop/jupyterlab_startup.sh
 COPY --chown=root:users config/guacamole/guacamole.sh /opt/neurodesktop/guacamole.sh
 COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
+COPY --chown=root:users config/jupyter/connect_xpra.sh /opt/neurodesktop/connect_xpra.sh
+RUN chmod +x /opt/neurodesktop/connect_xpra.sh \
+    && echo "alias connect_xpra='source /opt/neurodesktop/connect_xpra.sh'" >> /etc/bash.bashrc
+
 # COPY --chown=root:users config/guacamole/user-mapping.xml /etc/guacamole/user-mapping.xml
 
 # Generic webapp infrastructure
