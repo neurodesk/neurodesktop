@@ -289,8 +289,10 @@ COPY --chown=root:users config/jupyter/jupyterlab_startup.sh /opt/neurodesktop/j
 COPY --chown=root:users config/guacamole/guacamole.sh /opt/neurodesktop/guacamole.sh
 COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
 COPY --chown=root:users config/jupyter/connect_xpra.sh /opt/neurodesktop/connect_xpra.sh
-RUN chmod +x /opt/neurodesktop/connect_xpra.sh \
-    && echo "alias connect_xpra='source /opt/neurodesktop/connect_xpra.sh'" >> /etc/bash.bashrc
+COPY --chown=root:users config/jupyter/check_xpra_status.sh /opt/neurodesktop/check_xpra_status.sh
+RUN chmod +x /opt/neurodesktop/connect_xpra.sh /opt/neurodesktop/check_xpra_status.sh \
+    && echo "alias connect_xpra='source /opt/neurodesktop/connect_xpra.sh'" >> /etc/bash.bashrc \
+    && echo "alias check_xpra='/opt/neurodesktop/check_xpra_status.sh'" >> /etc/bash.bashrc
 
 # COPY --chown=root:users config/guacamole/user-mapping.xml /etc/guacamole/user-mapping.xml
 

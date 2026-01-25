@@ -27,6 +27,15 @@ if [ -z "$DISP_SOCK" ]; then
 fi
 
 if [ -n "$DISP_SOCK" ]; then
+    # Validate that the actual X11 socket exists in /tmp/.X11-unix
+    # DISP_SOCK is like :100. We need to check /tmp/.X11-unix/X100
+    DISP_NUM=$(echo "$DISP_SOCK" | sed 's/://')
+    
+    if [ ! -S "/tmp/.X11-unix/X$DISP_NUM" ]; then
+        echo "WARNING: Xpra session found at $DISP_SOCK, but X11 socket /tmp/.X11-unix/X$DISP_NUM is missing."
+        echo "         GUI applications may fail to launch."
+    fi
+
     export DISPLAY=$DISP_SOCK
     echo "Environment configured for Xpra display: $DISP_SOCK"
     echo "GUI applications started in this terminal will now appear in your Xpra Desktop tab."
