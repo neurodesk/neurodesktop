@@ -330,6 +330,9 @@ RUN echo "${NB_USER} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/notebook \
 # Enable deletion of non-empty-directories in JupyterLab: https://github.com/jupyter/notebook/issues/4916
 RUN sed -i 's/c.FileContentsManager.delete_to_trash = False/c.FileContentsManager.always_delete_dir = True/g' /etc/jupyter/jupyter_server_config.py
 
+# Source environment variables in global bashrc for Apptainer/Singularity (which mounts host home)
+RUN echo "source /opt/neurodesktop/environment_variables.sh" >> /etc/bash.bashrc
+
 #========================================#
 # Configuration (as notebook user)
 #========================================#

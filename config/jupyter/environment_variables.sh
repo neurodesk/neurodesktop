@@ -1,9 +1,12 @@
 #!/bin/bash
 
 # This file is sourced once in jupyterlab_startup.sh and once in ~/.bashrc so we get the same environment variables in the jupyter and in the desktop environment
-if [[ -z "${NB_USER}" ]]; then
-    export NB_USER=${USER}
-fi
+if [ -z "$NEURODESKTOP_ENV_SOURCED" ]; then
+    export NEURODESKTOP_ENV_SOURCED=1
+
+    if [[ -z "${NB_USER}" ]]; then
+        export NB_USER=${USER}
+    fi
 
 if [[ -z "${USER}" ]]; then
     export USER=${NB_USER}
@@ -69,6 +72,8 @@ export neurodesk_singularity_opts=" --overlay /tmp/apptainer_overlay "
 #         export neurodesk_singularity_opts="${neurodesk_singularity_opts} --nv "
 # fi
 # THIS IS CURRENTLY DISABLED BECAUSE IT CAUSES PROBLEMS ON UBUNTU 24.04 HOSTS WHERE THIS LEADS TO A GLIBC VERSION ERROR
+
+fi
 
 export PS1='\u@neurodesktop-$NEURODESKTOP_VERSION:\w$ '
 
