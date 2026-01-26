@@ -32,4 +32,4 @@ c.NotebookApp.tornado_settings = { "headers": { "Content-Security-Policy": "fram
 c.ResourceUseDisplay.track_cpu_percent = True
 c.ResourceUseDisplay.mem_warning_threshold = 0.1  # Warn at 90% usage
 c.ResourceUseDisplay.track_disk_usage = True
-c.ResourceUseDisplay.disk_path = '/home/jovyan'
+c.ResourceUseDisplay.disk_path = os.environ.get('HOME', '/home/jovyan')

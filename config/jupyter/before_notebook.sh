@@ -40,7 +40,7 @@ if [ "$EUID" -eq 0 ]; then
             # CVMFS_DISABLE is false and CVMFS should be enabled.
 
             # needs to be kept in sync with config/cvmfs/default.local
-            CACHE_DIR="/home/jovyan/cvmfs_cache"
+            CACHE_DIR="${HOME}/cvmfs_cache"
 
             # Create the cache directory if it doesn't exist
             if [ ! -d "$CACHE_DIR" ]; then
@@ -51,9 +51,11 @@ if [ "$EUID" -eq 0 ]; then
             fi
 
             # Make sure the CVMFS user can access the cache directory
-            chmod 755 /home/jovyan
+            chmod 755 ${HOME}
             # The cache directory needs to be owned by cvmfs user and group
-            chown -R cvmfs:root "$CACHE_DIR"
+            if sudo -n true 2>/dev/null; then
+                chown -R cvmfs:root "$CACHE_DIR"
+            fi
 
             # try to list the directory in case it's autofs mounted outside
             ls /cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/ 2>/dev/null && echo "CVMFS is ready" || echo "CVMFS directory not there. Trying internal fuse mount next."

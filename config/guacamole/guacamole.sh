@@ -17,7 +17,7 @@ if sudo -n true 2>/dev/null; then
 fi
 
 # SSH/SFTP
-/usr/sbin/sshd -f /home/${NB_USER}/.ssh/sshd_config
+/usr/sbin/sshd -f ${HOME}/.ssh/sshd_config
 
 # VNC
 vncserver -kill :1

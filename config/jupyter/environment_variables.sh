@@ -45,10 +45,10 @@ fi
 export APPTAINER_BINDPATH=/data,/mnt,/neurodesktop-storage,/tmp,/cvmfs
 # This also needs to be set in the Dockerfile, so it is available in a jupyter notebook
 
-export APPTAINERENV_SUBJECTS_DIR=/home/${NB_USER}/freesurfer-subjects-dir
-export MPLCONFIGDIR=/home/${NB_USER}/.config/matplotlib-mpldir
+export APPTAINERENV_SUBJECTS_DIR=${HOME}/freesurfer-subjects-dir
+export MPLCONFIGDIR=${HOME}/.config/matplotlib-mpldir
 
-export PATH=$PATH:/home/${NB_USER}/.local/bin:/opt/conda/bin:/opt/conda/condabin
+export PATH=$PATH:${HOME}/.local/bin:/opt/conda/bin:/opt/conda/condabin
 
 # This is needed to make containers writable as a workaround for macos with Apple Silicon. We need to do it here for the desktop
 # and in the dockerfile for the jupyter notebook
