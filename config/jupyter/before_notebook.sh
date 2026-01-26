@@ -302,6 +302,10 @@ if [ -f "/home/${NB_USER}/.vnc/passwd" ] && [ "$(stat -c %a /home/${NB_USER}/.vn
 fi
 
 apply_chown_if_needed() {
+    # If running in Apptainer/Singularity, we likely don't want to mess with chown
+    if [ -n "$SINGULARITY_NAME" ] || [ -n "$APPTAINER_NAME" ] || [ -n "$APPTAINER_CONTAINER" ] || [ -n "$SINGULARITY_CONTAINER" ]; then
+        return
+    fi
     local dir=$1
     local recursive=$2
     if [ -d "$dir" ]; then
