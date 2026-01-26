@@ -481,18 +481,29 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
                     self.wfile.write(chunk)
 
         except urllib.error.HTTPError as e:
-            self.send_response(e.code)
-            for header, value in e.headers.items():
-                if header.lower() not in ("transfer-encoding", "connection"):
-                    self.send_header(header, value)
-            self.end_headers()
-            self.wfile.write(e.read())
+            try:
+                self.send_response(e.code)
+                for header, value in e.headers.items():
+                    if header.lower() not in ("transfer-encoding", "connection"):
+                        self.send_header(header, value)
+                self.end_headers()
+                # Read the response body (may be empty for 304)
+                body = e.read()
+                if body:
+                    self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                log(f"Client disconnected while sending HTTP {e.code} response")
+        except (BrokenPipeError, ConnectionResetError):
+            log("Client disconnected during proxying")
         except Exception as e:
             log(f"Proxy error: {e}")
-            self.send_response(502)
-            self.send_header("Content-Type", "text/plain")
-            self.end_headers()
-            self.wfile.write(f"Proxy error: {e}".encode())
+            try:
+                self.send_response(502)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(f"Proxy error: {e}".encode())
+            except (BrokenPipeError, ConnectionResetError):
+                log("Client disconnected before error response could be sent")
 
 
 def signal_handler(_sig, _frame):
