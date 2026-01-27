@@ -40,7 +40,7 @@ if [ "$EUID" -eq 0 ]; then
             # CVMFS_DISABLE is false and CVMFS should be enabled.
 
             # needs to be kept in sync with config/cvmfs/default.local
-            CACHE_DIR="/home/jovyan/cvmfs_cache"
+            CACHE_DIR="${HOME}/cvmfs_cache"
 
             # Create the cache directory if it doesn't exist
             if [ ! -d "$CACHE_DIR" ]; then
@@ -51,9 +51,11 @@ if [ "$EUID" -eq 0 ]; then
             fi
 
             # Make sure the CVMFS user can access the cache directory
-            chmod 755 /home/jovyan
+            chmod 755 ${HOME}
             # The cache directory needs to be owned by cvmfs user and group
-            chown -R cvmfs:root "$CACHE_DIR"
+            if sudo -n true 2>/dev/null; then
+                chown -R cvmfs:root "$CACHE_DIR"
+            fi
 
             # try to list the directory in case it's autofs mounted outside
             ls /cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/ 2>/dev/null && echo "CVMFS is ready" || echo "CVMFS directory not there. Trying internal fuse mount next."
@@ -257,6 +259,41 @@ else
     echo "cgroup v2 cpu.max not found (may be running on older kernel or non-Linux system)"
 fi
 
+# SLURM limit detection (overrides cgroup limits if present)
+if [ -n "$SLURM_JOB_ID" ]; then
+    echo "Running inside a SLURM job (Job ID: $SLURM_JOB_ID). Detecting SLURM limits..."
+    
+    # Memory Limit
+    if [ -n "$SLURM_MEM_PER_NODE" ]; then
+        # SLURM_MEM_PER_NODE is in MB
+        echo "SLURM_MEM_PER_NODE detected: ${SLURM_MEM_PER_NODE} MB"
+        export MEM_LIMIT=$(($SLURM_MEM_PER_NODE * 1024 * 1024))
+    elif [ -n "$SLURM_MEM_PER_CPU" ] && [ -n "$SLURM_JOB_CPUS_PER_NODE" ]; then
+        echo "SLURM_MEM_PER_CPU detected: ${SLURM_MEM_PER_CPU} MB"
+        # Extract the number of CPUs on the first node (simplification)
+        CPU_ALLOC=$(echo "$SLURM_JOB_CPUS_PER_NODE" | sed 's/(.*//') 
+        if [[ "$CPU_ALLOC" =~ ^[0-9]+$ ]]; then
+            export MEM_LIMIT=$(($SLURM_MEM_PER_CPU * $CPU_ALLOC * 1024 * 1024))
+        fi
+    fi
+    if [ -n "$MEM_LIMIT" ]; then
+        echo "Memory limit set from SLURM: $(numfmt --to=iec "$MEM_LIMIT")"
+    fi
+
+    # CPU Limit
+    if [ -n "$SLURM_CPUS_PER_TASK" ]; then
+        export CPU_LIMIT="$SLURM_CPUS_PER_TASK"
+        echo "SLURM_CPUS_PER_TASK detected: $CPU_LIMIT"
+    elif [ -n "$SLURM_JOB_CPUS_PER_NODE" ]; then
+        # Extract the number of CPUs on the first node (simplification)
+        CPU_ALLOC=$(echo "$SLURM_JOB_CPUS_PER_NODE" | sed 's/(.*//')
+        if [[ "$CPU_ALLOC" =~ ^[0-9]+$ ]]; then
+            export CPU_LIMIT="$CPU_ALLOC"
+            echo "SLURM_JOB_CPUS_PER_NODE detected: $CPU_LIMIT"
+        fi
+    fi
+fi
+
 source /opt/neurodesktop/environment_variables.sh
 
 # Set default value for START_LOCAL_LLMS
@@ -302,6 +339,10 @@ if [ -f "/home/${NB_USER}/.vnc/passwd" ] && [ "$(stat -c %a /home/${NB_USER}/.vn
 fi
 
 apply_chown_if_needed() {
+    # If running in Apptainer/Singularity, we likely don't want to mess with chown
+    if [ -n "$SINGULARITY_NAME" ] || [ -n "$APPTAINER_NAME" ] || [ -n "$APPTAINER_CONTAINER" ] || [ -n "$SINGULARITY_CONTAINER" ]; then
+        return
+    fi
     local dir=$1
     local recursive=$2
     if [ -d "$dir" ]; then

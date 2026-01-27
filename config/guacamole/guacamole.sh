@@ -17,11 +17,11 @@ if sudo -n true 2>/dev/null; then
 fi
 
 # SSH/SFTP
-/usr/sbin/sshd -f /home/${NB_USER}/.ssh/sshd_config
+/usr/sbin/sshd -f ${HOME}/.ssh/sshd_config
 
 # VNC
 vncserver -kill :1
-vncserver -depth 24 -geometry 1920x1080 -name \"VNC\" :1
+vncserver -geometry 1280x720 -depth 24 -name "VNC" :1
 xset -display :1 s off
 
 # Guacamole

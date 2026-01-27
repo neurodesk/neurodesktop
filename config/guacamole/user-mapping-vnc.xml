@@ -1,6 +1,6 @@
 <user-mapping>
     <authorize username="jovyan" password="password">
-        <connection name="Desktop VNC - 1920x1080px or change resolution by running lxrandr on a terminal">
+        <connection name="Desktop VNC - 1280x720px or change resolution by running lxrandr on a terminal">
             <protocol>vnc</protocol>
             <param name="hostname">localhost</param>
             <param name="username">jovyan</param>

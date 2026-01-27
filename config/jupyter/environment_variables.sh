@@ -1,9 +1,12 @@
 #!/bin/bash
 
 # This file is sourced once in jupyterlab_startup.sh and once in ~/.bashrc so we get the same environment variables in the jupyter and in the desktop environment
-if [[ -z "${NB_USER}" ]]; then
-    export NB_USER=${USER}
-fi
+if [ -z "$NEURODESKTOP_ENV_SOURCED" ]; then
+    export NEURODESKTOP_ENV_SOURCED=1
+
+    if [[ -z "${NB_USER}" ]]; then
+        export NB_USER=${USER}
+    fi
 
 if [[ -z "${USER}" ]]; then
     export USER=${NB_USER}
@@ -45,10 +48,10 @@ fi
 export APPTAINER_BINDPATH=/data,/mnt,/neurodesktop-storage,/tmp,/cvmfs
 # This also needs to be set in the Dockerfile, so it is available in a jupyter notebook
 
-export APPTAINERENV_SUBJECTS_DIR=/home/${NB_USER}/freesurfer-subjects-dir
-export MPLCONFIGDIR=/home/${NB_USER}/.config/matplotlib-mpldir
+export APPTAINERENV_SUBJECTS_DIR=${HOME}/freesurfer-subjects-dir
+export MPLCONFIGDIR=${HOME}/.config/matplotlib-mpldir
 
-export PATH=$PATH:/home/${NB_USER}/.local/bin:/opt/conda/bin:/opt/conda/condabin
+export PATH=$PATH:${HOME}/.local/bin:/opt/conda/bin:/opt/conda/condabin
 
 # This is needed to make containers writable as a workaround for macos with Apple Silicon. We need to do it here for the desktop
 # and in the dockerfile for the jupyter notebook
@@ -69,6 +72,8 @@ export neurodesk_singularity_opts=" --overlay /tmp/apptainer_overlay "
 #         export neurodesk_singularity_opts="${neurodesk_singularity_opts} --nv "
 # fi
 # THIS IS CURRENTLY DISABLED BECAUSE IT CAUSES PROBLEMS ON UBUNTU 24.04 HOSTS WHERE THIS LEADS TO A GLIBC VERSION ERROR
+
+fi
 
 export PS1='\u@neurodesktop-$NEURODESKTOP_VERSION:\w$ '
 
