@@ -21,7 +21,7 @@ fi
 
 # VNC
 vncserver -kill :1
-vncserver -depth 24 -geometry 1280x720 -name \"VNC\" :1
+vncserver -geometry 1280x720 -depth 24 -name "VNC" :1
 xset -display :1 s off
 
 # Guacamole
