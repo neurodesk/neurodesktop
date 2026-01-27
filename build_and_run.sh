@@ -57,12 +57,29 @@ docker build . -t neurodesktop:latest
 
 # Test Online mode with CVMFS enabled without --device=/dev/fuse
 docker volume create neurodesk-home
+
+# Mount local test webapp containers if they exist
+TEST_WEBAPP_MOUNT=""
+NEUROCONTAINERS_SIFS_DIR="../neurocontainers/sifs"
+if [ -d "$NEUROCONTAINERS_SIFS_DIR" ]; then
+    for sif_file in "$NEUROCONTAINERS_SIFS_DIR"/*.sif; do
+        if [ -f "$sif_file" ]; then
+            # Extract app name from filename (e.g., rstudio_2023.12.1.sif -> rstudio)
+            filename=$(basename "$sif_file")
+            app_name="${filename%%_*}"
+            echo "Mounting local test container: $app_name"
+            TEST_WEBAPP_MOUNT="$TEST_WEBAPP_MOUNT -v $(realpath "$sif_file"):/opt/neurodesktop-test-webapps/$app_name/$app_name.sif:ro"
+        fi
+    done
+fi
+
 docker run --shm-size=1gb -it --privileged --user=root \
     --name neurodesktop -v ~/neurodesktop-storage:/neurodesktop-storage \
     --mount source=neurodesk-home,target=/home/jovyan \
     -e CVMFS_DISABLE=false \
     -p 8888:8888 \
     -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
+    $TEST_WEBAPP_MOUNT \
     neurodesktop:latest
 
 

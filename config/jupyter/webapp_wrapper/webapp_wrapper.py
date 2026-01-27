@@ -107,7 +107,23 @@ config: WebappConfig = None
 container_ready = False
 container_error = None
 container_process = None
+container_output = []  # Collected output from container process
 startup_start_time = None
+
+
+def drain_process_output(proc):
+    """Read and store process output to prevent pipe buffer from blocking."""
+    global container_output
+    try:
+        while True:
+            line = proc.stdout.readline()
+            if not line and proc.poll() is not None:
+                break
+            if line:
+                container_output.append(line.rstrip())
+                log(f"Container output: {line.rstrip()}")
+    except Exception as e:
+        log(f"Error draining output: {e}")
 
 
 def log(message):
@@ -119,11 +135,13 @@ def log(message):
 def check_app_ready():
     """Check if the webapp is responding on its port."""
     try:
-        url = f"http://localhost:{config.target_port}{config.start_page}"
-        req = urllib.request.Request(url, method="GET")
-        resp = urllib.request.urlopen(req, timeout=5)
-        return resp.status == 200
-    except (urllib.error.URLError, Exception):
+        # Just check if something is listening and responding
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        result = sock.connect_ex(('localhost', config.target_port))
+        sock.close()
+        return result == 0
+    except Exception:
         return False
 
 
@@ -140,7 +158,15 @@ def start_container():
 
         if os.path.exists(local_sif):
             log(f"Using local test image: {local_sif}")
-            cmd = ["apptainer", "run", "--writable-tmpfs", local_sif]
+            log(f"Startup command: {config.startup_command}")
+            # Bind mount storage and home directories so apps can access user files
+            cmd = [
+                "apptainer", "exec", "--writable-tmpfs",
+                "-B", "/neurodesktop-storage:/neurodesktop-storage",
+                "-B", "/home/jovyan:/home/jovyan",
+                local_sif, config.startup_command
+            ]
+            log(f"Full command: {cmd}")
         else:
             log("Using CVMFS module system")
             # Build module spec with version if available
@@ -165,21 +191,42 @@ def start_container():
             text=True
         )
 
+        # Start a thread to drain output and prevent pipe buffer from blocking
+        output_thread = threading.Thread(
+            target=drain_process_output,
+            args=(container_process,),
+            daemon=True
+        )
+        output_thread.start()
+
         # Wait for container to be ready (with timeout)
         start_time = time.time()
 
         while time.time() - start_time < config.startup_timeout:
-            if container_process.poll() is not None:
-                # Process exited
-                output = container_process.stdout.read() if container_process.stdout else ""
-                container_error = f"Container exited unexpectedly: {output}"
-                log(container_error)
-                return
-
+            # Check if app is ready FIRST (rserver may fork and parent exits)
             if check_app_ready():
                 container_ready = True
                 elapsed = time.time() - startup_start_time
                 log(f"{config.app_name} is ready! Startup took {elapsed:.1f}s")
+                return
+
+            poll_result = container_process.poll()
+            if poll_result is not None:
+                # Process exited - but check multiple times if app is ready
+                # (some apps like rserver fork and the parent exits immediately)
+                log(f"Process exited with code: {poll_result}, checking if app started anyway...")
+                for retry in range(10):
+                    time.sleep(1)
+                    if check_app_ready():
+                        container_ready = True
+                        elapsed = time.time() - startup_start_time
+                        log(f"{config.app_name} is ready! (process exited but app responding) Startup took {elapsed:.1f}s")
+                        return
+                    log(f"Retry {retry + 1}/10: app not ready yet")
+                # Process exited and app not ready after retries - get collected output
+                output = "\n".join(container_output) if container_output else "(no output)"
+                container_error = f"Container exited unexpectedly: {output}"
+                log(container_error)
                 return
 
             time.sleep(1)
@@ -280,6 +327,17 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
         path = self.path.rstrip("/")
         return path == f"/{config.app_name}" or path == f"/{config.app_name}/index.html"
 
+    def _rewrite_location(self, location, target_port):
+        """Rewrite Location header to go through proxy instead of direct port access."""
+        # Rewrite http://localhost:PORT/path to /app_name/path
+        import re
+        pattern = rf"^https?://(?:localhost|127\.0\.0\.1):{target_port}(/.*)?$"
+        match = re.match(pattern, location)
+        if match:
+            path = match.group(1) or "/"
+            return f"/{config.app_name}{path}"
+        return location
+
     def _send_status(self):
         """Send current status as JSON."""
         elapsed = time.time() - startup_start_time if startup_start_time else 0
@@ -314,7 +372,7 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
             target_port = config.target_port  # default
             is_main_html = self._is_main_app_html()
 
-            # Check routes and strip prefixes
+            # Check routes and strip prefixes (apps listen at / not /appname)
             for prefix, port in config.routes:
                 if path.startswith(prefix):
                     path = path[len(prefix):] or "/"
@@ -338,8 +396,21 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
                 if header.lower() not in ("host", "content-length"):
                     req.add_header(header, value)
 
-            # Make the request
-            response = urllib.request.urlopen(req, timeout=300)
+            # Make the request - use custom opener that doesn't follow redirects
+            # so we can rewrite Location headers
+            class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, req, fp, code, msg, headers, newurl):
+                    return None  # Don't follow redirects
+
+            opener = urllib.request.build_opener(NoRedirectHandler)
+            try:
+                response = opener.open(req, timeout=300)
+            except urllib.error.HTTPError as redirect_error:
+                # 3xx redirects come as HTTPError when not followed
+                if 300 <= redirect_error.code < 400:
+                    response = redirect_error  # Use the redirect response
+                else:
+                    raise
 
             # Check if we need to inject URL rewriting script (for main HTML page)
             content_type = response.getheader("Content-Type", "")
@@ -374,21 +445,35 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
                     response_body = response_body.replace(b'<HEAD>', b'<HEAD>' + inject_bytes, 1)
 
                 # Send modified response
-                self.send_response(response.status)
-                for header, value in response.getheaders():
+                status = response.status if hasattr(response, 'status') else response.code
+                headers = response.getheaders() if hasattr(response, 'getheaders') else response.headers.items()
+
+                self.send_response(status)
+                for header, value in headers:
                     if header.lower() not in ("transfer-encoding", "connection", "content-length"):
+                        # Rewrite Location headers to go through proxy
+                        if header.lower() == "location":
+                            value = self._rewrite_location(value, target_port)
                         self.send_header(header, value)
                 self.send_header("Content-Length", len(response_body))
                 self.end_headers()
                 self.wfile.write(response_body)
             else:
                 # Stream response as-is
-                self.send_response(response.status)
-                for header, value in response.getheaders():
+                # Handle both normal responses and HTTPError (for redirects)
+                status = response.status if hasattr(response, 'status') else response.code
+                headers = response.getheaders() if hasattr(response, 'getheaders') else response.headers.items()
+
+                self.send_response(status)
+                for header, value in headers:
                     if header.lower() not in ("transfer-encoding", "connection"):
+                        # Rewrite Location headers to go through proxy
+                        if header.lower() == "location":
+                            value = self._rewrite_location(value, target_port)
                         self.send_header(header, value)
                 self.end_headers()
 
+                # For redirects, there may be minimal body
                 while True:
                     chunk = response.read(8192)
                     if not chunk:
@@ -396,18 +481,29 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
                     self.wfile.write(chunk)
 
         except urllib.error.HTTPError as e:
-            self.send_response(e.code)
-            for header, value in e.headers.items():
-                if header.lower() not in ("transfer-encoding", "connection"):
-                    self.send_header(header, value)
-            self.end_headers()
-            self.wfile.write(e.read())
+            try:
+                self.send_response(e.code)
+                for header, value in e.headers.items():
+                    if header.lower() not in ("transfer-encoding", "connection"):
+                        self.send_header(header, value)
+                self.end_headers()
+                # Read the response body (may be empty for 304)
+                body = e.read()
+                if body:
+                    self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                log(f"Client disconnected while sending HTTP {e.code} response")
+        except (BrokenPipeError, ConnectionResetError):
+            log("Client disconnected during proxying")
         except Exception as e:
             log(f"Proxy error: {e}")
-            self.send_response(502)
-            self.send_header("Content-Type", "text/plain")
-            self.end_headers()
-            self.wfile.write(f"Proxy error: {e}".encode())
+            try:
+                self.send_response(502)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(f"Proxy error: {e}".encode())
+            except (BrokenPipeError, ConnectionResetError):
+                log("Client disconnected before error response could be sent")
 
 
 def signal_handler(_sig, _frame):

@@ -8,8 +8,41 @@ the ServerProxy.servers entries for JupyterLab integration.
 
 import json
 import sys
+import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Dict, Any
+
+# Directory to store downloaded webapp icons
+ICONS_DIR = Path("/opt/neurodesk/icons")
+
+
+def download_icon(url: str, name: str) -> str:
+    """
+    Download an icon from a URL and save it locally.
+
+    Args:
+        url: URL to download the icon from
+        name: Name of the webapp (used for the local filename)
+
+    Returns:
+        Local path to the downloaded icon, or default icon path on failure
+    """
+    default_icon = "/opt/neurodesk_brain_icon.svg"
+
+    # Determine file extension from URL
+    ext = Path(url).suffix or ".svg"
+    local_path = ICONS_DIR / f"{name}{ext}"
+
+    try:
+        ICONS_DIR.mkdir(parents=True, exist_ok=True)
+        print(f"  Downloading icon for {name}: {url}")
+        urllib.request.urlretrieve(url, local_path)
+        print(f"    Saved to: {local_path}")
+        return str(local_path)
+    except Exception as e:
+        print(f"  Warning: Failed to download icon for {name}: {e}")
+        return default_icon
 
 
 def generate_server_proxy_entries(webapps: Dict[str, Any]) -> str:
@@ -29,9 +62,16 @@ def generate_server_proxy_entries(webapps: Dict[str, Any]) -> str:
         socket_path = f"/tmp/neurodesk_webapp_{name}.sock"
 
         # Main webapp entry
-        # Note: icon_path only works when category is NOT "Notebook" (JupyterLab limitation)
-        category = config.get('category', 'Notebook')
-        icon_path = config.get('icon', '/opt/neurodesk_brain_icon.svg')
+        # Note: icon_path only works when category is "Notebook" or "Console" (JupyterLab limitation)
+        category = config.get('category', 'Console')
+        icon_config = config.get('icon', '/opt/neurodesk_brain_icon.svg')
+
+        # If icon is a URL, download it locally (JupyterLab needs local file paths)
+        if icon_config.startswith(('http://', 'https://')):
+            icon_path = download_icon(icon_config, name)
+        else:
+            icon_path = icon_config
+
         startup_timeout = config.get('startup_timeout', 120)
         entry = f"""  '{name}': {{
     'command': ['/opt/neurodesktop/webapp_launcher.sh', '{name}'],
