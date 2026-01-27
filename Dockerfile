@@ -1,4 +1,4 @@
-FROM quay.io/jupyter/base-notebook:2025-12-02
+FROM quay.io/jupyter/base-notebook:2026-01-26
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
 
 LABEL maintainer="Neurodesk Project <www.neurodesk.org>"
