@@ -4,18 +4,77 @@ on:
   workflow_dispatch: {}
 
 jobs:
-  run-on-self-hosted:
-    runs-on: ["self-hosted", "linux", "arc-base"]
+  sanity-base:
+    name: Sanity (base warm pool)
+    runs-on: [self-hosted, neurodesk-arcrunner-base]
+    timeout-minutes: 20
     steps:
-      - name: Show runner name
+      - name: Runner identity
         run: |
-          echo "Running on self-hosted runner"
-          echo "Runner hostname: $(hostname)"
-      - name: Show environment
+          echo "RUNNER_NAME=$RUNNER_NAME"
+          echo "RUNNER_OS=$RUNNER_OS"
+          echo "RUNNER_ARCH=$RUNNER_ARCH"
+          echo "hostname=$(hostname)"
+          uname -a
+
+      - name: Network quick check (GitHub + GHCR)
         run: |
-          echo "Runner container environment:"
-          env | sort
-      - name: Test docker
+          set -e
+          curl -sS -o /dev/null -w "github.com http=%{http_code} total=%{time_total}s\n" https://github.com/
+          curl -sS -o /dev/null -w "ghcr.io/v2 http=%{http_code} total=%{time_total}s\n" https://ghcr.io/v2/
+
+      - name: DinD quick build/run
+        shell: bash
         run: |
-          echo "If docker is enabled, show docker version"
-          docker --version || true
+          set -euo pipefail
+          docker version
+          docker info
+
+          cat > Dockerfile <<'EOF'
+          FROM alpine:3.19
+          RUN echo "hello from base pool" >/hello.txt
+          CMD ["cat", "/hello.txt"]
+          EOF
+
+          docker build -t dind-base-smoke:latest .
+          docker run --rm dind-base-smoke:latest
+
+  scale-cpu:
+    name: Scale-from-zero (cpu pool) + quick stress
+    runs-on: [self-hosted, neurodesk-arcrunner-cpu]
+    timeout-minutes: 20
+    steps:
+      - name: Runner identity
+        run: |
+          echo "RUNNER_NAME=$RUNNER_NAME"
+          echo "hostname=$(hostname)"
+          uname -a
+
+      - name: DinD + parallel pulls (bounded)
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker version
+          docker info
+
+          # Parallel pulls to stress registry/network a bit, but keep it bounded.
+          images=(
+            alpine:3.19
+            ubuntu:24.04
+            node:20-alpine
+            python:3.11-slim
+          )
+
+          printf "%s\n" "${images[@]}" | xargs -P 4 -n 1 docker pull
+
+      - name: Small build (bounded)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > Dockerfile <<'EOF'
+          FROM alpine:3.19
+          RUN dd if=/dev/zero of=/blob bs=1M count=64 status=none && sha256sum /blob | head -n1
+          CMD ["sh","-lc","echo cpu pool build ok; uname -a"]
+          EOF
+          docker build -t dind-cpu-smoke:latest .
+          docker run --rm dind-cpu-smoke:latest
