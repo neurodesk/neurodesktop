@@ -350,15 +350,34 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
         path = self._get_normalized_path().rstrip("/")
         return path == f"/{config.app_name}" or path == f"/{config.app_name}/index.html"
 
+    def _get_base_path(self):
+        """
+        Get the full base path for the app, including any JupyterHub prefix.
+
+        On JupyterHub: /user/<username>/<app_name>/
+        On localhost: /<app_name>/
+
+        Returns the path ending with a trailing slash.
+        """
+        parsed_path = urllib.parse.urlparse(self.path).path
+        app_marker = f"/{config.app_name}"
+        idx = parsed_path.find(app_marker)
+        if idx != -1:
+            # Return everything up to and including the app name, plus trailing slash
+            return parsed_path[:idx + len(app_marker)] + "/"
+        # Fallback to just the app name
+        return f"/{config.app_name}/"
+
     def _rewrite_location(self, location, target_port):
         """Rewrite Location header to go through proxy instead of direct port access."""
-        # Rewrite http://localhost:PORT/path to /app_name/path
+        # Rewrite http://localhost:PORT/path to base_path + path
         import re
         pattern = rf"^https?://(?:localhost|127\.0\.0\.1):{target_port}(/.*)?$"
         match = re.match(pattern, location)
         if match:
             path = match.group(1) or "/"
-            return f"/{config.app_name}{path}"
+            base_path = self._get_base_path().rstrip("/")
+            return f"{base_path}{path}"
         return location
 
     def _send_status(self):
@@ -452,15 +471,18 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
                 # Read full response to inject script
                 response_body = response.read()
 
+                # Get the full base path including any JupyterHub prefix
+                base_path = self._get_base_path()
+
                 # Inject base href to preserve relative URL resolution,
                 # plus script to rewrite URL for client-side routing
-                inject_script = f'''<base href="/{config.app_name}/">
+                inject_script = f'''<base href="{base_path}">
 <script>
 (function() {{
   // Rewrite URL for client-side routing frameworks (React Router, etc.)
   // They see the full path and need it to appear as "/" for proper routing
-  var appPath = '/{config.app_name}';
-  if (window.location.pathname === appPath || window.location.pathname === appPath + '/') {{
+  var basePath = '{base_path.rstrip("/")}';
+  if (window.location.pathname === basePath || window.location.pathname === basePath + '/') {{
     window.history.replaceState(null, '', '/' + window.location.search + window.location.hash);
   }}
 }})();
