@@ -282,7 +282,7 @@ COPY config/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/
 
 # Add custom HTML template for donation banner
 RUN mkdir -p /opt/neurodesktop/templates
-COPY config/jupyter/templates/page.html /opt/neurodesktop/templates/page.html
+COPY config/jupyter/templates/index.html /opt/neurodesktop/templates/index.html
 
 # Add jupyter notebook and startup scripts for system-wide configuration
 # Note: jupyter_notebook_config.py is generated from template + webapps.json below
