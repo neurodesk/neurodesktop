@@ -1,8 +1,0 @@
-{
-  "notificationAreaWidget": {
-    "enabled": true
-  },
-  "custom": {
-    "donationBanner": true
-  }
-}
