@@ -1,0 +1,45 @@
+{% extends "templates/page.html" %}
+
+{% block body %}
+<div id="donation-banner" style="position: fixed; top: 0; left: 0; right: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 20px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; font-size: 14px; z-index: 10000; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); display: flex; align-items: center; justify-content: center; gap: 15px;">
+    <span class="heart-icon" style="display: inline-block; animation: heartbeat 1.5s ease-in-out infinite;">❤️</span>
+    <span>
+        Support Neurodesk! Help us maintain this free platform by 
+        <a href="https://donations.uq.edu.au/EAINNEUR" target="_blank" rel="noopener noreferrer" style="color: white; font-weight: 600; text-decoration: underline;">donating to our infrastructure costs</a>.
+    </span>
+    <button id="donation-banner-close" style="background: rgba(255, 255, 255, 0.2); border: none; color: white; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; margin-left: 15px;">Dismiss</button>
+</div>
+
+<style>
+@keyframes heartbeat {
+    0%, 100% { transform: scale(1); }
+    10%, 30% { transform: scale(1.1); }
+    20%, 40% { transform: scale(1); }
+}
+body {
+    padding-top: 50px !important;
+}
+</style>
+
+<script>
+(function() {
+    'use strict';
+    const bannerClosed = localStorage.getItem('neurodeskDonationBannerClosed');
+    const banner = document.getElementById('donation-banner');
+    if (bannerClosed) {
+        banner.style.display = 'none';
+        document.body.style.paddingTop = '0';
+    }
+    const closeButton = document.getElementById('donation-banner-close');
+    if (closeButton) {
+        closeButton.addEventListener('click', function() {
+            banner.style.display = 'none';
+            document.body.style.paddingTop = '0';
+            localStorage.setItem('neurodeskDonationBannerClosed', 'true');
+        });
+    }
+})();
+</script>
+
+{{ super() }}
+{% endblock %}
