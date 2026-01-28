@@ -35,4 +35,5 @@ c.ResourceUseDisplay.track_disk_usage = True
 c.ResourceUseDisplay.disk_path = os.environ.get('HOME', '/home/jovyan')
 
 # Custom template paths for donation banner
+# Compatible with JupyterLab 3.x+ (uses ServerApp configuration)
 c.ServerApp.extra_template_paths = ['/opt/neurodesktop/templates']
