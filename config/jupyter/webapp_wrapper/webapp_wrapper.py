@@ -19,6 +19,7 @@ import subprocess
 import threading
 import urllib.request
 import urllib.error
+import urllib.parse
 import os
 import json
 import time
@@ -317,14 +318,36 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
             "status": "loading"
         }).encode())
 
+    def _get_normalized_path(self):
+        """
+        Normalize the request path by stripping JupyterHub prefix if present.
+
+        On JupyterHub, paths come through as /user/<username>/<app>/...
+        We need to strip the /user/<username>/ prefix to get /<app>/...
+
+        On localhost, paths are already /<app>/... so no change needed.
+        """
+        # Parse to handle any query strings
+        parsed_path = urllib.parse.urlparse(self.path).path
+
+        # Look for the app name in the path and extract from there
+        app_marker = f"/{config.app_name}"
+        idx = parsed_path.find(app_marker)
+        if idx != -1:
+            # Found app name - return path starting from there
+            return parsed_path[idx:]
+
+        # No app name found - return path as-is (handles / and empty paths)
+        return parsed_path
+
     def _is_root_path(self):
         """Check if path is a root-like path for the app."""
-        path = self.path.rstrip("/")
+        path = self._get_normalized_path().rstrip("/")
         return path == "" or path == "/" or path == f"/{config.app_name}"
 
     def _is_main_app_html(self):
         """Check if this is a request for the main app HTML page."""
-        path = self.path.rstrip("/")
+        path = self._get_normalized_path().rstrip("/")
         return path == f"/{config.app_name}" or path == f"/{config.app_name}/index.html"
 
     def _rewrite_location(self, location, target_port):
@@ -368,19 +391,25 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
         """Proxy request to the actual webapp server."""
         try:
             # Find matching route and determine target port
-            path = self.path
+            # Use normalized path for route matching (handles JupyterHub prefix)
+            normalized_path = self._get_normalized_path()
             target_port = config.target_port  # default
             is_main_html = self._is_main_app_html()
 
+            # Preserve query string from original request
+            parsed_url = urllib.parse.urlparse(self.path)
+            query_string = f"?{parsed_url.query}" if parsed_url.query else ""
+
             # Check routes and strip prefixes (apps listen at / not /appname)
+            path = normalized_path  # default to normalized path
             for prefix, port in config.routes:
-                if path.startswith(prefix):
-                    path = path[len(prefix):] or "/"
+                if normalized_path.startswith(prefix):
+                    path = normalized_path[len(prefix):] or "/"
                     target_port = port
                     break
 
-            # Build the target URL
-            target_url = f"http://localhost:{target_port}{path}"
+            # Build the target URL (add back query string)
+            target_url = f"http://localhost:{target_port}{path}{query_string}"
 
             # Read request body if present
             content_length = self.headers.get("Content-Length")
