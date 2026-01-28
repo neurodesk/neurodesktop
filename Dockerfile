@@ -280,9 +280,8 @@ RUN mkdir -p /usr/local/bin/start-notebook.d/ \
 COPY config/jupyter/start_notebook.sh /usr/local/bin/start-notebook.d/
 COPY config/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/
 
-# Add custom HTML template for donation banner
-RUN mkdir -p /opt/neurodesktop/templates
-COPY config/jupyter/templates/index.html /opt/neurodesktop/templates/index.html
+# Add donation notification script
+COPY config/jupyter/donation_notification.js /opt/neurodesktop/donation_notification.js
 
 # Add jupyter notebook and startup scripts for system-wide configuration
 # Note: jupyter_notebook_config.py is generated from template + webapps.json below
