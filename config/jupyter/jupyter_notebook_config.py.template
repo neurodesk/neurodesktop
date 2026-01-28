@@ -34,6 +34,5 @@ c.ResourceUseDisplay.mem_warning_threshold = 0.1  # Warn at 90% usage
 c.ResourceUseDisplay.track_disk_usage = True
 c.ResourceUseDisplay.disk_path = os.environ.get('HOME', '/home/jovyan')
 
-# Custom HTML/CSS/JS for donation banner
+# Custom template paths for donation banner
 c.ServerApp.extra_template_paths = ['/opt/neurodesktop/templates']
-c.LabApp.extra_labextensions_path = ['/opt/neurodesktop/labextensions']
