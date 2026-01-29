@@ -98,6 +98,14 @@ class WebappConfig:
         self.start_page = config.get("start_page", "/")
         self.startup_timeout = config.get("startup_timeout", 120)
 
+        # Path rewrites for apps built with hard-coded absolute paths
+        # This rewrites paths like /hub/ezbids/ to the correct base path
+        # Always include the app's own path as a fallback rewrite
+        self.path_rewrites = config.get("path_rewrites", [])
+        # Add default rewrite for the app's own path (e.g., /ezbids/ -> base_path)
+        if f"/{self.app_name}/" not in self.path_rewrites:
+            self.path_rewrites.append(f"/{self.app_name}/")
+
         # Paths
         self.logfile = f"/tmp/{self.app_name}_wrapper.log"
         self.status_endpoint = f"{self.app_name}-wrapper-status"
@@ -460,40 +468,71 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
                 else:
                     raise
 
-            # Check if we need to inject URL rewriting script (for main HTML page)
+            # Check content type for response handling
             content_type = response.getheader("Content-Type", "")
-            should_inject = (
-                is_main_html and
-                "text/html" in content_type
-            )
 
-            if should_inject:
-                # Read full response to inject script
+            # Determine what processing is needed:
+            # - Path rewriting: for text-based responses (HTML, JS, CSS) that may contain hard-coded paths
+            # - Base href injection: only for main HTML page
+            needs_path_rewrite = (
+                config.path_rewrites and
+                any(ct in content_type for ct in ["text/html", "text/javascript", "application/javascript", "text/css"])
+            )
+            needs_base_href = is_main_html and "text/html" in content_type
+
+            if needs_path_rewrite or needs_base_href:
+                # Read full response to modify
                 response_body = response.read()
 
                 # Get the full base path including any JupyterHub prefix
                 base_path = self._get_base_path()
 
-                # Inject base href to preserve relative URL resolution,
-                # plus script to rewrite URL for client-side routing
-                inject_script = f'''<base href="{base_path}">
+                # Rewrite hard-coded absolute paths to the correct base path
+                # This fixes apps built with paths like /hub/ezbids/ or /ezbids/
+                if needs_path_rewrite:
+                    for rewrite_path in config.path_rewrites:
+                        # Rewrite paths in HTML/JS/CSS
+                        # The path_rewrite is like "/hub/ezbids/" and should become base_path
+                        old_bytes = rewrite_path.encode('utf-8')
+                        new_bytes = base_path.encode('utf-8')
+                        response_body = response_body.replace(old_bytes, new_bytes)
+
+                # Inject base href and routing fix for main HTML pages
+                if needs_base_href:
+                    # The base href fixes relative URL resolution (assets, etc.)
+                    # Since we can't patch location.pathname, we strip the base path from
+                    # the URL entirely. The app works during the session, but refresh on
+                    # sub-pages will redirect to JupyterLab (the server doesn't know the context).
+                    # This is a limitation of apps not built with proper base path support.
+                    inject_script = f'''<base href="{base_path}">
 <script>
 (function() {{
-  // Rewrite URL for client-side routing frameworks (React Router, etc.)
-  // They see the full path and need it to appear as "/" for proper routing
   var basePath = '{base_path.rstrip("/")}';
-  if (window.location.pathname === basePath || window.location.pathname === basePath + '/') {{
-    window.history.replaceState(null, '', '/' + window.location.search + window.location.hash);
+  var origReplace = History.prototype.replaceState;
+
+  // Strip base path from current URL so router sees correct path
+  // This must happen BEFORE React/Vue/etc initializes
+  var currentPath = window.location.pathname;
+  var newPath = currentPath;
+  if (currentPath === basePath || currentPath === basePath + '/') {{
+    newPath = '/';
+  }} else if (currentPath.startsWith(basePath + '/')) {{
+    newPath = currentPath.substring(basePath.length);
   }}
+  if (newPath !== currentPath) {{
+    origReplace.call(history, history.state, '', newPath + window.location.search + window.location.hash);
+  }}
+
+  // Don't patch pushState/replaceState - let the router navigate freely
+  // The URL will be like /workspace instead of /dicompare/workspace
+  // This means refresh won't work on sub-pages, but the app works during session
 }})();
 </script>'''
-
-                # Inject after <head> tag
-                inject_bytes = inject_script.encode('utf-8')
-                if b'<head>' in response_body:
-                    response_body = response_body.replace(b'<head>', b'<head>' + inject_bytes, 1)
-                elif b'<HEAD>' in response_body:
-                    response_body = response_body.replace(b'<HEAD>', b'<HEAD>' + inject_bytes, 1)
+                    inject_bytes = inject_script.encode('utf-8')
+                    if b'<head>' in response_body:
+                        response_body = response_body.replace(b'<head>', b'<head>' + inject_bytes, 1)
+                    elif b'<HEAD>' in response_body:
+                        response_body = response_body.replace(b'<HEAD>', b'<HEAD>' + inject_bytes, 1)
 
                 # Send modified response
                 status = response.status if hasattr(response, 'status') else response.code
