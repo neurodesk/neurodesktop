@@ -403,9 +403,9 @@ COPY config/cvmfs/neurodesk.ardc.edu.au.pub /etc/cvmfs/keys/ardc.edu.au/neurodes
 COPY config/cvmfs/neurodesk.ardc.edu.au.conf* /etc/cvmfs/config.d/
 COPY config/cvmfs/default.local /etc/cvmfs/default.local
 
-# Save a backup copy of startup home dir into /tmp
+# Save a backup copy of startup home dir into /opt
 # Used to restore home dir in persistent sessions
-RUN cp -rp /home/${NB_USER} /tmp/
+RUN cp -rp /home/${NB_USER} /opt/
 
 # Set up data directory so it exists in the container for the SINGULARITY_BINDPATH
 RUN mkdir -p /data /neurodesktop-storage

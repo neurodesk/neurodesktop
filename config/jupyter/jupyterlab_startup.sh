@@ -7,9 +7,9 @@ if [ ! -f "${HOME}/conda-readme.md" ]
 then
     mkdir -p ${HOME}
     if sudo -n true 2>/dev/null; then
-        sudo cp -rpn /tmp/${NB_USER} "$(dirname "${HOME}")"
+        sudo cp -rpn /opt/${NB_USER} "$(dirname "${HOME}")"
     else
-        cp -rpn /tmp/${NB_USER}/. "${HOME}"
+        cp -rpn /opt/${NB_USER}/. "${HOME}"
     fi
 fi
 
