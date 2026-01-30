@@ -3,6 +3,18 @@
 # order: start_notebook.sh -> ### before_notebook.sh ###-> jupyter_notebook_config.py -> jupyterlab_startup.sh
 
 if [ "$EUID" -eq 0 ]; then
+    # Ensure home directory is owned by the notebook user
+    # This fixes issues when the home directory was created with a different UID
+    # (e.g., from a mounted volume or previous container run)
+    HOME_DIR="/home/${NB_USER}"
+    if [ -d "$HOME_DIR" ]; then
+        CURRENT_OWNER=$(stat -c "%u" "$HOME_DIR")
+        if [ "$CURRENT_OWNER" != "$NB_UID" ]; then
+            echo "Fixing ownership of $HOME_DIR (was UID $CURRENT_OWNER, setting to $NB_UID:$NB_GID)"
+            chown "$NB_UID:$NB_GID" "$HOME_DIR"
+        fi
+    fi
+
     # # Overrides Dockerfile changes to NB_USER
     /usr/bin/printf '%s\n%s\n' 'password' 'password' | passwd ${NB_USER}
     usermod --shell /bin/bash ${NB_USER}
