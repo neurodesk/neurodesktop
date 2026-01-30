@@ -19,10 +19,27 @@ fi
 # SSH/SFTP
 /usr/sbin/sshd -f ${HOME}/.ssh/sshd_config
 
-# VNC
-vncserver -kill :1
-vncserver -geometry 1280x720 -depth 24 -name "VNC" :1
-xset -display :1 s off
+# VNC - find available display by trying to start vncserver. 
+# This is needed for running on HPC where multiple users may be running VNC sessions
+DISPLAY_NUM=1
+MAX_DISPLAY=42
+
+while [ $DISPLAY_NUM -le $MAX_DISPLAY ]; do
+    vncserver -kill :${DISPLAY_NUM} 2>/dev/null
+    if vncserver -geometry 1280x720 -depth 24 -name "VNC" :${DISPLAY_NUM} 2>&1; then
+        echo "VNC server started on display :${DISPLAY_NUM}"
+        break
+    fi
+    echo "Display :${DISPLAY_NUM} unavailable, trying next..."
+    DISPLAY_NUM=$((DISPLAY_NUM + 1))
+done
+
+if [ $DISPLAY_NUM -gt $MAX_DISPLAY ]; then
+    echo "ERROR: Could not find available display (tried :1 to :${MAX_DISPLAY})"
+fi
+
+export DISPLAY=:${DISPLAY_NUM}
+xset -display :${DISPLAY_NUM} s off
 
 # Guacamole
 # sudo service guacd start
