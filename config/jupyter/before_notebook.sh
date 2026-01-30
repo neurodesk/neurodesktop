@@ -11,7 +11,7 @@ if [ "$EUID" -eq 0 ]; then
         CURRENT_OWNER=$(stat -c "%u" "$HOME_DIR")
         if [ "$CURRENT_OWNER" != "$NB_UID" ]; then
             echo "Fixing ownership of $HOME_DIR (was UID $CURRENT_OWNER, setting to $NB_UID:$NB_GID)"
-            chown "$NB_UID:$NB_GID" "$HOME_DIR"
+            sudo chown "$NB_UID:$NB_GID" "$HOME_DIR"
         fi
     fi
 
