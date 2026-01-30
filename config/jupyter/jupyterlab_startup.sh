@@ -149,3 +149,13 @@ if [ ! -d "${HOME}/.vnc" ]; then
     printf '%s\n' '#!/bin/sh' '/usr/bin/startlxde' 'vncconfig -nowin -noiconic &' > "${HOME}/.vnc/xstartup"
     chmod +x "${HOME}/.vnc/xstartup"
 fi
+
+# Setup donation notification script
+echo "[INFO] Installing donation notification script"
+mkdir -p ${HOME}/.jupyter/custom
+if [ -f "/opt/neurodesktop/donation_notification.js" ]; then
+    cp /opt/neurodesktop/donation_notification.js ${HOME}/.jupyter/custom/custom.js
+    echo "[INFO] Donation notification script installed to ${HOME}/.jupyter/custom/custom.js"
+else
+    echo "[WARN] Donation notification script not found at /opt/neurodesktop/donation_notification.js"
+fi

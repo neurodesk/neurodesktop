@@ -239,7 +239,6 @@ RUN /opt/conda/bin/pip install \
         jupyterlab_widgets \
         nbgitpuller \
         xnat \
-    && /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
     && rm -rf /home/${NB_USER}/.cache
 
 #========================================#
@@ -279,6 +278,9 @@ RUN mkdir -p /usr/local/bin/start-notebook.d/ \
     && mkdir -p /usr/local/bin/before-notebook.d/
 COPY config/jupyter/start_notebook.sh /usr/local/bin/start-notebook.d/
 COPY config/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/
+
+# Add donation notification script
+COPY config/jupyter/donation_notification.js /opt/neurodesktop/donation_notification.js
 
 # Add jupyter notebook and startup scripts for system-wide configuration
 # Note: jupyter_notebook_config.py is generated from template + webapps.json below
