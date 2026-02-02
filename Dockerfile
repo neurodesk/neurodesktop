@@ -187,6 +187,10 @@ RUN apt-get update --yes \
         tcsh \
         && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Install Claude Code CLI (Anthropic's AI coding assistant)
+RUN npm install -g @anthropic-ai/claude-code \
+    && rm -rf /root/.npm
+
 # Install firefox
 RUN add-apt-repository ppa:mozillateam/ppa \
     && apt-get update --yes \
@@ -378,6 +382,11 @@ RUN mkdir /home/${NB_USER}/.vnc \
 
 COPY --chown=${NB_UID}:${NB_GID} config/lxde/xstartup /home/${NB_USER}/.vnc
 COPY --chown=${NB_UID}:${NB_GID} config/conda/conda-readme.md /home/${NB_USER}/
+
+# Add Claude Code wrapper script and AGENT.md for AI-assisted neuroimaging workflows
+COPY --chown=${NB_UID}:${NB_GID} config/jupyter/AGENT.md /home/${NB_USER}/AGENT.md
+COPY --chown=root:root config/jupyter/claude /usr/local/sbin/claude
+RUN sudo chmod +x /usr/local/sbin/claude
 
 RUN mkdir -p /home/${NB_USER}/.ssh \
     && chmod -R 700 /home/${NB_USER}/.ssh \
