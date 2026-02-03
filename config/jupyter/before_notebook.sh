@@ -224,7 +224,6 @@ fi
 # Source custom scripts in .bashrc if they are not already there
 BASHRC_FILE="/home/${NB_USER}/.bashrc"
 INIT_MODULES="if [ -f '/usr/share/module.sh' ]; then source /usr/share/module.sh; fi"
-INIT_ENVARS="if [ -f '/opt/neurodesktop/environment_variables.sh' ]; then source /opt/neurodesktop/environment_variables.sh; fi"
 
 # if [ -f "$BASHRC_FILE" ]; then
 touch "$BASHRC_FILE"
@@ -232,12 +231,9 @@ touch "$BASHRC_FILE"
 if ! grep -qF "$INIT_MODULES" "$BASHRC_FILE"; then
     echo "$INIT_MODULES" >> "$BASHRC_FILE"
 fi
-
-# Add environment_variables.sh if not already in .bashrc
-if ! grep -qF "$INIT_ENVARS" "$BASHRC_FILE"; then
-    echo "$INIT_ENVARS" >> "$BASHRC_FILE"
-fi
 # fi
+
+# Note: environment_variables.sh is sourced via /etc/bash.bashrc (set in Dockerfile)
 
 # Read cgroup v2 limits and set environment variables for jupyter-resource-usage
 echo "Detecting container resource limits from cgroup v2..."
