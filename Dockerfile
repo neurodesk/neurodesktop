@@ -230,7 +230,7 @@ RUN /opt/conda/bin/pip install \
         jupyterlab-git \
         notebook_intelligence \
         jupyterlab_rise \
-        jupyterlab-niivue \
+        jupyterlab-niivue==0.2.4 \
         jupyterlab_myst \
         jupyter-sshd-proxy \
         papermill \
