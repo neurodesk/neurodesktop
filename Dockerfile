@@ -388,6 +388,7 @@ COPY --chown=${NB_UID}:${NB_GID} config/lxde/xstartup /home/${NB_USER}/.vnc
 COPY --chown=${NB_UID}:${NB_GID} config/conda/conda-readme.md /home/${NB_USER}/
 
 # Add Claude Code wrapper script and AGENT.md for AI-assisted neuroimaging workflows
+COPY --chown=${NB_UID}:${NB_GID} config/agents/AGENT.md /opt/AGENT.md
 WORKDIR /home/${NB_USER}/.claude/
 COPY --chown=${NB_UID}:${NB_GID} config/agents/claude_settings.local.json /home/${NB_USER}/.claude/settings.local.json
 COPY --chown=root:root config/agents/claude /usr/local/sbin/claude

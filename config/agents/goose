@@ -4,7 +4,7 @@
 
 # Copy AGENT.md from home directory to current directory as .goosehints
 if [ ! -f ./.goosehints ]; then
-    cp /opt/jovyan/AGENT.md ./.goosehints
+    cp /opt/AGENT.md ./.goosehints
 fi
 
 # Start Goose using the actual binary path (not this wrapper)

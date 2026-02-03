@@ -4,7 +4,7 @@
 
 # Copy AGENT.md from home directory to current directory as CLAUDE.md
 if [ ! -f ./CLAUDE.md ]; then
-    cp /opt/jovyan/AGENT.md ./CLAUDE.md
+    cp /opt/AGENT.md ./CLAUDE.md
 fi
 
 # Copy settings.local.json from home directory to current directory's .claude folder
