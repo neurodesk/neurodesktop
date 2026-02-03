@@ -1,12 +1,18 @@
 #!/bin/bash
 # Claude Code wrapper script
-# Copies ~/AGENT.md to current directory as CLAUDE.md, then starts Claude Code
+# Copies ~/AGENT.md and settings.local.json to current directory, then starts Claude Code
 
 # Copy AGENT.md from home directory to current directory as CLAUDE.md
 if [ ! -f ./CLAUDE.md ]; then
     cp /opt/jovyan/AGENT.md ./CLAUDE.md
 fi
 
+# Copy settings.local.json from home directory to current directory's .claude folder
+if [ ! -f ./.claude/settings.local.json ]; then
+    mkdir -p ./.claude
+    cp /opt/jovyan/.claude/settings.local.json ./.claude/settings.local.json    
+fi
+
+
 # Start Claude Code using the actual binary path (not this wrapper)
-# The npm global install puts claude in /usr/local/bin
 exec /usr/bin/claude "$@"
