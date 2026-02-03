@@ -129,6 +129,9 @@ fi
 # ensure overlay directory exists
 mkdir -p /tmp/apptainer_overlay
 
+# ensure goose config directory exists
+mkdir -p ${HOME}/.config/goose
+
 # Start and stop SSH server to initialize host
 if sudo -n true 2>/dev/null; then
     sudo service ssh restart

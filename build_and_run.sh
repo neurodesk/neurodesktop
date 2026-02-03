@@ -73,9 +73,9 @@ if [ -d "$NEUROCONTAINERS_SIFS_DIR" ]; then
     done
 fi
 
+    # --mount source=neurodesk-home,target=/home/jovyan \
 docker run --shm-size=1gb -it --privileged --user=root \
     --name neurodesktop -v ~/neurodesktop-storage:/neurodesktop-storage \
-    --mount source=neurodesk-home,target=/home/jovyan \
     -e CVMFS_DISABLE=false \
     -p 8888:8888 \
     -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \

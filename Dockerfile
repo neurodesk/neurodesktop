@@ -191,6 +191,10 @@ RUN apt-get update --yes \
 RUN npm install -g @anthropic-ai/claude-code \
     && rm -rf /root/.npm
 
+# Install Goose CLI (Block's AI coding agent)
+RUN curl -fsSL https://github.com/block/goose/releases/latest/download/download_cli.sh | CONFIGURE=false bash \
+    && mv /home/jovyan/.local/bin/goose /usr/bin/goose
+
 # Install firefox
 RUN add-apt-repository ppa:mozillateam/ppa \
     && apt-get update --yes \
@@ -230,7 +234,7 @@ RUN /opt/conda/bin/pip install \
         jupyterlab-git \
         notebook_intelligence \
         jupyterlab_rise \
-        jupyterlab-niivue==0.2.4 \
+        jupyterlab-niivue==0.2.3 \
         jupyterlab_myst \
         jupyter-sshd-proxy \
         papermill \
@@ -384,11 +388,15 @@ COPY --chown=${NB_UID}:${NB_GID} config/lxde/xstartup /home/${NB_USER}/.vnc
 COPY --chown=${NB_UID}:${NB_GID} config/conda/conda-readme.md /home/${NB_USER}/
 
 # Add Claude Code wrapper script and AGENT.md for AI-assisted neuroimaging workflows
-COPY --chown=${NB_UID}:${NB_GID} config/jupyter/AGENT.md /home/${NB_USER}/AGENT.md
 WORKDIR /home/${NB_USER}/.claude/
-COPY --chown=${NB_UID}:${NB_GID} config/jupyter/claude_settings.local.json /home/${NB_USER}/.claude/settings.local.json
-COPY --chown=root:root config/jupyter/claude /usr/local/sbin/claude
+COPY --chown=${NB_UID}:${NB_GID} config/agents/claude_settings.local.json /home/${NB_USER}/.claude/settings.local.json
+COPY --chown=root:root config/agents/claude /usr/local/sbin/claude
 RUN sudo chmod +x /usr/local/sbin/claude
+
+# Add Goose wrapper script for AI-assisted neuroimaging workflows
+COPY --chown=root:root config/agents/goose /usr/local/sbin/goose
+COPY --chown=${NB_UID}:${NB_GID} config/agents/goose_config.yaml /home/${NB_USER}/.goose/goose_config.yaml
+RUN sudo chmod +x /usr/local/sbin/goose
 
 RUN mkdir -p /home/${NB_USER}/.ssh \
     && chmod -R 700 /home/${NB_USER}/.ssh \
