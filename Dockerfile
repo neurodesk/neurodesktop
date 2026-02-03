@@ -396,7 +396,7 @@ RUN sudo chmod +x /usr/local/sbin/claude
 
 # Add Goose wrapper script for AI-assisted neuroimaging workflows
 COPY --chown=root:root config/agents/goose /usr/local/sbin/goose
-COPY --chown=${NB_UID}:${NB_GID} config/agents/goose_config.yaml /home/${NB_USER}/.goose/config.yaml
+COPY --chown=${NB_UID}:${NB_GID} config/agents/goose_config.yaml /home/${NB_USER}/.config/goose/config.yaml
 RUN sudo chmod +x /usr/local/sbin/goose
 
 RUN mkdir -p /home/${NB_USER}/.ssh \
