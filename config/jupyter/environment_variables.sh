@@ -35,8 +35,10 @@ fi
 fi
 
 # Show informational messages in interactive terminals (outside the NEURODESKTOP_ENV_SOURCED guard so they show on each new terminal)
-if [ -f '/usr/share/module.sh' ]; then
+# Use a separate guard to prevent duplicate messages when sourced from both /etc/bash.bashrc and ~/.bashrc
+if [ -z "$NEURODESKTOP_MSG_SHOWN" ] && [ -f '/usr/share/module.sh' ]; then
         if [[ $- == *i* || -t 1 ]]; then
+                export NEURODESKTOP_MSG_SHOWN=1
                 # Check for local containers
                 if [ -d "${OFFLINE_MODULES}" ] && [ -d "${CVMFS_MODULES}" ]; then
                         echo "Found local container installations in $OFFLINE_MODULES. Using installed containers with a higher priority over CVMFS."
