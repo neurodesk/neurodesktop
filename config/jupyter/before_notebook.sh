@@ -302,7 +302,7 @@ if [ -n "$SLURM_JOB_ID" ]; then
     fi
 fi
 
-source /opt/neurodesktop/environment_variables.sh
+source /opt/neurodesktop/environment_variables.sh > /dev/null 2>&1
 
 # Set default value for START_LOCAL_LLMS
 if [ -v START_LOCAL_LLMS ] && [ "$START_LOCAL_LLMS" -eq 1 ]; then
