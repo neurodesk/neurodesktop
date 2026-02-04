@@ -15,4 +15,4 @@ await module.load('toolname/version')"
 - you can find more information and examples about neuroimaging tools via running "module help <module name>"
 - Once the analysis script is written, execute the script in the background - these processings will take a long time!
 - ALWAYS check results for plausability
-- when downloading sample data make sure the data is stored in the current directory and the code used for downloading the data is in a script file for full reproducibility
+- when downloading sample data from openneuro make sure to use datalad and store the data in the current directory and the code used for downloading the data is in a script file for full reproducibility
