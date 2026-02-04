@@ -99,6 +99,7 @@ RUN wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor 
     && add-apt-repository ppa:nextcloud-devs/client \
     && chmod -R 770 /home/${NB_USER}/.launchpadlib \
     && chown -R ${NB_UID}:${NB_GID} /home/${NB_USER}/.launchpadlib \
+    && rm -rf /home/${NB_USER}/.cache \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -193,10 +194,12 @@ RUN npm install -g @anthropic-ai/claude-code \
 
 # Install Goose CLI (Block's AI coding agent)
 RUN curl -fsSL https://github.com/block/goose/releases/latest/download/download_cli.sh | CONFIGURE=false bash \
-    && mv /home/jovyan/.local/bin/goose /usr/bin/goose
+    && mv /home/jovyan/.local/bin/goose /usr/bin/goose \
+    && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 
 # Install OpenCode CLI (open source AI coding agent)
-RUN OPENCODE_INSTALL_DIR=/usr/bin curl -fsSL https://opencode.ai/install | bash
+RUN OPENCODE_INSTALL_DIR=/usr/bin curl -fsSL https://opencode.ai/install | bash \
+    && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 
 # Install OpenAI Codex CLI (OpenAI's AI coding agent)
 RUN npm install -g @openai/codex \
@@ -211,7 +214,8 @@ RUN add-apt-repository ppa:mozillateam/ppa \
     && apt-get update --yes \
     && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
         --target-release 'o=LP-PPA-mozillateam' firefox \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 COPY config/firefox/mozillateamppa /etc/apt/preferences.d/mozillateamppa
 COPY config/firefox/syspref.js /etc/firefox/syspref.js
 
@@ -245,7 +249,7 @@ RUN /opt/conda/bin/pip install \
         jupyterlab-git \
         notebook_intelligence \
         jupyterlab_rise \
-        jupyterlab-niivue==0.2.3 \
+        jupyterlab-niivue==0.2.5 \
         jupyterlab_myst \
         jupyter-sshd-proxy \
         papermill \
