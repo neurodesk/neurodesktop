@@ -198,6 +198,10 @@ RUN curl -fsSL https://github.com/block/goose/releases/latest/download/download_
 # Install OpenCode CLI (open source AI coding agent)
 RUN OPENCODE_INSTALL_DIR=/usr/bin curl -fsSL https://opencode.ai/install | bash
 
+# Install OpenAI Codex CLI (OpenAI's AI coding agent)
+RUN npm install -g @openai/codex \
+    && rm -rf /root/.npm
+
 # Install firefox
 RUN add-apt-repository ppa:mozillateam/ppa \
     && apt-get update --yes \
@@ -411,6 +415,12 @@ RUN sudo chmod +x /usr/local/sbin/goose
 COPY --chown=root:root config/agents/opencode /usr/local/sbin/opencode
 COPY --chown=${NB_UID}:${NB_GID} config/agents/opencode_config.json /home/${NB_USER}/.config/opencode/opencode.json
 RUN sudo chmod +x /usr/local/sbin/opencode
+
+# Add OpenAI Codex wrapper script for AI-assisted neuroimaging workflows
+WORKDIR /home/${NB_USER}/.codex/
+COPY --chown=${NB_UID}:${NB_GID} config/agents/codex_config.json /home/${NB_USER}/.codex/config.json
+COPY --chown=root:root config/agents/codex /usr/local/sbin/codex
+RUN sudo chmod +x /usr/local/sbin/codex
 
 RUN mkdir -p /home/${NB_USER}/.ssh \
     && chmod -R 700 /home/${NB_USER}/.ssh \
