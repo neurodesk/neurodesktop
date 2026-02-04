@@ -193,9 +193,9 @@ RUN npm install -g @anthropic-ai/claude-code @openai/codex \
     && rm -rf /root/.npm
 
 # Install Goose CLI (Block's AI coding agent)
-RUN curl -fsSL https://github.com/block/goose/releases/latest/download/download_cli.sh | CONFIGURE=false bash \
-    && mv /home/jovyan/.local/bin/goose /usr/bin/goose \
-    && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
+# RUN curl -fsSL https://github.com/block/goose/releases/latest/download/download_cli.sh | CONFIGURE=false bash \
+#     && mv /home/jovyan/.local/bin/goose /usr/bin/goose \
+#     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 
 # Install OpenCode CLI (open source AI coding agent)
 RUN OPENCODE_INSTALL_DIR=/usr/bin curl -fsSL https://opencode.ai/install | bash \
