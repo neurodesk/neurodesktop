@@ -1,3 +1,4 @@
+#!/bin/bash
 set -e
 
 # test if dive is installed and make sure it is installed
