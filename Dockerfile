@@ -390,8 +390,13 @@ RUN mkdir /home/${NB_USER}/.vnc \
 COPY --chown=${NB_UID}:${NB_GID} config/lxde/xstartup /home/${NB_USER}/.vnc
 COPY --chown=${NB_UID}:${NB_GID} config/conda/conda-readme.md /home/${NB_USER}/
 
-# Add Claude Code wrapper script and AGENT.md for AI-assisted neuroimaging workflows
+# Add AGENT.md for AI-assisted neuroimaging workflows (used by Claude Code and notebook_intelligence)
 COPY --chown=${NB_UID}:${NB_GID} config/agents/AGENT.md /opt/AGENT.md
+RUN mkdir -p /home/${NB_USER}/.jupyter/nbi/rules \
+    && cp /opt/AGENT.md /home/${NB_USER}/.jupyter/nbi/rules/neurodesk.md \
+    && chown -R ${NB_UID}:${NB_GID} /home/${NB_USER}/.jupyter/nbi
+
+# Add Claude Code wrapper script
 WORKDIR /home/${NB_USER}/.claude/
 COPY --chown=${NB_UID}:${NB_GID} config/agents/claude_settings.local.json /home/${NB_USER}/.claude/settings.local.json
 COPY --chown=root:root config/agents/claude /usr/local/sbin/claude
