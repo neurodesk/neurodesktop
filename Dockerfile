@@ -202,6 +202,10 @@ RUN OPENCODE_INSTALL_DIR=/usr/bin curl -fsSL https://opencode.ai/install | bash
 RUN npm install -g @openai/codex \
     && rm -rf /root/.npm
 
+# Install Gemini CLI (Google's AI coding agent)
+RUN npm install -g @google/gemini-cli \
+    && rm -rf /root/.npm
+
 # Install firefox
 RUN add-apt-repository ppa:mozillateam/ppa \
     && apt-get update --yes \
@@ -421,6 +425,12 @@ WORKDIR /home/${NB_USER}/.codex/
 COPY --chown=${NB_UID}:${NB_GID} config/agents/codex_config.json /home/${NB_USER}/.codex/config.json
 COPY --chown=root:root config/agents/codex /usr/local/sbin/codex
 RUN sudo chmod +x /usr/local/sbin/codex
+
+# Add Gemini CLI wrapper script for AI-assisted neuroimaging workflows
+WORKDIR /home/${NB_USER}/.gemini/
+COPY --chown=${NB_UID}:${NB_GID} config/agents/gemini_settings.json /home/${NB_USER}/.gemini/settings.json
+COPY --chown=root:root config/agents/gemini /usr/local/sbin/gemini
+RUN sudo chmod +x /usr/local/sbin/gemini
 
 RUN mkdir -p /home/${NB_USER}/.ssh \
     && chmod -R 700 /home/${NB_USER}/.ssh \
