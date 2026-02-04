@@ -28,18 +28,30 @@ if [ -f '/usr/share/module.sh' ]; then
 
                 # if the offline modules directory exists, we can use it and will prefer it over cvmfs
                 if [ -d ${OFFLINE_MODULES} ]; then
-                        [[ $- == *i* ]] && echo "Found local container installations in $OFFLINE_MODULES. Using installed containers with a higher priority over CVMFS."
                         export MODULEPATH=${OFFLINE_MODULES}:$MODULEPATH
                 fi
         fi
+fi
+fi
 
-        [[ $- == *i* ]] && echo 'Neuroimaging tools are accessible via the Neurodesktop Applications menu and running them through the menu will provide help and setup instructions. If you are familiar with the tools and you want to combine multiple tools in one script, you can run "ml av" to see which tools are available and then use "ml <tool>/<version>" to load them. '
-        
-        # check if $CVMFS_DISABLE is set to true
-        if [[ "$CVMFS_DISABLE" == "true" ]]; then
-                [[ $- == *i* ]] && echo "CVMFS is disabled. Using local containers stored in $MODULEPATH"
-                if [ ! -d $MODULEPATH ]; then
-                        [[ $- == *i* ]] && echo 'Neurodesk tools not yet downloaded. Choose tools to install from the Neurodesktop Application menu.'
+# Show informational messages in interactive terminals (outside the NEURODESKTOP_ENV_SOURCED guard so they show on each new terminal)
+# Use a separate guard to prevent duplicate messages when sourced from both /etc/bash.bashrc and ~/.bashrc
+if [ -z "$NEURODESKTOP_MSG_SHOWN" ] && [ -f '/usr/share/module.sh' ]; then
+        if [[ $- == *i* || -t 1 ]]; then
+                export NEURODESKTOP_MSG_SHOWN=1
+                # Check for local containers
+                if [ -d "${OFFLINE_MODULES}" ] && [ -d "${CVMFS_MODULES}" ]; then
+                        echo "Found local container installations in $OFFLINE_MODULES. Using installed containers with a higher priority over CVMFS."
+                fi
+
+                echo 'Neuroimaging tools are accessible via the Neurodesktop Applications menu and running them through the menu will provide help and setup instructions. If you are familiar with the tools and you want to combine multiple tools in one script, you can run "ml av" to see which tools are available and then use "ml <tool>/<version>" to load them. '
+
+                # check if $CVMFS_DISABLE is set to true
+                if [[ "$CVMFS_DISABLE" == "true" ]]; then
+                        echo "CVMFS is disabled. Using local containers stored in $MODULEPATH"
+                        if [ ! -d $MODULEPATH ]; then
+                                echo 'Neurodesk tools not yet downloaded. Choose tools to install from the Neurodesktop Application menu.'
+                        fi
                 fi
         fi
 fi
@@ -72,8 +84,6 @@ export neurodesk_singularity_opts=" --overlay /tmp/apptainer_overlay "
 #         export neurodesk_singularity_opts="${neurodesk_singularity_opts} --nv "
 # fi
 # THIS IS CURRENTLY DISABLED BECAUSE IT CAUSES PROBLEMS ON UBUNTU 24.04 HOSTS WHERE THIS LEADS TO A GLIBC VERSION ERROR
-
-fi
 
 export PS1='\u@neurodesktop-$NEURODESKTOP_VERSION:\w$ '
 

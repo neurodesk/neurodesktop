@@ -99,6 +99,7 @@ RUN wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor 
     && add-apt-repository ppa:nextcloud-devs/client \
     && chmod -R 770 /home/${NB_USER}/.launchpadlib \
     && chown -R ${NB_UID}:${NB_GID} /home/${NB_USER}/.launchpadlib \
+    && rm -rf /home/${NB_USER}/.cache \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -149,7 +150,7 @@ RUN apt-get update --yes \
         libgpgme-dev \
         libossp-uuid-dev \
         libpci3 \
-        libreoffice \
+        libreoffice-core \
         lmod \
         lua-bit32 \
         lua-filesystem \
@@ -187,16 +188,26 @@ RUN apt-get update --yes \
         tcsh \
         && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code CLI (Anthropic's AI coding assistant)
-RUN npm install -g @anthropic-ai/claude-code \
+# Install AI coding assistants (npm packages combined to dedupe dependencies)
+RUN npm install -g @anthropic-ai/claude-code @openai/codex \
     && rm -rf /root/.npm
+
+# Install Goose CLI (Block's AI coding agent)
+# RUN curl -fsSL https://github.com/block/goose/releases/latest/download/download_cli.sh | CONFIGURE=false bash \
+#     && mv /home/jovyan/.local/bin/goose /usr/bin/goose \
+#     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
+
+# Install OpenCode CLI (open source AI coding agent)
+RUN OPENCODE_INSTALL_DIR=/usr/bin curl -fsSL https://opencode.ai/install | bash \
+    && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 
 # Install firefox
 RUN add-apt-repository ppa:mozillateam/ppa \
     && apt-get update --yes \
     && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
         --target-release 'o=LP-PPA-mozillateam' firefox \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 COPY config/firefox/mozillateamppa /etc/apt/preferences.d/mozillateamppa
 COPY config/firefox/syspref.js /etc/firefox/syspref.js
 
@@ -230,7 +241,7 @@ RUN /opt/conda/bin/pip install \
         jupyterlab-git \
         notebook_intelligence \
         jupyterlab_rise \
-        jupyterlab-niivue==0.2.4 \
+        jupyterlab-niivue==0.2.5 \
         jupyterlab_myst \
         jupyter-sshd-proxy \
         papermill \
@@ -383,12 +394,33 @@ RUN mkdir /home/${NB_USER}/.vnc \
 COPY --chown=${NB_UID}:${NB_GID} config/lxde/xstartup /home/${NB_USER}/.vnc
 COPY --chown=${NB_UID}:${NB_GID} config/conda/conda-readme.md /home/${NB_USER}/
 
-# Add Claude Code wrapper script and AGENT.md for AI-assisted neuroimaging workflows
-COPY --chown=${NB_UID}:${NB_GID} config/jupyter/AGENT.md /home/${NB_USER}/AGENT.md
+# Add AGENT.md for AI-assisted neuroimaging workflows (used by Claude Code and notebook_intelligence)
+COPY --chown=${NB_UID}:${NB_GID} config/agents/AGENT.md /opt/AGENT.md
+RUN mkdir -p /home/${NB_USER}/.jupyter/nbi/rules \
+    && cp /opt/AGENT.md /home/${NB_USER}/.jupyter/nbi/rules/neurodesk.md \
+    && chown -R ${NB_UID}:${NB_GID} /home/${NB_USER}/.jupyter/nbi
+
+# Add Claude Code wrapper script
 WORKDIR /home/${NB_USER}/.claude/
-COPY --chown=${NB_UID}:${NB_GID} config/jupyter/claude_settings.local.json /home/${NB_USER}/.claude/settings.local.json
-COPY --chown=root:root config/jupyter/claude /usr/local/sbin/claude
+COPY --chown=${NB_UID}:${NB_GID} config/agents/claude_settings.local.json /home/${NB_USER}/.claude/settings.local.json
+COPY --chown=root:root config/agents/claude /usr/local/sbin/claude
 RUN sudo chmod +x /usr/local/sbin/claude
+
+# Add Goose wrapper script for AI-assisted neuroimaging workflows
+COPY --chown=root:root config/agents/goose /usr/local/sbin/goose
+COPY --chown=${NB_UID}:${NB_GID} config/agents/goose_config.yaml /home/${NB_USER}/.config/goose/config.yaml
+RUN sudo chmod +x /usr/local/sbin/goose
+
+# Add OpenCode wrapper script for AI-assisted neuroimaging workflows
+COPY --chown=root:root config/agents/opencode /usr/local/sbin/opencode
+COPY --chown=${NB_UID}:${NB_GID} config/agents/opencode_config.json /home/${NB_USER}/.config/opencode/opencode.json
+RUN sudo chmod +x /usr/local/sbin/opencode
+
+# Add OpenAI Codex wrapper script for AI-assisted neuroimaging workflows
+WORKDIR /home/${NB_USER}/.codex/
+COPY --chown=${NB_UID}:${NB_GID} config/agents/codex_config.json /home/${NB_USER}/.codex/config.json
+COPY --chown=root:root config/agents/codex /usr/local/sbin/codex
+RUN sudo chmod +x /usr/local/sbin/codex
 
 RUN mkdir -p /home/${NB_USER}/.ssh \
     && chmod -R 700 /home/${NB_USER}/.ssh \

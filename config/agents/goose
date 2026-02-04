@@ -1,0 +1,11 @@
+#!/bin/bash
+# Goose wrapper script
+# Copies ~/AGENT.md and .goosehints to current directory, then starts Goose
+
+# Copy AGENT.md from home directory to current directory as .goosehints
+if [ ! -f ./.goosehints ]; then
+    cp /opt/AGENT.md ./.goosehints
+fi
+
+# Start Goose using the actual binary path (not this wrapper)
+exec /usr/bin/goose "$@"

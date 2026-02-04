@@ -1,0 +1,17 @@
+#!/bin/bash
+# OpenAI Codex CLI wrapper script
+# Copies AGENT.md to current directory as AGENTS.md, then starts Codex CLI
+
+# Copy AGENT.md from /opt to current directory as AGENTS.md (Codex uses AGENTS.md)
+if [ ! -f ./AGENTS.md ]; then
+    cp /opt/AGENT.md ./AGENTS.md
+fi
+
+# Copy codex config from home directory to current directory's .codex folder
+if [ ! -f ./.codex/config.json ]; then
+    mkdir -p ./.codex
+    cp /opt/jovyan/.codex/config.json ./.codex/config.json
+fi
+
+# Start Codex CLI using the actual binary path (not this wrapper)
+exec /usr/bin/codex --full-auto "$@"
