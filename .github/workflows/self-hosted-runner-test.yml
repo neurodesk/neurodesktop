@@ -6,11 +6,11 @@ on:
 jobs:
   sanity-base:
     name: Sanity (base warm pool)
-    runs-on: [self-hosted, linux, x64]
+    # runs-on: [self-hosted, linux, x64]
     #target a specific self-hosted runner group
-    # runs-on:
-    #   group: arc-base
-    #   labels: [self-hosted, linux, x64]
+    runs-on:
+      group: arc-base
+      labels: [self-hosted, linux, x64]
     timeout-minutes: 20
     steps:
       - name: Runner identity
@@ -45,11 +45,11 @@ jobs:
 
   scale-cpu:
     name: Scale-from-zero (cpu pool) + quick stress
-    runs-on: [self-hosted, linux, x64]
+    # runs-on: [self-hosted, linux, x64]
     #target a specific self-hosted runner group
-    # runs-on:
-    #   group: arc-cpu
-    #   labels: [self-hosted, linux, x64]
+    runs-on:
+      group: arc-cpu
+      labels: [self-hosted, linux, x64]
     timeout-minutes: 20
     steps:
       - name: Runner identity
