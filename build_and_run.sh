@@ -13,6 +13,9 @@ fi
 # -e CVMFS_DISABLE=true # will disable CVMFS for testing purposes
 
 docker build . -t neurodesktop:latest
+
+
+
 # podman build . -t neurodesktop:latest
 
 # Test with internal CVMFS
