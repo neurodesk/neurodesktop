@@ -195,6 +195,9 @@ RUN npm install -g @anthropic-ai/claude-code \
 RUN curl -fsSL https://github.com/block/goose/releases/latest/download/download_cli.sh | CONFIGURE=false bash \
     && mv /home/jovyan/.local/bin/goose /usr/bin/goose
 
+# Install OpenCode CLI (open source AI coding agent)
+RUN OPENCODE_INSTALL_DIR=/usr/bin curl -fsSL https://opencode.ai/install | bash
+
 # Install firefox
 RUN add-apt-repository ppa:mozillateam/ppa \
     && apt-get update --yes \
@@ -398,6 +401,11 @@ RUN sudo chmod +x /usr/local/sbin/claude
 COPY --chown=root:root config/agents/goose /usr/local/sbin/goose
 COPY --chown=${NB_UID}:${NB_GID} config/agents/goose_config.yaml /home/${NB_USER}/.config/goose/config.yaml
 RUN sudo chmod +x /usr/local/sbin/goose
+
+# Add OpenCode wrapper script for AI-assisted neuroimaging workflows
+COPY --chown=root:root config/agents/opencode /usr/local/sbin/opencode
+COPY --chown=${NB_UID}:${NB_GID} config/agents/opencode_config.json /home/${NB_USER}/.config/opencode/opencode.json
+RUN sudo chmod +x /usr/local/sbin/opencode
 
 RUN mkdir -p /home/${NB_USER}/.ssh \
     && chmod -R 700 /home/${NB_USER}/.ssh \

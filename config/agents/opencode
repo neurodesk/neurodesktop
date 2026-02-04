@@ -1,0 +1,11 @@
+#!/bin/bash
+# OpenCode wrapper script
+# Copies AGENT.md to current directory, then starts OpenCode
+
+# Copy AGENT.md from /opt to current directory
+if [ ! -f ./AGENT.md ]; then
+    cp /opt/AGENT.md ./AGENT.md
+fi
+
+# Start OpenCode using the actual binary path (not this wrapper)
+exec /usr/bin/opencode "$@"
