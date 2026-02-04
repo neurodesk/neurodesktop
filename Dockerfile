@@ -150,7 +150,7 @@ RUN apt-get update --yes \
         libgpgme-dev \
         libossp-uuid-dev \
         libpci3 \
-        libreoffice \
+        libreoffice-core \
         lmod \
         lua-bit32 \
         lua-filesystem \
