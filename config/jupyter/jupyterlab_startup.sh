@@ -136,17 +136,28 @@ fi
 conda init bash
 mamba init bash
 
-# Generate VNC password if not existing
+# Setup VNC directory and ensure files exist (should be restored from defaults)
+echo "[INFO] Setting up VNC..."
+mkdir -p "${HOME}/.vnc"
+if sudo -n true 2>/dev/null; then
+    chown "${NB_USER}" "${HOME}/.vnc"
+fi
+
+# Generate VNC password if not existing (fallback if restore failed)
 if [ ! -f "${HOME}/.vnc/passwd" ]; then
-    mkdir -p ${HOME}/.vnc
-    if sudo -n true 2>/dev/null; then
-        chown ${NB_USER} ${HOME}/.vnc
-    fi
+    echo "[INFO] Generating VNC password (not found in restored defaults)..."
     /usr/bin/printf '%s\n%s\n%s\n' 'password' 'password' 'n' | vncpasswd
 fi
 
-# Create xstartup if not existing (should be restored from defaults, but fallback here)
+# Create xstartup if not existing (fallback if restore failed)
 if [ ! -f "${HOME}/.vnc/xstartup" ]; then
+    echo "[INFO] Creating VNC xstartup (not found in restored defaults)..."
     printf '%s\n' '#!/bin/sh' '/usr/bin/startlxde' 'vncconfig -nowin -noiconic &' > "${HOME}/.vnc/xstartup"
-    chmod +x "${HOME}/.vnc/xstartup"
 fi
+
+# Ensure correct permissions
+chmod 600 "${HOME}/.vnc/passwd" 2>/dev/null || true
+chmod +x "${HOME}/.vnc/xstartup"
+
+echo "[INFO] VNC setup complete. Contents of ${HOME}/.vnc:"
+ls -la "${HOME}/.vnc/"

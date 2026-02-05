@@ -388,9 +388,13 @@ COPY config/agents/AGENT.md /opt/jovyan_defaults/.jupyter/nbi/rules/neurodesk.md
 # Special: bashrc content to append (not replace)
 COPY config/lxde/.bashrc /opt/jovyan_defaults/.bashrc_append
 
+# Generate VNC password at build time and store in defaults
+RUN /usr/bin/printf '%s\n%s\n%s\n' 'password' 'password' 'n' | vncpasswd /opt/jovyan_defaults/.vnc/passwd
+
 # Create marker files and set permissions
 RUN touch /opt/jovyan_defaults/.sudo_as_admin_successful \
     && chmod +x /opt/jovyan_defaults/.vnc/xstartup \
+    && chmod 600 /opt/jovyan_defaults/.vnc/passwd \
     && chmod 700 /opt/jovyan_defaults/.ssh \
     && chown -R ${NB_UID}:${NB_GID} /opt/jovyan_defaults
 
