@@ -10,7 +10,7 @@ jobs:
     #target a specific self-hosted runner group
     runs-on:
       group: arc-base
-      labels: [self-hosted, linux, x64]
+      # labels: [self-hosted, linux, x64]
     timeout-minutes: 20
     steps:
       - name: Runner identity
@@ -49,7 +49,7 @@ jobs:
     #target a specific self-hosted runner group
     runs-on:
       group: arc-cpu
-      labels: [self-hosted, linux, x64]
+      # labels: [self-hosted, linux, x64]
     timeout-minutes: 20
     steps:
       - name: Runner identity
