@@ -392,11 +392,13 @@ COPY config/lxde/.bashrc /opt/jovyan_defaults/.bashrc_append
 RUN /usr/bin/printf '%s\n%s\n%s\n' 'password' 'password' 'n' | vncpasswd /opt/jovyan_defaults/.vnc/passwd
 
 # Create marker files and set permissions
+# Note: Don't chmod 700 .ssh here - it prevents access during restore
+# The restore script sets proper permissions on the destination
 RUN touch /opt/jovyan_defaults/.sudo_as_admin_successful \
     && chmod +x /opt/jovyan_defaults/.vnc/xstartup \
     && chmod 600 /opt/jovyan_defaults/.vnc/passwd \
-    && chmod 700 /opt/jovyan_defaults/.ssh \
-    && chown -R ${NB_UID}:${NB_GID} /opt/jovyan_defaults
+    && chown -R ${NB_UID}:${NB_GID} /opt/jovyan_defaults \
+    && ls -la /opt/jovyan_defaults/.ssh/
 
 # Copy restore script
 COPY --chown=root:users config/jupyter/restore_home_defaults.sh /opt/neurodesktop/restore_home_defaults.sh

@@ -102,6 +102,10 @@ restore_defaults() {
         return 1
     fi
 
+    log_info "Starting restoration from $DEFAULTS_DIR"
+    log_info "Contents of defaults directory:"
+    find "$DEFAULTS_DIR" -type f 2>&1 | head -20
+
     # Ensure home directory exists
     mkdir -p "$HOME_DIR"
 
@@ -116,6 +120,7 @@ restore_defaults() {
         rel_path="${src_file#${DEFAULTS_DIR}/}"
         dest_file="${HOME_DIR}/${rel_path}"
 
+        log_info "Processing: $rel_path"
         copy_if_missing "$src_file" "$dest_file"
     done < <(find "$DEFAULTS_DIR" -type f -print0)
 
