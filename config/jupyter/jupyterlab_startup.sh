@@ -136,14 +136,17 @@ fi
 conda init bash
 mamba init bash
 
-# Create and setup .vnc dir if not existing
-if [ ! -d "${HOME}/.vnc" ]; then
+# Generate VNC password if not existing
+if [ ! -f "${HOME}/.vnc/passwd" ]; then
     mkdir -p ${HOME}/.vnc
     if sudo -n true 2>/dev/null; then
         chown ${NB_USER} ${HOME}/.vnc
     fi
     /usr/bin/printf '%s\n%s\n%s\n' 'password' 'password' 'n' | vncpasswd
+fi
 
+# Create xstartup if not existing (should be restored from defaults, but fallback here)
+if [ ! -f "${HOME}/.vnc/xstartup" ]; then
     printf '%s\n' '#!/bin/sh' '/usr/bin/startlxde' 'vncconfig -nowin -noiconic &' > "${HOME}/.vnc/xstartup"
     chmod +x "${HOME}/.vnc/xstartup"
 fi

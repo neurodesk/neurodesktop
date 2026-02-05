@@ -75,6 +75,16 @@ create_directories() {
     chmod -R 700 "${HOME_DIR}/.config/matplotlib-mpldir" 2>/dev/null || true
 }
 
+# Setup SSH directory with proper permissions and ACLs
+setup_ssh_directory() {
+    local ssh_dir="${HOME_DIR}/.ssh"
+    if [ -d "$ssh_dir" ]; then
+        chmod 700 "$ssh_dir"
+        # Set default ACLs for new files in .ssh directory
+        setfacl -dRm u::rwx,g::0,o::0 "$ssh_dir" 2>/dev/null || true
+    fi
+}
+
 # Setup git config if not already configured
 setup_git_config() {
     if ! git config --global user.email > /dev/null 2>&1; then
@@ -112,6 +122,7 @@ restore_defaults() {
     # Handle special cases
     handle_bashrc_append
     create_directories
+    setup_ssh_directory
     setup_git_config
 
     log_info "Home directory defaults restoration complete"
