@@ -198,7 +198,8 @@ RUN npm install -g @anthropic-ai/claude-code @openai/codex \
 #     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 
 # Install OpenCode CLI (open source AI coding agent)
-RUN OPENCODE_INSTALL_DIR=/usr/bin curl -fsSL https://opencode.ai/install | bash \
+RUN curl -fsSL https://opencode.ai/install | bash \
+    && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 
 # Install firefox
@@ -349,88 +350,67 @@ RUN sed -i 's/c.FileContentsManager.delete_to_trash = False/c.FileContentsManage
 RUN echo "source /opt/neurodesktop/environment_variables.sh" >> /etc/bash.bashrc
 
 #========================================#
-# Configuration (as notebook user)
+# Home directory defaults (stored in /opt/jovyan_defaults/)
+# Files are restored to user home on startup if they don't exist
 #========================================#
-
-# Switch to notebook user
-USER ${NB_USER}
-
-# Configure ITKsnap
-RUN mkdir -p /home/${NB_USER}/.itksnap.org/ITK-SNAP \
-    && chown ${NB_USER} /home/${NB_USER}/.itksnap.org -R
-COPY --chown=${NB_UID}:${NB_GID} ./config/itksnap/UserPreferences.xml /home/${NB_USER}/.itksnap.org
-COPY --chown=${NB_UID}:${NB_GID} ./config/lxde/mimeapps.list /home/${NB_USER}/.config/mimeapps.list
-
-COPY --chown=${NB_UID}:${NB_GID} config/lxde/panel /home/${NB_USER}/.config/lxpanel/LXDE/panels/panel
-COPY --chown=${NB_UID}:${NB_GID} config/lxde/.bashrc /home/${NB_USER}/tmp_bashrc
-RUN cat /home/${NB_USER}/tmp_bashrc >> /home/${NB_USER}/.bashrc \
-     && rm /home/${NB_USER}/tmp_bashrc
-
-# Setup git
-RUN git config --global user.email "user@neurodesk.org" \
-    && git config --global user.name "Neurodesk User"
-
-# Setup temp directory for matplotlib (required for fmriprep)
-RUN mkdir -p /home/${NB_USER}/.config/matplotlib-mpldir \
-    && chmod -R 700 /home/${NB_USER}/.config/matplotlib-mpldir \
-    && chown -R ${NB_UID}:${NB_GID} /home/${NB_USER}/.config/matplotlib-mpldir
-
-COPY --chown=${NB_UID}:${NB_GID} config/vscode/settings.json /home/${NB_USER}/.config/Code/User/settings.json
-
-# Add libfm script
-RUN mkdir -p /home/${NB_USER}/.config/libfm
-COPY --chown=${NB_UID}:${NB_GID} ./config/lxde/libfm.conf /home/${NB_USER}/.config/libfm
-
-RUN touch /home/${NB_USER}/.sudo_as_admin_successful
 
 ENV DONT_PROMPT_WSL_INSTALL=1
 ENV LMOD_CMD=/usr/share/lmod/lmod/libexec/lmod
 
-# Add startup and config files for neurodesktop, jupyter, guacamole, vnc
-RUN mkdir /home/${NB_USER}/.vnc \
-    && chown ${NB_USER} /home/${NB_USER}/.vnc \
-    && /usr/bin/printf '%s\n%s\n%s\n' 'password' 'password' 'n' | vncpasswd
+# Create defaults directory structure
+RUN mkdir -p /opt/jovyan_defaults/.itksnap.org/ITK-SNAP \
+    && mkdir -p /opt/jovyan_defaults/.config/lxpanel/LXDE/panels \
+    && mkdir -p /opt/jovyan_defaults/.config/Code/User \
+    && mkdir -p /opt/jovyan_defaults/.config/libfm \
+    && mkdir -p /opt/jovyan_defaults/.config/goose \
+    && mkdir -p /opt/jovyan_defaults/.config/opencode \
+    && mkdir -p /opt/jovyan_defaults/.vnc \
+    && mkdir -p /opt/jovyan_defaults/.claude \
+    && mkdir -p /opt/jovyan_defaults/.codex \
+    && mkdir -p /opt/jovyan_defaults/.ssh \
+    && mkdir -p /opt/jovyan_defaults/.jupyter/nbi/rules
 
-COPY --chown=${NB_UID}:${NB_GID} config/lxde/xstartup /home/${NB_USER}/.vnc
-COPY --chown=${NB_UID}:${NB_GID} config/conda/conda-readme.md /home/${NB_USER}/
+# Copy configuration files to defaults directory
+COPY config/itksnap/UserPreferences.xml /opt/jovyan_defaults/.itksnap.org/ITK-SNAP/UserPreferences.xml
+COPY config/lxde/mimeapps.list /opt/jovyan_defaults/.config/mimeapps.list
+COPY config/lxde/panel /opt/jovyan_defaults/.config/lxpanel/LXDE/panels/panel
+COPY config/vscode/settings.json /opt/jovyan_defaults/.config/Code/User/settings.json
+COPY config/lxde/libfm.conf /opt/jovyan_defaults/.config/libfm/libfm.conf
+COPY config/lxde/xstartup /opt/jovyan_defaults/.vnc/xstartup
+COPY config/conda/conda-readme.md /opt/jovyan_defaults/conda-readme.md
+COPY config/agents/claude_settings.local.json /opt/jovyan_defaults/.claude/settings.local.json
+COPY config/agents/goose_config.yaml /opt/jovyan_defaults/.config/goose/config.yaml
+COPY config/agents/opencode_config.json /opt/jovyan_defaults/.config/opencode/opencode.json
+COPY config/agents/codex_config.json /opt/jovyan_defaults/.codex/config.json
+COPY config/ssh/sshd_config /opt/jovyan_defaults/.ssh/sshd_config
+COPY config/agents/AGENT.md /opt/jovyan_defaults/.jupyter/nbi/rules/neurodesk.md
 
-# Add AGENT.md for AI-assisted neuroimaging workflows (used by Claude Code and notebook_intelligence)
-COPY --chown=${NB_UID}:${NB_GID} config/agents/AGENT.md /opt/AGENT.md
-RUN mkdir -p /home/${NB_USER}/.jupyter/nbi/rules \
-    && cp /opt/AGENT.md /home/${NB_USER}/.jupyter/nbi/rules/neurodesk.md \
-    && chown -R ${NB_UID}:${NB_GID} /home/${NB_USER}/.jupyter/nbi
+# Special: bashrc content to append (not replace)
+COPY config/lxde/.bashrc /opt/jovyan_defaults/.bashrc_append
 
-# Add Claude Code wrapper script
-WORKDIR /home/${NB_USER}/.claude/
-COPY --chown=${NB_UID}:${NB_GID} config/agents/claude_settings.local.json /home/${NB_USER}/.claude/settings.local.json
+# Generate VNC password at build time and store in defaults
+RUN /usr/bin/printf '%s\n%s\n%s\n' 'password' 'password' 'n' | vncpasswd /opt/jovyan_defaults/.vnc/passwd
+
+# Create marker files and set permissions
+# Note: Don't chmod 700 .ssh here - it prevents access during restore
+# The restore script sets proper permissions on the destination
+RUN chmod +x /opt/jovyan_defaults/.vnc/xstartup \
+    && chown root:users /opt/jovyan_defaults/.vnc/passwd \
+    && chmod 640 /opt/jovyan_defaults/.vnc/passwd
+
+# Copy restore script
+COPY --chown=root:users config/jupyter/restore_home_defaults.sh /opt/neurodesktop/restore_home_defaults.sh
+RUN chmod +rx /opt/neurodesktop/restore_home_defaults.sh
+
+# Add AGENT.md to /opt for reference
+COPY config/agents/AGENT.md /opt/AGENT.md
+
+# Add AI agent wrapper scripts to /usr/local/sbin/
 COPY --chown=root:root config/agents/claude /usr/local/sbin/claude
-RUN sudo chmod +x /usr/local/sbin/claude
-
-# Add Goose wrapper script for AI-assisted neuroimaging workflows
 COPY --chown=root:root config/agents/goose /usr/local/sbin/goose
-COPY --chown=${NB_UID}:${NB_GID} config/agents/goose_config.yaml /home/${NB_USER}/.config/goose/config.yaml
-RUN sudo chmod +x /usr/local/sbin/goose
-
-# Add OpenCode wrapper script for AI-assisted neuroimaging workflows
 COPY --chown=root:root config/agents/opencode /usr/local/sbin/opencode
-COPY --chown=${NB_UID}:${NB_GID} config/agents/opencode_config.json /home/${NB_USER}/.config/opencode/opencode.json
-RUN sudo chmod +x /usr/local/sbin/opencode
-
-# Add OpenAI Codex wrapper script for AI-assisted neuroimaging workflows
-WORKDIR /home/${NB_USER}/.codex/
-COPY --chown=${NB_UID}:${NB_GID} config/agents/codex_config.json /home/${NB_USER}/.codex/config.json
 COPY --chown=root:root config/agents/codex /usr/local/sbin/codex
-RUN sudo chmod +x /usr/local/sbin/codex
-
-RUN mkdir -p /home/${NB_USER}/.ssh \
-    && chmod -R 700 /home/${NB_USER}/.ssh \
-    && setfacl -dRm u::rwx,g::0,o::0 /home/${NB_USER}/.ssh
-COPY --chown=${NB_UID}:${NB_GID} config/ssh/sshd_config /home/${NB_USER}/.ssh/sshd_config
-
-RUN chmod +x /home/${NB_USER}/.vnc/xstartup
-
-# Set up working directories and symlinks
-RUN mkdir -p /home/${NB_USER}/Desktop/
+RUN chmod +x /usr/local/sbin/claude /usr/local/sbin/goose /usr/local/sbin/opencode /usr/local/sbin/codex
 
 #========================================#
 # Finalise build
@@ -446,9 +426,6 @@ COPY config/cvmfs/neurodesk.ardc.edu.au.pub /etc/cvmfs/keys/ardc.edu.au/neurodes
 COPY config/cvmfs/neurodesk.ardc.edu.au.conf* /etc/cvmfs/config.d/
 COPY config/cvmfs/default.local /etc/cvmfs/default.local
 
-# Save a backup copy of startup home dir into /opt
-# Used to restore home dir in persistent sessions
-RUN cp -rp /home/${NB_USER} /opt/
 
 # Set up data directory so it exists in the container for the SINGULARITY_BINDPATH
 RUN mkdir -p /data /neurodesktop-storage
@@ -467,4 +444,3 @@ RUN rm /tmp/skipcache \
 USER ${NB_UID}
 
 WORKDIR "${HOME}"
-

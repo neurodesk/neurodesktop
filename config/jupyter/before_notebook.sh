@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# order: start_notebook.sh -> ### before_notebook.sh ###-> jupyter_notebook_config.py -> jupyterlab_startup.sh
+# order: start_notebook.sh -> ### before_notebook.sh ### -> jupyterlab_startup.sh -> jupyter_notebook_config.py
 
 if [ "$EUID" -eq 0 ]; then
     # Ensure home directory is owned by the notebook user
@@ -363,3 +363,15 @@ apply_chown_if_needed() {
 }
 apply_chown_if_needed "/etc/guacamole"
 apply_chown_if_needed "/usr/local/tomcat"
+
+# Run user-level startup tasks once before Jupyter server initialization.
+if [ "$EUID" -eq 0 ]; then
+    sudo -H -u "${NB_USER}" \
+        NB_USER="${NB_USER}" \
+        NB_UID="${NB_UID}" \
+        NB_GID="${NB_GID}" \
+        HOSTNAME="${HOSTNAME}" \
+        /opt/neurodesktop/jupyterlab_startup.sh
+else
+    /opt/neurodesktop/jupyterlab_startup.sh
+fi
