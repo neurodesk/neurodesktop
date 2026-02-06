@@ -1,5 +1,24 @@
 #!/bin/bash
-# order: start_notebook.sh -> before_notebook.sh -> jupyter_notebook_config.py -> #### jupyterlab_startup.sh ####
+# order: start_notebook.sh -> before_notebook.sh -> #### jupyterlab_startup.sh #### -> jupyter_notebook_config.py
+
+# Prevent duplicate execution during the same container lifetime.
+STARTUP_LOCK_DIR="/tmp/neurodesktop-jupyterlab-startup.lock"
+STARTUP_DONE_FILE="/tmp/neurodesktop-jupyterlab-startup.done"
+
+if [ -f "$STARTUP_DONE_FILE" ]; then
+    echo "[INFO] jupyterlab_startup already completed. Skipping."
+    exit 0
+fi
+
+if ! mkdir "$STARTUP_LOCK_DIR" 2>/dev/null; then
+    echo "[INFO] jupyterlab_startup is already running. Skipping duplicate invocation."
+    exit 0
+fi
+
+cleanup_startup_lock() {
+    rmdir "$STARTUP_LOCK_DIR" 2>/dev/null || true
+}
+trap cleanup_startup_lock EXIT
 
 # Restore default home directory files (per-file, not bulk copy)
 # Each file is only copied if it doesn't already exist
@@ -133,8 +152,8 @@ if sudo -n true 2>/dev/null; then
     sudo service ssh stop
 fi
 
-conda init bash
-mamba init bash
+# Conda shell hooks are already provided by the base image/defaults.
+# Avoid mutating shell config on each startup.
 
 # Setup VNC directory and ensure files exist (should be restored from defaults)
 echo "[INFO] Setting up VNC..."
@@ -161,3 +180,5 @@ chmod +x "${HOME}/.vnc/xstartup"
 
 echo "[INFO] VNC setup complete. Contents of ${HOME}/.vnc:"
 ls -la "${HOME}/.vnc/"
+
+touch "$STARTUP_DONE_FILE"

@@ -395,7 +395,8 @@ RUN /usr/bin/printf '%s\n%s\n%s\n' 'password' 'password' 'n' | vncpasswd /opt/jo
 # Note: Don't chmod 700 .ssh here - it prevents access during restore
 # The restore script sets proper permissions on the destination
 RUN chmod +x /opt/jovyan_defaults/.vnc/xstartup \
-    && chmod 600 /opt/jovyan_defaults/.vnc/passwd \
+    && chown root:users /opt/jovyan_defaults/.vnc/passwd \
+    && chmod 640 /opt/jovyan_defaults/.vnc/passwd
 
 # Copy restore script
 COPY --chown=root:users config/jupyter/restore_home_defaults.sh /opt/neurodesktop/restore_home_defaults.sh
@@ -443,4 +444,3 @@ RUN rm /tmp/skipcache \
 USER ${NB_UID}
 
 WORKDIR "${HOME}"
-

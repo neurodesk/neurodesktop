@@ -1,5 +1,5 @@
 #!/bin/bash
-# order: #### start_notebook.sh #### -> before_notebook.sh -> jupyter_notebook_config.py -> jupyterlab_startup.sh
+# order: #### start_notebook.sh #### -> before_notebook.sh -> jupyterlab_startup.sh -> jupyter_notebook_config.py
 
 # if [ -z "$GRANT_SUDO" ]; then
 # export GRANT_SUDO='yes'
@@ -47,4 +47,3 @@ apply_chown_if_needed "${HOME}" true
 # apply_chown_if_needed "${HOME}/.local/share" false
 # apply_chown_if_needed "${HOME}/.ssh" true
 # apply_chown_if_needed "${HOME}/.local/share/jupyter" true
-
