@@ -178,7 +178,7 @@ fi
 chmod 600 "${HOME}/.vnc/passwd" 2>/dev/null || true
 chmod +x "${HOME}/.vnc/xstartup"
 
-echo "[INFO] VNC setup complete. Contents of ${HOME}/.vnc:"
-ls -la "${HOME}/.vnc/"
+# echo "[INFO] VNC setup complete. Contents of ${HOME}/.vnc:"
+# ls -la "${HOME}/.vnc/"
 
 touch "$STARTUP_DONE_FILE"
