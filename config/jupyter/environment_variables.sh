@@ -65,10 +65,10 @@ export MPLCONFIGDIR=${HOME}/.config/matplotlib-mpldir
 
 export PATH=$PATH:${HOME}/.local/bin:/opt/conda/bin:/opt/conda/condabin
 
-# Default to host Ollama from inside Docker unless explicitly overridden.
-# Local Ollama mode (START_LOCAL_LLMS=1) overrides this in before_notebook.sh.
-if [ -z "${OLLAMA_HOST}" ]; then
-        export OLLAMA_HOST="http://host.docker.internal:11434"
+# Local Slurm configuration used by the in-container single-node queue.
+export SLURM_CONF=/etc/slurm/slurm.conf
+if [[ -z "${NEURODESKTOP_SLURM_PARTITION}" ]]; then
+        export NEURODESKTOP_SLURM_PARTITION=neurodesktop
 fi
 
 # This is needed to make containers writable as a workaround for macos with Apple Silicon. We need to do it here for the desktop

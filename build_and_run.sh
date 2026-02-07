@@ -81,9 +81,9 @@ docker run --shm-size=1gb -it --privileged --user=root \
     --name neurodesktop -v ~/neurodesktop-storage:/neurodesktop-storage \
     --add-host=host.docker.internal:host-gateway \
     -e CVMFS_DISABLE=false \
+    --cpus=16 --memory=32g \
     -e OLLAMA_HOST="http://host.docker.internal:11434" \
     -p 127.0.0.1:8888:8888 \
-    --cpus=10 --memory=32g \
     -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
     $TEST_WEBAPP_MOUNT \
     neurodesktop:latest
