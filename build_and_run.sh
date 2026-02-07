@@ -81,7 +81,7 @@ docker run --shm-size=1gb -it --privileged --user=root \
     --name neurodesktop -v ~/neurodesktop-storage:/neurodesktop-storage \
     -e CVMFS_DISABLE=false \
     -p 8888:8888 \
-    --cpus=16 --memory=32g \
+    --cpus=10 --memory=32g \
     -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
     $TEST_WEBAPP_MOUNT \
     neurodesktop:latest
