@@ -174,7 +174,12 @@ RUN apt-get update --yes \
         rclone \
         s3fs \
         screen \
+        slurm-client \
+        slurm-wlm-basic-plugins \
+        slurmctld \
+        slurmd \
         sshfs \
+        munge \
         tcllib \
         tk \
         tmux \
@@ -301,6 +306,7 @@ COPY config/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/
 COPY --chown=root:users config/jupyter/jupyterlab_startup.sh /opt/neurodesktop/jupyterlab_startup.sh
 COPY --chown=root:users config/guacamole/guacamole.sh /opt/neurodesktop/guacamole.sh
 COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
+COPY --chown=root:users config/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh
 # COPY --chown=root:users config/guacamole/user-mapping.xml /etc/guacamole/user-mapping.xml
 
 # Generic webapp infrastructure
@@ -321,6 +327,7 @@ RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/jupyterlab_startup.sh \
     /opt/neurodesktop/guacamole.sh \
     /opt/neurodesktop/environment_variables.sh \
+    /opt/neurodesktop/setup_and_start_slurm.sh \
     /opt/neurodesktop/webapp_launcher.sh \
     /opt/neurodesktop/webapp_wrapper/webapp_wrapper.py \
     /opt/neurodesktop/scripts/generate_jupyter_config.py \
