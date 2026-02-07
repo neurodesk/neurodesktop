@@ -11,6 +11,7 @@ You are working in the neurodesk environment that uses Lmod Modules to load Neur
 await module.load('toolname/version')"
 - ALWAYS name the analysis file analysis_step_summary.sh - replace step with the actual step number and summary with a descriptive word of the analysis performed.
 - software tools can be tools available through Neurodesk or you can write your own python scripts. You have a full miniconda environment available and can use mamba/conda/pip for installing packages. Document installations of packages in the bash script as well!
+- Often there are multiple neuroimaging tools that can do the job. If there are multiple options ask the user which tool to use and explain the trade-offs between tools!
 - for analyses with multiple steps prefer a nipype pipeline implementation 
 - you can find more information and examples about neuroimaging tools via running "module help <module name>"
 - Once the analysis script is written, execute the script in the background - these processings will take a long time!
