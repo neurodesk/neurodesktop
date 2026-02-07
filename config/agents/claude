@@ -10,7 +10,7 @@ fi
 # Copy settings.local.json from home directory to current directory's .claude folder
 if [ ! -f ./.claude/settings.local.json ]; then
     mkdir -p ./.claude
-    cp /opt/jovyan/.claude/settings.local.json ./.claude/settings.local.json    
+    cp /opt/jovyan_defaults/.claude/settings.local.json ./.claude/settings.local.json    
 fi
 
 

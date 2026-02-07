@@ -10,7 +10,7 @@ fi
 # Copy codex config from home directory to current directory's .codex folder
 if [ ! -f ./.codex/config.json ]; then
     mkdir -p ./.codex
-    cp /opt/jovyan/.codex/config.json ./.codex/config.json
+    cp /opt/jovyan_defaults/.codex/config.json ./.codex/config.json
 fi
 
 # Start Codex CLI using the actual binary path (not this wrapper)
