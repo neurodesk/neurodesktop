@@ -199,9 +199,10 @@ RUN npm install -g @openai/codex \
     && su - "${NB_USER}" -c 'curl -fsSL https://claude.ai/install.sh | bash -s -- stable' \
     && test -x "/home/${NB_USER}/.local/bin/claude" \
     && mkdir -p /opt/jovyan_defaults/.local/bin \
-    && mv /home/${NB_USER}/.local/bin/claude /opt/jovyan_defaults/.local/bin/claude \
+    && mv /home/jovyan/.local/share/claude/versions/* /opt/jovyan_defaults/.local/bin/claude \
     && chmod +x /opt/jovyan_defaults/.local/bin/claude \
-    && rm -rf /home/${NB_USER}/.cache
+    && rm -rf /home/${NB_USER}/.cache \
+    && rm -rf /home/${NB_USER}/.local
 
 # Install Goose CLI (Block's AI coding agent)
 # RUN curl -fsSL https://github.com/block/goose/releases/latest/download/download_cli.sh | CONFIGURE=false bash \

@@ -158,11 +158,6 @@ restore_defaults() {
     setup_ssh_directory
     setup_git_config
 
-    # Verify critical agent binary restore.
-    if [ -f "${DEFAULTS_DIR}/.local/bin/claude" ] && [ ! -x "${HOME_DIR}/.local/bin/claude" ]; then
-        log_warn "Claude binary missing after restore: ${HOME_DIR}/.local/bin/claude"
-    fi
-
     log_info "Home directory defaults restoration complete"
 }
 
