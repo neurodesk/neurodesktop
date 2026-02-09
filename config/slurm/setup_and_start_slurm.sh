@@ -126,7 +126,9 @@ mkdir -p /etc/munge /run/munge /var/log/munge
 
 chown -R slurm:slurm /run/slurm /var/log/slurm /var/spool/slurmctld /var/spool/slurmd
 chown -R munge:munge /etc/munge /run/munge /var/log/munge
-chmod 0700 /etc/munge /run/munge
+# /etc/munge must stay private, but /run/munge needs traversal for non-root clients.
+chmod 0700 /etc/munge
+chmod 0755 /run/munge
 
 if [ ! -s /etc/munge/munge.key ]; then
     if command -v create-munge-key >/dev/null 2>&1; then
@@ -141,8 +143,17 @@ fi
 chown munge:munge /etc/munge/munge.key
 chmod 0400 /etc/munge/munge.key
 
+MUNGE_NUM_THREADS="${NEURODESKTOP_MUNGE_NUM_THREADS:-10}"
+if ! [[ "${MUNGE_NUM_THREADS}" =~ ^[0-9]+$ ]] || [ "${MUNGE_NUM_THREADS}" -lt 1 ]; then
+    MUNGE_NUM_THREADS=10
+fi
+
 if ! pgrep -x munged >/dev/null 2>&1; then
-    /usr/sbin/munged --force
+    /usr/sbin/munged --force --num-threads "${MUNGE_NUM_THREADS}"
+fi
+
+if [ -S /run/munge/munge.socket.2 ]; then
+    chmod 0777 /run/munge/munge.socket.2
 fi
 
 NODE_HOSTNAME="$(hostname -s 2>/dev/null || hostname)"
