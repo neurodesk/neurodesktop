@@ -16,8 +16,11 @@ if [ "$EUID" -eq 0 ]; then
     fi
 
     # # Overrides Dockerfile changes to NB_USER
-    /usr/bin/printf '%s\n%s\n' 'password' 'password' | passwd ${NB_USER}
-    usermod --shell /bin/bash ${NB_USER}
+    # Keep startup non-interactive and avoid passwd prompt noise in logs.
+    echo "${NB_USER}:password" | chpasswd
+    if [ "$(getent passwd "${NB_USER}" | cut -d: -f7)" != "/bin/bash" ]; then
+        usermod --shell /bin/bash "${NB_USER}"
+    fi
 
     # Make sure binfmt_misc is mounted in the place apptainer expects it. This is most likely a bug in apptainer and is a workaround for now on apple silicon when CVMFS is disabled.
     if [ -d "/proc/sys/fs/binfmt_misc" ]; then
@@ -82,7 +85,7 @@ if [ "$EUID" -eq 0 ]; then
                     echo "Testing $url" >&2
                     echo "Resolving DNS name for $server_name" >&2
                     local resolved_dns
-                    resolved_dns=$(dig +short "$server_name")
+                    resolved_dns=$(dig +short "$server_name" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
                     # Redirect debug output to stderr
                     echo "[DEBUG]: Resolved DNS for $server_name: $resolved_dns" >&2
                     local output
@@ -161,7 +164,7 @@ if [ "$EUID" -eq 0 ]; then
                 echo "Asia Latency: $ASIA_latency"
 
                 # Find the fastest region
-                printf "%s europe\n%s america\n%s asia\n" "$EUROPE_latency" "$AMERICA_latency" "$ASIA_latency"
+                echo "Regional latencies (s): europe=${EUROPE_latency}, america=${AMERICA_latency}, asia=${ASIA_latency}"
                 FASTEST_REGION=$(printf "%s europe\n%s america\n%s asia\n" "$EUROPE_latency" "$AMERICA_latency" "$ASIA_latency" | sort -n | head -n 1 | awk '{print $2}')
 
                 echo "Probing connection modes (Direct vs CDN)..."
@@ -198,11 +201,15 @@ if [ "$EUID" -eq 0 ]; then
                 echo "\
                 ==================================================================
                 Mounting CVMFS"
-                if (service autofs status >/dev/null); then
+                if [ -x /etc/init.d/autofs ] && service autofs status >/dev/null 2>&1; then
                     echo "autofs is running - not attempting to mount manually:"
                     ls /cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/ 2>/dev/null && echo "CVMFS is ready after autofs mount" || echo "AutoFS not working!"
                 else
-                    echo "autofs is NOT running - attempting to mount manually:"
+                    if [ -x /etc/init.d/autofs ]; then
+                        echo "autofs is NOT running - attempting to mount manually:"
+                    else
+                        echo "autofs service is unavailable in this container - attempting to mount manually:"
+                    fi
                     mkdir -p /cvmfs/neurodesk.ardc.edu.au
                     mount -t cvmfs neurodesk.ardc.edu.au /cvmfs/neurodesk.ardc.edu.au
 
@@ -211,7 +218,7 @@ if [ "$EUID" -eq 0 ]; then
                     echo "\
                     ==================================================================
                     CVMFS servers:"
-                    if [ "$mode" = "direct" ]; then
+                    if [ "$FASTEST_MODE" = "direct" ]; then
                         cvmfs_talk -i neurodesk.ardc.edu.au host probe
                     fi
                     cvmfs_talk -i neurodesk.ardc.edu.au host info
@@ -316,6 +323,9 @@ source /opt/neurodesktop/environment_variables.sh > /dev/null 2>&1
 
 # Set default value for START_LOCAL_LLMS
 if [ -v START_LOCAL_LLMS ] && [ "$START_LOCAL_LLMS" -eq 1 ]; then
+    # Local LLM mode must target the in-container Ollama daemon.
+    export OLLAMA_HOST="http://127.0.0.1:11434"
+
     # Check if Ollama is installed
     if ! command -v ollama &>/dev/null; then
         echo "Ollama is not installed. Installing Ollama..."

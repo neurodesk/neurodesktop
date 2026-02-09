@@ -76,11 +76,13 @@ if [ -d "$NEUROCONTAINERS_SIFS_DIR" ]; then
     done
 fi
 
+    # --mount source=neurodesk-home,target=/home/jovyan \
 docker run --shm-size=1gb -it --privileged --user=root \
-    --mount source=neurodesk-home,target=/home/jovyan \
     --name neurodesktop -v ~/neurodesktop-storage:/neurodesktop-storage \
+    --add-host=host.docker.internal:host-gateway \
     -e CVMFS_DISABLE=false \
-    -p 8888:8888 \
+    -e OLLAMA_HOST="http://host.docker.internal:11434" \
+    -p 127.0.0.1:8888:8888 \
     --cpus=10 --memory=32g \
     -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
     $TEST_WEBAPP_MOUNT \
