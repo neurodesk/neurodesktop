@@ -14,3 +14,10 @@ Optional environment variables:
 - `NEURODESKTOP_SLURM_MEMORY_RESERVE_MB=256` memory headroom reserved for desktop/Jupyter processes
 - `NEURODESKTOP_SLURM_PARTITION=neurodesktop` to rename the partition
 - `NEURODESKTOP_MUNGE_NUM_THREADS=10` to control munged worker threads for Slurm auth traffic
+- `NEURODESKTOP_SLURM_USE_CGROUP=0` to force non-cgroup mode (useful in containers without systemd cgroup scopes)
+
+Quick smoke test inside the container:
+
+```bash
+/opt/neurodesktop/test_slurm_setup.sh --bootstrap
+```

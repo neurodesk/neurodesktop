@@ -117,9 +117,24 @@ detect_memory_limit_mb() {
     echo "${mem_mb}"
 }
 
+detect_node_addr() {
+    local host ip
+    host="$1"
+    ip="$(getent ahostsv4 "${host}" 2>/dev/null | awk 'NR==1 {print $1}')"
+    if [ -z "${ip}" ]; then
+        ip="$(hostname -i 2>/dev/null | awk '{print $1}')"
+    fi
+    if [ -z "${ip}" ]; then
+        ip="127.0.0.1"
+    fi
+    echo "${ip}"
+}
+
 SLURM_ETC_DIR=/etc/slurm
 SLURM_CONF_PATH="${SLURM_ETC_DIR}/slurm.conf"
 SLURM_CGROUP_CONF_PATH="${SLURM_ETC_DIR}/cgroup.conf"
+SLURMCTLD_PID_FILE=/run/slurm/slurmctld.pid
+SLURMD_PID_FILE=/run/slurm/slurmd.pid
 
 mkdir -p "${SLURM_ETC_DIR}" /run/slurm /var/log/slurm /var/spool/slurmctld /var/spool/slurmd
 mkdir -p /etc/munge /run/munge /var/log/munge
@@ -129,6 +144,9 @@ chown -R munge:munge /etc/munge /run/munge /var/log/munge
 # /etc/munge must stay private, but /run/munge needs traversal for non-root clients.
 chmod 0700 /etc/munge
 chmod 0755 /run/munge
+touch /var/log/slurm/slurmctld.log /var/log/slurm/slurmd.log
+chown slurm:slurm /var/log/slurm/slurmctld.log /var/log/slurm/slurmd.log
+chmod 0644 /var/log/slurm/slurmctld.log /var/log/slurm/slurmd.log
 
 if [ ! -s /etc/munge/munge.key ]; then
     if command -v create-munge-key >/dev/null 2>&1; then
@@ -157,9 +175,33 @@ if [ -S /run/munge/munge.socket.2 ]; then
 fi
 
 NODE_HOSTNAME="$(hostname -s 2>/dev/null || hostname)"
+NODE_ADDR="$(detect_node_addr "${NODE_HOSTNAME}")"
 NODE_CPUS="$(detect_cpu_limit)"
 NODE_MEMORY_MB="$(detect_memory_limit_mb)"
 PARTITION_NAME="${NEURODESKTOP_SLURM_PARTITION:-neurodesktop}"
+USE_CGROUP_MODE=1
+
+if is_false "${NEURODESKTOP_SLURM_USE_CGROUP:-auto}"; then
+    USE_CGROUP_MODE=0
+elif [ "${NEURODESKTOP_SLURM_USE_CGROUP:-auto}" = "auto" ]; then
+    # In many containers without systemd, slurmd cannot create system.slice scopes.
+    if [ ! -d /sys/fs/cgroup/system.slice ] || [ ! -w /sys/fs/cgroup/system.slice ]; then
+        USE_CGROUP_MODE=0
+    fi
+fi
+
+if [ "${USE_CGROUP_MODE}" -eq 1 ]; then
+    PROCTRACK_TYPE="proctrack/cgroup"
+    TASK_PLUGIN="task/cgroup,task/affinity"
+    JOBACCT_GATHER_TYPE="jobacct_gather/cgroup"
+    echo "[INFO] Slurm cgroup mode enabled."
+else
+    PROCTRACK_TYPE="proctrack/linuxproc"
+    TASK_PLUGIN="task/affinity"
+    JOBACCT_GATHER_TYPE="jobacct_gather/none"
+    echo "[INFO] Slurm cgroup mode disabled (container cgroup layout is not compatible)."
+fi
+
 DEF_MEM_PER_CPU=$((NODE_MEMORY_MB / NODE_CPUS))
 if [ "${DEF_MEM_PER_CPU}" -lt 1 ]; then
     DEF_MEM_PER_CPU=1
@@ -172,17 +214,17 @@ SlurmctldHost=${NODE_HOSTNAME}
 SlurmUser=slurm
 AuthType=auth/munge
 MpiDefault=none
-ProctrackType=proctrack/cgroup
-TaskPlugin=task/cgroup,task/affinity
-JobAcctGatherType=jobacct_gather/cgroup
+ProctrackType=${PROCTRACK_TYPE}
+TaskPlugin=${TASK_PLUGIN}
+JobAcctGatherType=${JOBACCT_GATHER_TYPE}
 AccountingStorageType=accounting_storage/none
 SelectType=select/cons_tres
 SelectTypeParameters=CR_Core_Memory
 SchedulerType=sched/backfill
 SwitchType=switch/none
 
-SlurmctldPidFile=/run/slurm/slurmctld.pid
-SlurmdPidFile=/run/slurm/slurmd.pid
+SlurmctldPidFile=${SLURMCTLD_PID_FILE}
+SlurmdPidFile=${SLURMD_PID_FILE}
 StateSaveLocation=/var/spool/slurmctld
 SlurmdSpoolDir=/var/spool/slurmd
 
@@ -198,11 +240,12 @@ Waittime=0
 ReturnToService=2
 DefMemPerCPU=${DEF_MEM_PER_CPU}
 
-NodeName=${NODE_HOSTNAME} NodeAddr=127.0.0.1 CPUs=${NODE_CPUS} RealMemory=${NODE_MEMORY_MB} State=UNKNOWN
+NodeName=${NODE_HOSTNAME} NodeAddr=${NODE_ADDR} CPUs=${NODE_CPUS} RealMemory=${NODE_MEMORY_MB} State=UNKNOWN
 PartitionName=${PARTITION_NAME} Nodes=${NODE_HOSTNAME} Default=YES MaxTime=INFINITE State=UP
 EOF
 
-cat > "${SLURM_CGROUP_CONF_PATH}" <<EOF
+if [ "${USE_CGROUP_MODE}" -eq 1 ]; then
+    cat > "${SLURM_CGROUP_CONF_PATH}" <<EOF
 CgroupPlugin=autodetect
 CgroupMountpoint=/sys/fs/cgroup
 IgnoreSystemd=yes
@@ -212,6 +255,11 @@ ConstrainSwapSpace=yes
 AllowedRAMSpace=100
 AllowedSwapSpace=0
 EOF
+else
+    cat > "${SLURM_CGROUP_CONF_PATH}" <<EOF
+# cgroup plugin disabled for this container runtime
+EOF
+fi
 
 if [ -d /etc/slurm-llnl ]; then
     ln -sf "${SLURM_CONF_PATH}" /etc/slurm-llnl/slurm.conf
@@ -220,24 +268,93 @@ fi
 
 export SLURM_CONF="${SLURM_CONF_PATH}"
 
+node_has_bad_state() {
+    local state node_info
+    node_info="$(scontrol show node "${NODE_HOSTNAME}" 2>/dev/null || true)"
+    state="$(printf '%s\n' "${node_info}" | awk '
+        /State=/ {
+            for (i = 1; i <= NF; i++) {
+                if ($i ~ /^State=/) {
+                    sub(/^State=/, "", $i)
+                    print $i
+                    exit
+                }
+            }
+        }'
+    )"
+    [[ -z "${state}" || "${state}" == *UNKNOWN* || "${state}" == *NOT_RESPONDING* ]]
+}
+
+start_slurmctld() {
+    if /usr/sbin/slurmctld -f "${SLURM_CONF_PATH}" -L /var/log/slurm/slurmctld.log; then
+        return 0
+    fi
+    echo "[ERROR] Failed to start slurmctld. Recent log output:"
+    tail -n 80 /var/log/slurm/slurmctld.log || true
+    return 1
+}
+
+start_slurmd() {
+    if /usr/sbin/slurmd -N "${NODE_HOSTNAME}" -f "${SLURM_CONF_PATH}" -L /var/log/slurm/slurmd.log; then
+        return 0
+    fi
+    echo "[ERROR] Failed to start slurmd. Recent log output:"
+    tail -n 80 /var/log/slurm/slurmd.log || true
+    return 1
+}
+
+wait_for_healthy_node() {
+    local retries="${1:-10}"
+    local _i
+    for _i in $(seq 1 "${retries}"); do
+        if scontrol ping >/dev/null 2>&1 && ! node_has_bad_state; then
+            scontrol update NodeName="${NODE_HOSTNAME}" State=RESUME >/dev/null 2>&1 || true
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+if [ -f "${SLURMCTLD_PID_FILE}" ] && ! pgrep -x slurmctld >/dev/null 2>&1; then
+    rm -f "${SLURMCTLD_PID_FILE}"
+fi
+if [ -f "${SLURMD_PID_FILE}" ] && ! pgrep -x slurmd >/dev/null 2>&1; then
+    rm -f "${SLURMD_PID_FILE}"
+fi
+
 if pgrep -x slurmctld >/dev/null 2>&1; then
     scontrol reconfigure >/dev/null 2>&1 || true
 else
-    /usr/sbin/slurmctld -f "${SLURM_CONF_PATH}" -L /var/log/slurm/slurmctld.log
+    start_slurmctld
 fi
 
 if pgrep -x slurmd >/dev/null 2>&1; then
+    if node_has_bad_state; then
+        pkill -x slurmd >/dev/null 2>&1 || true
+        rm -f "${SLURMD_PID_FILE}"
+        sleep 1
+        start_slurmd
+    else
+        pkill -HUP -x slurmd >/dev/null 2>&1 || true
+    fi
     scontrol update NodeName="${NODE_HOSTNAME}" State=RESUME >/dev/null 2>&1 || true
 else
-    /usr/sbin/slurmd -f "${SLURM_CONF_PATH}" -L /var/log/slurm/slurmd.log
+    start_slurmd
 fi
 
-for _ in $(seq 1 10); do
-    if scontrol ping >/dev/null 2>&1; then
-        scontrol update NodeName="${NODE_HOSTNAME}" State=RESUME >/dev/null 2>&1 || true
-        break
-    fi
+if ! wait_for_healthy_node 10; then
+    echo "[WARN] Node ${NODE_HOSTNAME} not healthy yet. Forcing slurmd restart."
+    pkill -x slurmd >/dev/null 2>&1 || true
+    rm -f "${SLURMD_PID_FILE}"
     sleep 1
-done
+    start_slurmd
+    if ! wait_for_healthy_node 10; then
+        echo "[ERROR] Node ${NODE_HOSTNAME} failed to become healthy after restart."
+        scontrol show node "${NODE_HOSTNAME}" || true
+        tail -n 120 /var/log/slurm/slurmd.log || true
+        exit 1
+    fi
+fi
 
-echo "[INFO] Slurm single-node queue '${PARTITION_NAME}' ready on ${NODE_HOSTNAME} (CPUs=${NODE_CPUS}, RealMemory=${NODE_MEMORY_MB}MB, DefMemPerCPU=${DEF_MEM_PER_CPU}MB)."
+echo "[INFO] Slurm single-node queue '${PARTITION_NAME}' ready on ${NODE_HOSTNAME} (${NODE_ADDR}) (CPUs=${NODE_CPUS}, RealMemory=${NODE_MEMORY_MB}MB, DefMemPerCPU=${DEF_MEM_PER_CPU}MB)."
