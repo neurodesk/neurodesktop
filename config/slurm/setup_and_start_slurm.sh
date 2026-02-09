@@ -194,12 +194,26 @@ if [ "${USE_CGROUP_MODE}" -eq 1 ]; then
     PROCTRACK_TYPE="proctrack/cgroup"
     TASK_PLUGIN="task/cgroup,task/affinity"
     JOBACCT_GATHER_TYPE="jobacct_gather/cgroup"
+    CGROUP_CONSTRAIN_CORES="yes"
+    CGROUP_CONSTRAIN_RAM="yes"
+    CGROUP_CONSTRAIN_SWAP="yes"
     echo "[INFO] Slurm cgroup mode enabled."
 else
     PROCTRACK_TYPE="proctrack/linuxproc"
     TASK_PLUGIN="task/affinity"
     JOBACCT_GATHER_TYPE="jobacct_gather/none"
+    CGROUP_CONSTRAIN_CORES="no"
+    CGROUP_CONSTRAIN_RAM="no"
+    CGROUP_CONSTRAIN_SWAP="no"
     echo "[INFO] Slurm cgroup mode disabled (container cgroup layout is not compatible)."
+fi
+
+# Some container runtimes expose cgroup v2 without systemd/dbus.
+# Slurm cgroup/v2 expects this parent path when IgnoreSystemd=yes.
+if [ ! -d /sys/fs/cgroup/system.slice ]; then
+    if [ -d /sys/fs/cgroup ] && [ -w /sys/fs/cgroup ]; then
+        mkdir -p /sys/fs/cgroup/system.slice || true
+    fi
 fi
 
 DEF_MEM_PER_CPU=$((NODE_MEMORY_MB / NODE_CPUS))
@@ -244,22 +258,16 @@ NodeName=${NODE_HOSTNAME} NodeAddr=${NODE_ADDR} CPUs=${NODE_CPUS} RealMemory=${N
 PartitionName=${PARTITION_NAME} Nodes=${NODE_HOSTNAME} Default=YES MaxTime=INFINITE State=UP
 EOF
 
-if [ "${USE_CGROUP_MODE}" -eq 1 ]; then
-    cat > "${SLURM_CGROUP_CONF_PATH}" <<EOF
+cat > "${SLURM_CGROUP_CONF_PATH}" <<EOF
 CgroupPlugin=autodetect
 CgroupMountpoint=/sys/fs/cgroup
 IgnoreSystemd=yes
-ConstrainCores=yes
-ConstrainRAMSpace=yes
-ConstrainSwapSpace=yes
+ConstrainCores=${CGROUP_CONSTRAIN_CORES}
+ConstrainRAMSpace=${CGROUP_CONSTRAIN_RAM}
+ConstrainSwapSpace=${CGROUP_CONSTRAIN_SWAP}
 AllowedRAMSpace=100
 AllowedSwapSpace=0
 EOF
-else
-    cat > "${SLURM_CGROUP_CONF_PATH}" <<EOF
-# cgroup plugin disabled for this container runtime
-EOF
-fi
 
 if [ -d /etc/slurm-llnl ]; then
     ln -sf "${SLURM_CONF_PATH}" /etc/slurm-llnl/slurm.conf
