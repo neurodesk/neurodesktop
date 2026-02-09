@@ -53,7 +53,8 @@ apply_chown_if_needed "${HOME}" true
 # apply_chown_if_needed "${HOME}/.ssh" true
 # apply_chown_if_needed "${HOME}/.local/share/jupyter" true
 
-chmod -R 700 ${HOME}/.ssh
+mkdir -p "${HOME}/.ssh"
+chmod 700 "${HOME}/.ssh"
 
 # # Set .ssh directory permissions
 # chmod -R 700 /home/${NB_USER}/.ssh
@@ -62,25 +63,30 @@ chmod -R 700 ${HOME}/.ssh
 
 # Generate SSH keys
 if [ ! -f "${HOME}/.ssh/guacamole_rsa" ]; then
-    ssh-keygen -t rsa -f ${HOME}/.ssh/guacamole_rsa -b 4096 -m PEM -N '' -C guacamole@sftp-server <<< n
+    ssh-keygen -q -t rsa -f "${HOME}/.ssh/guacamole_rsa" -b 4096 -m PEM -N '' -C "guacamole@sftp-server"
 fi
 if [ ! -f "${HOME}/.ssh/id_rsa" ]; then
-    ssh-keygen -t rsa -f ${HOME}/.ssh/id_rsa -b 4096 -m PEM -N '' <<< n
+    ssh-keygen -q -t rsa -f "${HOME}/.ssh/id_rsa" -b 4096 -m PEM -N ''
 fi
 if [ ! -f "${HOME}/.ssh/ssh_host_rsa_key" ]; then
-    ssh-keygen -t rsa -f ${HOME}/.ssh/ssh_host_rsa_key -N '' <<< n
+    ssh-keygen -q -t rsa -f "${HOME}/.ssh/ssh_host_rsa_key" -N ''
 fi
-if ! grep "guacamole@sftp-server" ${HOME}/.ssh/authorized_keys
-then
-    cat ${HOME}/.ssh/guacamole_rsa.pub >> ${HOME}/.ssh/authorized_keys
+
+AUTHORIZED_KEYS_FILE="${HOME}/.ssh/authorized_keys"
+touch "$AUTHORIZED_KEYS_FILE"
+chmod 600 "$AUTHORIZED_KEYS_FILE"
+
+if ! grep -qF "guacamole@sftp-server" "$AUTHORIZED_KEYS_FILE"; then
+    cat "${HOME}/.ssh/guacamole_rsa.pub" >> "$AUTHORIZED_KEYS_FILE"
 fi
-if ! grep "${NB_USER}@${HOSTNAME}" ${HOME}/.ssh/authorized_keys
-then
-    cat ${HOME}/.ssh/id_rsa.pub >> ${HOME}/.ssh/authorized_keys
+if ! grep -qF "${NB_USER}@${HOSTNAME}" "$AUTHORIZED_KEYS_FILE"; then
+    cat "${HOME}/.ssh/id_rsa.pub" >> "$AUTHORIZED_KEYS_FILE"
 fi
 
 # Fix sshd_config paths
-sed -i "s|/home/jovyan|${HOME}|g" ${HOME}/.ssh/sshd_config
+if [ -f "${HOME}/.ssh/sshd_config" ]; then
+    sed -i "s|/home/jovyan|${HOME}|g" "${HOME}/.ssh/sshd_config"
+fi
 
 if sudo -n true 2>/dev/null; then
     ln -sf /etc/guacamole/user-mapping-vnc-rdp.xml /etc/guacamole/user-mapping.xml
@@ -146,10 +152,13 @@ mkdir -p ${HOME}/.config/goose
 # ensure opencode config directory exists
 mkdir -p ${HOME}/.config/opencode
 
-# Start and stop SSH server to initialize host
-if sudo -n true 2>/dev/null; then
-    sudo service ssh restart
-    sudo service ssh stop
+# Validate SSH config only; guacamole.sh starts sshd when needed.
+if sudo -n true 2>/dev/null && [ -f "${HOME}/.ssh/sshd_config" ]; then
+    # OpenSSH expects this runtime directory to exist for privilege separation.
+    sudo mkdir -p /run/sshd
+    sudo chmod 755 /run/sshd
+    sudo /usr/sbin/sshd -t -f "${HOME}/.ssh/sshd_config" || \
+        echo "[WARN] sshd_config validation failed: ${HOME}/.ssh/sshd_config"
 fi
 
 # Conda shell hooks are already provided by the base image/defaults.

@@ -21,7 +21,7 @@ c.ServerApp.preferred_dir = os.getcwd()
 c.FileContentsManager.allow_hidden = True
 
 # Fix for Rise extension: https://github.com/neurodesk/neurodesktop/issues/327
-c.NotebookApp.tornado_settings = { "headers": { "Content-Security-Policy": "frame-ancestors 'self'" } }
+c.ServerApp.tornado_settings = { "headers": { "Content-Security-Policy": "frame-ancestors 'self'" } }
 
 # Enable resource monitoring with cgroup support
 # Resource limits are set via MEM_LIMIT and CPU_LIMIT environment variables
