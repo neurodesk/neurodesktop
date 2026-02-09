@@ -71,6 +71,12 @@ if [ -z "${OLLAMA_HOST}" ]; then
         export OLLAMA_HOST="http://host.docker.internal:11434"
 fi
 
+# Local Slurm configuration used by the in-container single-node queue.
+export SLURM_CONF=/etc/slurm/slurm.conf
+if [[ -z "${NEURODESKTOP_SLURM_PARTITION}" ]]; then
+        export NEURODESKTOP_SLURM_PARTITION=neurodesktop
+fi
+
 # This is needed to make containers writable as a workaround for macos with Apple Silicon. We need to do it here for the desktop
 # and in the dockerfile for the jupyter notebook
 export neurodesk_singularity_opts=" --overlay /tmp/apptainer_overlay "
