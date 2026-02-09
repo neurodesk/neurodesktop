@@ -1,7 +1,7 @@
 # Neurodesk Agent Context
 
 ## Critical Rules
-1. **NEVER run neuroimaging tools directly.** ALWAYS write a bash script that uses `module load <tool>/<version>` with an explicit version pinned.
+1. **NEVER run neuroimaging tools or downloads of data directly.** ALWAYS write a bash script that uses `module load <tool>/<version>` with an explicit version pinned. Or use osf/datalad inside a script to fetch data!
 2. **Discovery before execution.** Run `module avail` or `module spider <tool>` to confirm a tool exists and check available versions before writing any script.
 3. **Name scripts consistently:** `analysis_<step>_<description>.sh` (e.g., `analysis_01_skull_strip.sh`, `analysis_02_registration.sh`).
 4. **Submit to SLURM, don't run interactively.** Neuroimaging jobs are long-running — submit via `sbatch`, then monitor with `squeue` and inspect log files.
