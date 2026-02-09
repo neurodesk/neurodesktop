@@ -193,9 +193,15 @@ RUN apt-get update --yes \
         tcsh \
         && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install AI coding assistants (npm packages combined to dedupe dependencies)
-RUN npm install -g @anthropic-ai/claude-code @openai/codex \
-    && rm -rf /root/.npm
+# Install AI coding assistants
+RUN npm install -g @openai/codex \
+    && rm -rf /root/.npm \
+    && su - "${NB_USER}" -c 'curl -fsSL https://claude.ai/install.sh | bash -s -- stable' \
+    && test -x "/home/${NB_USER}/.local/bin/claude" \
+    && mkdir -p /opt/jovyan_defaults/.local/bin \
+    && mv /home/${NB_USER}/.local/bin/claude /opt/jovyan_defaults/.local/bin/claude \
+    && chmod +x /opt/jovyan_defaults/.local/bin/claude \
+    && rm -rf /home/${NB_USER}/.cache
 
 # Install Goose CLI (Block's AI coding agent)
 # RUN curl -fsSL https://github.com/block/goose/releases/latest/download/download_cli.sh | CONFIGURE=false bash \
@@ -375,6 +381,7 @@ RUN mkdir -p /opt/jovyan_defaults/.itksnap.org/ITK-SNAP \
     && mkdir -p /opt/jovyan_defaults/.config/libfm \
     && mkdir -p /opt/jovyan_defaults/.config/goose \
     && mkdir -p /opt/jovyan_defaults/.config/opencode \
+    && mkdir -p /opt/jovyan_defaults/.local/bin \
     && mkdir -p /opt/jovyan_defaults/.vnc \
     && mkdir -p /opt/jovyan_defaults/.claude \
     && mkdir -p /opt/jovyan_defaults/.codex \

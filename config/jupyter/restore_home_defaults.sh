@@ -10,6 +10,10 @@ log_info() {
     echo "[restore_home_defaults] $1"
 }
 
+log_warn() {
+    echo "[restore_home_defaults] WARN: $1" >&2
+}
+
 # Copy a single file if it doesn't exist at destination
 copy_if_missing() {
     local src="$1"
@@ -19,13 +23,37 @@ copy_if_missing() {
 
     # Create parent directory if needed
     if [ ! -d "$dest_dir" ]; then
-        mkdir -p "$dest_dir"
+        mkdir -p "$dest_dir" 2>/dev/null || true
+    fi
+
+    # If the directory still doesn't exist, try with sudo (home mounts can have strict ownership)
+    if [ ! -d "$dest_dir" ] && sudo -n true 2>/dev/null; then
+        sudo mkdir -p "$dest_dir" 2>/dev/null || true
+        if [ -n "$NB_UID" ] && [ -n "$NB_GID" ]; then
+            sudo chown "$NB_UID:$NB_GID" "$dest_dir" 2>/dev/null || true
+        fi
     fi
 
     # Copy file if destination doesn't exist
     if [ ! -e "$dest" ]; then
         log_info "Restoring: $dest"
-        cp -p "$src" "$dest"
+
+        if cp -p "$src" "$dest" 2>/dev/null; then
+            return 0
+        fi
+
+        # Fallback path for permission-constrained homes.
+        if sudo -n true 2>/dev/null; then
+            if sudo cp -p "$src" "$dest" 2>/dev/null; then
+                if [ -n "$NB_UID" ] && [ -n "$NB_GID" ]; then
+                    sudo chown "$NB_UID:$NB_GID" "$dest" 2>/dev/null || true
+                fi
+                return 0
+            fi
+        fi
+
+        log_warn "Failed to restore $dest from $src"
+        return 1
     fi
 }
 
@@ -129,6 +157,11 @@ restore_defaults() {
     create_directories
     setup_ssh_directory
     setup_git_config
+
+    # Verify critical agent binary restore.
+    if [ -f "${DEFAULTS_DIR}/.local/bin/claude" ] && [ ! -x "${HOME_DIR}/.local/bin/claude" ]; then
+        log_warn "Claude binary missing after restore: ${HOME_DIR}/.local/bin/claude"
+    fi
 
     log_info "Home directory defaults restoration complete"
 }
