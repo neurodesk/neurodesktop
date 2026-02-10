@@ -104,20 +104,54 @@ if mountpoint -q /data; then
     fi
 fi
 
-# Create a symlink to /neurodesktop-storage in home if it is mounted
-if mountpoint -q /neurodesktop-storage/; then
-    if [ ! -L "${HOME}/neurodesktop-storage" ]; then
-        ln -s /neurodesktop-storage/ ${HOME}/
+# Returns success if directory exists and has no entries.
+dir_is_empty() {
+    local dir="$1"
+    [ -d "$dir" ] && [ -z "$(find "$dir" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]
+}
+
+NEURODESKTOP_HOME_STORAGE="${HOME}/neurodesktop-storage"
+NEURODESKTOP_ROOT_STORAGE="/neurodesktop-storage"
+
+# Create/repair neurodesktop-storage links.
+if mountpoint -q "${NEURODESKTOP_ROOT_STORAGE}"; then
+    if [ -L "${NEURODESKTOP_HOME_STORAGE}" ]; then
+        :
+    elif [ ! -e "${NEURODESKTOP_HOME_STORAGE}" ]; then
+        ln -s "${NEURODESKTOP_ROOT_STORAGE}/" "${NEURODESKTOP_HOME_STORAGE}"
+    elif dir_is_empty "${NEURODESKTOP_HOME_STORAGE}"; then
+        rmdir "${NEURODESKTOP_HOME_STORAGE}" \
+            && ln -s "${NEURODESKTOP_ROOT_STORAGE}/" "${NEURODESKTOP_HOME_STORAGE}"
+    else
+        echo "[WARN] ${NEURODESKTOP_HOME_STORAGE} exists and is not a symlink; leaving it unchanged."
     fi
 else
-    if [ ! -L "/neurodesktop-storage" ]; then
-        if [ ! -d "${HOME}/neurodesktop-storage/" ]; then
-            mkdir -p ${HOME}/neurodesktop-storage/containers
-        fi
-        if [ ! -L "/neurodesktop-storage" ]; then
-            if sudo -n true 2>/dev/null; then
-                sudo ln -s ${HOME}/neurodesktop-storage/ /neurodesktop-storage
+    if [ ! -d "${NEURODESKTOP_HOME_STORAGE}" ]; then
+        mkdir -p "${NEURODESKTOP_HOME_STORAGE}/containers"
+    fi
+
+    if [ ! -L "${NEURODESKTOP_ROOT_STORAGE}" ] && sudo -n true 2>/dev/null; then
+        if [ -d "${NEURODESKTOP_ROOT_STORAGE}" ]; then
+            nested_link="${NEURODESKTOP_ROOT_STORAGE}/neurodesktop-storage"
+            nested_target=$(sudo readlink "${nested_link}" 2>/dev/null || true)
+
+            # Repair previous broken state: /neurodesktop-storage/neurodesktop-storage -> $HOME/neurodesktop-storage
+            if [ -L "${nested_link}" ] \
+                && [ -z "$(sudo find "${NEURODESKTOP_ROOT_STORAGE}" -mindepth 1 -maxdepth 1 ! -name neurodesktop-storage -print -quit 2>/dev/null)" ] \
+                && { [ "${nested_target}" = "${NEURODESKTOP_HOME_STORAGE}/" ] || [ "${nested_target}" = "${NEURODESKTOP_HOME_STORAGE}" ]; }; then
+                sudo rm -f "${nested_link}"
             fi
+
+            if [ -z "$(sudo find "${NEURODESKTOP_ROOT_STORAGE}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+                sudo rmdir "${NEURODESKTOP_ROOT_STORAGE}" \
+                    && sudo ln -s "${NEURODESKTOP_HOME_STORAGE}/" "${NEURODESKTOP_ROOT_STORAGE}"
+            else
+                echo "[WARN] ${NEURODESKTOP_ROOT_STORAGE} exists as non-empty directory; leaving it unchanged."
+            fi
+        elif [ ! -e "${NEURODESKTOP_ROOT_STORAGE}" ]; then
+            sudo ln -s "${NEURODESKTOP_HOME_STORAGE}/" "${NEURODESKTOP_ROOT_STORAGE}"
+        else
+            echo "[WARN] ${NEURODESKTOP_ROOT_STORAGE} exists and is not a symlink; leaving it unchanged."
         fi
     fi
 fi
