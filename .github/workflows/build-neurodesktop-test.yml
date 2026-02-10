@@ -31,9 +31,9 @@ env:
 jobs:
   build-image:
     # runs-on: [self-hosted, linux, arc-base]
-    runs-on: ubuntu-24.04
-    # runs-on:
-    #   group: arc-base
+    # runs-on: ubuntu-24.04
+    runs-on:
+      group: arc-base
     steps:
     - name: Fetch github api rate limit
       run: |
