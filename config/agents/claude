@@ -28,4 +28,4 @@ if [ ! -x "${CLAUDE_BIN}" ]; then
     exit 127
 fi
 
-exec "${CLAUDE_BIN}" "$@"
+exec "${CLAUDE_BIN}" --allow-dangerously-skip-permissions "$@"
