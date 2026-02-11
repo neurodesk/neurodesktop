@@ -1,11 +1,68 @@
 #!/bin/bash
 # OpenCode wrapper script
-# Copies AGENT.md to current directory, then starts OpenCode
+# Copies AGENT.md to current directory, prompts for API key if needed, then starts OpenCode
 
 # Copy AGENT.md from /opt to current directory
 if [ ! -f ./AGENT.md ]; then
     cp /opt/AGENT.md ./AGENT.md
 fi
 
+# Ensure NEURODESK_API_KEY is available for OpenCode
+ensure_neurodesk_api_key() {
+    local bashrc_file="${HOME}/.bashrc"
+    local key_from_bashrc
+    local entered_key
+    local tmp_bashrc
+
+    # Use already-exported key when available.
+    if [ -n "${NEURODESK_API_KEY:-}" ]; then
+        return 0
+    fi
+
+    # Try to recover key from an existing .bashrc export line first.
+    if [ -f "${bashrc_file}" ]; then
+        key_from_bashrc=$(sed -nE \
+            -e "s/^[[:space:]]*export[[:space:]]+NEURODESK_API_KEY='([^']+)'[[:space:]]*$/\1/p" \
+            -e 's/^[[:space:]]*export[[:space:]]+NEURODESK_API_KEY="([^"]+)"[[:space:]]*$/\1/p' \
+            -e 's/^[[:space:]]*export[[:space:]]+NEURODESK_API_KEY=([^[:space:]#]+)[[:space:]]*$/\1/p' \
+            "${bashrc_file}" | tail -n 1)
+        if [ -n "${key_from_bashrc}" ]; then
+            export NEURODESK_API_KEY="${key_from_bashrc}"
+            return 0
+        fi
+    fi
+
+    if [ ! -t 0 ]; then
+        echo "NEURODESK_API_KEY is not set. OpenCode requires this key." >&2
+        echo "Set it in your environment or add it to ${bashrc_file} and retry." >&2
+        exit 1
+    fi
+
+    echo "OpenCode requires a Neurodesk API key."
+    echo "Go to https://llm.neurodesk.org, create an API key, then paste it below."
+    while [ -z "${entered_key:-}" ]; do
+        read -r -s -p "Paste your API key: " entered_key
+        echo
+        if [ -z "${entered_key}" ]; then
+            echo "API key cannot be empty. Please try again."
+        fi
+    done
+
+    # Persist the key to ~/.bashrc and export it for this process.
+    touch "${bashrc_file}"
+    tmp_bashrc=$(mktemp)
+    grep -v '^[[:space:]]*export[[:space:]]\+NEURODESK_API_KEY=' "${bashrc_file}" > "${tmp_bashrc}" || true
+    echo "" >> "${tmp_bashrc}"
+    echo "# Neurodesk API key for OpenCode" >> "${tmp_bashrc}"
+    printf "export NEURODESK_API_KEY='%s'\n" "${entered_key}" >> "${tmp_bashrc}"
+    mv "${tmp_bashrc}" "${bashrc_file}"
+
+    export NEURODESK_API_KEY="${entered_key}"
+    echo "Saved NEURODESK_API_KEY to ${bashrc_file}."
+}
+
+ensure_neurodesk_api_key
+
 # Start OpenCode using the actual binary path (not this wrapper)
+export TERM=xterm-direct
 exec /usr/bin/opencode "$@"
