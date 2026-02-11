@@ -2,10 +2,76 @@
 # OpenCode wrapper script
 # Copies AGENT.md to current directory, prompts for API key if needed, then starts OpenCode
 
+OPENCODE_CONFIG_DIR="${HOME}/.config/opencode"
+OPENCODE_CONFIG_FILE="${OPENCODE_CONFIG_DIR}/opencode.json"
+OPENCODE_DEFAULT_CONFIG_FILE="/opt/jovyan_defaults/.config/opencode/opencode.json"
+
 # Copy AGENT.md from /opt to current directory
 if [ ! -f ./AGENT.md ]; then
     cp /opt/AGENT.md ./AGENT.md
 fi
+
+ensure_opencode_config_file() {
+    mkdir -p "${OPENCODE_CONFIG_DIR}"
+    if [ ! -f "${OPENCODE_CONFIG_FILE}" ] && [ -f "${OPENCODE_DEFAULT_CONFIG_FILE}" ]; then
+        cp "${OPENCODE_DEFAULT_CONFIG_FILE}" "${OPENCODE_CONFIG_FILE}"
+    fi
+}
+
+# Switch OpenCode between Neurodesk and Jetstream model profiles.
+set_opencode_model_profile() {
+    local profile="$1"
+
+    ensure_opencode_config_file
+    if [ ! -f "${OPENCODE_CONFIG_FILE}" ]; then
+        return 0
+    fi
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "Warning: python3 not found; cannot update OpenCode model profile." >&2
+        return 1
+    fi
+
+    python3 - "${OPENCODE_CONFIG_FILE}" "${OPENCODE_DEFAULT_CONFIG_FILE}" "${profile}" <<'PY'
+import json
+import os
+import sys
+
+config_path, default_path, profile = sys.argv[1:4]
+
+with open(config_path, "r", encoding="utf-8") as f:
+    cfg = json.load(f)
+
+default_cfg = {}
+if os.path.exists(default_path):
+    with open(default_path, "r", encoding="utf-8") as f:
+        default_cfg = json.load(f)
+
+providers = cfg.get("provider", {})
+default_providers = default_cfg.get("provider", {})
+
+if profile == "jetstream":
+    providers.pop("neurodesk", None)
+    if "jetstream" not in providers and "jetstream" in default_providers:
+        providers["jetstream"] = default_providers["jetstream"]
+    cfg["provider"] = providers
+    cfg["model"] = "jetstream/gpt-oss-120b"
+elif profile == "neurodesk":
+    if "neurodesk" not in providers and "neurodesk" in default_providers:
+        providers["neurodesk"] = default_providers["neurodesk"]
+    cfg["provider"] = providers
+    if cfg.get("model") == "jetstream/gpt-oss-120b":
+        cfg["model"] = "neurodesk/devstral-small-2"
+else:
+    raise SystemExit(f"Unknown profile: {profile}")
+
+tmp_path = f"{config_path}.tmp"
+with open(tmp_path, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
+os.replace(tmp_path, config_path)
+PY
+}
 
 # Ensure NEURODESK_API_KEY is available for OpenCode
 ensure_neurodesk_api_key() {
@@ -13,9 +79,11 @@ ensure_neurodesk_api_key() {
     local key_from_bashrc
     local entered_key
     local tmp_bashrc
+    local choice
 
     # Use already-exported key when available.
     if [ -n "${NEURODESK_API_KEY:-}" ]; then
+        set_opencode_model_profile neurodesk
         return 0
     fi
 
@@ -28,36 +96,58 @@ ensure_neurodesk_api_key() {
             "${bashrc_file}" | tail -n 1)
         if [ -n "${key_from_bashrc}" ]; then
             export NEURODESK_API_KEY="${key_from_bashrc}"
+            set_opencode_model_profile neurodesk
             return 0
         fi
     fi
 
     if [ ! -t 0 ]; then
-        echo "NEURODESK_API_KEY is not set. OpenCode requires this key." >&2
-        echo "Set it in your environment or add it to ${bashrc_file} and retry." >&2
-        exit 1
+        echo "NEURODESK_API_KEY is not set. Using Jetstream model for this session." >&2
+        set_opencode_model_profile jetstream
+        return 0
     fi
 
-    echo "Go to https://llm.neurodesk.org, create an API key, then paste it below."
-    while [ -z "${entered_key:-}" ]; do
-        read -r -s -p "Paste your API key: " entered_key
-        echo
-        if [ -z "${entered_key}" ]; then
-            echo "API key cannot be empty. Please try again."
-        fi
+    echo "NEURODESK_API_KEY is not set."
+    echo "1) Create key at https://llm.neurodesk.org and use Neurodesk model"
+    echo "2) Skip key creation and use Jetstream model"
+
+    while true; do
+        read -r -p "Choose [1/2]: " choice
+        case "${choice}" in
+            1)
+                echo "Go to https://llm.neurodesk.org, create an API key, then paste it below."
+                while [ -z "${entered_key:-}" ]; do
+                    read -r -s -p "Paste your API key: " entered_key
+                    echo
+                    if [ -z "${entered_key}" ]; then
+                        echo "API key cannot be empty. Please try again."
+                    fi
+                done
+
+                # Persist the key to ~/.bashrc and export it for this process.
+                touch "${bashrc_file}"
+                tmp_bashrc=$(mktemp)
+                grep -v '^[[:space:]]*export[[:space:]]\+NEURODESK_API_KEY=' "${bashrc_file}" > "${tmp_bashrc}" || true
+                echo "" >> "${tmp_bashrc}"
+                echo "# Neurodesk API key for OpenCode" >> "${tmp_bashrc}"
+                printf "export NEURODESK_API_KEY='%s'\n" "${entered_key}" >> "${tmp_bashrc}"
+                mv "${tmp_bashrc}" "${bashrc_file}"
+
+                export NEURODESK_API_KEY="${entered_key}"
+                set_opencode_model_profile neurodesk
+                echo "Saved NEURODESK_API_KEY to ${bashrc_file}."
+                return 0
+                ;;
+            2)
+                echo "Skipping key creation. Switching OpenCode to Jetstream model."
+                set_opencode_model_profile jetstream
+                return 0
+                ;;
+            *)
+                echo "Invalid choice. Enter 1 or 2."
+                ;;
+        esac
     done
-
-    # Persist the key to ~/.bashrc and export it for this process.
-    touch "${bashrc_file}"
-    tmp_bashrc=$(mktemp)
-    grep -v '^[[:space:]]*export[[:space:]]\+NEURODESK_API_KEY=' "${bashrc_file}" > "${tmp_bashrc}" || true
-    echo "" >> "${tmp_bashrc}"
-    echo "# Neurodesk API key for OpenCode" >> "${tmp_bashrc}"
-    printf "export NEURODESK_API_KEY='%s'\n" "${entered_key}" >> "${tmp_bashrc}"
-    mv "${tmp_bashrc}" "${bashrc_file}"
-
-    export NEURODESK_API_KEY="${entered_key}"
-    echo "Saved NEURODESK_API_KEY to ${bashrc_file}."
 }
 
 ensure_neurodesk_api_key
