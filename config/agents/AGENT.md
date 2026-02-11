@@ -72,7 +72,7 @@ mkdir -p <output_dir>
 2.  **Monitor:** Instruct the user on how to check the queue (`squeue`) and inspect log files.
 3.  **Quality Control (QC):**
     * Once processing is complete, check results for plausibility.
-    * **Visual QC:** Generate a PNG snapshot of the result (e.g., using `fsleyes` or Python plotting) so the user can verify the analysis worked.
+    * **Visual QC:** Generate a PNG snapshot of the result (e.g., using Python plotting) so the user can verify the analysis worked.
 
 ## 4. Critical Constraints
 * **DO NOT** assume a module is loaded; always load it explicitly in the script.
