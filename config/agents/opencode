@@ -38,7 +38,6 @@ ensure_neurodesk_api_key() {
         exit 1
     fi
 
-    echo "OpenCode requires a Neurodesk API key."
     echo "Go to https://llm.neurodesk.org, create an API key, then paste it below."
     while [ -z "${entered_key:-}" ]; do
         read -r -s -p "Paste your API key: " entered_key
