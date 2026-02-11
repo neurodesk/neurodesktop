@@ -199,7 +199,6 @@ if [ "${USE_CGROUP_MODE}" -eq 1 ]; then
     PROCTRACK_TYPE="proctrack/cgroup"
     TASK_PLUGIN="task/cgroup,task/affinity"
     JOBACCT_GATHER_TYPE="jobacct_gather/cgroup"
-    WRITE_CGROUP_CONF=1
     CGROUP_CONSTRAIN_CORES="yes"
     CGROUP_CONSTRAIN_RAM="yes"
     CGROUP_CONSTRAIN_SWAP="yes"
@@ -208,7 +207,6 @@ else
     PROCTRACK_TYPE="proctrack/linuxproc"
     TASK_PLUGIN="task/none"
     JOBACCT_GATHER_TYPE="jobacct_gather/none"
-    WRITE_CGROUP_CONF=0
     CGROUP_CONSTRAIN_CORES="no"
     CGROUP_CONSTRAIN_RAM="no"
     CGROUP_CONSTRAIN_SWAP="no"
@@ -217,7 +215,8 @@ fi
 
 # Some container runtimes expose cgroup v2 without systemd/dbus.
 # Slurm cgroup/v2 expects this parent path when IgnoreSystemd=yes.
-if [ "${USE_CGROUP_MODE}" -eq 1 ] && [ ! -d /sys/fs/cgroup/system.slice ]; then
+# Creating it preempts scope creation failures in containers without systemd.
+if [ ! -d /sys/fs/cgroup/system.slice ]; then
     if [ -d /sys/fs/cgroup ] && [ -w /sys/fs/cgroup ]; then
         mkdir -p /sys/fs/cgroup/system.slice || true
     fi
@@ -266,28 +265,21 @@ NodeName=${NODE_HOSTNAME} NodeAddr=${NODE_ADDR} CPUs=${NODE_CPUS} RealMemory=${N
 PartitionName=${PARTITION_NAME} Nodes=${NODE_HOSTNAME} Default=YES MaxTime=INFINITE State=UP
 EOF
 
-if [ "${WRITE_CGROUP_CONF}" -eq 1 ]; then
 cat > "${SLURM_CGROUP_CONF_PATH}" <<EOF
 CgroupPlugin=autodetect
 CgroupMountpoint=/sys/fs/cgroup
 IgnoreSystemd=yes
+IgnoreSystemdOnFailure=yes
 ConstrainCores=${CGROUP_CONSTRAIN_CORES}
 ConstrainRAMSpace=${CGROUP_CONSTRAIN_RAM}
 ConstrainSwapSpace=${CGROUP_CONSTRAIN_SWAP}
 AllowedRAMSpace=100
 AllowedSwapSpace=0
 EOF
-else
-    rm -f "${SLURM_CGROUP_CONF_PATH}"
-fi
 
 if [ -d /etc/slurm-llnl ]; then
     ln -sf "${SLURM_CONF_PATH}" /etc/slurm-llnl/slurm.conf
-    if [ "${WRITE_CGROUP_CONF}" -eq 1 ]; then
-        ln -sf "${SLURM_CGROUP_CONF_PATH}" /etc/slurm-llnl/cgroup.conf
-    else
-        rm -f /etc/slurm-llnl/cgroup.conf
-    fi
+    ln -sf "${SLURM_CGROUP_CONF_PATH}" /etc/slurm-llnl/cgroup.conf
 fi
 
 export SLURM_CONF="${SLURM_CONF_PATH}"
