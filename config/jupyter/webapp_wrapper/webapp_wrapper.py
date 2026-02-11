@@ -77,6 +77,7 @@ class WebappConfig:
 
         # Target port (where the actual app listens)
         self.target_port = config.get("port", 3000)
+        self.default_port = self.target_port  # preserved for fallback
 
         # Build routing table: list of (path_prefix, target_port) tuples
         # More specific routes (longer prefixes) should be checked first
@@ -141,17 +142,52 @@ def log(message):
         f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {message}\n")
 
 
-def check_app_ready():
-    """Check if the webapp is responding on its port."""
+def find_free_port():
+    """Find a free TCP port by briefly binding to port 0."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('', 0))
+        return s.getsockname()[1]
+
+
+def check_port(port):
+    """Check if something is listening on the given TCP port."""
     try:
-        # Just check if something is listening and responding
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(2)
-        result = sock.connect_ex(('localhost', config.target_port))
+        result = sock.connect_ex(('localhost', port))
         sock.close()
         return result == 0
     except Exception:
         return False
+
+
+def check_app_ready():
+    """Check if the webapp is responding on its expected port.
+
+    Checks the dynamic port first. If the container hasn't been updated to
+    read NEURODESK_WEBAPP_PORT, it will still listen on its default port,
+    so we fall back to checking that as well.
+    """
+    # Check dynamic port first (container supports NEURODESK_WEBAPP_PORT)
+    if check_port(config.target_port):
+        return True
+
+    # Fallback: check the default port from the recipe config.
+    # This handles containers that haven't been rebuilt yet and still
+    # use a hardcoded port. Once all containers are updated, this
+    # fallback is never triggered.
+    if config.default_port != config.target_port and check_port(config.default_port):
+        log(f"App listening on default port {config.default_port} instead of "
+            f"dynamic port {config.target_port} — container likely needs rebuild "
+            f"to support NEURODESK_WEBAPP_PORT")
+        config.target_port = config.default_port
+        for i, (prefix, port) in enumerate(config.routes):
+            if prefix == f"/{config.app_name}":
+                config.routes[i] = (prefix, config.default_port)
+                break
+        return True
+
+    return False
 
 
 def start_container():
@@ -162,6 +198,24 @@ def start_container():
     log(f"Starting {config.app_name} container...")
 
     try:
+        # Dynamically allocate a free port so multiple webapps never conflict
+        dynamic_port = find_free_port()
+        log(f"Allocated dynamic port {dynamic_port} (default was {config.target_port})")
+
+        # Update config to use the dynamic port
+        config.target_port = dynamic_port
+        for i, (prefix, port) in enumerate(config.routes):
+            if prefix == f"/{config.app_name}":
+                config.routes[i] = (prefix, dynamic_port)
+                break
+
+        # Build environment with the dynamic port for the container
+        env = os.environ.copy()
+        env['NEURODESK_WEBAPP_PORT'] = str(dynamic_port)
+        # APPTAINERENV_ prefix ensures the var passes through --cleanenv
+        # (used by transparent-singularity when loading modules)
+        env['APPTAINERENV_NEURODESK_WEBAPP_PORT'] = str(dynamic_port)
+
         # Check for local test image first (mounted via build_and_run.sh)
         local_sif = f"/opt/neurodesktop-test-webapps/{config.app_name}/{config.app_name}.sif"
 
@@ -197,7 +251,8 @@ def start_container():
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True
+            text=True,
+            env=env,
         )
 
         # Start a thread to drain output and prevent pipe buffer from blocking
