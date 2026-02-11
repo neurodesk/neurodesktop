@@ -1,14 +1,27 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": ["/opt/AGENT.md"],
-
-  // Jetstream: GPT-oss-120b
-  "model": "jetstream/gpt-oss-120b",
-
-  // Jetstream: DeepSeek-R1
-  // "model": "jetstream-deepseek/DeepSeek-R1",
-
+  "instructions": [
+    "/opt/AGENT.md"
+  ],
+  "model": "neurodesk/devstral-small-2",
   "provider": {
+    "neurodesk": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Neurodesk vLLM",
+      "options": {
+        "baseURL": "https://llm.neurodesk.org/v1",
+        "apiKey": "{env:NEURODESK_API_KEY}"
+      },
+      "models": {
+        "devstral-small-2": {
+          "name": "Devstral Small 2 24B",
+          "limit": {
+            "context": 131000,
+            "output": 8192
+          }
+        }
+      }
+    },
     "jetstream": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "JetStream",
