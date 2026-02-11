@@ -197,10 +197,9 @@ RUN apt-get update --yes \
 RUN npm install -g @openai/codex \
     && rm -rf /root/.npm \
     && su - "${NB_USER}" -c 'curl -fsSL https://claude.ai/install.sh | bash -s -- stable' \
-    && test -x "/home/${NB_USER}/.local/bin/claude" \
     && mkdir -p /opt/jovyan_defaults/.local/bin \
-    && mv /home/jovyan/.local/share/claude/versions/* /opt/jovyan_defaults/.local/bin/claude \
-    && chmod +x /opt/jovyan_defaults/.local/bin/claude \
+    && mv /home/jovyan/.local/share/claude/versions/* /opt/jovyan_defaults/.local/bin/claude_bin \
+    && chmod +x /opt/jovyan_defaults/.local/bin/claude_bin \
     && rm -rf /home/${NB_USER}/.cache \
     && rm -rf /home/${NB_USER}/.local
 
