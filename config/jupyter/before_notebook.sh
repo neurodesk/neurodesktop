@@ -315,8 +315,18 @@ if [ "$EUID" -eq 0 ]; then
     if ! /opt/neurodesktop/setup_and_start_slurm.sh; then
         echo "[WARN] Failed to configure/start local Slurm queue."
     fi
+elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+    if ! sudo -n env \
+        NEURODESKTOP_SLURM_ENABLE="${NEURODESKTOP_SLURM_ENABLE:-1}" \
+        NEURODESKTOP_SLURM_MEMORY_RESERVE_MB="${NEURODESKTOP_SLURM_MEMORY_RESERVE_MB:-256}" \
+        NEURODESKTOP_SLURM_PARTITION="${NEURODESKTOP_SLURM_PARTITION:-neurodesktop}" \
+        NEURODESKTOP_MUNGE_NUM_THREADS="${NEURODESKTOP_MUNGE_NUM_THREADS:-10}" \
+        NEURODESKTOP_SLURM_USE_CGROUP="${NEURODESKTOP_SLURM_USE_CGROUP:-auto}" \
+        /opt/neurodesktop/setup_and_start_slurm.sh; then
+        echo "[WARN] Failed to configure/start local Slurm queue via passwordless sudo."
+    fi
 else
-    echo "[WARN] Not running as root; skipping local Slurm startup."
+    echo "[WARN] Not running as root and passwordless sudo is unavailable; skipping local Slurm startup."
 fi
 
 source /opt/neurodesktop/environment_variables.sh > /dev/null 2>&1
