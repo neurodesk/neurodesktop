@@ -1,6 +1,6 @@
 #!/bin/bash
 # OpenCode wrapper script
-# Copies AGENT.md to current directory, prompts for API key if needed, then starts OpenCode
+# Copies AGENT.md to current directory, configures a model profile, then starts OpenCode
 
 OPENCODE_CONFIG_DIR="${HOME}/.config/opencode"
 OPENCODE_CONFIG_FILE="${OPENCODE_CONFIG_DIR}/opencode.json"
@@ -18,7 +18,7 @@ ensure_opencode_config_file() {
     fi
 }
 
-# Switch OpenCode between Neurodesk and Jetstream model profiles.
+# Switch OpenCode between Neurodesk, Jetstream, and local Ollama model profiles.
 set_opencode_model_profile() {
     local profile="$1"
 
@@ -50,20 +50,72 @@ if os.path.exists(default_path):
 providers = cfg.get("provider", {})
 default_providers = default_cfg.get("provider", {})
 
-if profile == "jetstream":
-    providers.pop("neurodesk", None)
-    if "jetstream" not in providers and "jetstream" in default_providers:
-        providers["jetstream"] = default_providers["jetstream"]
-    cfg["provider"] = providers
-    cfg["model"] = "jetstream/gpt-oss-120b"
-elif profile == "neurodesk":
-    if "neurodesk" not in providers and "neurodesk" in default_providers:
-        providers["neurodesk"] = default_providers["neurodesk"]
-    cfg["provider"] = providers
-    if cfg.get("model") == "jetstream/gpt-oss-120b":
-        cfg["model"] = "neurodesk/devstral-small-2"
-else:
+ollama_host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+if ollama_host.endswith("/v1"):
+    ollama_host = ollama_host[:-3]
+
+profile_defaults = {
+    "neurodesk": {
+        "provider_key": "neurodesk",
+        "model": "neurodesk/devstral-small-2",
+    },
+    "jetstream": {
+        "provider_key": "jetstream",
+        "model": "jetstream/gpt-oss-120b",
+    },
+    "ollama": {
+        "provider_key": "ollama",
+        "model": "ollama/qwen3-coder-next:latest",
+        "provider_fallback": {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": "Local Ollama",
+            "options": {
+                "baseURL": f"{ollama_host}/v1",
+            },
+            "models": {
+                "neurodesk": {"name": "neurodesk"},
+                "qwen3-coder-next:latest": {"name": "qwen3-coder-next:latest"},
+                "devstral:latest": {"name": "devstral:latest"},
+                "codellama:7b-code": {"name": "codellama:7b-code"},
+            },
+        },
+    },
+}
+
+if profile not in profile_defaults:
     raise SystemExit(f"Unknown profile: {profile}")
+
+def ensure_provider(provider_key, provider_fallback=None):
+    if provider_key in providers:
+        return
+    if provider_key in default_providers:
+        providers[provider_key] = default_providers[provider_key]
+    elif provider_fallback is not None:
+        providers[provider_key] = provider_fallback
+
+# Keep all known providers visible in OpenCode, even when one profile is selected.
+ensure_provider("neurodesk")
+ensure_provider("jetstream")
+ensure_provider("jetstream-deepseek")
+ensure_provider("ollama", profile_defaults["ollama"]["provider_fallback"])
+
+profile_cfg = profile_defaults[profile]
+
+# Keep Ollama target in sync when users override OLLAMA_HOST.
+if isinstance(providers.get("ollama"), dict):
+    options = providers["ollama"].setdefault("options", {})
+    options["baseURL"] = f"{ollama_host}/v1"
+    models = providers["ollama"].setdefault("models", {})
+    for model_name in (
+        "neurodesk",
+        "qwen3-coder-next:latest",
+        "devstral:latest",
+        "codellama:7b-code",
+    ):
+        models.setdefault(model_name, {"name": model_name})
+
+cfg["provider"] = providers
+cfg["model"] = profile_cfg["model"]
 
 tmp_path = f"{config_path}.tmp"
 with open(tmp_path, "w", encoding="utf-8") as f:
@@ -73,13 +125,51 @@ os.replace(tmp_path, config_path)
 PY
 }
 
-# Ensure NEURODESK_API_KEY is available for OpenCode
-ensure_neurodesk_api_key() {
+# Check whether a local Ollama server appears reachable.
+is_local_ollama_available() {
+    local ollama_host="${OLLAMA_HOST:-http://127.0.0.1:11434}"
+    ollama_host="${ollama_host%/}"
+    ollama_host="${ollama_host%/v1}"
+
+    if ! command -v curl >/dev/null 2>&1; then
+        return 1
+    fi
+
+    curl -fsS "${ollama_host}/api/tags" >/dev/null 2>&1
+}
+
+# Ensure OpenCode has a usable model profile.
+ensure_opencode_model_profile() {
     local bashrc_file="${HOME}/.bashrc"
     local key_from_bashrc
     local entered_key
     local tmp_bashrc
     local choice
+    local requested_profile="${OPENCODE_MODEL_PROFILE:-}"
+
+    if [ -n "${requested_profile}" ]; then
+        case "${requested_profile}" in
+            neurodesk|jetstream|ollama)
+                if [ "${requested_profile}" = "ollama" ] && ! is_local_ollama_available; then
+                    echo "OPENCODE_MODEL_PROFILE=ollama requested, but local Ollama is not reachable at ${OLLAMA_HOST:-http://127.0.0.1:11434} yet." >&2
+                fi
+                set_opencode_model_profile "${requested_profile}"
+                return 0
+                ;;
+            *)
+                echo "Invalid OPENCODE_MODEL_PROFILE='${requested_profile}'. Expected: neurodesk, jetstream, or ollama." >&2
+                ;;
+        esac
+    fi
+
+    # Prefer local Ollama in explicit local-LLM sessions.
+    if [ "${START_LOCAL_LLMS:-0}" = "1" ]; then
+        if ! is_local_ollama_available; then
+            echo "START_LOCAL_LLMS=1 is set, but local Ollama is not reachable at ${OLLAMA_HOST:-http://127.0.0.1:11434} yet." >&2
+        fi
+        set_opencode_model_profile ollama
+        return 0
+    fi
 
     # Use already-exported key when available.
     if [ -n "${NEURODESK_API_KEY:-}" ]; then
@@ -102,17 +192,23 @@ ensure_neurodesk_api_key() {
     fi
 
     if [ ! -t 0 ]; then
-        echo "NEURODESK_API_KEY is not set. Using Jetstream model for this session." >&2
-        set_opencode_model_profile jetstream
+        if is_local_ollama_available; then
+            echo "NEURODESK_API_KEY is not set. Local Ollama is available; using local model." >&2
+            set_opencode_model_profile ollama
+        else
+            echo "NEURODESK_API_KEY is not set. Using Jetstream model for this session." >&2
+            set_opencode_model_profile jetstream
+        fi
         return 0
     fi
 
     echo "NEURODESK_API_KEY is not set."
     echo "1) Create key at https://llm.neurodesk.org and use Neurodesk model"
     echo "2) Skip key creation and use Jetstream model"
+    echo "3) Use local Ollama model (requires running Ollama server)"
 
     while true; do
-        read -r -p "Choose [1/2]: " choice
+        read -r -p "Choose [1/2/3]: " choice
         case "${choice}" in
             1)
                 echo "Go to https://llm.neurodesk.org, create an API key, then paste it below."
@@ -143,14 +239,23 @@ ensure_neurodesk_api_key() {
                 set_opencode_model_profile jetstream
                 return 0
                 ;;
+            3)
+                if ! is_local_ollama_available; then
+                    echo "Local Ollama server not reachable at ${OLLAMA_HOST:-http://127.0.0.1:11434} right now."
+                    echo "Switching anyway; start Ollama before sending requests."
+                fi
+                echo "Switching OpenCode to local Ollama model."
+                set_opencode_model_profile ollama
+                return 0
+                ;;
             *)
-                echo "Invalid choice. Enter 1 or 2."
+                echo "Invalid choice. Enter 1, 2, or 3."
                 ;;
         esac
     done
 }
 
-ensure_neurodesk_api_key
+ensure_opencode_model_profile
 
 # Start OpenCode using the actual binary path (not this wrapper)
 export TERM=xterm-direct

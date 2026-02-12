@@ -22,6 +22,27 @@
         }
       }
     },
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Local Ollama",
+      "options": {
+        "baseURL": "http://127.0.0.1:11434/v1"
+      },
+      "models": {
+        "neurodesk": {
+          "name": "neurodesk"
+        },
+        "qwen3-coder-next:latest": {
+          "name": "qwen3-coder-next:latest"
+        },
+        "devstral:latest": {
+          "name": "devstral:latest"
+        },
+        "codellama:7b-code": {
+          "name": "codellama:7b-code"
+        }
+      }
+    },
     "jetstream": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "JetStream",

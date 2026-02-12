@@ -1,6 +1,7 @@
 #!/bin/bash
 # restore_home_defaults.sh
 # Restores default home directory files if they don't exist
+# and migrates them when image defaults are newer.
 # Called from jupyterlab_startup.sh
 
 DEFAULTS_DIR="/opt/jovyan_defaults"
@@ -14,11 +15,35 @@ log_warn() {
     echo "[restore_home_defaults] WARN: $1" >&2
 }
 
-# Copy a single file if it doesn't exist at destination
-copy_if_missing() {
+# Copy file with sudo fallback for permission-constrained homes.
+copy_file_with_fallback() {
+    local src="$1"
+    local dest="$2"
+
+    if cp -p "$src" "$dest" 2>/dev/null; then
+        return 0
+    fi
+
+    # Fallback path for permission-constrained homes.
+    if sudo -n true 2>/dev/null; then
+        if sudo cp -p "$src" "$dest" 2>/dev/null; then
+            if [ -n "$NB_UID" ] && [ -n "$NB_GID" ]; then
+                sudo chown "$NB_UID:$NB_GID" "$dest" 2>/dev/null || true
+            fi
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# Ensure a destination file exists and is updated when defaults are newer.
+sync_file_from_defaults() {
     local src="$1"
     local dest="$2"
     local dest_dir
+    local action
+
     dest_dir=$(dirname "$dest")
 
     # Create parent directory if needed
@@ -34,27 +59,25 @@ copy_if_missing() {
         fi
     fi
 
-    # Copy file if destination doesn't exist
+    action=""
     if [ ! -e "$dest" ]; then
-        log_info "Restoring: $dest"
-
-        if cp -p "$src" "$dest" 2>/dev/null; then
-            return 0
-        fi
-
-        # Fallback path for permission-constrained homes.
-        if sudo -n true 2>/dev/null; then
-            if sudo cp -p "$src" "$dest" 2>/dev/null; then
-                if [ -n "$NB_UID" ] && [ -n "$NB_GID" ]; then
-                    sudo chown "$NB_UID:$NB_GID" "$dest" 2>/dev/null || true
-                fi
-                return 0
-            fi
-        fi
-
-        log_warn "Failed to restore $dest from $src"
-        return 1
+        action="Restoring missing file"
+    elif [ "$src" -nt "$dest" ]; then
+        action="Migrating updated default"
     fi
+
+    if [ -z "$action" ]; then
+        return 0
+    fi
+
+    log_info "${action}: $dest"
+
+    if copy_file_with_fallback "$src" "$dest"; then
+        return 0
+    fi
+
+    log_warn "Failed to update $dest from $src"
+    return 1
 }
 
 # Handle .bashrc append (special case - append content with marker detection)
@@ -149,7 +172,7 @@ restore_defaults() {
         dest_file="${HOME_DIR}/${rel_path}"
 
         log_info "Processing: $rel_path"
-        copy_if_missing "$src_file" "$dest_file"
+        sync_file_from_defaults "$src_file" "$dest_file"
     done < <(find "$DEFAULTS_DIR" -type f -print0)
 
     # Handle special cases

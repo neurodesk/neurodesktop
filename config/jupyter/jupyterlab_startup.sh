@@ -21,7 +21,7 @@ cleanup_startup_lock() {
 trap cleanup_startup_lock EXIT
 
 # Restore default home directory files (per-file, not bulk copy)
-# Each file is only copied if it doesn't already exist
+# Each file is copied if missing, or migrated when image defaults are newer.
 source /opt/neurodesktop/restore_home_defaults.sh
 
 # Function to check and apply chown if necessary
