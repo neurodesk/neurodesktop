@@ -2,19 +2,35 @@
 
 # order: start_notebook.sh -> ### before_notebook.sh ### -> jupyterlab_startup.sh -> jupyter_notebook_config.py
 
-if [ "$EUID" -eq 0 ]; then
-    # Ensure home directory is owned by the notebook user
-    # This fixes issues when the home directory was created with a different UID
-    # (e.g., from a mounted volume or previous container run)
-    HOME_DIR="/home/${NB_USER}"
-    if [ -d "$HOME_DIR" ]; then
-        CURRENT_OWNER=$(stat -c "%u" "$HOME_DIR")
-        if [ "$CURRENT_OWNER" != "$NB_UID" ]; then
-            echo "Fixing ownership of $HOME_DIR (was UID $CURRENT_OWNER, setting to $NB_UID:$NB_GID)"
-            sudo chown "$NB_UID:$NB_GID" "$HOME_DIR"
-        fi
+fix_home_ownership_if_needed() {
+    local home_dir="/home/${NB_USER}"
+
+    if [ ! -d "$home_dir" ]; then
+        return
     fi
 
+    local current_uid
+    local current_gid
+    current_uid=$(stat -c "%u" "$home_dir")
+    current_gid=$(stat -c "%g" "$home_dir")
+
+    if [ "$current_uid" = "$NB_UID" ] && [ "$current_gid" = "$NB_GID" ]; then
+        return
+    fi
+
+    echo "Fixing ownership of $home_dir (was $current_uid:$current_gid, setting to $NB_UID:$NB_GID)"
+    if [ "$EUID" -eq 0 ]; then
+        chown "$NB_UID:$NB_GID" "$home_dir"
+    elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+        sudo -n chown "$NB_UID:$NB_GID" "$home_dir"
+    else
+        echo "[WARN] Unable to fix $home_dir ownership: requires root or passwordless sudo."
+    fi
+}
+
+fix_home_ownership_if_needed
+
+if [ "$EUID" -eq 0 ]; then
     # # Overrides Dockerfile changes to NB_USER
     # Keep startup non-interactive and avoid passwd prompt noise in logs.
     echo "${NB_USER}:password" | chpasswd

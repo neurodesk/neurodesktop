@@ -37,10 +37,19 @@ apply_chown_if_needed() {
         current_uid=$(stat -c "%u" "$dir")
         current_gid=$(stat -c "%g" "$dir")
         if [ "$current_uid" != "$NB_UID" ] || [ "$current_gid" != "$NB_GID" ]; then
+            chown_runner=(chown)
+            if [ "$EUID" -ne 0 ]; then
+                if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+                    chown_runner=(sudo -n chown)
+                else
+                    echo "[WARN] Unable to fix ownership of $dir: requires root or passwordless sudo."
+                    return
+                fi
+            fi
             if [ "$recursive" = true ]; then
-                chown -R ${NB_UID}:${NB_GID} "$dir"
+                "${chown_runner[@]}" -R ${NB_UID}:${NB_GID} "$dir"
             else
-                chown ${NB_UID}:${NB_GID} "$dir"
+                "${chown_runner[@]}" ${NB_UID}:${NB_GID} "$dir"
             fi
         fi
     fi
