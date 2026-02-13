@@ -273,12 +273,43 @@ fi
 # Source custom scripts in .bashrc if they are not already there
 BASHRC_FILE="/home/${NB_USER}/.bashrc"
 INIT_MODULES="if [ -f '/usr/share/module.sh' ]; then source /usr/share/module.sh; fi"
+PERSISTENT_HISTORY_MARKER="# Neurodesk persistent bash history"
 
 # if [ -f "$BASHRC_FILE" ]; then
 touch "$BASHRC_FILE"
 # Add module.sh if not already in .bashrc
 if ! grep -qF "$INIT_MODULES" "$BASHRC_FILE"; then
     echo "$INIT_MODULES" >> "$BASHRC_FILE"
+fi
+
+# Ensure bash history is durable across terminal and session restarts.
+if ! grep -qF "$PERSISTENT_HISTORY_MARKER" "$BASHRC_FILE"; then
+    cat >> "$BASHRC_FILE" <<'EOF'
+
+# Neurodesk persistent bash history
+if [[ $- == *i* ]]; then
+    shopt -s histappend
+    if [ -d "${HOME}/neurodesktop-storage" ] && [ -w "${HOME}/neurodesktop-storage" ]; then
+        export HISTFILE="${HOME}/neurodesktop-storage/.bash_history"
+    elif [ -d "/neurodesktop-storage" ] && [ -w "/neurodesktop-storage" ]; then
+        export HISTFILE="/neurodesktop-storage/.bash_history"
+    else
+        export HISTFILE="${HISTFILE:-$HOME/.bash_history}"
+    fi
+    export HISTSIZE=100000
+    export HISTFILESIZE=200000
+    export HISTCONTROL=ignoredups:erasedups
+
+    # Persist history continuously so abrupt terminal/session closes do not lose commands.
+    if [[ "${PROMPT_COMMAND:-}" != *"history -a"* ]]; then
+        if [ -n "${PROMPT_COMMAND:-}" ]; then
+            export PROMPT_COMMAND="history -a; history -n; ${PROMPT_COMMAND}"
+        else
+            export PROMPT_COMMAND="history -a; history -n"
+        fi
+    fi
+fi
+EOF
 fi
 # fi
 

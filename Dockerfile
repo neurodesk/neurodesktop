@@ -385,7 +385,37 @@ RUN echo "${NB_USER} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/notebook \
 RUN sed -i 's/c.FileContentsManager.delete_to_trash = False/c.FileContentsManager.always_delete_dir = True/g' /etc/jupyter/jupyter_server_config.py
 
 # Source environment variables in global bashrc for Apptainer/Singularity (which mounts host home)
-RUN echo "source /opt/neurodesktop/environment_variables.sh" >> /etc/bash.bashrc
+# Also configure durable shell history globally so JupyterHub terminals get it even when
+# notebook startup hooks are bypassed.
+RUN cat >> /etc/bash.bashrc <<'EOF'
+source /opt/neurodesktop/environment_variables.sh
+
+# Neurodesk persistent bash history
+if [[ $- == *i* ]]; then
+    shopt -s histappend
+
+    if [ -d "${HOME}/neurodesktop-storage" ] && [ -w "${HOME}/neurodesktop-storage" ]; then
+        export HISTFILE="${HOME}/neurodesktop-storage/.bash_history"
+    elif [ -d "/neurodesktop-storage" ] && [ -w "/neurodesktop-storage" ]; then
+        export HISTFILE="/neurodesktop-storage/.bash_history"
+    else
+        export HISTFILE="${HISTFILE:-$HOME/.bash_history}"
+    fi
+
+    export HISTSIZE=100000
+    export HISTFILESIZE=200000
+    export HISTCONTROL=ignoredups:erasedups
+
+    # Persist history continuously so abrupt terminal/session closes do not lose commands.
+    if [[ "${PROMPT_COMMAND:-}" != *"history -a"* ]]; then
+        if [ -n "${PROMPT_COMMAND:-}" ]; then
+            export PROMPT_COMMAND="history -a; history -n; ${PROMPT_COMMAND}"
+        else
+            export PROMPT_COMMAND="history -a; history -n"
+        fi
+    fi
+fi
+EOF
 
 #========================================#
 # Home directory defaults (stored in /opt/jovyan_defaults/)
