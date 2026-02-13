@@ -36,6 +36,7 @@ set_opencode_model_profile() {
 import json
 import os
 import sys
+import copy
 
 config_path, default_path, profile = sys.argv[1:4]
 
@@ -54,6 +55,16 @@ ollama_host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/"
 if ollama_host.endswith("/v1"):
     ollama_host = ollama_host[:-3]
 
+ollama_model_defaults = {
+    "neurodesk": {"name": "neurodesk"},
+    "qwen3-coder-next:latest": {"name": "qwen3-coder-next:latest"},
+    "devstral-32k:latest": {
+        "name": "devstral-32k:latest",
+        "limit": {"context": 32768, "output": 8192},
+    },
+    "codellama:7b-code": {"name": "codellama:7b-code"},
+}
+
 profile_defaults = {
     "neurodesk": {
         "provider_key": "neurodesk",
@@ -65,19 +76,14 @@ profile_defaults = {
     },
     "ollama": {
         "provider_key": "ollama",
-        "model": "ollama/qwen3-coder-next:latest",
+        "model": "ollama/devstral-32k:latest",
         "provider_fallback": {
             "npm": "@ai-sdk/openai-compatible",
             "name": "Local Ollama",
             "options": {
                 "baseURL": f"{ollama_host}/v1",
             },
-            "models": {
-                "neurodesk": {"name": "neurodesk"},
-                "qwen3-coder-next:latest": {"name": "qwen3-coder-next:latest"},
-                "devstral:latest": {"name": "devstral:latest"},
-                "codellama:7b-code": {"name": "codellama:7b-code"},
-            },
+            "models": copy.deepcopy(ollama_model_defaults),
         },
     },
 }
@@ -106,13 +112,26 @@ if isinstance(providers.get("ollama"), dict):
     options = providers["ollama"].setdefault("options", {})
     options["baseURL"] = f"{ollama_host}/v1"
     models = providers["ollama"].setdefault("models", {})
-    for model_name in (
-        "neurodesk",
-        "qwen3-coder-next:latest",
-        "devstral:latest",
-        "codellama:7b-code",
-    ):
-        models.setdefault(model_name, {"name": model_name})
+    for stale_model_name in tuple(models.keys()):
+        if stale_model_name.startswith("devstral:"):
+            models.pop(stale_model_name, None)
+    for model_name, model_cfg in ollama_model_defaults.items():
+        default_model_cfg = copy.deepcopy(model_cfg)
+        current_model_cfg = models.get(model_name)
+        if not isinstance(current_model_cfg, dict):
+            models[model_name] = default_model_cfg
+            continue
+
+        current_model_cfg.setdefault("name", default_model_cfg.get("name", model_name))
+
+        default_limit = default_model_cfg.get("limit")
+        if isinstance(default_limit, dict):
+            current_limit = current_model_cfg.get("limit")
+            if not isinstance(current_limit, dict):
+                current_model_cfg["limit"] = default_limit
+            else:
+                for limit_key, limit_value in default_limit.items():
+                    current_limit.setdefault(limit_key, limit_value)
 
 cfg["provider"] = providers
 cfg["model"] = profile_cfg["model"]
