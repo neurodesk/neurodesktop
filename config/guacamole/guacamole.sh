@@ -16,21 +16,12 @@ if sudo -n true 2>/dev/null; then
     sudo service xrdp start
 fi
 
-# SSH/SFTP - ensure config exists
-if [ ! -f "${HOME}/.ssh/sshd_config" ]; then
-    echo "[WARN] SSH config not found, copying from defaults..."
-    mkdir -p "${HOME}/.ssh"
-    if [ -f "/opt/jovyan_defaults/.ssh/sshd_config" ]; then
-        cp /opt/jovyan_defaults/.ssh/sshd_config "${HOME}/.ssh/sshd_config"
-        sed -i "s|/home/jovyan|${HOME}|g" "${HOME}/.ssh/sshd_config"
-    else
-        echo "[ERROR] Default sshd_config not found!"
-    fi
-fi
-if [ -f "${HOME}/.ssh/sshd_config" ]; then
-    /usr/sbin/sshd -f "${HOME}/.ssh/sshd_config"
+# SSH/SFTP
+if [ -x /opt/neurodesktop/ensure_sftp_sshd.sh ]; then
+    /opt/neurodesktop/ensure_sftp_sshd.sh || \
+        echo "[WARN] Failed to initialize SSH/SFTP service for Guacamole."
 else
-    echo "[ERROR] Cannot start SSH - config file missing"
+    echo "[WARN] /opt/neurodesktop/ensure_sftp_sshd.sh not found."
 fi
 
 # VNC - find available display by trying to start vncserver.

@@ -17,7 +17,8 @@ Port 2222
 #ListenAddress 0.0.0.0
 #ListenAddress ::
 
-HostKey /home/jovyan/.ssh/ssh_host_rsa_key
+HostKey /home/jovyan/.ssh/hostkeys/ssh_host_ed25519_key
+HostKey /home/jovyan/.ssh/hostkeys/ssh_host_rsa_key
 #HostKey /etc/ssh/ssh_host_rsa_key
 #HostKey /etc/ssh/ssh_host_ecdsa_key
 #HostKey /etc/ssh/ssh_host_ed25519_key
@@ -103,7 +104,7 @@ PrintMotd no
 #ClientAliveCountMax 3
 #UseDNS no
 #PidFile /var/run/sshd.pid
-PidFile /home/jovyan/.ssh/sshd.pid
+PidFile /tmp/sshd_2222.pid
 #MaxStartups 10:30:100
 #PermitTunnel no
 #ChrootDirectory none

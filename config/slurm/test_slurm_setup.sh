@@ -18,6 +18,9 @@ fail() {
 print_cgroup_hint_if_needed() {
     if [ -r /var/log/slurm/slurmd.log ] && grep -q "Could not create scope directory .*system.slice" /var/log/slurm/slurmd.log; then
         echo "[INFO] Detected cgroup/systemd scope error in slurmd."
+        echo "[INFO] Try creating the scope directory and restarting slurmd:"
+        echo "[INFO]   sudo mkdir -p /sys/fs/cgroup/system.slice/\$(hostname)_slurmstepd.scope"
+        echo "[INFO]   sudo slurmd"
         echo "[INFO] Use non-cgroup Slurm mode: NEURODESKTOP_SLURM_USE_CGROUP=0"
     fi
 }
