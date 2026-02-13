@@ -28,7 +28,33 @@ fix_home_ownership_if_needed() {
     fi
 }
 
+link_data_dir_if_present() {
+    local source_dir="/data"
+    local home_dir="/home/${NB_USER}"
+    local target_link="${home_dir}/data"
+
+    if [ ! -d "$source_dir" ] || [ ! -d "$home_dir" ]; then
+        return
+    fi
+
+    if [ -L "$target_link" ]; then
+        if [ "$(readlink "$target_link")" = "$source_dir" ]; then
+            return
+        fi
+        echo "[WARN] ${target_link} already exists as a symlink to a different location. Skipping."
+        return
+    fi
+
+    if [ -e "$target_link" ]; then
+        echo "[WARN] ${target_link} already exists and is not a symlink. Skipping."
+        return
+    fi
+
+    ln -s "$source_dir" "$target_link"
+}
+
 fix_home_ownership_if_needed
+link_data_dir_if_present
 
 if [ "$EUID" -eq 0 ]; then
     # # Overrides Dockerfile changes to NB_USER
