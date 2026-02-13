@@ -383,7 +383,7 @@ if [ -n "$SLURM_JOB_ID" ]; then
 fi
 
 # Start a local single-node Slurm queue inside the container.
-# Jobs are constrained by the container cgroup limits through Slurm's cgroup plugin.
+# In auto mode, Slurm defaults to non-cgroup compatibility settings unless explicitly enabled.
 if [ "$EUID" -eq 0 ]; then
     if ! /opt/neurodesktop/setup_and_start_slurm.sh; then
         echo "[WARN] Failed to configure/start local Slurm queue."

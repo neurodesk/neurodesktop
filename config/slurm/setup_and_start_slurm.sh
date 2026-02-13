@@ -203,24 +203,28 @@ NODE_MEMORY_MB="$(detect_memory_limit_mb)"
 PARTITION_NAME="${NEURODESKTOP_SLURM_PARTITION:-neurodesktop}"
 CGROUP_PLUGIN="${NEURODESKTOP_SLURM_CGROUP_PLUGIN:-autodetect}"
 CGROUP_MOUNTPOINT="${NEURODESKTOP_SLURM_CGROUP_MOUNTPOINT:-/sys/fs/cgroup}"
-USE_CGROUP_MODE=1
+USE_CGROUP_MODE=0
 CGROUP_DISABLE_REASON=""
 
 if is_false "${NEURODESKTOP_SLURM_USE_CGROUP:-auto}"; then
-    USE_CGROUP_MODE=0
     CGROUP_DISABLE_REASON="disabled via NEURODESKTOP_SLURM_USE_CGROUP"
 elif [ "${NEURODESKTOP_SLURM_USE_CGROUP:-auto}" = "auto" ]; then
+    # Default to non-cgroup mode in containers; opt in with NEURODESKTOP_SLURM_USE_CGROUP=1.
+    CGROUP_DISABLE_REASON="auto mode defaults to non-cgroup mode for container compatibility"
+else
     if [ ! -d "${CGROUP_MOUNTPOINT}" ]; then
-        USE_CGROUP_MODE=0
         CGROUP_DISABLE_REASON="mountpoint ${CGROUP_MOUNTPOINT} is missing"
     elif [ -f "${CGROUP_MOUNTPOINT}/cgroup.controllers" ]; then
         # cgroup v2: slurmd needs a writable system.slice subtree when IgnoreSystemd=yes.
-        if ! mkdir -p "${CGROUP_MOUNTPOINT}/system.slice" >/dev/null 2>&1 || ! can_write_dir "${CGROUP_MOUNTPOINT}/system.slice"; then
-            USE_CGROUP_MODE=0
+        if ! mkdir -p "${CGROUP_MOUNTPOINT}/system.slice" >/dev/null 2>&1 || \
+           ! can_write_dir "${CGROUP_MOUNTPOINT}/system.slice"; then
             CGROUP_DISABLE_REASON="cgroup v2 system.slice is not writable"
+        else
+            USE_CGROUP_MODE=1
         fi
-    elif ! can_write_dir "${CGROUP_MOUNTPOINT}"; then
-        USE_CGROUP_MODE=0
+    elif can_write_dir "${CGROUP_MOUNTPOINT}"; then
+        USE_CGROUP_MODE=1
+    else
         CGROUP_DISABLE_REASON="mountpoint ${CGROUP_MOUNTPOINT} is not writable"
     fi
 fi
@@ -236,7 +240,7 @@ if [ "${USE_CGROUP_MODE}" -eq 1 ]; then
     echo "[INFO] Slurm cgroup mode enabled (plugin: ${CGROUP_PLUGIN}, mountpoint: ${CGROUP_MOUNTPOINT})."
 else
     PROCTRACK_TYPE="proctrack/linuxproc"
-    TASK_PLUGIN="task/none"
+    TASK_PLUGIN="task/affinity"
     JOBACCT_GATHER_TYPE="jobacct_gather/none"
     CGROUP_CONSTRAIN_CORES="no"
     CGROUP_CONSTRAIN_RAM="no"
