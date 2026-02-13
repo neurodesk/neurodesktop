@@ -26,7 +26,7 @@ for container compatibility. This sets:
 - `ProctrackType=proctrack/linuxproc`
 - `TaskPlugin=task/affinity`
 - `JobAcctGatherType=jobacct_gather/none`
-- minimal `cgroup.conf` (no cgroup plugin selected)
+- compatibility `cgroup.conf` (`CgroupPlugin=cgroup/v1`, `CgroupMountpoint=/tmp/cgroup`)
 
 When cgroup mode is enabled (`NEURODESKTOP_SLURM_USE_CGROUP=1`) and compatible cgroups are available,
 the script writes `cgroup.conf` with `CgroupPlugin=autodetect`, mountpoint `/sys/fs/cgroup`,
@@ -34,14 +34,9 @@ and `IgnoreSystemd=yes`, then prepares `/sys/fs/cgroup/system.slice/<hostname>_s
 before starting `slurmd`.
 If `slurmd` still fails with cgroup scope/mount errors, startup automatically falls back to
 non-cgroup mode and retries once.
-If the local Slurm version does not support `CgroupPlugin=disabled`, startup automatically
-applies a legacy compatibility fallback (`CgroupPlugin=cgroup/v1`, mountpoint `/tmp/cgroup`)
-and retries once.
 Startup logs include:
 - `SLURM fallback activated: ...`
-- `Legacy cgroup compatibility fallback activated: ...`
 - `slurmd started successfully using non-cgroup fallback (...)`
-- `slurmd started successfully using legacy cgroup compatibility fallback (...)`
 In non-cgroup mode, cgroup constraints are disabled (no CPU/RAM/SWAP enforcement by Slurm).
 
 Quick smoke test inside the container:

@@ -321,9 +321,15 @@ AllowedRAMSpace=100
 AllowedSwapSpace=0
 EOF
 else
+    mkdir -p "${LEGACY_CGROUP_COMPAT_MOUNTPOINT}" >/dev/null 2>&1 || true
     cat > "${SLURM_CGROUP_CONF_PATH}" <<EOF
-# Slurm non-cgroup mode: cgroup plugins are disabled via slurm.conf plugin settings.
-# Keep this file minimal so slurmd does not attempt to load a cgroup plugin.
+CgroupPlugin=${LEGACY_CGROUP_COMPAT_PLUGIN}
+CgroupMountpoint=${LEGACY_CGROUP_COMPAT_MOUNTPOINT}
+ConstrainCores=no
+ConstrainRAMSpace=no
+ConstrainSwapSpace=no
+AllowedRAMSpace=100
+AllowedSwapSpace=0
 EOF
 fi
 
@@ -379,9 +385,15 @@ switch_to_non_cgroup_mode() {
             "${SLURM_CONF_PATH}"
     fi
 
+    mkdir -p "${LEGACY_CGROUP_COMPAT_MOUNTPOINT}" >/dev/null 2>&1 || true
     cat > "${SLURM_CGROUP_CONF_PATH}" <<EOF
-# Slurm non-cgroup mode: cgroup plugins are disabled via slurm.conf plugin settings.
-# Keep this file minimal so slurmd does not attempt to load a cgroup plugin.
+CgroupPlugin=${LEGACY_CGROUP_COMPAT_PLUGIN}
+CgroupMountpoint=${LEGACY_CGROUP_COMPAT_MOUNTPOINT}
+ConstrainCores=no
+ConstrainRAMSpace=no
+ConstrainSwapSpace=no
+AllowedRAMSpace=100
+AllowedSwapSpace=0
 EOF
 
     if pgrep -x slurmctld >/dev/null 2>&1; then
