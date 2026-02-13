@@ -14,10 +14,12 @@ Optional environment variables:
 - `NEURODESKTOP_SLURM_MEMORY_RESERVE_MB=256` memory headroom reserved for desktop/Jupyter processes
 - `NEURODESKTOP_SLURM_PARTITION=neurodesktop` to rename the partition
 - `NEURODESKTOP_MUNGE_NUM_THREADS=10` to control munged worker threads for Slurm auth traffic
-- `NEURODESKTOP_SLURM_USE_CGROUP=0` to force non-cgroup mode (useful in containers without systemd cgroup scopes)
+- `NEURODESKTOP_SLURM_USE_CGROUP=0` to force non-cgroup mode
+- `NEURODESKTOP_SLURM_CGROUP_MOUNTPOINT=/tmp/cgroup` to override the writable cgroup mountpoint path
 
-`setup_and_start_slurm.sh` always writes `cgroup.conf` with `IgnoreSystemd=yes`
-to avoid dbus/systemd-scope dependency in minimal containers.
+`setup_and_start_slurm.sh` writes `cgroup.conf` with `CgroupPlugin=cgroup/v1`
+and a writable mountpoint (`/tmp/cgroup` by default) to avoid read-only cgroup v2
+and dbus/systemd-scope dependency issues in minimal containers.
 In non-cgroup mode, cgroup constraints are disabled (no CPU/RAM/SWAP enforcement by Slurm).
 
 Quick smoke test inside the container:

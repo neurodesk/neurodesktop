@@ -184,18 +184,19 @@ NODE_ADDR="$(detect_node_addr "${NODE_HOSTNAME}")"
 NODE_CPUS="$(detect_cpu_limit)"
 NODE_MEMORY_MB="$(detect_memory_limit_mb)"
 PARTITION_NAME="${NEURODESKTOP_SLURM_PARTITION:-neurodesktop}"
+CGROUP_MOUNTPOINT="${NEURODESKTOP_SLURM_CGROUP_MOUNTPOINT:-/tmp/cgroup}"
 USE_CGROUP_MODE=1
 
 if is_false "${NEURODESKTOP_SLURM_USE_CGROUP:-auto}"; then
     USE_CGROUP_MODE=0
 elif [ "${NEURODESKTOP_SLURM_USE_CGROUP:-auto}" = "auto" ]; then
-    # In many containers without systemd, slurmd cannot create system.slice scopes.
-    if [ ! -d /sys/fs/cgroup/system.slice ] || [ ! -w /sys/fs/cgroup/system.slice ]; then
+    if ! mkdir -p "${CGROUP_MOUNTPOINT}" >/dev/null 2>&1 || [ ! -w "${CGROUP_MOUNTPOINT}" ]; then
         USE_CGROUP_MODE=0
     fi
 fi
 
 if [ "${USE_CGROUP_MODE}" -eq 1 ]; then
+    mkdir -p "${CGROUP_MOUNTPOINT}"
     PROCTRACK_TYPE="proctrack/cgroup"
     TASK_PLUGIN="task/cgroup,task/affinity"
     JOBACCT_GATHER_TYPE="jobacct_gather/cgroup"
@@ -210,16 +211,7 @@ else
     CGROUP_CONSTRAIN_CORES="no"
     CGROUP_CONSTRAIN_RAM="no"
     CGROUP_CONSTRAIN_SWAP="no"
-    echo "[INFO] Slurm cgroup mode disabled (container cgroup layout is not compatible)."
-fi
-
-# Some container runtimes expose cgroup v2 without systemd/dbus.
-# Slurm cgroup/v2 expects this parent path when IgnoreSystemd=yes.
-# Creating it preempts scope creation failures in containers without systemd.
-if [ ! -d /sys/fs/cgroup/system.slice ]; then
-    if [ -d /sys/fs/cgroup ] && [ -w /sys/fs/cgroup ]; then
-        mkdir -p /sys/fs/cgroup/system.slice || true
-    fi
+    echo "[INFO] Slurm cgroup mode disabled."
 fi
 
 DEF_MEM_PER_CPU=$((NODE_MEMORY_MB / NODE_CPUS))
@@ -266,8 +258,8 @@ PartitionName=${PARTITION_NAME} Nodes=${NODE_HOSTNAME} Default=YES MaxTime=INFIN
 EOF
 
 cat > "${SLURM_CGROUP_CONF_PATH}" <<EOF
-CgroupPlugin=autodetect
-CgroupMountpoint=/sys/fs/cgroup
+CgroupPlugin=cgroup/v1
+CgroupMountpoint=${CGROUP_MOUNTPOINT}
 IgnoreSystemd=yes
 IgnoreSystemdOnFailure=yes
 ConstrainCores=${CGROUP_CONSTRAIN_CORES}
