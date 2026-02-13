@@ -14,6 +14,23 @@ is_false() {
     esac
 }
 
+can_write_dir() {
+    local dir probe
+    dir="$1"
+
+    if [ ! -d "${dir}" ]; then
+        return 1
+    fi
+
+    probe="${dir}/.nd-write-test-$$"
+    if mkdir "${probe}" >/dev/null 2>&1; then
+        rmdir "${probe}" >/dev/null 2>&1 || true
+        return 0
+    fi
+
+    return 1
+}
+
 if is_false "${NEURODESKTOP_SLURM_ENABLE:-1}"; then
     echo "[INFO] Slurm startup disabled via NEURODESKTOP_SLURM_ENABLE."
     exit 0
@@ -184,26 +201,39 @@ NODE_ADDR="$(detect_node_addr "${NODE_HOSTNAME}")"
 NODE_CPUS="$(detect_cpu_limit)"
 NODE_MEMORY_MB="$(detect_memory_limit_mb)"
 PARTITION_NAME="${NEURODESKTOP_SLURM_PARTITION:-neurodesktop}"
-CGROUP_MOUNTPOINT="${NEURODESKTOP_SLURM_CGROUP_MOUNTPOINT:-/tmp/cgroup}"
+CGROUP_PLUGIN="${NEURODESKTOP_SLURM_CGROUP_PLUGIN:-autodetect}"
+CGROUP_MOUNTPOINT="${NEURODESKTOP_SLURM_CGROUP_MOUNTPOINT:-/sys/fs/cgroup}"
 USE_CGROUP_MODE=1
+CGROUP_DISABLE_REASON=""
 
 if is_false "${NEURODESKTOP_SLURM_USE_CGROUP:-auto}"; then
     USE_CGROUP_MODE=0
+    CGROUP_DISABLE_REASON="disabled via NEURODESKTOP_SLURM_USE_CGROUP"
 elif [ "${NEURODESKTOP_SLURM_USE_CGROUP:-auto}" = "auto" ]; then
-    if ! mkdir -p "${CGROUP_MOUNTPOINT}" >/dev/null 2>&1 || [ ! -w "${CGROUP_MOUNTPOINT}" ]; then
+    if [ ! -d "${CGROUP_MOUNTPOINT}" ]; then
         USE_CGROUP_MODE=0
+        CGROUP_DISABLE_REASON="mountpoint ${CGROUP_MOUNTPOINT} is missing"
+    elif [ -f "${CGROUP_MOUNTPOINT}/cgroup.controllers" ]; then
+        # cgroup v2: slurmd needs a writable system.slice subtree when IgnoreSystemd=yes.
+        if ! mkdir -p "${CGROUP_MOUNTPOINT}/system.slice" >/dev/null 2>&1 || ! can_write_dir "${CGROUP_MOUNTPOINT}/system.slice"; then
+            USE_CGROUP_MODE=0
+            CGROUP_DISABLE_REASON="cgroup v2 system.slice is not writable"
+        fi
+    elif ! can_write_dir "${CGROUP_MOUNTPOINT}"; then
+        USE_CGROUP_MODE=0
+        CGROUP_DISABLE_REASON="mountpoint ${CGROUP_MOUNTPOINT} is not writable"
     fi
 fi
 
 if [ "${USE_CGROUP_MODE}" -eq 1 ]; then
-    mkdir -p "${CGROUP_MOUNTPOINT}"
+    mkdir -p "${CGROUP_MOUNTPOINT}" >/dev/null 2>&1 || true
     PROCTRACK_TYPE="proctrack/cgroup"
     TASK_PLUGIN="task/cgroup,task/affinity"
     JOBACCT_GATHER_TYPE="jobacct_gather/cgroup"
     CGROUP_CONSTRAIN_CORES="yes"
     CGROUP_CONSTRAIN_RAM="yes"
     CGROUP_CONSTRAIN_SWAP="yes"
-    echo "[INFO] Slurm cgroup mode enabled."
+    echo "[INFO] Slurm cgroup mode enabled (plugin: ${CGROUP_PLUGIN}, mountpoint: ${CGROUP_MOUNTPOINT})."
 else
     PROCTRACK_TYPE="proctrack/linuxproc"
     TASK_PLUGIN="task/none"
@@ -211,7 +241,11 @@ else
     CGROUP_CONSTRAIN_CORES="no"
     CGROUP_CONSTRAIN_RAM="no"
     CGROUP_CONSTRAIN_SWAP="no"
-    echo "[INFO] Slurm cgroup mode disabled."
+    if [ -n "${CGROUP_DISABLE_REASON}" ]; then
+        echo "[INFO] Slurm cgroup mode disabled (${CGROUP_DISABLE_REASON})."
+    else
+        echo "[INFO] Slurm cgroup mode disabled."
+    fi
 fi
 
 DEF_MEM_PER_CPU=$((NODE_MEMORY_MB / NODE_CPUS))
@@ -258,7 +292,7 @@ PartitionName=${PARTITION_NAME} Nodes=${NODE_HOSTNAME} Default=YES MaxTime=INFIN
 EOF
 
 cat > "${SLURM_CGROUP_CONF_PATH}" <<EOF
-CgroupPlugin=cgroup/v1
+CgroupPlugin=${CGROUP_PLUGIN}
 CgroupMountpoint=${CGROUP_MOUNTPOINT}
 IgnoreSystemd=yes
 IgnoreSystemdOnFailure=yes

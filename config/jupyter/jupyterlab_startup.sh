@@ -77,17 +77,11 @@ fi
 if [ ! -f "${HOME}/.ssh/id_rsa" ]; then
     ssh-keygen -q -t rsa -f "${HOME}/.ssh/id_rsa" -b 4096 -m PEM -N ''
 fi
-if [ ! -f "${HOME}/.ssh/ssh_host_rsa_key" ]; then
-    ssh-keygen -q -t rsa -f "${HOME}/.ssh/ssh_host_rsa_key" -N ''
-fi
 
 AUTHORIZED_KEYS_FILE="${HOME}/.ssh/authorized_keys"
 touch "$AUTHORIZED_KEYS_FILE"
 chmod 600 "$AUTHORIZED_KEYS_FILE"
 
-if ! grep -qF "guacamole@sftp-server" "$AUTHORIZED_KEYS_FILE"; then
-    cat "${HOME}/.ssh/guacamole_rsa.pub" >> "$AUTHORIZED_KEYS_FILE"
-fi
 if ! grep -qF "${NB_USER}@${HOSTNAME}" "$AUTHORIZED_KEYS_FILE"; then
     cat "${HOME}/.ssh/id_rsa.pub" >> "$AUTHORIZED_KEYS_FILE"
 fi
@@ -104,6 +98,14 @@ fi
 # Insert guacamole private key into user-mapping for ssh/sftp support
 if ! grep 'BEGIN RSA PRIVATE KEY' /etc/guacamole/user-mapping.xml; then
     sed -i "/private-key/ r ${HOME}/.ssh/guacamole_rsa" /etc/guacamole/user-mapping.xml
+fi
+
+# Start SSH/SFTP endpoint for Guacamole and sync authorized_keys from sftp-private-key.
+if [ -x /opt/neurodesktop/ensure_sftp_sshd.sh ]; then
+    /opt/neurodesktop/ensure_sftp_sshd.sh || \
+        echo "[WARN] Failed to initialize SSH/SFTP service for Guacamole."
+else
+    echo "[WARN] /opt/neurodesktop/ensure_sftp_sshd.sh not found."
 fi
 
 # Create a symlink in home if /data is mounted
@@ -195,14 +197,7 @@ mkdir -p ${HOME}/.config/goose
 # ensure opencode config directory exists
 mkdir -p ${HOME}/.config/opencode
 
-# Validate SSH config only; guacamole.sh starts sshd when needed.
-if sudo -n true 2>/dev/null && [ -f "${HOME}/.ssh/sshd_config" ]; then
-    # OpenSSH expects this runtime directory to exist for privilege separation.
-    sudo mkdir -p /run/sshd
-    sudo chmod 755 /run/sshd
-    sudo /usr/sbin/sshd -t -f "${HOME}/.ssh/sshd_config" || \
-        echo "[WARN] sshd_config validation failed: ${HOME}/.ssh/sshd_config"
-fi
+# SSH/SFTP startup is handled above by /opt/neurodesktop/ensure_sftp_sshd.sh.
 
 # Conda shell hooks are already provided by the base image/defaults.
 # Avoid mutating shell config on each startup.

@@ -335,6 +335,7 @@ COPY config/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/
 COPY --chown=root:users config/jupyter/jupyterlab_startup.sh /opt/neurodesktop/jupyterlab_startup.sh
 COPY --chown=root:users config/guacamole/guacamole.sh /opt/neurodesktop/guacamole.sh
 COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
+COPY --chown=root:users config/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh
 COPY --chown=root:users config/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh
 COPY --chown=root:users config/slurm/test_slurm_setup.sh /opt/neurodesktop/test_slurm_setup.sh
 COPY --chown=root:users config/slurm/slurm_submit_smoke.sbatch /opt/neurodesktop/slurm_submit_smoke.sbatch
@@ -359,6 +360,7 @@ RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/jupyterlab_startup.sh \
     /opt/neurodesktop/guacamole.sh \
     /opt/neurodesktop/environment_variables.sh \
+    /opt/neurodesktop/ensure_sftp_sshd.sh \
     /opt/neurodesktop/setup_and_start_slurm.sh \
     /opt/neurodesktop/test_slurm_setup.sh \
     /opt/neurodesktop/slurm_submit_smoke.sbatch \
