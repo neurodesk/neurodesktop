@@ -193,6 +193,24 @@ RUN apt-get update --yes \
         tcsh \
         && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Install Nextflow ecosystem tools
+ENV NF_NEURO_MODULES_DIR=/opt/nf-neuro/modules
+ENV NF_TEST_HOME=/opt/nf-test
+RUN mkdir -p "${NF_TEST_HOME}" \
+    && cd /tmp \
+    && curl -fsSL https://get.nextflow.io | bash \
+    && mv /tmp/nextflow /usr/local/bin/nextflow \
+    && chmod 755 /usr/local/bin/nextflow \
+    && wget -qO- https://get.nf-test.com | bash \
+    && test -f "${HOME}/.nf-test/nf-test.jar" \
+    && cp -a "${HOME}/.nf-test/." "${NF_TEST_HOME}/" \
+    && printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'exec java -jar /opt/nf-test/nf-test.jar "$@"' > /usr/local/bin/nf-test \
+    && chmod 755 /usr/local/bin/nf-test \
+    && mkdir -p /opt/nf-neuro \
+    && git clone --depth=1 https://github.com/nf-neuro/modules.git "${NF_NEURO_MODULES_DIR}" \
+    && chown -R ${NB_UID}:${NB_GID} /opt/nf-neuro "${NF_TEST_HOME}" \
+    && rm -rf /root/.cache "${HOME}/.nf-test" /tmp/nf-test /tmp/nextflow
+
 # Install AI coding assistants
 RUN npm install -g @openai/codex \
     && rm -rf /root/.npm \
@@ -240,6 +258,7 @@ RUN /opt/conda/bin/pip install \
         datalad \
         nipype \
         nbdev \
+        nf-core \
         pydra==1.0a7 \
         nipoppy \
         matplotlib \
@@ -315,6 +334,7 @@ COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodeskto
 COPY --chown=root:users config/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh
 COPY --chown=root:users config/slurm/test_slurm_setup.sh /opt/neurodesktop/test_slurm_setup.sh
 COPY --chown=root:users config/slurm/slurm_submit_smoke.sbatch /opt/neurodesktop/slurm_submit_smoke.sbatch
+COPY --chown=root:users config/nextflow/test_nextflow.sh /opt/neurodesktop/test_nextflow.sh
 # COPY --chown=root:users config/guacamole/user-mapping.xml /etc/guacamole/user-mapping.xml
 
 # Generic webapp infrastructure
@@ -338,6 +358,7 @@ RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/setup_and_start_slurm.sh \
     /opt/neurodesktop/test_slurm_setup.sh \
     /opt/neurodesktop/slurm_submit_smoke.sbatch \
+    /opt/neurodesktop/test_nextflow.sh \
     /opt/neurodesktop/webapp_launcher.sh \
     /opt/neurodesktop/webapp_wrapper/webapp_wrapper.py \
     /opt/neurodesktop/scripts/generate_jupyter_config.py \
