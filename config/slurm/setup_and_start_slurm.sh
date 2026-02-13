@@ -260,6 +260,10 @@ fi
 
 SLURMD_FALLBACK_ATTEMPTED=0
 SLURMD_FALLBACK_REASON=""
+SLURMD_LEGACY_CGROUP_COMPAT_ATTEMPTED=0
+SLURMD_LEGACY_CGROUP_COMPAT_REASON=""
+LEGACY_CGROUP_COMPAT_PLUGIN="${NEURODESKTOP_SLURM_LEGACY_CGROUP_PLUGIN:-cgroup/v1}"
+LEGACY_CGROUP_COMPAT_MOUNTPOINT="${NEURODESKTOP_SLURM_LEGACY_CGROUP_MOUNTPOINT:-/tmp/cgroup}"
 
 DEF_MEM_PER_CPU=$((NODE_MEMORY_MB / NODE_CPUS))
 if [ "${DEF_MEM_PER_CPU}" -lt 1 ]; then
@@ -304,7 +308,8 @@ NodeName=${NODE_HOSTNAME} NodeAddr=${NODE_ADDR} CPUs=${NODE_CPUS} RealMemory=${N
 PartitionName=${PARTITION_NAME} Nodes=${NODE_HOSTNAME} Default=YES MaxTime=INFINITE State=UP
 EOF
 
-cat > "${SLURM_CGROUP_CONF_PATH}" <<EOF
+if [ "${USE_CGROUP_MODE}" -eq 1 ]; then
+    cat > "${SLURM_CGROUP_CONF_PATH}" <<EOF
 CgroupPlugin=${CGROUP_PLUGIN}
 CgroupMountpoint=${CGROUP_MOUNTPOINT}
 IgnoreSystemd=yes
@@ -315,6 +320,12 @@ ConstrainSwapSpace=${CGROUP_CONSTRAIN_SWAP}
 AllowedRAMSpace=100
 AllowedSwapSpace=0
 EOF
+else
+    cat > "${SLURM_CGROUP_CONF_PATH}" <<EOF
+# Slurm non-cgroup mode: cgroup plugins are disabled via slurm.conf plugin settings.
+# Keep this file minimal so slurmd does not attempt to load a cgroup plugin.
+EOF
+fi
 
 if [ -d /etc/slurm-llnl ]; then
     ln -sf "${SLURM_CONF_PATH}" /etc/slurm-llnl/slurm.conf
@@ -330,6 +341,16 @@ slurmd_log_indicates_cgroup_failure() {
 
     grep -Eiq \
         "Could not create scope directory .*system\.slice|_slurmstepd\.scope|cgroup.*(read-only|permission denied|no such file)|failed to create cgroup" \
+        /var/log/slurm/slurmd.log
+}
+
+slurmd_log_indicates_disabled_plugin_unsupported() {
+    if [ ! -r /var/log/slurm/slurmd.log ]; then
+        return 1
+    fi
+
+    grep -Eiq \
+        "plugin name for disabled|cannot find cgroup plugin for disabled|cannot create cgroup context for disabled" \
         /var/log/slurm/slurmd.log
 }
 
@@ -358,13 +379,35 @@ switch_to_non_cgroup_mode() {
             "${SLURM_CONF_PATH}"
     fi
 
-    if [ -f "${SLURM_CGROUP_CONF_PATH}" ]; then
-        sed -i \
-            -e "s/^ConstrainCores=.*/ConstrainCores=${CGROUP_CONSTRAIN_CORES}/" \
-            -e "s/^ConstrainRAMSpace=.*/ConstrainRAMSpace=${CGROUP_CONSTRAIN_RAM}/" \
-            -e "s/^ConstrainSwapSpace=.*/ConstrainSwapSpace=${CGROUP_CONSTRAIN_SWAP}/" \
-            "${SLURM_CGROUP_CONF_PATH}"
+    cat > "${SLURM_CGROUP_CONF_PATH}" <<EOF
+# Slurm non-cgroup mode: cgroup plugins are disabled via slurm.conf plugin settings.
+# Keep this file minimal so slurmd does not attempt to load a cgroup plugin.
+EOF
+
+    if pgrep -x slurmctld >/dev/null 2>&1; then
+        scontrol reconfigure >/dev/null 2>&1 || true
     fi
+}
+
+switch_to_legacy_cgroup_compat_mode() {
+    local reason
+    reason="${1:-automatic compatibility fallback for legacy Slurm cgroup plugin behavior}"
+
+    SLURMD_LEGACY_CGROUP_COMPAT_REASON="${reason}"
+    mkdir -p "${LEGACY_CGROUP_COMPAT_MOUNTPOINT}" >/dev/null 2>&1 || true
+
+    echo "[WARN] Legacy cgroup compatibility fallback activated: ${reason}"
+    echo "[WARN] Writing cgroup.conf with CgroupPlugin=${LEGACY_CGROUP_COMPAT_PLUGIN} and CgroupMountpoint=${LEGACY_CGROUP_COMPAT_MOUNTPOINT}"
+
+    cat > "${SLURM_CGROUP_CONF_PATH}" <<EOF
+CgroupPlugin=${LEGACY_CGROUP_COMPAT_PLUGIN}
+CgroupMountpoint=${LEGACY_CGROUP_COMPAT_MOUNTPOINT}
+ConstrainCores=no
+ConstrainRAMSpace=no
+ConstrainSwapSpace=no
+AllowedRAMSpace=100
+AllowedSwapSpace=0
+EOF
 
     if pgrep -x slurmctld >/dev/null 2>&1; then
         scontrol reconfigure >/dev/null 2>&1 || true
@@ -374,6 +417,12 @@ switch_to_non_cgroup_mode() {
 log_slurmd_fallback_success_if_needed() {
     if [ "${SLURMD_FALLBACK_ATTEMPTED}" -eq 1 ]; then
         echo "[INFO] slurmd started successfully using non-cgroup fallback (${SLURMD_FALLBACK_REASON:-unspecified reason})."
+    fi
+}
+
+log_slurmd_legacy_cgroup_compat_success_if_needed() {
+    if [ "${SLURMD_LEGACY_CGROUP_COMPAT_ATTEMPTED}" -eq 1 ]; then
+        echo "[INFO] slurmd started successfully using legacy cgroup compatibility fallback (${SLURMD_LEGACY_CGROUP_COMPAT_REASON:-unspecified reason})."
     fi
 }
 
@@ -437,6 +486,7 @@ start_slurmd() {
 
     if /usr/sbin/slurmd -N "${NODE_HOSTNAME}" -f "${SLURM_CONF_PATH}" -L /var/log/slurm/slurmd.log; then
         log_slurmd_fallback_success_if_needed
+        log_slurmd_legacy_cgroup_compat_success_if_needed
         return 0
     fi
 
@@ -446,6 +496,17 @@ start_slurmd() {
         switch_to_non_cgroup_mode "auto fallback after slurmd cgroup startup failure"
         if /usr/sbin/slurmd -N "${NODE_HOSTNAME}" -f "${SLURM_CONF_PATH}" -L /var/log/slurm/slurmd.log; then
             log_slurmd_fallback_success_if_needed
+            log_slurmd_legacy_cgroup_compat_success_if_needed
+            return 0
+        fi
+    fi
+
+    if [ "${SLURMD_LEGACY_CGROUP_COMPAT_ATTEMPTED}" -eq 0 ] && slurmd_log_indicates_disabled_plugin_unsupported; then
+        SLURMD_LEGACY_CGROUP_COMPAT_ATTEMPTED=1
+        switch_to_legacy_cgroup_compat_mode "auto compatibility fallback after unsupported CgroupPlugin=disabled"
+        if /usr/sbin/slurmd -N "${NODE_HOSTNAME}" -f "${SLURM_CONF_PATH}" -L /var/log/slurm/slurmd.log; then
+            log_slurmd_fallback_success_if_needed
+            log_slurmd_legacy_cgroup_compat_success_if_needed
             return 0
         fi
     fi
