@@ -14,9 +14,9 @@ if [ ! -f ./.claude/settings.local.json ]; then
 fi
 
 
-# Start Claude Code from the restored home directory location
-CLAUDE_BIN="${HOME}/.local/bin/claude_bin"
-DEFAULT_CLAUDE_BIN="/opt/jovyan_defaults/.local/bin/claude_bin"
+# Start Claude Code from the standard user-local path.
+CLAUDE_BIN="${HOME}/.local/bin/claude"
+DEFAULT_CLAUDE_BIN="/opt/jovyan_defaults/.local/bin/claude"
 
 if [ ! -x "${CLAUDE_BIN}" ] && [ -x "${DEFAULT_CLAUDE_BIN}" ]; then
     mkdir -p "${HOME}/.local/bin" 2>/dev/null || true

@@ -216,8 +216,12 @@ RUN npm install -g @openai/codex \
     && rm -rf /root/.npm \
     && su - "${NB_USER}" -c 'curl -fsSL https://claude.ai/install.sh | bash -s -- stable' \
     && mkdir -p /opt/jovyan_defaults/.local/bin \
-    && mv /home/jovyan/.local/share/claude/versions/* /opt/jovyan_defaults/.local/bin/claude_bin \
-    && chmod +x /opt/jovyan_defaults/.local/bin/claude_bin \
+    && if [ -x /home/jovyan/.local/bin/claude ]; then \
+        cp -L /home/jovyan/.local/bin/claude /opt/jovyan_defaults/.local/bin/claude; \
+    else \
+        cp -L /home/jovyan/.local/share/claude/versions/* /opt/jovyan_defaults/.local/bin/claude; \
+    fi \
+    && chmod +x /opt/jovyan_defaults/.local/bin/claude \
     && rm -rf /home/${NB_USER}/.cache \
     && rm -rf /home/${NB_USER}/.local
 

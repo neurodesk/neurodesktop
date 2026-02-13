@@ -63,7 +63,29 @@ export APPTAINER_BINDPATH=/data,/mnt,/neurodesktop-storage,/tmp,/cvmfs
 export APPTAINERENV_SUBJECTS_DIR=${HOME}/freesurfer-subjects-dir
 export MPLCONFIGDIR=${HOME}/.config/matplotlib-mpldir
 
-export PATH=$PATH:${HOME}/.local/bin:/opt/conda/bin:/opt/conda/condabin
+# Keep agent wrappers in /usr/local/sbin ahead of user-level installs in ~/.local/bin.
+path_prepend() {
+        local dir="$1"
+        PATH=":${PATH}:"
+        PATH="${PATH//:${dir}:/:}"
+        PATH="${PATH#:}"
+        PATH="${PATH%:}"
+        PATH="${dir}${PATH:+:${PATH}}"
+}
+
+path_append_if_missing() {
+        local dir="$1"
+        case ":${PATH}:" in
+                *":${dir}:"*) ;;
+                *) PATH="${PATH}${PATH:+:}${dir}" ;;
+        esac
+}
+
+path_prepend "/usr/local/sbin"
+path_append_if_missing "${HOME}/.local/bin"
+path_append_if_missing "/opt/conda/bin"
+path_append_if_missing "/opt/conda/condabin"
+export PATH
 
 # Default to host Ollama from inside Docker unless explicitly overridden.
 # Local Ollama mode (START_LOCAL_LLMS=1) overrides this in before_notebook.sh.
