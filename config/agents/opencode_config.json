@@ -35,10 +35,10 @@
         "qwen3-coder-next:latest": {
           "name": "qwen3-coder-next:latest"
         },
-        "devstral-32k:latest": {
-          "name": "devstral-32k:latest",
+        "devstral-16k:latest": {
+          "name": "devstral-16k:latest",
           "limit": {
-            "context": 32768,
+            "context": 16384,
             "output": 8192
           }
         },
