@@ -56,13 +56,10 @@ if ollama_host.endswith("/v1"):
     ollama_host = ollama_host[:-3]
 
 ollama_model_defaults = {
-    "neurodesk": {"name": "neurodesk"},
-    "qwen3-coder-next:latest": {"name": "qwen3-coder-next:latest"},
     "devstral-16k:latest": {
         "name": "devstral-16k:latest",
         "limit": {"context": 16384, "output": 8192},
     },
-    "codellama:7b-code": {"name": "codellama:7b-code"},
 }
 
 profile_defaults = {
@@ -113,7 +110,9 @@ if isinstance(providers.get("ollama"), dict):
     options["baseURL"] = f"{ollama_host}/v1"
     models = providers["ollama"].setdefault("models", {})
     for stale_model_name in tuple(models.keys()):
-        if stale_model_name.startswith("devstral-") and stale_model_name != "devstral-16k:latest":
+        if stale_model_name in {"neurodesk", "qwen3-coder-next:latest", "codellama:7b-code"}:
+            models.pop(stale_model_name, None)
+        elif stale_model_name.startswith("devstral-") and stale_model_name != "devstral-16k:latest":
             models.pop(stale_model_name, None)
         elif stale_model_name.startswith("devstral:"):
             models.pop(stale_model_name, None)

@@ -29,21 +29,12 @@
         "baseURL": "http://127.0.0.1:11434/v1"
       },
       "models": {
-        "neurodesk": {
-          "name": "neurodesk"
-        },
-        "qwen3-coder-next:latest": {
-          "name": "qwen3-coder-next:latest"
-        },
         "devstral-16k:latest": {
           "name": "devstral-16k:latest",
           "limit": {
             "context": 16384,
             "output": 8192
           }
-        },
-        "codellama:7b-code": {
-          "name": "codellama:7b-code"
         }
       }
     },
