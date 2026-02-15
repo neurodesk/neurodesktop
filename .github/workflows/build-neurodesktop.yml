@@ -152,10 +152,10 @@ jobs:
       uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
       env: 
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GITHUB_WORKFLOW: ${{ env.GITHUB_WORKFLOW }}
-        GITHUB_SERVER_URL: ${{ env.GITHUB_SERVER_URL }}
-        GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
-        GITHUB_RUN_ID: ${{ env.GITHUB_RUN_ID }}
+        GITHUB_WORKFLOW: ${{ github.workflow }}
+        GITHUB_SERVER_URL: ${{ github.server_url }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_RUN_ID: ${{ github.run_id }}
       with:
         filename: .github/job_failure_issue_template.md
         update_existing: true
@@ -188,7 +188,6 @@ jobs:
           echo "Available space after cleanup:"
           df -h
       - name: Checkout repository
-        if: ${{ env.GITHUB_RATE_REMAINING > 0 }}
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.ref }}
@@ -214,10 +213,10 @@ jobs:
         uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
         env: 
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_WORKFLOW: ${{ env.GITHUB_WORKFLOW }}
-          GITHUB_SERVER_URL: ${{ env.GITHUB_SERVER_URL }}
-          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
-          GITHUB_RUN_ID: ${{ env.GITHUB_RUN_ID }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
         with:
           filename: .github/job_failure_issue_template.md
           update_existing: true
