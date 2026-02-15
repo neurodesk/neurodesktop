@@ -175,7 +175,8 @@ jobs:
           exit-code: '1'
           severity: CRITICAL
           timeout: 25m0s
-          skip-files: /opt/rclone-v1.60.1-linux-amd64/README.txt, /opt/rclone-v1.60.1-linux-amd64/README.html, /opt/rclone-v1.60.1-linux-amd64/rclone.1
+          # These are VS Code metadata package manifests inside code-server, not runtime npm libraries.
+          skip-files: /opt/rclone-v1.60.1-linux-amd64/README.txt,/opt/rclone-v1.60.1-linux-amd64/README.html,/opt/rclone-v1.60.1-linux-amd64/rclone.1,/opt/code-server/lib/vscode/package.json,/opt/code-server/lib/vscode/extensions/handlebars/package.json
       - name: Generate issue on job failure
         if: always() && failure()
         uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
