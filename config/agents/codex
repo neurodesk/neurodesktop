@@ -13,5 +13,18 @@ if [ ! -f ./.codex/config.json ]; then
     cp /opt/jovyan_defaults/.codex/config.json ./.codex/config.json
 fi
 
+# In browser-proxied environments (e.g., code-server behind Jupyter),
+# localhost OAuth callbacks can fail. Default `codex login` to device auth
+# unless the caller already requested an explicit auth mode.
+if [ "${1:-}" = "login" ]; then
+    shift
+    for arg in "$@"; do
+        if [ "$arg" = "--device-auth" ] || [ "$arg" = "--with-api-key" ]; then
+            exec /usr/bin/codex login "$@"
+        fi
+    done
+    exec /usr/bin/codex login --device-auth "$@"
+fi
+
 # Start Codex CLI using the actual binary path (not this wrapper)
 exec /usr/bin/codex --full-auto "$@"

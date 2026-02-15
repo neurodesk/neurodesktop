@@ -53,9 +53,6 @@ Plugin {
     Button {
       id=lxterminal.desktop
     }
-    Button {
-      id=code.desktop
-    }
   }
 }
 Plugin {
