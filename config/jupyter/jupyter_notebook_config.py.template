@@ -1,5 +1,7 @@
 import os
 
+home_dir = os.environ.get('HOME', '/home/jovyan')
+
 c.ServerProxy.servers = {
   'neurodesktop': {
     'command': ['/opt/neurodesktop/guacamole.sh'],
@@ -13,7 +15,27 @@ c.ServerProxy.servers = {
         'title': 'Neurodesktop',
         'icon_path': '/opt/neurodesk_brain_logo.svg'
       }
-    }# {{WEBAPP_SERVERS}}
+    },
+  'vscode': {
+    'command': [
+      '/usr/local/bin/code-server',
+      '--auth',
+      'none',
+      '--disable-telemetry',
+      '--disable-update-check',
+      '--bind-addr',
+      '127.0.0.1:{port}',
+      home_dir
+    ],
+    'timeout': 60,
+    'new_browser_tab': True,
+    'launcher_entry': {
+      'path_info': 'vscode',
+      'title': 'VS Code',
+      'icon_path': '/opt/vscode_logo.svg',
+      'category': 'Notebook'
+    }
+  }# {{WEBAPP_SERVERS}}
 }
 
 # c.ServerApp.root_dir = '/' # this causes an error when clicking on the little house icon when being located in the home directory

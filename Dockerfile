@@ -50,6 +50,7 @@ RUN mkdir -p /opt/strace \
 ARG TOMCAT_REL="9"
 ARG TOMCAT_VERSION="9.0.112"
 ARG GUACAMOLE_VERSION="1.6.0"
+ARG CODE_SERVER_VERSION="4.104.2"
 
 ENV LANG=""
 ENV LANGUAGE=""
@@ -92,11 +93,7 @@ RUN wget -q "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/bina
 # #========================================#
 
 # Add Software sources
-RUN wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg \
-    && install -D -o root -g root -m 644 packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg \
-    && sh -c 'echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list' \
-    && rm -f packages.microsoft.gpg \
-    && add-apt-repository ppa:nextcloud-devs/client \
+RUN add-apt-repository ppa:nextcloud-devs/client \
     && chmod -R 770 /home/${NB_USER}/.launchpadlib \
     && chown -R ${NB_UID}:${NB_GID} /home/${NB_USER}/.launchpadlib \
     && rm -rf /home/${NB_USER}/.cache \
@@ -132,12 +129,12 @@ RUN apt-get update --yes \
     && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
         aria2 \
         bc \
-        code \
         davfs2 \
         debootstrap \
         dnsutils \
         emacs \
         gedit \
+        gh \
         git \
         git-annex \
         gnome-keyring \
@@ -210,6 +207,33 @@ RUN mkdir -p "${NF_TEST_HOME}" \
     && git clone --depth=1 https://github.com/nf-neuro/modules.git "${NF_NEURO_MODULES_DIR}" \
     && chown -R ${NB_UID}:${NB_GID} /opt/nf-neuro "${NF_TEST_HOME}" \
     && rm -rf /root/.cache "${HOME}/.nf-test" /tmp/nf-test /tmp/nextflow
+
+# Install code-server as a prebuilt binary (more reliable than npm package install)
+RUN set -eux; \
+    deb_arch="$(dpkg --print-architecture || true)"; \
+    kernel_arch="$(uname -m || true)"; \
+    cs_arch=""; \
+    for arch in "${deb_arch}" "${kernel_arch}"; do \
+        case "${arch}" in \
+            amd64|x86_64) cs_arch="amd64" ;; \
+            arm64|aarch64) cs_arch="arm64" ;; \
+            armhf|armv7l|armv7) cs_arch="armv7l" ;; \
+        esac; \
+        if [ -n "${cs_arch}" ]; then break; fi; \
+    done; \
+    if [ -z "${cs_arch}" ]; then \
+        echo "Unsupported architecture for code-server: deb_arch=${deb_arch} kernel_arch=${kernel_arch}" >&2; \
+        exit 1; \
+    fi; \
+    cs_tar="code-server-${CODE_SERVER_VERSION}-linux-${cs_arch}.tar.gz"; \
+    curl -fL --retry 5 --retry-all-errors --retry-delay 2 \
+        "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/${cs_tar}" \
+        -o "/tmp/${cs_tar}"; \
+    tar -xzf "/tmp/${cs_tar}" -C /tmp; \
+    rm -rf /opt/code-server; \
+    mv "/tmp/code-server-${CODE_SERVER_VERSION}-linux-${cs_arch}" /opt/code-server; \
+    ln -sf /opt/code-server/bin/code-server /usr/local/bin/code-server; \
+    rm -f "/tmp/${cs_tar}"
 
 # Install AI coding assistants
 RUN npm install -g @openai/codex \
@@ -301,6 +325,7 @@ USER root
 # # Customise logo, wallpaper, terminal
 COPY config/jupyter/neurodesk_brain_logo.svg /opt/neurodesk_brain_logo.svg
 COPY config/jupyter/neurodesk_brain_icon.svg /opt/neurodesk_brain_icon.svg
+COPY config/jupyter/vscode_logo.svg /opt/vscode_logo.svg
 
 COPY config/lxde/background.png /usr/share/lxde/wallpapers/desktop_wallpaper.png
 COPY config/lxde/pcmanfm.conf /etc/xdg/pcmanfm/LXDE/pcmanfm.conf
@@ -434,7 +459,7 @@ ENV LMOD_CMD=/usr/share/lmod/lmod/libexec/lmod
 # Create defaults directory structure
 RUN mkdir -p /opt/jovyan_defaults/.itksnap.org/ITK-SNAP \
     && mkdir -p /opt/jovyan_defaults/.config/lxpanel/LXDE/panels \
-    && mkdir -p /opt/jovyan_defaults/.config/Code/User \
+    && mkdir -p /opt/jovyan_defaults/.local/share/code-server/User \
     && mkdir -p /opt/jovyan_defaults/.config/libfm \
     && mkdir -p /opt/jovyan_defaults/.config/goose \
     && mkdir -p /opt/jovyan_defaults/.config/opencode \
@@ -449,7 +474,7 @@ RUN mkdir -p /opt/jovyan_defaults/.itksnap.org/ITK-SNAP \
 COPY config/itksnap/UserPreferences.xml /opt/jovyan_defaults/.itksnap.org/ITK-SNAP/UserPreferences.xml
 COPY config/lxde/mimeapps.list /opt/jovyan_defaults/.config/mimeapps.list
 COPY config/lxde/panel /opt/jovyan_defaults/.config/lxpanel/LXDE/panels/panel
-COPY config/vscode/settings.json /opt/jovyan_defaults/.config/Code/User/settings.json
+COPY config/vscode/settings.json /opt/jovyan_defaults/.local/share/code-server/User/settings.json
 COPY config/lxde/libfm.conf /opt/jovyan_defaults/.config/libfm/libfm.conf
 COPY config/lxde/xstartup /opt/jovyan_defaults/.vnc/xstartup
 COPY config/conda/conda-readme.md /opt/jovyan_defaults/conda-readme.md

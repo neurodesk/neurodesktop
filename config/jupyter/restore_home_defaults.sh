@@ -143,6 +143,16 @@ setup_git_config() {
         git config --global user.email "user@neurodesk.org"
         git config --global user.name "Neurodesk User"
     fi
+
+    # Enable GitHub authentication flow via GitHub CLI for git operations.
+    # This gives code-server a working auth path for clone/push against github.com.
+    if command -v gh >/dev/null 2>&1; then
+        current_helper="$(git config --global --get credential.\"https://github.com\".helper 2>/dev/null || true)"
+        if [ "$current_helper" != "!gh auth git-credential" ]; then
+            log_info "Configuring git credential helper for github.com via gh"
+            git config --global credential."https://github.com".helper '!gh auth git-credential'
+        fi
+    fi
 }
 
 # Main restoration logic

@@ -197,6 +197,55 @@ mkdir -p ${HOME}/.config/goose
 # ensure opencode config directory exists
 mkdir -p ${HOME}/.config/opencode
 
+# Best-effort: install a small set of useful code-server extensions.
+ensure_codeserver_extension() {
+    local ext_name="$1"
+    local ext_pattern="$2"
+    shift 2
+
+    local ext_dir="${HOME}/.local/share/code-server/extensions"
+    local log_file="/tmp/code-server-${ext_name,,}-extension-install.log"
+
+    mkdir -p "${ext_dir}"
+
+    if find "${ext_dir}" -maxdepth 1 -type d -iname "${ext_pattern}" -print -quit | grep -q .; then
+        return
+    fi
+
+    local ext_id
+    for ext_id in "$@"; do
+        echo "[INFO] Installing code-server ${ext_name} extension (${ext_id})..."
+        if code-server --install-extension "${ext_id}" >"${log_file}" 2>&1; then
+            return
+        fi
+    done
+
+    echo "[WARN] Could not install ${ext_name} extension. Check ${log_file} for details."
+}
+
+ensure_codeserver_extensions() {
+    if ! command -v code-server >/dev/null 2>&1; then
+        return
+    fi
+
+    # Anthropic Claude assistant
+    ensure_codeserver_extension "anthropic.claude-code"
+
+    # OpenAI Codex / ChatGPT assistant
+    ensure_codeserver_extension "openai.chatgpt"
+
+    # GitHub auth and PR integration
+    ensure_codeserver_extension "github.vscode-pull-request-github"
+
+    # NIfTI/medical image viewer
+    ensure_codeserver_extension "korbinianeckstein.niivue"
+
+    # Slurm job dashboard / helpers
+    ensure_codeserver_extension "xy-sss.slurm--extension" 
+}
+
+ensure_codeserver_extensions &
+
 # SSH/SFTP startup is handled above by /opt/neurodesktop/ensure_sftp_sshd.sh.
 
 # Conda shell hooks are already provided by the base image/defaults.
