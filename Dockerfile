@@ -307,6 +307,7 @@ RUN /opt/conda/bin/pip install \
         ipycanvas \
         jupyter-resource-usage \
         jupyter_scheduler \
+        jupyterlab_slurm \
         httpx \
         ipywidgets==7.8.5 \
         ipyvolume \
