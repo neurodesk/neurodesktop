@@ -14,7 +14,7 @@ USER root
 RUN apt-get update --yes \
     && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
         software-properties-common \
-        openjdk-21-jre \
+        openjdk-21-jre-headless \
         build-essential \
         libcairo2-dev \
         libjpeg-turbo8-dev \
@@ -130,9 +130,7 @@ RUN apt-get update --yes \
         aria2 \
         bc \
         davfs2 \
-        debootstrap \
         dnsutils \
-        emacs \
         gedit \
         gh \
         git \
