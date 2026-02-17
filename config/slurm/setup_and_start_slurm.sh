@@ -281,7 +281,6 @@ ProctrackType=${PROCTRACK_TYPE}
 TaskPlugin=${TASK_PLUGIN}
 JobAcctGatherType=${JOBACCT_GATHER_TYPE}
 AccountingStorageType=accounting_storage/none
-AccountingStorageEnforce=none
 SelectType=select/cons_tres
 SelectTypeParameters=CR_Core_Memory
 SchedulerType=sched/backfill

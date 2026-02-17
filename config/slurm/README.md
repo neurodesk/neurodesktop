@@ -7,8 +7,7 @@ Neurodesktop starts a local Slurm controller/worker inside the container with a 
 - Limits: detected from container cgroups (`cpu.max`, `memory.max`), with optional Slurm cgroup enforcement when cgroup mode is enabled
 
 The local queue is configured without SlurmDBD accounting (`AccountingStorageType=accounting_storage/none`)
-and account enforcement is explicitly disabled (`AccountingStorageEnforce=none`, partition `AllowAccounts=ALL`).
-This avoids jobs getting stuck in `PD (InvalidAccount)` when no accounting backend exists.
+and the partition uses `AllowAccounts=ALL` to avoid jobs getting stuck in `PD (InvalidAccount)` when no accounting backend exists.
 
 This means `sbatch`/`srun` jobs submitted inside the container stay inside the container and cannot exceed the configured node CPU/memory limits.
 
