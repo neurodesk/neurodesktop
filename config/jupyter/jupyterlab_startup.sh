@@ -239,6 +239,9 @@ ensure_codeserver_extensions() {
 
     # NIfTI/medical image viewer
     ensure_codeserver_extension "korbinianeckstein.niivue"
+    
+    # slurm extension
+    ensure_codeserver_extension "xy-sss.slurm--extension"
 }
 
 ensure_codeserver_extensions &

@@ -175,6 +175,8 @@ RUN apt-get update --yes \
         slurm-wlm-basic-plugins \
         slurmctld \
         slurmd \
+        slurmdbd \
+        mariadb-server \
         sshfs \
         munge \
         tcllib \
