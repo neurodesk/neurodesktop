@@ -99,7 +99,6 @@ def ensure_provider(provider_key, provider_fallback=None):
 # Keep all known providers visible in OpenCode, even when one profile is selected.
 ensure_provider("neurodesk")
 ensure_provider("jetstream")
-ensure_provider("jetstream-deepseek")
 ensure_provider("ollama", profile_defaults["ollama"]["provider_fallback"])
 
 profile_cfg = profile_defaults[profile]
@@ -145,6 +144,154 @@ os.replace(tmp_path, config_path)
 PY
 }
 
+# Activate/deactivate Jetstream gpt-oss-120b in OpenCode's provider model list.
+set_jetstream_gpt_oss_model_state() {
+    local action="$1"
+
+    ensure_opencode_config_file
+    if [ ! -f "${OPENCODE_CONFIG_FILE}" ]; then
+        return 0
+    fi
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "Warning: python3 not found; cannot update Jetstream gpt-oss-120b model state." >&2
+        return 1
+    fi
+
+    python3 - "${OPENCODE_CONFIG_FILE}" "${OPENCODE_DEFAULT_CONFIG_FILE}" "${action}" <<'PY'
+import copy
+import json
+import os
+import sys
+
+config_path, default_path, action = sys.argv[1:4]
+
+with open(config_path, "r", encoding="utf-8") as f:
+    cfg = json.load(f)
+
+default_cfg = {}
+if os.path.exists(default_path):
+    with open(default_path, "r", encoding="utf-8") as f:
+        default_cfg = json.load(f)
+
+providers = cfg.setdefault("provider", {})
+jetstream_provider = providers.setdefault("jetstream", {})
+jetstream_models = jetstream_provider.setdefault("models", {})
+
+default_model_cfg = (
+    default_cfg.get("provider", {})
+    .get("jetstream", {})
+    .get("models", {})
+    .get("gpt-oss-120b")
+)
+
+if action == "deactivate":
+    jetstream_models.pop("gpt-oss-120b", None)
+elif action == "activate":
+    if "gpt-oss-120b" not in jetstream_models:
+        if isinstance(default_model_cfg, dict):
+            jetstream_models["gpt-oss-120b"] = copy.deepcopy(default_model_cfg)
+        else:
+            jetstream_models["gpt-oss-120b"] = {"name": "gpt-oss-120b"}
+else:
+    raise SystemExit(f"Unknown action: {action}")
+
+tmp_path = f"{config_path}.tmp"
+with open(tmp_path, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
+os.replace(tmp_path, config_path)
+PY
+}
+
+# Return success when Jetstream's gpt-oss-120b endpoint explicitly denies permission.
+jetstream_gpt_oss_permission_denied() {
+    local response_file
+    local http_code
+    local endpoint="https://llm.jetstream-cloud.org/v1/chat/completions"
+
+    if ! command -v curl >/dev/null 2>&1; then
+        return 1
+    fi
+
+    response_file=$(mktemp)
+    if [ -z "${response_file}" ]; then
+        return 1
+    fi
+
+    http_code=$(curl -sS -m 12 -o "${response_file}" -w "%{http_code}" \
+        -H "Content-Type: application/json" \
+        -d '{"model":"gpt-oss-120b","messages":[{"role":"user","content":"ping"}],"max_tokens":1,"temperature":0}' \
+        "${endpoint}" 2>/dev/null || true)
+
+    if grep -Eiq 'permission[[:space:]_-]*denied|permission_denied' "${response_file}"; then
+        rm -f "${response_file}"
+        return 0
+    fi
+
+    if [ "${http_code}" = "401" ] || [ "${http_code}" = "403" ]; then
+        if grep -Eiq 'forbidden|unauthorized|not allowed|access denied|permission' "${response_file}"; then
+            rm -f "${response_file}"
+            return 0
+        fi
+    fi
+
+    rm -f "${response_file}"
+    return 1
+}
+
+# Use Jetstream gpt-oss-120b when permitted, otherwise disable it and choose a non-Jetstream fallback.
+set_jetstream_profile() {
+    local fallback_choice
+
+    if jetstream_gpt_oss_permission_denied; then
+        echo "Jetstream gpt-oss-120b returned permission denied; deactivating it." >&2
+        set_jetstream_gpt_oss_model_state deactivate
+
+        if [ -t 0 ]; then
+            echo "Choose fallback model:"
+            echo "1) Local Ollama model"
+            echo "2) Remote Neurodesk model"
+
+            while true; do
+                read -r -p "Choose [1/2]: " fallback_choice
+                case "${fallback_choice}" in
+                    1)
+                        if ! is_local_ollama_available; then
+                            echo "Local Ollama server not reachable at ${OLLAMA_HOST:-http://127.0.0.1:11434} right now." >&2
+                            echo "Switching anyway; start Ollama before sending requests." >&2
+                        fi
+                        set_opencode_model_profile ollama
+                        return 0
+                        ;;
+                    2)
+                        if [ -z "${NEURODESK_API_KEY:-}" ]; then
+                            echo "NEURODESK_API_KEY is not set. Remote Neurodesk requests may fail until it is configured." >&2
+                        fi
+                        set_opencode_model_profile neurodesk
+                        return 0
+                        ;;
+                    *)
+                        echo "Invalid choice. Enter 1 or 2."
+                        ;;
+                esac
+            done
+        fi
+
+        if is_local_ollama_available; then
+            echo "Local Ollama is reachable; switching OpenCode to Ollama model." >&2
+            set_opencode_model_profile ollama
+        else
+            echo "Falling back to Neurodesk model (requires NEURODESK_API_KEY)." >&2
+            set_opencode_model_profile neurodesk
+        fi
+        return 0
+    fi
+
+    set_jetstream_gpt_oss_model_state activate
+    set_opencode_model_profile jetstream
+}
+
 # Check whether a local Ollama server appears reachable.
 is_local_ollama_available() {
     local ollama_host="${OLLAMA_HOST:-http://127.0.0.1:11434}"
@@ -173,7 +320,11 @@ ensure_opencode_model_profile() {
                 if [ "${requested_profile}" = "ollama" ] && ! is_local_ollama_available; then
                     echo "OPENCODE_MODEL_PROFILE=ollama requested, but local Ollama is not reachable at ${OLLAMA_HOST:-http://127.0.0.1:11434} yet." >&2
                 fi
-                set_opencode_model_profile "${requested_profile}"
+                if [ "${requested_profile}" = "jetstream" ]; then
+                    set_jetstream_profile
+                else
+                    set_opencode_model_profile "${requested_profile}"
+                fi
                 return 0
                 ;;
             *)
@@ -217,7 +368,7 @@ ensure_opencode_model_profile() {
             set_opencode_model_profile ollama
         else
             echo "NEURODESK_API_KEY is not set. Using Jetstream model for this session." >&2
-            set_opencode_model_profile jetstream
+            set_jetstream_profile
         fi
         return 0
     fi
@@ -256,7 +407,7 @@ ensure_opencode_model_profile() {
                 ;;
             2)
                 echo "Skipping key creation. Switching OpenCode to Jetstream model."
-                set_opencode_model_profile jetstream
+                set_jetstream_profile
                 return 0
                 ;;
             3)
