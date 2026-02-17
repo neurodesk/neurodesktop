@@ -1,41 +1,3 @@
-#========================================#
-# Builder stage: compile Guacamole server
-# Keeps build-essential and -dev packages out of the final image
-#========================================#
-FROM ubuntu:24.04 AS guacamole-builder
-
-ARG GUACAMOLE_VERSION="1.6.0"
-
-RUN apt-get update --yes \
-    && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
-        build-essential \
-        ca-certificates \
-        libcairo2-dev \
-        libjpeg-turbo8-dev \
-        libpng-dev \
-        libtool-bin \
-        uuid-dev \
-        freerdp2-dev \
-        libvncserver-dev \
-        libssl-dev \
-        libwebp-dev \
-        libssh2-1-dev \
-        libpango1.0-dev \
-        wget \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN wget -q "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/source/guacamole-server-${GUACAMOLE_VERSION}.tar.gz" -P /tmp \
-    && tar xf /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz -C /tmp \
-    && rm /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz \
-    && cd /tmp/guacamole-server-${GUACAMOLE_VERSION} \
-    && ./configure --with-init-dir=/etc/init.d \
-    && make -j"$(nproc)" \
-    && make install \
-    && ldconfig
-
-#========================================#
-# Main image
-#========================================#
 FROM quay.io/jupyter/base-notebook:2026-01-26
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
 
@@ -49,13 +11,22 @@ USER root
 
 
 # Install base image dependencies
-# Note: build-essential and -dev packages are not needed here; Guacamole server
-# is compiled in the guacamole-builder stage and copied as pre-built binaries.
-# Runtime libraries for guacd are listed explicitly below.
 RUN apt-get update --yes \
     && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
         software-properties-common \
         openjdk-21-jre-headless \
+        build-essential \
+        libcairo2-dev \
+        libjpeg-turbo8-dev \
+        libpng-dev \
+        libtool-bin \
+        uuid-dev \
+        freerdp2-dev \
+        libvncserver-dev \
+        libssl-dev \
+        libwebp-dev \
+        libssh2-1-dev \
+        libpango1.0-dev \
         tigervnc-common \
         tigervnc-standalone-server \
         tigervnc-tools \
@@ -69,12 +40,6 @@ RUN apt-get update --yes \
         gpg \
         gpg-agent \
         apt-transport-https \
-        libcairo2 \
-        libjpeg-turbo8 \
-        libpango-1.0-0 \
-        libssh2-1 \
-        libvncclient1 \
-        libwebp7 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # add a static strace executable to /opt which we can copy to containers for debugging:
@@ -107,12 +72,17 @@ RUN wget -q https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v${TOMCA
     && mkdir /usr/local/tomcat/webapps \
     && chmod +x /usr/local/tomcat/bin/*.sh
 
-# Install Apache Guacamole: copy pre-built server from builder stage, download WAR
-COPY --from=guacamole-builder /usr/local/sbin/guacd /usr/local/sbin/guacd
-COPY --from=guacamole-builder /usr/local/lib/libguac* /usr/local/lib/
-COPY --from=guacamole-builder /etc/init.d/guacd /etc/init.d/guacd
+# Install Apache Guacamole
 RUN wget -q "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/binary/guacamole-${GUACAMOLE_VERSION}.war" -O /usr/local/tomcat/webapps/ROOT.war \
-    && ldconfig
+    && wget -q "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/source/guacamole-server-${GUACAMOLE_VERSION}.tar.gz" -P /tmp \
+    && tar xvf /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz -C /tmp \
+    && rm /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz \
+    && cd /tmp/guacamole-server-${GUACAMOLE_VERSION} \
+    && ./configure --with-init-dir=/etc/init.d \
+    && make \
+    && make install \
+    && ldconfig \
+    && rm -r /tmp/guacamole-server-${GUACAMOLE_VERSION}
 
 # # Set home directory default acls
 # RUN chmod g+rwxs /home/${NB_USER}
@@ -155,10 +125,8 @@ RUN wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb 
 #     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Tools and Libs
-# Note: build-essential is needed here for pip packages that compile C extensions (psutil, traits, etc.)
 RUN apt-get update --yes \
     && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
-        build-essential \
         aria2 \
         bc \
         davfs2 \
