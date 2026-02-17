@@ -305,7 +305,7 @@ ReturnToService=2
 DefMemPerCPU=${DEF_MEM_PER_CPU}
 
 NodeName=${NODE_HOSTNAME} NodeAddr=${NODE_ADDR} CPUs=${NODE_CPUS} RealMemory=${NODE_MEMORY_MB} State=UNKNOWN
-PartitionName=${PARTITION_NAME} Nodes=${NODE_HOSTNAME} Default=YES MaxTime=INFINITE State=UP AllowAccounts=ALL
+PartitionName=${PARTITION_NAME} Nodes=${NODE_HOSTNAME} Default=YES MaxTime=INFINITE State=UP
 EOF
 
 if [ "${USE_CGROUP_MODE}" -eq 1 ]; then
