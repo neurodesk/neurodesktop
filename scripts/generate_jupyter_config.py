@@ -63,7 +63,7 @@ def generate_server_proxy_entries(webapps: Dict[str, Any]) -> str:
 
         # Main webapp entry
         # Note: icon_path only works when category is "Notebook" or "Console" (JupyterLab limitation)
-        category = config.get('category', 'Console')
+        category = config.get('category', 'Webapps')
         icon_config = config.get('icon', '/opt/neurodesk_brain_icon.svg')
 
         # If icon is a URL, download it locally (JupyterLab needs local file paths)

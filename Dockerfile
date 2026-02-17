@@ -312,6 +312,14 @@ RUN /opt/conda/bin/pip install \
     && /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
     && rm -rf /home/${NB_USER}/.cache
 
+# Build and install neurodesk-launcher JupyterLab extension
+COPY --chown=${NB_USER}:users extensions/neurodesk-launcher /tmp/neurodesk-launcher
+RUN cd /tmp/neurodesk-launcher \
+    && /opt/conda/bin/pip install . \
+    && rm -rf /tmp/neurodesk-launcher \
+    && /opt/conda/bin/jupyter labextension disable @jupyterhub/jupyter-server-proxy \
+    && rm -rf /home/${NB_USER}/.cache
+
 #========================================#
 # Configuration (as root user)
 #========================================#

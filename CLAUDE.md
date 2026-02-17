@@ -92,7 +92,6 @@ The startup sequence follows this order:
 - Apache Tomcat: Serves Guacamole web application
 - VNC: Desktop access via Guacamole
 - SSH: Optional SSH server proxy
-- Optional: Ollama for local LLMs (if `START_LOCAL_LLMS=1`)
 
 ### Directory Structure
 

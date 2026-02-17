@@ -13,7 +13,8 @@ c.ServerProxy.servers = {
       'launcher_entry': {
         'path_info' : 'neurodesktop',
         'title': 'Neurodesktop',
-        'icon_path': '/opt/neurodesk_brain_logo.svg'
+        'icon_path': '/opt/neurodesk_brain_logo.svg',
+        'category': 'Neurodesk'
       }
     },
   'vscode': {
@@ -33,7 +34,7 @@ c.ServerProxy.servers = {
       'path_info': 'vscode',
       'title': 'VS Code',
       'icon_path': '/opt/vscode_logo.svg',
-      'category': 'Notebook'
+      'category': 'Neurodesk'
     }
   }# {{WEBAPP_SERVERS}}
 }

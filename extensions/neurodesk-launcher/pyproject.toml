@@ -1,0 +1,46 @@
+[build-system]
+requires = [
+    "hatchling>=1.18.0",
+    "hatch-jupyter-builder>=0.8.3",
+    "jupyterlab>=4.0.0,<5.0.0a0",
+]
+build-backend = "hatchling.build"
+
+[project]
+name = "neurodesk-launcher"
+version = "0.1.0"
+description = "JupyterLab extension for Neurodesk launcher with custom category icons"
+license = {text = "BSD-3-Clause"}
+requires-python = ">=3.9"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "neurodesk_launcher/**",
+    "package.json",
+    "tsconfig.json",
+    "src/**",
+    "style/**",
+]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"neurodesk_launcher/labextension" = "share/jupyter/labextensions/neurodesk-launcher"
+
+[tool.hatch.build.hooks.jupyter-builder]
+dependencies = ["hatch-jupyter-builder>=0.8.3"]
+build-function = "hatch_jupyter_builder.npm_builder"
+ensured-targets = [
+    "neurodesk_launcher/labextension/static/style.js",
+    "neurodesk_launcher/labextension/package.json",
+]
+
+[tool.hatch.build.hooks.jupyter-builder.build-kwargs]
+build_cmd = "build:prod"
+npm = ["jlpm"]
+source_dir = "src"
+build_dir = "neurodesk_launcher/labextension"
+
+[tool.hatch.build.hooks.jupyter-builder.editable-build-kwargs]
+build_cmd = "build"
+npm = ["jlpm"]
+source_dir = "src"
+build_dir = "neurodesk_launcher/labextension"
