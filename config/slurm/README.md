@@ -6,6 +6,10 @@ Neurodesktop starts a local Slurm controller/worker inside the container with a 
 - Node: current container hostname
 - Limits: detected from container cgroups (`cpu.max`, `memory.max`), with optional Slurm cgroup enforcement when cgroup mode is enabled
 
+The local queue is configured without SlurmDBD accounting (`AccountingStorageType=accounting_storage/none`)
+and account enforcement is explicitly disabled (`AccountingStorageEnforce=none`, partition `AllowAccounts=ALL`).
+This avoids jobs getting stuck in `PD (InvalidAccount)` when no accounting backend exists.
+
 This means `sbatch`/`srun` jobs submitted inside the container stay inside the container and cannot exceed the configured node CPU/memory limits.
 
 Optional environment variables:
@@ -59,3 +63,6 @@ If you changed the partition name, override on submit:
 ```bash
 sbatch -p "${NEURODESKTOP_SLURM_PARTITION}" /opt/neurodesktop/slurm_submit_smoke.sbatch
 ```
+
+To prevent inherited host-cluster defaults from causing account errors, Neurodesktop clears `SBATCH_ACCOUNT`
+and `SLURM_ACCOUNT` in `/opt/neurodesktop/environment_variables.sh`.

@@ -281,6 +281,7 @@ ProctrackType=${PROCTRACK_TYPE}
 TaskPlugin=${TASK_PLUGIN}
 JobAcctGatherType=${JOBACCT_GATHER_TYPE}
 AccountingStorageType=accounting_storage/none
+AccountingStorageEnforce=none
 SelectType=select/cons_tres
 SelectTypeParameters=CR_Core_Memory
 SchedulerType=sched/backfill
@@ -305,7 +306,7 @@ ReturnToService=2
 DefMemPerCPU=${DEF_MEM_PER_CPU}
 
 NodeName=${NODE_HOSTNAME} NodeAddr=${NODE_ADDR} CPUs=${NODE_CPUS} RealMemory=${NODE_MEMORY_MB} State=UNKNOWN
-PartitionName=${PARTITION_NAME} Nodes=${NODE_HOSTNAME} Default=YES MaxTime=INFINITE State=UP
+PartitionName=${PARTITION_NAME} Nodes=${NODE_HOSTNAME} Default=YES MaxTime=INFINITE State=UP AllowAccounts=ALL
 EOF
 
 if [ "${USE_CGROUP_MODE}" -eq 1 ]; then

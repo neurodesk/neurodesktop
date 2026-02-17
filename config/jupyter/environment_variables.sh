@@ -98,6 +98,10 @@ export SLURM_CONF=/etc/slurm/slurm.conf
 if [[ -z "${NEURODESKTOP_SLURM_PARTITION}" ]]; then
         export NEURODESKTOP_SLURM_PARTITION=neurodesktop
 fi
+# In-container Slurm does not use slurmdbd accounts. Clear inherited account defaults from host environments
+# so sbatch jobs do not pend with Reason=InvalidAccount.
+unset SBATCH_ACCOUNT
+unset SLURM_ACCOUNT
 
 # This is needed to make containers writable as a workaround for macos with Apple Silicon. We need to do it here for the desktop
 # and in the dockerfile for the jupyter notebook

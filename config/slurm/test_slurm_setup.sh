@@ -69,8 +69,11 @@ if [ "${1:-}" = "--bootstrap" ]; then
 fi
 
 require_cmd munge
+require_cmd sbatch
+require_cmd scancel
 require_cmd scontrol
 require_cmd sinfo
+require_cmd squeue
 require_cmd srun
 
 if [ "${CMD_FAILURES}" -gt 0 ]; then
@@ -125,6 +128,42 @@ if SRUN_OUTPUT="$(srun -I20 -N1 -n1 -p "${PARTITION_NAME}" /bin/hostname 2>&1)";
     fi
 else
     fail "srun smoke test failed: ${SRUN_OUTPUT}"
+fi
+
+SBATCH_CHECK_NAME="nd-account-check-$$"
+if SBATCH_SUBMIT_OUTPUT="$(sbatch --parsable -p "${PARTITION_NAME}" --job-name="${SBATCH_CHECK_NAME}" --time=00:01:00 --ntasks=1 --cpus-per-task=1 --mem=64M --wrap '/bin/true' 2>&1)"; then
+    SBATCH_JOB_ID="${SBATCH_SUBMIT_OUTPUT%%;*}"
+    if [[ "${SBATCH_JOB_ID}" =~ ^[0-9]+$ ]]; then
+        ACCOUNT_INVALID=0
+        for _i in $(seq 1 10); do
+            JOB_STATUS_LINE="$(squeue -h -j "${SBATCH_JOB_ID}" -o '%T|%r' 2>/dev/null || true)"
+            if [ -z "${JOB_STATUS_LINE}" ]; then
+                break
+            fi
+
+            JOB_STATE="${JOB_STATUS_LINE%%|*}"
+            JOB_REASON="${JOB_STATUS_LINE#*|}"
+            if [ "${JOB_REASON}" = "InvalidAccount" ]; then
+                ACCOUNT_INVALID=1
+                break
+            fi
+            sleep 1
+        done
+
+        if [ "${ACCOUNT_INVALID}" -eq 1 ]; then
+            fail "sbatch account check job ${SBATCH_JOB_ID} is pending with Reason=InvalidAccount."
+            scancel "${SBATCH_JOB_ID}" >/dev/null 2>&1 || true
+        else
+            pass "sbatch account check accepted without InvalidAccount (job ${SBATCH_JOB_ID})."
+            if squeue -h -j "${SBATCH_JOB_ID}" >/dev/null 2>&1; then
+                scancel "${SBATCH_JOB_ID}" >/dev/null 2>&1 || true
+            fi
+        fi
+    else
+        fail "sbatch account check returned an unexpected job id: ${SBATCH_SUBMIT_OUTPUT}"
+    fi
+else
+    fail "sbatch account check failed: ${SBATCH_SUBMIT_OUTPUT}"
 fi
 
 if [ "${FAILURES}" -eq 0 ]; then

@@ -249,11 +249,6 @@ RUN npm install -g @openai/codex \
     && rm -rf /home/${NB_USER}/.cache \
     && rm -rf /home/${NB_USER}/.local
 
-# Install Goose CLI (Block's AI coding agent)
-# RUN curl -fsSL https://github.com/block/goose/releases/latest/download/download_cli.sh | CONFIGURE=false bash \
-#     && mv /home/jovyan/.local/bin/goose /usr/bin/goose \
-#     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
-
 # Install OpenCode CLI (open source AI coding agent)
 RUN curl -fsSL https://opencode.ai/install | bash \
     && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
@@ -461,7 +456,6 @@ RUN mkdir -p /opt/jovyan_defaults/.itksnap.org/ITK-SNAP \
     && mkdir -p /opt/jovyan_defaults/.config/lxpanel/LXDE/panels \
     && mkdir -p /opt/jovyan_defaults/.local/share/code-server/User \
     && mkdir -p /opt/jovyan_defaults/.config/libfm \
-    && mkdir -p /opt/jovyan_defaults/.config/goose \
     && mkdir -p /opt/jovyan_defaults/.config/opencode \
     && mkdir -p /opt/jovyan_defaults/.local/bin \
     && mkdir -p /opt/jovyan_defaults/.vnc \
@@ -479,7 +473,6 @@ COPY config/lxde/libfm.conf /opt/jovyan_defaults/.config/libfm/libfm.conf
 COPY config/lxde/xstartup /opt/jovyan_defaults/.vnc/xstartup
 COPY config/conda/conda-readme.md /opt/jovyan_defaults/conda-readme.md
 COPY config/agents/claude_settings.local.json /opt/jovyan_defaults/.claude/settings.local.json
-COPY config/agents/goose_config.yaml /opt/jovyan_defaults/.config/goose/config.yaml
 COPY config/agents/opencode_config.json /opt/jovyan_defaults/.config/opencode/opencode.json
 COPY config/agents/codex_config.json /opt/jovyan_defaults/.codex/config.json
 COPY config/ssh/sshd_config /opt/jovyan_defaults/.ssh/sshd_config
@@ -507,10 +500,9 @@ COPY config/agents/AGENT.md /opt/AGENT.md
 
 # Add AI agent wrapper scripts to /usr/local/sbin/
 COPY --chown=root:root config/agents/claude /usr/local/sbin/claude
-COPY --chown=root:root config/agents/goose /usr/local/sbin/goose
 COPY --chown=root:root config/agents/opencode /usr/local/sbin/opencode
 COPY --chown=root:root config/agents/codex /usr/local/sbin/codex
-RUN chmod +x /usr/local/sbin/claude /usr/local/sbin/goose /usr/local/sbin/opencode /usr/local/sbin/codex
+RUN chmod +x /usr/local/sbin/claude /usr/local/sbin/opencode /usr/local/sbin/codex
 
 #========================================#
 # Finalise build
