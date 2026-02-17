@@ -390,6 +390,7 @@ if [ "$EUID" -eq 0 ]; then
     fi
 elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
     if ! sudo -n env \
+        NB_USER="${NB_USER:-jovyan}" \
         NEURODESKTOP_SLURM_ENABLE="${NEURODESKTOP_SLURM_ENABLE:-1}" \
         NEURODESKTOP_SLURM_MEMORY_RESERVE_MB="${NEURODESKTOP_SLURM_MEMORY_RESERVE_MB:-256}" \
         NEURODESKTOP_SLURM_PARTITION="${NEURODESKTOP_SLURM_PARTITION:-neurodesktop}" \

@@ -98,8 +98,8 @@ export SLURM_CONF=/etc/slurm/slurm.conf
 if [[ -z "${NEURODESKTOP_SLURM_PARTITION}" ]]; then
         export NEURODESKTOP_SLURM_PARTITION=neurodesktop
 fi
-# In-container Slurm does not use slurmdbd accounts. Clear inherited account defaults from host environments
-# so sbatch jobs do not pend with Reason=InvalidAccount.
+# Clear inherited account defaults from host environments so sbatch jobs inside the container
+# use the local slurmdbd's "default" account rather than a host-cluster account name.
 unset SBATCH_ACCOUNT
 unset SLURM_ACCOUNT
 

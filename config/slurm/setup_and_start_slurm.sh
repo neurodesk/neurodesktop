@@ -196,6 +196,155 @@ if [ -S /run/munge/munge.socket.2 ]; then
     chmod 0777 /run/munge/munge.socket.2
 fi
 
+# ── MariaDB + slurmdbd functions ──────────────────────────────────────
+# Provides real accounting so SLURM 23.11+ does not reject jobs with
+# Reason=InvalidAccount when accounting_storage/none is used.
+
+start_mariadb() {
+    if pgrep -x mariadbd >/dev/null 2>&1 || pgrep -x mysqld >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Initialise data directory if empty
+    if [ ! -d /var/lib/mysql/mysql ]; then
+        mysql_install_db --user=mysql --datadir=/var/lib/mysql >/dev/null 2>&1 || {
+            echo "[WARN] mysql_install_db failed."
+            return 1
+        }
+    fi
+
+    # Socket-only (no TCP) — no port exposure
+    mkdir -p /run/mysqld
+    chown mysql:mysql /run/mysqld
+    /usr/sbin/mariadbd --user=mysql --datadir=/var/lib/mysql \
+        --socket=/run/mysqld/mysqld.sock \
+        --skip-networking \
+        --pid-file=/run/mysqld/mysqld.pid &
+
+    # Wait for socket (up to 15 seconds)
+    local _i
+    for _i in $(seq 1 30); do
+        if [ -S /run/mysqld/mysqld.sock ]; then
+            return 0
+        fi
+        sleep 0.5
+    done
+    echo "[WARN] MariaDB socket did not appear within 15 seconds."
+    return 1
+}
+
+setup_slurm_database() {
+    if ! [ -S /run/mysqld/mysqld.sock ]; then
+        return 1
+    fi
+
+    mysql --socket=/run/mysqld/mysqld.sock -u root <<'EOSQL'
+CREATE DATABASE IF NOT EXISTS slurm_acct_db;
+CREATE USER IF NOT EXISTS 'slurm'@'localhost';
+GRANT ALL ON slurm_acct_db.* TO 'slurm'@'localhost';
+FLUSH PRIVILEGES;
+EOSQL
+}
+
+generate_slurmdbd_conf() {
+    cat > "${SLURM_ETC_DIR}/slurmdbd.conf" <<EOF
+AuthType=auth/munge
+DbdHost=localhost
+StorageType=accounting_storage/mysql
+StorageLoc=slurm_acct_db
+StorageHost=localhost
+StorageUser=slurm
+LogFile=/var/log/slurm/slurmdbd.log
+PidFile=/run/slurm/slurmdbd.pid
+SlurmUser=slurm
+EOF
+    chown slurm:slurm "${SLURM_ETC_DIR}/slurmdbd.conf"
+    chmod 0600 "${SLURM_ETC_DIR}/slurmdbd.conf"
+    touch /var/log/slurm/slurmdbd.log
+    chown slurm:slurm /var/log/slurm/slurmdbd.log
+}
+
+start_slurmdbd() {
+    if pgrep -x slurmdbd >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Clear log so the "started" grep below only matches this invocation
+    : > /var/log/slurm/slurmdbd.log
+
+    /usr/sbin/slurmdbd -D &
+    local dbd_pid=$!
+
+    # Wait for slurmdbd to finish initialising (up to 30 seconds).
+    # We cannot use sacctmgr here because slurm.conf (which sacctmgr reads
+    # to find AccountingStorageHost) has not been generated yet.
+    local _i
+    for _i in $(seq 1 60); do
+        if grep -q "slurmdbd version.*started" /var/log/slurm/slurmdbd.log 2>/dev/null; then
+            return 0
+        fi
+        # Check the daemon is still alive
+        if ! kill -0 "${dbd_pid}" 2>/dev/null; then
+            echo "[WARN] slurmdbd exited prematurely."
+            tail -n 20 /var/log/slurm/slurmdbd.log 2>/dev/null || true
+            return 1
+        fi
+        sleep 0.5
+    done
+    echo "[WARN] slurmdbd did not become ready within 30 seconds."
+    tail -n 20 /var/log/slurm/slurmdbd.log 2>/dev/null || true
+    return 1
+}
+
+setup_slurm_accounts() {
+    local nb_user="${NB_USER:-jovyan}"
+
+    # Add cluster (idempotent — already exists is fine)
+    sacctmgr --immediate add cluster neurodesktop >/dev/null 2>&1 || true
+
+    # Add default account
+    sacctmgr --immediate add account default \
+        Description="Default account" Organization="neurodesktop" >/dev/null 2>&1 || true
+
+    # Add the notebook user
+    sacctmgr --immediate add user "${nb_user}" Account=default >/dev/null 2>&1 || true
+
+    # Add root user
+    sacctmgr --immediate add user root Account=default >/dev/null 2>&1 || true
+}
+
+# Try to bring up the full accounting stack.  On any failure, fall back to
+# accounting_storage/none (the old behaviour, which may still trigger
+# InvalidAccount on SLURM 23.11+, but at least the container starts).
+USE_SLURMDBD=0
+if command -v slurmdbd >/dev/null 2>&1 && command -v mariadbd >/dev/null 2>&1; then
+    if start_mariadb; then
+        if setup_slurm_database; then
+            generate_slurmdbd_conf
+            if start_slurmdbd; then
+                USE_SLURMDBD=1
+                echo "[INFO] slurmdbd is running with MariaDB accounting backend."
+            else
+                echo "[WARN] slurmdbd failed to start. Falling back to accounting_storage/none."
+            fi
+        else
+            echo "[WARN] Failed to set up Slurm accounting database. Falling back to accounting_storage/none."
+        fi
+    else
+        echo "[WARN] MariaDB failed to start. Falling back to accounting_storage/none."
+    fi
+else
+    echo "[INFO] slurmdbd or mariadbd not found. Using accounting_storage/none."
+fi
+
+if [ "${USE_SLURMDBD}" -eq 1 ]; then
+    ACCOUNTING_STORAGE_TYPE="accounting_storage/slurmdbd"
+    ACCOUNTING_STORAGE_HOST="AccountingStorageHost=localhost"
+else
+    ACCOUNTING_STORAGE_TYPE="accounting_storage/none"
+    ACCOUNTING_STORAGE_HOST=""
+fi
+
 NODE_HOSTNAME="$(hostname -s 2>/dev/null || hostname)"
 NODE_HOSTNAME_FULL="$(hostname 2>/dev/null || echo "${NODE_HOSTNAME}")"
 NODE_ADDR="$(detect_node_addr "${NODE_HOSTNAME}")"
@@ -280,7 +429,8 @@ MpiDefault=none
 ProctrackType=${PROCTRACK_TYPE}
 TaskPlugin=${TASK_PLUGIN}
 JobAcctGatherType=${JOBACCT_GATHER_TYPE}
-AccountingStorageType=accounting_storage/none
+AccountingStorageType=${ACCOUNTING_STORAGE_TYPE}
+${ACCOUNTING_STORAGE_HOST}
 SelectType=select/cons_tres
 SelectTypeParameters=CR_Core_Memory
 SchedulerType=sched/backfill
@@ -579,6 +729,15 @@ if ! wait_for_healthy_node 10; then
         scontrol show node "${NODE_HOSTNAME}" || true
         tail -n 120 /var/log/slurm/slurmd.log || true
         exit 1
+    fi
+fi
+
+# Set up accounting associations now that slurmctld is running
+if [ "${USE_SLURMDBD}" -eq 1 ]; then
+    if setup_slurm_accounts; then
+        echo "[INFO] Slurm accounting associations configured (cluster=neurodesktop, account=default, users=${NB_USER:-jovyan},root)."
+    else
+        echo "[WARN] Failed to configure Slurm accounting associations."
     fi
 fi
 
