@@ -40,13 +40,14 @@ This means `sbatch`/`srun` jobs submitted inside the container stay inside the c
 - `NEURODESKTOP_SLURM_CGROUP_MOUNTPOINT=/sys/fs/cgroup` to override the cgroup mountpoint path
 - `NEURODESKTOP_SLURM_LEGACY_CGROUP_PLUGIN=cgroup/v1` to override legacy compatibility fallback plugin
 - `NEURODESKTOP_SLURM_LEGACY_CGROUP_MOUNTPOINT=/tmp/cgroup` to override legacy compatibility fallback mountpoint
+- `NEURODESKTOP_SLURM_ENABLE_TASK_AFFINITY=1` to opt in to `task/affinity` (default is disabled for container compatibility)
 
 ### Cgroup mode
 
 `setup_and_start_slurm.sh` defaults to non-cgroup mode in `NEURODESKTOP_SLURM_USE_CGROUP=auto`
 for container compatibility. This sets:
 - `ProctrackType=proctrack/linuxproc`
-- `TaskPlugin=task/affinity`
+- `TaskPlugin=task/none`
 - `JobAcctGatherType=jobacct_gather/none`
 - compatibility `cgroup.conf` (`CgroupPlugin=cgroup/v1`, `CgroupMountpoint=/tmp/cgroup`)
 

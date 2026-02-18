@@ -135,15 +135,19 @@ detect_memory_limit_mb() {
 }
 
 can_set_cpu_affinity() {
-    # Check if sched_setaffinity is permitted (requires SYS_NICE or equivalent).
-    # In restricted containers (e.g. k3s pods) this call is blocked, which causes
-    # task/affinity to fail at job launch time and drain the node.
+    # Best-effort check for sched_setaffinity support.
+    # This does not guarantee every Slurm launch path can set affinity, so affinity
+    # stays opt-in via NEURODESKTOP_SLURM_ENABLE_TASK_AFFINITY=1.
     if command -v taskset >/dev/null 2>&1; then
-        taskset -p $$ >/dev/null 2>&1
+        local mask
+        mask="$(taskset -p "$$" 2>/dev/null | awk -F': ' 'NR==1 {print $2}')"
+        if [ -z "${mask}" ]; then
+            return 1
+        fi
+        taskset -p "${mask}" "$$" >/dev/null 2>&1
         return $?
     fi
-    # If taskset is missing, assume affinity works (privileged containers usually have it).
-    return 0
+    return 1
 }
 
 detect_node_addr() {
@@ -396,11 +400,15 @@ else
     fi
 fi
 
-if can_set_cpu_affinity; then
+if is_false "${NEURODESKTOP_SLURM_ENABLE_TASK_AFFINITY:-0}"; then
+    AFFINITY_TASK_PLUGIN="task/none"
+    echo "[INFO] CPU affinity task plugin disabled by default; using TaskPlugin=task/none."
+elif can_set_cpu_affinity; then
     AFFINITY_TASK_PLUGIN="task/affinity"
+    echo "[INFO] CPU affinity explicitly enabled; using TaskPlugin=task/affinity."
 else
     AFFINITY_TASK_PLUGIN="task/none"
-    echo "[INFO] CPU affinity not available (restricted container); using TaskPlugin=task/none."
+    echo "[WARN] CPU affinity requested but unavailable; using TaskPlugin=task/none."
 fi
 
 if [ "${USE_CGROUP_MODE}" -eq 1 ]; then
