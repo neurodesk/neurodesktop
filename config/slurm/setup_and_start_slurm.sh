@@ -134,6 +134,18 @@ detect_memory_limit_mb() {
     echo "${mem_mb}"
 }
 
+can_set_cpu_affinity() {
+    # Check if sched_setaffinity is permitted (requires SYS_NICE or equivalent).
+    # In restricted containers (e.g. k3s pods) this call is blocked, which causes
+    # task/affinity to fail at job launch time and drain the node.
+    if command -v taskset >/dev/null 2>&1; then
+        taskset -p $$ >/dev/null 2>&1
+        return $?
+    fi
+    # If taskset is missing, assume affinity works (privileged containers usually have it).
+    return 0
+}
+
 detect_node_addr() {
     local host ip
     host="$1"
@@ -384,10 +396,21 @@ else
     fi
 fi
 
+if can_set_cpu_affinity; then
+    AFFINITY_TASK_PLUGIN="task/affinity"
+else
+    AFFINITY_TASK_PLUGIN="task/none"
+    echo "[INFO] CPU affinity not available (restricted container); using TaskPlugin=task/none."
+fi
+
 if [ "${USE_CGROUP_MODE}" -eq 1 ]; then
     mkdir -p "${CGROUP_MOUNTPOINT}" >/dev/null 2>&1 || true
     PROCTRACK_TYPE="proctrack/cgroup"
-    TASK_PLUGIN="task/cgroup,task/affinity"
+    if [ "${AFFINITY_TASK_PLUGIN}" = "task/affinity" ]; then
+        TASK_PLUGIN="task/cgroup,task/affinity"
+    else
+        TASK_PLUGIN="task/cgroup"
+    fi
     JOBACCT_GATHER_TYPE="jobacct_gather/cgroup"
     CGROUP_CONSTRAIN_CORES="yes"
     CGROUP_CONSTRAIN_RAM="yes"
@@ -395,7 +418,7 @@ if [ "${USE_CGROUP_MODE}" -eq 1 ]; then
     echo "[INFO] Slurm cgroup mode enabled (plugin: ${CGROUP_PLUGIN}, mountpoint: ${CGROUP_MOUNTPOINT})."
 else
     PROCTRACK_TYPE="proctrack/linuxproc"
-    TASK_PLUGIN="task/affinity"
+    TASK_PLUGIN="${AFFINITY_TASK_PLUGIN}"
     JOBACCT_GATHER_TYPE="jobacct_gather/none"
     CGROUP_CONSTRAIN_CORES="no"
     CGROUP_CONSTRAIN_RAM="no"
@@ -518,7 +541,7 @@ switch_to_non_cgroup_mode() {
     CGROUP_DISABLE_REASON="${reason}"
     SLURMD_FALLBACK_REASON="${reason}"
     PROCTRACK_TYPE="proctrack/linuxproc"
-    TASK_PLUGIN="task/affinity"
+    TASK_PLUGIN="${AFFINITY_TASK_PLUGIN}"
     JOBACCT_GATHER_TYPE="jobacct_gather/none"
     CGROUP_CONSTRAIN_CORES="no"
     CGROUP_CONSTRAIN_RAM="no"
@@ -622,7 +645,7 @@ node_has_bad_state() {
             }
         }'
     )"
-    [[ -z "${state}" || "${state}" == *UNKNOWN* || "${state}" == *NOT_RESPONDING* ]]
+    [[ -z "${state}" || "${state}" == *UNKNOWN* || "${state}" == *NOT_RESPONDING* || "${state}" == *DRAIN* || "${state}" == *DOWN* || "${state}" == *FAIL* ]]
 }
 
 start_slurmctld() {
