@@ -22,6 +22,9 @@ OLLAMA_STATUS="not checked"
 NEURODESK_RUNNING=0
 NEURODESK_REQUIRES_KEY=0
 NEURODESK_STATUS="not checked"
+OLLAMA_MODEL_CONTEXTS_JSON="{}"
+OLLAMA_DEFAULT_CONTEXT_LIMIT=32768
+OLLAMA_DEFAULT_OUTPUT_LIMIT=8192
 
 JETSTREAM_MODELS=()
 OLLAMA_MODELS=()
@@ -154,6 +157,7 @@ check_local_ollama_models() {
 
     OLLAMA_RUNNING=0
     OLLAMA_MODELS=()
+    OLLAMA_MODEL_CONTEXTS_JSON="{}"
 
     if ! command -v curl >/dev/null 2>&1; then
         OLLAMA_STATUS="curl not found"
@@ -192,6 +196,93 @@ for model in payload.get("models", []):
         print(name)
 PY
             )
+
+            if [ "${#OLLAMA_MODELS[@]}" -gt 0 ]; then
+                OLLAMA_MODEL_CONTEXTS_JSON=$(python3 - "${OLLAMA_HOST_CLEAN}" "${OLLAMA_DEFAULT_CONTEXT_LIMIT}" "${OLLAMA_MODELS[@]}" <<'PY'
+import json
+import re
+import sys
+from urllib import error, request
+
+base_url = sys.argv[1].rstrip("/")
+fallback_context = int(sys.argv[2])
+model_ids = sys.argv[3:]
+
+def positive_int(value):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+def extract_context(payload):
+    if not isinstance(payload, dict):
+        return None
+
+    candidates = []
+
+    for field in ("context_length", "num_ctx", "max_context_length", "max_sequence_length"):
+        candidates.append(payload.get(field))
+
+    details = payload.get("details")
+    if isinstance(details, dict):
+        for field in ("context_length", "num_ctx", "max_context_length", "max_sequence_length"):
+            candidates.append(details.get(field))
+
+    model_info = payload.get("model_info")
+    if isinstance(model_info, dict):
+        for key, value in model_info.items():
+            if key in ("context_length", "num_ctx", "max_context_length", "max_sequence_length"):
+                candidates.append(value)
+                continue
+            if isinstance(key, str) and key.endswith(".context_length"):
+                candidates.append(value)
+
+    for raw in (payload.get("parameters"), payload.get("modelfile")):
+        if not isinstance(raw, str):
+            continue
+        match = re.search(r"(?im)^\\s*(?:parameter\\s+)?(?:num_ctx|context_length)\\s+([0-9]+)\\s*$", raw)
+        if match:
+            candidates.append(match.group(1))
+
+    for value in candidates:
+        parsed = positive_int(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+def fetch_show_payload(model_id):
+    endpoint = f"{base_url}/api/show"
+    body = json.dumps({"name": model_id}).encode("utf-8")
+    req = request.Request(endpoint, data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
+    with request.urlopen(req, timeout=6) as resp:
+        if resp.status != 200:
+            return None
+        data = resp.read()
+    return json.loads(data.decode("utf-8"))
+
+contexts = {}
+for model_id in model_ids:
+    if not isinstance(model_id, str) or not model_id:
+        continue
+    context_limit = None
+    try:
+        show_payload = fetch_show_payload(model_id)
+        context_limit = extract_context(show_payload)
+    except (error.URLError, TimeoutError, ValueError, json.JSONDecodeError):
+        context_limit = None
+
+    parsed_context = positive_int(context_limit)
+    if parsed_context is None:
+        parsed_context = fallback_context
+
+    contexts[model_id] = parsed_context
+
+print(json.dumps(contexts))
+PY
+                )
+            fi
         fi
 
         if [ "${#OLLAMA_MODELS[@]}" -gt 0 ]; then
@@ -339,6 +430,7 @@ update_opencode_config() {
     local selected_model="${1:-}"
     local jetstream_models_json
     local ollama_models_json
+    local ollama_model_contexts_json
     local neurodesk_models_json
 
     ensure_opencode_config_file
@@ -353,10 +445,14 @@ update_opencode_config() {
 
     jetstream_models_json=$(json_array_from_args "${JETSTREAM_MODELS[@]}")
     ollama_models_json=$(json_array_from_args "${OLLAMA_MODELS[@]}")
+    ollama_model_contexts_json="${OLLAMA_MODEL_CONTEXTS_JSON:-{}}"
     neurodesk_models_json=$(json_array_from_args "${NEURODESK_MODELS[@]}")
 
     JETSTREAM_MODELS_JSON="${jetstream_models_json}" \
     OLLAMA_MODELS_JSON="${ollama_models_json}" \
+    OLLAMA_MODEL_CONTEXTS_JSON="${ollama_model_contexts_json}" \
+    OLLAMA_DEFAULT_CONTEXT_LIMIT="${OLLAMA_DEFAULT_CONTEXT_LIMIT}" \
+    OLLAMA_DEFAULT_OUTPUT_LIMIT="${OLLAMA_DEFAULT_OUTPUT_LIMIT}" \
     NEURODESK_MODELS_JSON="${neurodesk_models_json}" \
     OLLAMA_BASE_URL="${OLLAMA_HOST_CLEAN}/v1" \
     JETSTREAM_BASE_URL="${JETSTREAM_BASE_URL}" \
@@ -385,12 +481,42 @@ default_providers = default_cfg.get("provider")
 if not isinstance(default_providers, dict):
     default_providers = {}
 
-jetstream_models = json.loads(os.environ.get("JETSTREAM_MODELS_JSON", "[]"))
-ollama_models = json.loads(os.environ.get("OLLAMA_MODELS_JSON", "[]"))
-neurodesk_models = json.loads(os.environ.get("NEURODESK_MODELS_JSON", "[]"))
+def load_json_env(name, default):
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return copy.deepcopy(default)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Recover from accidental concatenated payloads (e.g. "<json><json>" or trailing junk).
+        try:
+            parsed, _ = json.JSONDecoder().raw_decode(raw.lstrip())
+            return parsed
+        except json.JSONDecodeError:
+            return copy.deepcopy(default)
+
+jetstream_models = load_json_env("JETSTREAM_MODELS_JSON", [])
+ollama_models = load_json_env("OLLAMA_MODELS_JSON", [])
+ollama_model_contexts = load_json_env("OLLAMA_MODEL_CONTEXTS_JSON", {})
+neurodesk_models = load_json_env("NEURODESK_MODELS_JSON", [])
 ollama_base_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1")
 jetstream_base_url = os.environ.get("JETSTREAM_BASE_URL", "https://llm.jetstream-cloud.org/v1")
 neurodesk_base_url = os.environ.get("NEURODESK_BASE_URL", "https://llm.neurodesk.org/v1")
+ollama_default_context_limit = os.environ.get("OLLAMA_DEFAULT_CONTEXT_LIMIT", "16384")
+ollama_default_output_limit = os.environ.get("OLLAMA_DEFAULT_OUTPUT_LIMIT", "8192")
+
+if not isinstance(ollama_model_contexts, dict):
+    ollama_model_contexts = {}
+
+def positive_int(value):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+OLLAMA_DEFAULT_CONTEXT_LIMIT = positive_int(ollama_default_context_limit) or 16384
+OLLAMA_DEFAULT_OUTPUT_LIMIT = positive_int(ollama_default_output_limit) or 8192
 
 fallbacks = {
     "neurodesk": {
@@ -476,6 +602,28 @@ def apply_models(provider_key: str, model_ids):
                 model_cfg = {"name": model_id}
 
         model_cfg.setdefault("name", model_id)
+
+        if provider_key == "ollama":
+            limit_cfg = model_cfg.get("limit")
+            if not isinstance(limit_cfg, dict):
+                limit_cfg = {}
+
+            context_limit = positive_int(limit_cfg.get("context"))
+            if context_limit is None:
+                context_limit = positive_int(ollama_model_contexts.get(model_id))
+            if context_limit is None:
+                context_limit = OLLAMA_DEFAULT_CONTEXT_LIMIT
+
+            output_limit = positive_int(limit_cfg.get("output"))
+            if output_limit is None:
+                output_limit = OLLAMA_DEFAULT_OUTPUT_LIMIT
+            if output_limit > context_limit:
+                output_limit = context_limit
+
+            limit_cfg["context"] = context_limit
+            limit_cfg["output"] = output_limit
+            model_cfg["limit"] = limit_cfg
+
         updated_models[model_id] = model_cfg
 
     provider_cfg["models"] = updated_models
