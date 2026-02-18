@@ -16,7 +16,6 @@ interface ILauncherEntry {
   title: string;
   path_info: string;
   category: string;
-  icon_url?: string;
 }
 
 interface IServerProcess {
@@ -152,14 +151,17 @@ const plugin: JupyterFrontEndPlugin<void> = {
       return;
     }
 
-    // Fetch the Neurodesk icon for use as category header icon
+    // Fetch the Neurodesk icon for use as category header icon.
+    // Construct URL directly (like infoUrl) to avoid base-path issues on JupyterHub.
     const ndProcess = (data.server_processes || []).find(
       sp => sp.name === 'neurodesktop'
     );
-    if (ndProcess?.launcher_entry.icon_url) {
+    if (ndProcess) {
       const iconUrl = URLExt.join(
         settings.baseUrl,
-        ndProcess.launcher_entry.icon_url
+        'server-proxy',
+        'icon',
+        ndProcess.name
       );
       neuroIconSvg = await fetchSvgText(iconUrl, settings);
     }
@@ -174,17 +176,21 @@ const plugin: JupyterFrontEndPlugin<void> = {
       const pathInfo = entry.path_info || name;
       const url = URLExt.join(settings.baseUrl, pathInfo) + '/';
 
-      // Fetch SVG icon
+      // Fetch SVG icon via the server-proxy icon endpoint.
+      // Construct URL directly (like infoUrl) to avoid base-path issues on JupyterHub.
       let icon: LabIcon | undefined;
-      if (entry.icon_url) {
-        const iconFullUrl = URLExt.join(settings.baseUrl, entry.icon_url);
-        const svgStr = await fetchSvgText(iconFullUrl, settings);
-        if (svgStr) {
-          icon = new LabIcon({
-            name: `neurodesk-launcher:${name}`,
-            svgstr: svgStr
-          });
-        }
+      const iconFullUrl = URLExt.join(
+        settings.baseUrl,
+        'server-proxy',
+        'icon',
+        name
+      );
+      const svgStr = await fetchSvgText(iconFullUrl, settings);
+      if (svgStr) {
+        icon = new LabIcon({
+          name: `neurodesk-launcher:${name}`,
+          svgstr: svgStr
+        });
       }
 
       // Register a unique command for this server
