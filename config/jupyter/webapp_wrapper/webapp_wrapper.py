@@ -98,6 +98,18 @@ class WebappConfig:
         # Startup check
         self.start_page = config.get("start_page", "/")
         self.startup_timeout = config.get("startup_timeout", 120)
+        self.idle_timeout = parse_int(config.get("idle_timeout"), get_default_idle_timeout(), minimum=0)
+        self.idle_check_interval = parse_int(
+            config.get("idle_check_interval"),
+            get_default_idle_check_interval(),
+            minimum=1
+        )
+        self.heartbeat_interval = parse_int(
+            config.get("heartbeat_interval"),
+            get_default_heartbeat_interval(),
+            minimum=5
+        )
+        self.stop_timeout = parse_int(config.get("stop_timeout"), get_default_stop_timeout(), minimum=1)
 
         # Path rewrites for apps built with hard-coded absolute paths
         # This rewrites paths like /hub/ezbids/ to the correct base path
@@ -117,8 +129,44 @@ config: WebappConfig = None
 container_ready = False
 container_error = None
 container_process = None
+container_pgid = None
 container_output = []  # Collected output from container process
 startup_start_time = None
+container_start_thread = None
+last_client_activity = 0.0
+active_client_requests = 0
+httpd_server = None
+shutdown_event = threading.Event()
+shutdown_lock = threading.Lock()
+
+
+def parse_int(value, default, minimum=0):
+    """Parse an integer with fallback/default handling."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+
+    if parsed < minimum:
+        return default
+
+    return parsed
+
+
+def get_default_idle_timeout():
+    return parse_int(os.environ.get("NEURODESK_WEBAPP_IDLE_TIMEOUT"), 90, minimum=0)
+
+
+def get_default_idle_check_interval():
+    return parse_int(os.environ.get("NEURODESK_WEBAPP_IDLE_CHECK_INTERVAL"), 5, minimum=1)
+
+
+def get_default_heartbeat_interval():
+    return parse_int(os.environ.get("NEURODESK_WEBAPP_HEARTBEAT_INTERVAL"), 20, minimum=5)
+
+
+def get_default_stop_timeout():
+    return parse_int(os.environ.get("NEURODESK_WEBAPP_STOP_TIMEOUT"), 10, minimum=1)
 
 
 def drain_process_output(proc):
@@ -190,9 +238,174 @@ def check_app_ready():
     return False
 
 
+def mark_client_activity():
+    """Update last-seen timestamp for browser activity."""
+    global last_client_activity
+    last_client_activity = time.time()
+
+
+def begin_client_request():
+    """Track in-flight client requests and activity."""
+    global active_client_requests
+    with shutdown_lock:
+        active_client_requests += 1
+    mark_client_activity()
+
+
+def end_client_request():
+    """Update request counters after handling a client request."""
+    global active_client_requests
+    with shutdown_lock:
+        active_client_requests = max(0, active_client_requests - 1)
+    mark_client_activity()
+
+
+def process_group_exists(pgid):
+    """Check whether a process group still exists."""
+    if pgid is None:
+        return False
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def stop_container_processes():
+    """Stop the started container/app process group."""
+    global container_process, container_pgid
+
+    pgid = container_pgid
+    if pgid is None and container_process is not None:
+        try:
+            pgid = os.getpgid(container_process.pid)
+        except (ProcessLookupError, PermissionError):
+            pgid = None
+
+    if pgid is None or not process_group_exists(pgid):
+        container_pgid = None
+        return
+
+    log(f"Stopping process group {pgid} for {config.app_name}")
+
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        container_pgid = None
+        return
+
+    deadline = time.time() + config.stop_timeout
+    while time.time() < deadline:
+        if not process_group_exists(pgid):
+            container_pgid = None
+            return
+        time.sleep(0.2)
+
+    log(f"Process group {pgid} did not exit after {config.stop_timeout}s; sending SIGKILL")
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    container_pgid = None
+
+
+def reset_container_runtime_state(clear_error=True):
+    """Reset runtime state after stopping or before restarting the backend."""
+    global container_ready, container_error, container_process, container_output, startup_start_time
+    container_ready = False
+    container_process = None
+    container_output = []
+    startup_start_time = None
+    if clear_error:
+        container_error = None
+
+
+def ensure_container_starting(reason="request"):
+    """Start the backend container if it is not already ready/starting."""
+    global container_start_thread
+
+    with shutdown_lock:
+        if shutdown_event.is_set():
+            return
+        if container_ready:
+            return
+        if container_start_thread is not None and container_start_thread.is_alive():
+            return
+
+        # Clear previous errors for fresh restart attempts.
+        reset_container_runtime_state(clear_error=True)
+        container_start_thread = threading.Thread(target=start_container, daemon=True)
+        container_start_thread.start()
+        log(f"Starting backend launch thread ({reason})")
+
+
+def stop_backend_for_idle(idle_for):
+    """Stop only the backend app after inactivity, keeping wrapper alive."""
+    with shutdown_lock:
+        backend_running = process_group_exists(container_pgid)
+        was_ready = container_ready
+
+    if not backend_running and not was_ready:
+        return
+
+    log(f"Idle timeout reached after {idle_for:.1f}s; stopping backend and waiting for next launch")
+    stop_container_processes()
+    with shutdown_lock:
+        reset_container_runtime_state(clear_error=True)
+        mark_client_activity()
+
+
+def initiate_shutdown(reason):
+    """Stop container processes and exit the wrapper server."""
+    global httpd_server
+
+    if shutdown_event.is_set():
+        return
+
+    with shutdown_lock:
+        if shutdown_event.is_set():
+            return
+        shutdown_event.set()
+
+    log(f"Initiating wrapper shutdown: {reason}")
+    stop_container_processes()
+
+    if httpd_server is not None:
+        threading.Thread(target=httpd_server.shutdown, daemon=True).start()
+
+
+def monitor_idle_timeout():
+    """Stop backend processes when the browser is gone and requests stop."""
+    if config.idle_timeout <= 0:
+        log("Idle timeout disabled (idle_timeout <= 0)")
+        return
+
+    log(
+        f"Idle timeout enabled: {config.idle_timeout}s "
+        f"(check interval: {config.idle_check_interval}s, heartbeat: {config.heartbeat_interval}s)"
+    )
+
+    while not shutdown_event.is_set():
+        time.sleep(config.idle_check_interval)
+        if shutdown_event.is_set():
+            return
+
+        with shutdown_lock:
+            inflight = active_client_requests
+
+        if inflight > 0:
+            continue
+
+        idle_for = time.time() - last_client_activity
+        if idle_for >= config.idle_timeout:
+            stop_backend_for_idle(idle_for)
+
+
 def start_container():
     """Start the webapp container in background."""
-    global container_ready, container_error, container_process, startup_start_time
+    global container_ready, container_error, container_process, container_pgid, startup_start_time
 
     startup_start_time = time.time()
     log(f"Starting {config.app_name} container...")
@@ -253,7 +466,10 @@ def start_container():
             stderr=subprocess.STDOUT,
             text=True,
             env=env,
+            start_new_session=True,
         )
+        container_pgid = os.getpgid(container_process.pid)
+        log(f"Started process PID {container_process.pid} (PGID {container_pgid})")
 
         # Start a thread to drain output and prevent pipe buffer from blocking
         output_thread = threading.Thread(
@@ -355,31 +571,45 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self._handle_request("OPTIONS")
 
+    def _is_status_endpoint(self):
+        """Check if request targets the wrapper status/heartbeat endpoint."""
+        parsed_path = urllib.parse.urlparse(self.path).path
+        return parsed_path.endswith(f"/{config.status_endpoint}")
+
     def _handle_request(self, method):
-        # Status endpoint for splash page polling
-        if self.path.endswith(f"/{config.status_endpoint}"):
-            self._send_status()
-            return
+        begin_client_request()
 
-        # If container is ready, proxy all requests
-        if container_ready:
-            self._proxy_request(method)
-            return
+        try:
+            # Status endpoint for splash page polling / browser heartbeat
+            if self._is_status_endpoint():
+                self._send_status(method)
+                return
 
-        # Otherwise serve splash page for GET requests to root-ish paths
-        if method == "GET" and self._is_root_path():
-            self._serve_splash()
-            return
+            # Ensure backend is running when a user is actively opening the app.
+            if not container_ready:
+                ensure_container_starting("incoming web request")
 
-        # For other requests while loading, return 503
-        self.send_response(503)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Retry-After", "5")
-        self.end_headers()
-        self.wfile.write(json.dumps({
-            "error": f"{config.title} is still starting up",
-            "status": "loading"
-        }).encode())
+            # If container is ready, proxy all requests
+            if container_ready:
+                self._proxy_request(method)
+                return
+
+            # Otherwise serve splash page for GET requests to root-ish paths
+            if method == "GET" and self._is_root_path():
+                self._serve_splash()
+                return
+
+            # For other requests while loading, return 503
+            self.send_response(503)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Retry-After", "5")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "error": f"{config.title} is still starting up",
+                "status": "loading"
+            }).encode())
+        finally:
+            end_client_request()
 
     def _get_normalized_path(self):
         """
@@ -443,8 +673,14 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
             return f"{base_path}{path}"
         return location
 
-    def _send_status(self):
-        """Send current status as JSON."""
+    def _send_status(self, method):
+        """Send current status as JSON (GET) or heartbeat ack (POST)."""
+        if method == "POST":
+            self.send_response(204)
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            return
+
         elapsed = time.time() - startup_start_time if startup_start_time else 0
 
         status = {
@@ -563,6 +799,8 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
 <script>
 (function() {{
   var basePath = '{base_path.rstrip("/")}';
+  var statusUrl = basePath + '/{config.status_endpoint}';
+  var heartbeatIntervalMs = {config.heartbeat_interval * 1000};
   var origReplace = History.prototype.replaceState;
 
   // Strip base path from current URL so router sees correct path
@@ -578,9 +816,33 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
     origReplace.call(history, history.state, '', newPath + window.location.search + window.location.hash);
   }}
 
-  // Don't patch pushState/replaceState - let the router navigate freely
-  // The URL will be like /workspace instead of /dicompare/workspace
-  // This means refresh won't work on sub-pages, but the app works during session
+  // Keep wrapper/container alive while tab is open.
+  function sendHeartbeat() {{
+    fetch(statusUrl, {{
+      method: 'POST',
+      keepalive: true,
+      credentials: 'same-origin'
+    }}).catch(function() {{}});
+  }}
+
+  var heartbeatTimer = setInterval(sendHeartbeat, heartbeatIntervalMs);
+  sendHeartbeat();
+
+  function notifyClose() {{
+    clearInterval(heartbeatTimer);
+    if (navigator.sendBeacon) {{
+      navigator.sendBeacon(statusUrl + '?closing=1', '');
+    }} else {{
+      fetch(statusUrl + '?closing=1', {{
+        method: 'POST',
+        keepalive: true,
+        credentials: 'same-origin'
+      }}).catch(function() {{}});
+    }}
+  }}
+
+  window.addEventListener('pagehide', notifyClose);
+  window.addEventListener('beforeunload', notifyClose);
 }})();
 </script>'''
                     inject_bytes = inject_script.encode('utf-8')
@@ -653,14 +915,11 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
 
 def signal_handler(_sig, _frame):
     """Handle shutdown signals."""
-    log("Received shutdown signal")
-    if container_process:
-        container_process.terminate()
-    sys.exit(0)
+    initiate_shutdown("received shutdown signal")
 
 
 def main():
-    global config
+    global config, httpd_server, last_client_activity
 
     if len(sys.argv) != 2:
         print("Usage: webapp_wrapper.py <app_name>")
@@ -682,6 +941,8 @@ def main():
     log(f"  Socket: {config.socket_path}")
     log(f"  Target port: {config.target_port}")
     log(f"  Start page: {config.start_page}")
+    log(f"  Idle timeout: {config.idle_timeout}s")
+    log(f"  Heartbeat interval: {config.heartbeat_interval}s")
 
     # Set up signal handlers early
     signal.signal(signal.SIGINT, signal_handler)
@@ -694,19 +955,31 @@ def main():
 
     # Create and bind to socket
     httpd = UnixSocketHTTPServer(socket_path, WebappHandler)
+    httpd_server = httpd
     os.chmod(socket_path, 0o666)
     log(f"Bound to Unix socket: {socket_path}")
+    last_client_activity = time.time()
 
-    # Start the container in a background thread
-    container_thread = threading.Thread(target=start_container, daemon=True)
-    container_thread.start()
+    # Start backend immediately for first launch experience.
+    ensure_container_starting("initial startup")
+
+    idle_monitor_thread = threading.Thread(target=monitor_idle_timeout, daemon=True)
+    idle_monitor_thread.start()
 
     # Serve requests
     log(f"Serving on Unix socket: {socket_path}")
     try:
         httpd.serve_forever()
     finally:
+        shutdown_event.set()
+        stop_container_processes()
         httpd.server_close()
+        try:
+            if os.path.exists(socket_path):
+                os.unlink(socket_path)
+        except OSError as e:
+            log(f"Failed to remove socket file {socket_path}: {e}")
+        log("Wrapper server exited")
 
 
 if __name__ == "__main__":

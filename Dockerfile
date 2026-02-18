@@ -417,7 +417,8 @@ RUN echo "${NB_USER} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/notebook \
     && usermod --shell /bin/bash ${NB_USER}
 
 # Enable deletion of non-empty-directories in JupyterLab: https://github.com/jupyter/notebook/issues/4916
-RUN sed -i 's/c.FileContentsManager.delete_to_trash = False/c.FileContentsManager.always_delete_dir = True/g' /etc/jupyter/jupyter_server_config.py
+RUN sed -i 's/c.FileContentsManager.delete_to_trash = False/c.FileContentsManager.always_delete_dir = True/g' /etc/jupyter/jupyter_server_config.py \
+    && printf '\n# Detect dead WebSocket clients quickly (tab closed/network gone)\nc.ServerApp.websocket_ping_interval = 30\nc.ServerApp.websocket_ping_timeout = 60\n' >> /etc/jupyter/jupyter_server_config.py
 
 # Source environment variables in global bashrc for Apptainer/Singularity (which mounts host home)
 # Also configure durable shell history globally so JupyterHub terminals get it even when
