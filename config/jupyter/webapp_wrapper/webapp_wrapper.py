@@ -35,8 +35,10 @@ SCRIPT_DIR = Path(__file__).parent
 SPLASH_TEMPLATE_PATH = SCRIPT_DIR / "splash_template.html"
 
 
-class UnixSocketHTTPServer(socketserver.UnixStreamServer):
-    """HTTP server that listens on a Unix socket."""
+class UnixSocketHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    """HTTP server that listens on a Unix socket with threading for concurrency."""
+
+    daemon_threads = True
 
     def get_request(self):
         request, client_address = super().get_request()
@@ -124,6 +126,13 @@ class WebappConfig:
         self.status_endpoint = f"{self.app_name}-wrapper-status"
 
 
+# Cached urllib opener that doesn't follow redirects (so we can rewrite Location headers)
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+_no_redirect_opener = urllib.request.build_opener(_NoRedirectHandler)
+
 # Global state
 config: WebappConfig = None
 container_ready = False
@@ -201,7 +210,7 @@ def check_port(port):
     """Check if something is listening on the given TCP port."""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2)
+        sock.settimeout(0.2)
         result = sock.connect_ex(('localhost', port))
         sock.close()
         return result == 0
@@ -495,21 +504,22 @@ def start_container():
                 # Process exited - but check multiple times if app is ready
                 # (some apps like rserver fork and the parent exits immediately)
                 log(f"Process exited with code: {poll_result}, checking if app started anyway...")
-                for retry in range(10):
-                    time.sleep(1)
+                retry_delays = [0.2, 0.2, 0.5, 0.5, 1, 1, 1, 2, 2, 2]
+                for retry, delay in enumerate(retry_delays):
+                    time.sleep(delay)
                     if check_app_ready():
                         container_ready = True
                         elapsed = time.time() - startup_start_time
                         log(f"{config.app_name} is ready! (process exited but app responding) Startup took {elapsed:.1f}s")
                         return
-                    log(f"Retry {retry + 1}/10: app not ready yet")
+                    log(f"Retry {retry + 1}/{len(retry_delays)}: app not ready yet")
                 # Process exited and app not ready after retries - get collected output
                 output = "\n".join(container_output) if container_output else "(no output)"
                 container_error = f"Container exited unexpectedly: {output}"
                 log(container_error)
                 return
 
-            time.sleep(1)
+            time.sleep(0.3)
 
         container_error = f"Timeout waiting for {config.app_name} to start"
         log(container_error)
@@ -743,15 +753,10 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
                 if header.lower() not in ("host", "content-length"):
                     req.add_header(header, value)
 
-            # Make the request - use custom opener that doesn't follow redirects
+            # Make the request - use cached opener that doesn't follow redirects
             # so we can rewrite Location headers
-            class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-                def redirect_request(self, req, fp, code, msg, headers, newurl):
-                    return None  # Don't follow redirects
-
-            opener = urllib.request.build_opener(NoRedirectHandler)
             try:
-                response = opener.open(req, timeout=300)
+                response = _no_redirect_opener.open(req, timeout=300)
             except urllib.error.HTTPError as redirect_error:
                 # 3xx redirects come as HTTPError when not followed
                 if 300 <= redirect_error.code < 400:
