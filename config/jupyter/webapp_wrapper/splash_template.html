@@ -234,6 +234,10 @@
             return basePath + '${status_endpoint}';
         }
 
+        // Adaptive polling: start fast (500ms) for quick-starting apps,
+        // then back off to 2s to reduce overhead for slow starters.
+        let pollInterval = 500;
+
         // Poll for actual status
         async function checkStatus() {
             try {
@@ -248,6 +252,13 @@
                         elapsedEl.textContent = `Loading for $${mins}m $${secs}s...`;
                     } else {
                         elapsedEl.textContent = `Loading for $${secs}s...`;
+                    }
+
+                    // Back off polling after 10 seconds
+                    if (data.elapsed_seconds > 10) {
+                        pollInterval = 2000;
+                    } else if (data.elapsed_seconds > 5) {
+                        pollInterval = 1000;
                     }
                 }
 
@@ -279,8 +290,8 @@
                 console.error('Status check failed:', e);
             }
 
-            // Poll again
-            setTimeout(checkStatus, 2000);
+            // Poll again with adaptive interval
+            setTimeout(checkStatus, pollInterval);
         }
 
         // Start polling
