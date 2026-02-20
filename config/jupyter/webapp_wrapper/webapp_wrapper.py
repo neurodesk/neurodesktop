@@ -17,9 +17,8 @@ import socket
 import socketserver
 import subprocess
 import threading
-import urllib.request
-import urllib.error
 import urllib.parse
+import httpx
 import os
 import json
 import time
@@ -28,6 +27,9 @@ import sys
 from pathlib import Path
 from string import Template
 
+
+# Streaming chunk size: 128KB reduces syscall count vs 8KB default
+STREAM_CHUNK_SIZE = 131072
 
 # Paths
 CONFIG_PATH = Path("/opt/neurodesktop/webapps.json")
@@ -126,12 +128,16 @@ class WebappConfig:
         self.status_endpoint = f"{self.app_name}-wrapper-status"
 
 
-# Cached urllib opener that doesn't follow redirects (so we can rewrite Location headers)
-class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
+def _create_http_client():
+    """Create an httpx client with connection pooling."""
+    return httpx.Client(
+        follow_redirects=False,
+        timeout=httpx.Timeout(300.0, connect=10.0),
+        limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+    )
 
-_no_redirect_opener = urllib.request.build_opener(_NoRedirectHandler)
+# Persistent HTTP client with connection pooling (no redirect following so we can rewrite Location headers)
+_http_client = _create_http_client()
 
 # Global state
 config: WebappConfig = None
@@ -171,7 +177,7 @@ def get_default_idle_check_interval():
 
 
 def get_default_heartbeat_interval():
-    return parse_int(os.environ.get("NEURODESK_WEBAPP_HEARTBEAT_INTERVAL"), 20, minimum=5)
+    return parse_int(os.environ.get("NEURODESK_WEBAPP_HEARTBEAT_INTERVAL"), 60, minimum=5)
 
 
 def get_default_stop_timeout():
@@ -350,6 +356,20 @@ def ensure_container_starting(reason="request"):
         log(f"Starting backend launch thread ({reason})")
 
 
+def _close_backend_connections():
+    """Close all pooled TCP connections to the backend.
+
+    httpx's pool only reaps expired connections when a new request arrives.
+    When the user closes all tabs and no requests follow, idle connections
+    linger until the OS times them out.  Swapping the client forces an
+    immediate close so that TCP sessions don't outlive the backend process.
+    """
+    global _http_client
+    old_client = _http_client
+    _http_client = _create_http_client()
+    old_client.close()
+
+
 def stop_backend_for_idle(idle_for):
     """Stop only the backend app after inactivity, keeping wrapper alive."""
     with shutdown_lock:
@@ -364,6 +384,7 @@ def stop_backend_for_idle(idle_for):
     with shutdown_lock:
         reset_container_runtime_state(clear_error=True)
         mark_client_activity()
+    _close_backend_connections()
 
 
 def initiate_shutdown(reason):
@@ -715,92 +736,25 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
-    def _proxy_request(self, method):
-        """Proxy request to the actual webapp server."""
-        try:
-            # Find matching route and determine target port
-            # Use normalized path for route matching (handles JupyterHub prefix)
-            normalized_path = self._get_normalized_path()
-            target_port = config.target_port  # default
-            is_main_html = self._is_main_app_html()
+    def _write_chunk(self, data):
+        """Write one HTTP chunked-encoding frame."""
+        if data:
+            self.wfile.write(f"{len(data):x}\r\n".encode())
+            self.wfile.write(data)
+            self.wfile.write(b"\r\n")
 
-            # Preserve query string from original request
-            parsed_url = urllib.parse.urlparse(self.path)
-            query_string = f"?{parsed_url.query}" if parsed_url.query else ""
+    def _end_chunked(self):
+        """Terminate chunked transfer encoding."""
+        self.wfile.write(b"0\r\n\r\n")
 
-            # Check routes and strip prefixes (apps listen at / not /appname)
-            path = normalized_path  # default to normalized path
-            for prefix, port in config.routes:
-                if normalized_path.startswith(prefix):
-                    path = normalized_path[len(prefix):] or "/"
-                    target_port = port
-                    break
-
-            # Build the target URL (add back query string)
-            target_url = f"http://localhost:{target_port}{path}{query_string}"
-
-            # Read request body if present
-            content_length = self.headers.get("Content-Length")
-            body = None
-            if content_length:
-                body = self.rfile.read(int(content_length))
-
-            # Create the proxy request
-            req = urllib.request.Request(target_url, data=body, method=method)
-
-            # Copy relevant headers
-            for header, value in self.headers.items():
-                if header.lower() not in ("host", "content-length"):
-                    req.add_header(header, value)
-
-            # Make the request - use cached opener that doesn't follow redirects
-            # so we can rewrite Location headers
-            try:
-                response = _no_redirect_opener.open(req, timeout=300)
-            except urllib.error.HTTPError as redirect_error:
-                # 3xx redirects come as HTTPError when not followed
-                if 300 <= redirect_error.code < 400:
-                    response = redirect_error  # Use the redirect response
-                else:
-                    raise
-
-            # Check content type for response handling
-            content_type = response.getheader("Content-Type", "")
-
-            # Determine what processing is needed:
-            # - Path rewriting: for text-based responses (HTML, JS, CSS) that may contain hard-coded paths
-            # - Base href injection: only for main HTML page
-            needs_path_rewrite = (
-                config.path_rewrites and
-                any(ct in content_type for ct in ["text/html", "text/javascript", "application/javascript", "text/css"])
-            )
-            needs_base_href = is_main_html and "text/html" in content_type
-
-            if needs_path_rewrite or needs_base_href:
-                # Read full response to modify
-                response_body = response.read()
-
-                # Get the full base path including any JupyterHub prefix
-                base_path = self._get_base_path()
-
-                # Rewrite hard-coded absolute paths to the correct base path
-                # This fixes apps built with paths like /hub/ezbids/ or /ezbids/
-                if needs_path_rewrite:
-                    for rewrite_path in config.path_rewrites:
-                        # Rewrite paths in HTML/JS/CSS
-                        # The path_rewrite is like "/hub/ezbids/" and should become base_path
-                        old_bytes = rewrite_path.encode('utf-8')
-                        new_bytes = base_path.encode('utf-8')
-                        response_body = response_body.replace(old_bytes, new_bytes)
-
-                # Inject base href and routing fix for main HTML pages
-                if needs_base_href:
-                    # The base href fixes relative URL resolution (assets, etc.)
-                    # Since we can't patch location.pathname, we strip the base path from
-                    # the URL entirely. The app works during the session, but refresh on
-                    # sub-pages will redirect to JupyterLab (the server doesn't know the context).
-                    # This is a limitation of apps not built with proper base path support.
-                    inject_script = f'''<base href="{base_path}">
+    def _build_inject_script(self, base_path):
+        """Build the <base href> + heartbeat JS to inject after <head>."""
+        # The base href fixes relative URL resolution (assets, etc.)
+        # Since we can't patch location.pathname, we strip the base path from
+        # the URL entirely. The app works during the session, but refresh on
+        # sub-pages will redirect to JupyterLab (the server doesn't know the context).
+        # This is a limitation of apps not built with proper base path support.
+        inject_script = f'''<base href="{base_path}">
 <script>
 (function() {{
   var basePath = '{base_path.rstrip("/")}';
@@ -833,8 +787,24 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
   var heartbeatTimer = setInterval(sendHeartbeat, heartbeatIntervalMs);
   sendHeartbeat();
 
+  // Pause heartbeats when tab is hidden to reduce traffic
+  document.addEventListener('visibilitychange', function() {{
+    if (document.hidden) {{
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }} else {{
+      if (!heartbeatTimer) {{
+        sendHeartbeat();
+        heartbeatTimer = setInterval(sendHeartbeat, heartbeatIntervalMs);
+      }}
+    }}
+  }});
+
   function notifyClose() {{
-    clearInterval(heartbeatTimer);
+    if (heartbeatTimer) {{
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }}
     if (navigator.sendBeacon) {{
       navigator.sendBeacon(statusUrl + '?closing=1', '');
     }} else {{
@@ -850,61 +820,183 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
   window.addEventListener('beforeunload', notifyClose);
 }})();
 </script>'''
-                    inject_bytes = inject_script.encode('utf-8')
-                    if b'<head>' in response_body:
-                        response_body = response_body.replace(b'<head>', b'<head>' + inject_bytes, 1)
-                    elif b'<HEAD>' in response_body:
-                        response_body = response_body.replace(b'<HEAD>', b'<HEAD>' + inject_bytes, 1)
+        return inject_script.encode('utf-8')
 
-                # Send modified response
-                status = response.status if hasattr(response, 'status') else response.code
-                headers = response.getheaders() if hasattr(response, 'getheaders') else response.headers.items()
+    def _send_response_headers(self, response, target_port, omit_content_length=False,
+                               omit_content_encoding=False):
+        """Send HTTP status and headers from upstream httpx response."""
+        self.send_response(response.status_code)
+        skip = {"transfer-encoding", "connection"}
+        if omit_content_length:
+            skip.add("content-length")
+        if omit_content_encoding:
+            skip.add("content-encoding")
+        for header, value in response.headers.multi_items():
+            if header.lower() not in skip:
+                if header.lower() == "location":
+                    value = self._rewrite_location(value, target_port)
+                self.send_header(header, value)
 
-                self.send_response(status)
-                for header, value in headers:
-                    if header.lower() not in ("transfer-encoding", "connection", "content-length"):
-                        # Rewrite Location headers to go through proxy
-                        if header.lower() == "location":
-                            value = self._rewrite_location(value, target_port)
-                        self.send_header(header, value)
-                self.send_header("Content-Length", len(response_body))
-                self.end_headers()
-                self.wfile.write(response_body)
-            else:
-                # Stream response as-is
-                # Handle both normal responses and HTTPError (for redirects)
-                status = response.status if hasattr(response, 'status') else response.code
-                headers = response.getheaders() if hasattr(response, 'getheaders') else response.headers.items()
+    def _send_streamed_response(self, response, target_port):
+        """Stream binary/non-rewritable response with large chunks.
 
-                self.send_response(status)
-                for header, value in headers:
-                    if header.lower() not in ("transfer-encoding", "connection"):
-                        # Rewrite Location headers to go through proxy
-                        if header.lower() == "location":
-                            value = self._rewrite_location(value, target_port)
-                        self.send_header(header, value)
-                self.end_headers()
+        Uses iter_raw() to preserve the original bytes (including any
+        Content-Encoding like gzip) so the forwarded Content-Encoding
+        header stays correct for the browser.
+        """
+        self._send_response_headers(response, target_port)
+        self.end_headers()
+        for chunk in response.iter_raw(STREAM_CHUNK_SIZE):
+            self.wfile.write(chunk)
 
-                # For redirects, there may be minimal body
-                while True:
-                    chunk = response.read(8192)
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
+    def _send_streamed_text_response(self, response, target_port, is_main_html):
+        """Stream text response with path rewriting and optional script injection.
 
-        except urllib.error.HTTPError as e:
+        Uses a sliding-window overlap buffer so that rewrite patterns spanning
+        chunk boundaries are still matched correctly.
+        """
+        base_path = self._get_base_path()
+
+        # Build rewrite map: list of (old_bytes, new_bytes) tuples
+        rewrite_map = []
+        if config.path_rewrites:
+            base_bytes = base_path.encode('utf-8')
+            for rewrite_path in config.path_rewrites:
+                rewrite_map.append((rewrite_path.encode('utf-8'), base_bytes))
+
+        # Overlap buffer size: max pattern length - 1 to catch boundary crossings
+        max_pattern_len = max((len(old) for old, _ in rewrite_map), default=0)
+        overlap_size = max(max_pattern_len - 1, 0)
+
+        # Send headers with chunked transfer encoding (content-length unknown).
+        # Preserve Content-Encoding — we use iter_raw() so bytes are unchanged
+        # and the browser handles decompression.  Rewrites/injection only match
+        # on uncompressed responses (same behaviour as the old urllib code).
+        self._send_response_headers(response, target_port, omit_content_length=True)
+        self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+
+        def rewrite(data):
+            for old_bytes, new_bytes in rewrite_map:
+                data = data.replace(old_bytes, new_bytes)
+            return data
+
+        def stream_with_overlap(iterator):
+            """Stream chunks with overlap rewriting."""
+            overlap = b""
+            for chunk in iterator:
+                data = overlap + chunk
+                if overlap_size > 0 and len(data) > overlap_size:
+                    to_send = data[:-overlap_size]
+                    overlap = data[-overlap_size:]
+                elif overlap_size > 0:
+                    overlap = data
+                    continue
+                else:
+                    to_send = data
+                    overlap = b""
+                self._write_chunk(rewrite(to_send))
+            if overlap:
+                self._write_chunk(rewrite(overlap))
+
+        if is_main_html:
+            # Buffer initial data to find <head> and inject script
+            head_buffer = b""
+            HEAD_BUFFER_LIMIT = 4096
+            remaining_iter = response.iter_raw(STREAM_CHUNK_SIZE)
+            for chunk in remaining_iter:
+                head_buffer += chunk
+                if b'<head>' in head_buffer or b'<HEAD>' in head_buffer:
+                    break
+                if len(head_buffer) >= HEAD_BUFFER_LIMIT:
+                    break
+
+            # Rewrite paths and inject script into buffered head
+            head_buffer = rewrite(head_buffer)
+            inject_bytes = self._build_inject_script(base_path)
+            if b'<head>' in head_buffer:
+                head_buffer = head_buffer.replace(b'<head>', b'<head>' + inject_bytes, 1)
+            elif b'<HEAD>' in head_buffer:
+                head_buffer = head_buffer.replace(b'<HEAD>', b'<HEAD>' + inject_bytes, 1)
+
+            self._write_chunk(head_buffer)
+
+            # Stream remainder with overlap rewriting
+            stream_with_overlap(remaining_iter)
+        else:
+            # Non-HTML text (JS/CSS): stream with overlap rewriting
+            stream_with_overlap(response.iter_raw(STREAM_CHUNK_SIZE))
+
+        self._end_chunked()
+
+    def _proxy_request(self, method):
+        """Proxy request to the actual webapp server."""
+        target_port = config.target_port
+        try:
+            # Find matching route and determine target port
+            # Use normalized path for route matching (handles JupyterHub prefix)
+            normalized_path = self._get_normalized_path()
+            is_main_html = self._is_main_app_html()
+
+            # Preserve query string from original request
+            parsed_url = urllib.parse.urlparse(self.path)
+            query_string = f"?{parsed_url.query}" if parsed_url.query else ""
+
+            # Check routes and strip prefixes (apps listen at / not /appname)
+            path = normalized_path  # default to normalized path
+            for prefix, port in config.routes:
+                if normalized_path.startswith(prefix):
+                    path = normalized_path[len(prefix):] or "/"
+                    target_port = port
+                    break
+
+            # Build the target URL (add back query string)
+            target_url = f"http://localhost:{target_port}{path}{query_string}"
+
+            # Read request body if present
+            content_length = self.headers.get("Content-Length")
+            body = None
+            if content_length:
+                body = self.rfile.read(int(content_length))
+
+            # Copy relevant headers (preserve duplicates like Cookie)
+            proxy_headers = [
+                (h, v) for h, v in self.headers.items()
+                if h.lower() not in ("host", "content-length")
+            ]
+
+            # As a transparent proxy we must only forward the browser's cookies
+            # (already in proxy_headers), not cookies httpx accumulated from
+            # previous backend responses.  Clear the jar before each request.
+            _http_client.cookies.clear()
+
+            # httpx returns 3xx directly (no exception), simplifying redirect handling
+            with _http_client.stream(method, target_url, headers=proxy_headers, content=body) as response:
+                content_type = response.headers.get("content-type", "")
+
+                # Determine what processing is needed:
+                # - Path rewriting: for text responses that may contain hard-coded paths
+                # - Base href injection: only for main HTML page
+                needs_path_rewrite = (
+                    config.path_rewrites and
+                    any(ct in content_type for ct in ["text/html", "text/javascript", "application/javascript", "text/css"])
+                )
+                needs_base_href = is_main_html and "text/html" in content_type
+
+                if needs_path_rewrite or needs_base_href:
+                    self._send_streamed_text_response(response, target_port, needs_base_href)
+                else:
+                    self._send_streamed_response(response, target_port)
+
+        except httpx.ConnectError:
+            log(f"Cannot connect to backend on port {target_port}")
             try:
-                self.send_response(e.code)
-                for header, value in e.headers.items():
-                    if header.lower() not in ("transfer-encoding", "connection"):
-                        self.send_header(header, value)
+                self.send_response(502)
+                self.send_header("Content-Type", "text/plain")
                 self.end_headers()
-                # Read the response body (may be empty for 304)
-                body = e.read()
-                if body:
-                    self.wfile.write(body)
+                self.wfile.write(b"Backend unavailable")
             except (BrokenPipeError, ConnectionResetError):
-                log(f"Client disconnected while sending HTTP {e.code} response")
+                pass
         except (BrokenPipeError, ConnectionResetError):
             log("Client disconnected during proxying")
         except Exception as e:
@@ -948,6 +1040,9 @@ def main():
     log(f"  Start page: {config.start_page}")
     log(f"  Idle timeout: {config.idle_timeout}s")
     log(f"  Heartbeat interval: {config.heartbeat_interval}s")
+    if config.idle_timeout > 0 and config.idle_timeout < config.heartbeat_interval:
+        log(f"  WARNING: idle_timeout ({config.idle_timeout}s) < heartbeat_interval "
+            f"({config.heartbeat_interval}s); backend may stop between heartbeats")
 
     # Set up signal handlers early
     signal.signal(signal.SIGINT, signal_handler)
@@ -978,6 +1073,7 @@ def main():
     finally:
         shutdown_event.set()
         stop_container_processes()
+        _http_client.close()
         httpd.server_close()
         try:
             if os.path.exists(socket_path):
