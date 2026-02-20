@@ -1,0 +1,247 @@
+FROM quay.io/jupyter/docker-stacks-foundation:2026-02-16
+# https://quay.io/repository/jupyter/docker-stacks-foundation?tab=tags
+
+LABEL maintainer="Neurodesk Project <www.neurodesk.org>"
+
+USER root
+
+#========================================#
+# System packages (Ubuntu repos)
+#========================================#
+
+RUN apt-get update --yes \
+    && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+        # Bootstrap tools for adding external repos
+        software-properties-common wget gpg \
+        # Build tools
+        build-essential \
+        # Java (for Nextflow)
+        openjdk-21-jre-headless \
+        # Lmod and Lua
+        lmod \
+        lua-bit32 \
+        lua-filesystem \
+        lua-json \
+        lua-lpeg \
+        lua-posix \
+        lua-term \
+        lua5.2 \
+        # Filesystem tools
+        s3fs \
+        sshfs \
+        davfs2 \
+        rclone \
+        # CLI tools
+        aria2 \
+        bc \
+        curl \
+        dnsutils \
+        gh \
+        git \
+        git-annex \
+        graphviz \
+        htop \
+        imagemagick \
+        iputils-ping \
+        less \
+        man-db \
+        nano \
+        openssh-client \
+        pciutils \
+        python3-setuptools \
+        rsync \
+        screen \
+        tcllib \
+        tcsh \
+        tk \
+        tmux \
+        tree \
+        uidmap \
+        unzip \
+        vim \
+        zip \
+        # Libraries
+        acl \
+        libgfortran5 \
+        libgpgme-dev \
+        libossp-uuid-dev \
+        libpci3 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /root/.cache /home/${NB_USER}/.cache \
+    # Configure fuse for sshfs
+    && sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf \
+    && chmod +x /usr/bin/fusermount
+
+#========================================#
+# System packages (External repos)
+#========================================#
+
+# Workaround: CVMFS breaks systemctl, replace with dummy before installing
+RUN if [ -f /usr/bin/systemctl ]; then mv /usr/bin/systemctl /usr/bin/systemctl.orig; fi \
+    && echo '#!/bin/bash' > /usr/bin/systemctl \
+    && echo 'echo "systemctl is disabled in this container"' >> /usr/bin/systemctl \
+    && chmod +x /usr/bin/systemctl
+
+# External repos + their packages (may rebuild on repo changes)
+RUN add-apt-repository -y ppa:apptainer/ppa \
+    && wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb -P /tmp \
+    && dpkg -i /tmp/cvmfs-release-latest_all.deb && rm /tmp/cvmfs-release-latest_all.deb \
+    && apt-get update --yes \
+    && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+        apptainer \
+        cvmfs \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+#========================================#
+# Nextflow ecosystem
+#========================================#
+
+ENV NF_NEURO_MODULES_DIR=/opt/nf-neuro/modules
+ENV NF_TEST_HOME=/opt/nf-test
+RUN mkdir -p "${NF_TEST_HOME}" \
+    && cd /tmp \
+    && curl -fsSL https://get.nextflow.io | bash \
+    && mv /tmp/nextflow /usr/local/bin/nextflow \
+    && chmod 755 /usr/local/bin/nextflow \
+    && wget -qO- https://get.nf-test.com | bash \
+    && test -f "${HOME}/.nf-test/nf-test.jar" \
+    && cp -a "${HOME}/.nf-test/." "${NF_TEST_HOME}/" \
+    && printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'exec java -jar /opt/nf-test/nf-test.jar "$@"' > /usr/local/bin/nf-test \
+    && chmod 755 /usr/local/bin/nf-test \
+    && mkdir -p /opt/nf-neuro \
+    && git clone --depth=1 https://github.com/nf-neuro/modules.git "${NF_NEURO_MODULES_DIR}" \
+    && chown -R ${NB_UID}:${NB_GID} /opt/nf-neuro "${NF_TEST_HOME}" \
+    && rm -rf /root/.cache "${HOME}/.nf-test" /tmp/nf-test /tmp/nextflow
+
+#========================================#
+# Python packages (headless)
+#========================================#
+
+USER ${NB_USER}
+
+# Install conda packages
+RUN conda install -c conda-forge nb_conda_kernels \
+    && conda clean --all -f -y \
+    && rm -rf /home/${NB_USER}/.cache
+RUN conda config --system --prepend envs_dirs '~/conda-environments'
+
+# Install Python packages for headless execution (no JupyterLab extensions)
+RUN /opt/conda/bin/pip install \
+        datalad \
+        nipype \
+        nbdev \
+        nf-core \
+        pydra==1.0a7 \
+        nipoppy \
+        matplotlib \
+        datalad-container \
+        datalad-osf \
+        osfclient \
+        watermark \
+        nbconvert \
+        papermill \
+        ipykernel \
+        httpx \
+        xnat \
+    && rm -rf /home/${NB_USER}/.cache
+
+#========================================#
+# Configuration (as root user)
+#========================================#
+
+USER root
+
+ENV LANG=""
+ENV LANGUAGE=""
+ENV LC_ALL=""
+ENV DONT_PROMPT_WSL_INSTALL=1
+ENV LMOD_CMD=/usr/share/lmod/lmod/libexec/lmod
+
+# Add notebook startup scripts (minimal for headless mode)
+# https://jupyter-docker-stacks.readthedocs.io/en/latest/using/common.html
+RUN mkdir -p /usr/local/bin/start-notebook.d/ \
+    && mkdir -p /usr/local/bin/before-notebook.d/
+COPY config/jupyter/start_notebook.sh /usr/local/bin/start-notebook.d/
+COPY config/jupyter/before_notebook_base.sh /usr/local/bin/before-notebook.d/before_notebook.sh
+
+# Environment variables script
+COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
+RUN chmod +rx /opt/neurodesktop/environment_variables.sh
+
+# Source environment variables in global bashrc for Apptainer/Singularity
+RUN cat >> /etc/bash.bashrc <<'EOF'
+source /opt/neurodesktop/environment_variables.sh
+
+# Neurodesk persistent bash history
+if [[ $- == *i* ]]; then
+    shopt -s histappend
+
+    if [ -d "${HOME}/neurodesktop-storage" ] && [ -w "${HOME}/neurodesktop-storage" ]; then
+        export HISTFILE="${HOME}/neurodesktop-storage/.bash_history"
+    elif [ -d "/neurodesktop-storage" ] && [ -w "/neurodesktop-storage" ]; then
+        export HISTFILE="/neurodesktop-storage/.bash_history"
+    else
+        export HISTFILE="${HISTFILE:-$HOME/.bash_history}"
+    fi
+
+    export HISTSIZE=100000
+    export HISTFILESIZE=200000
+    export HISTCONTROL=ignoredups:erasedups
+
+    # Persist history continuously so abrupt terminal/session closes do not lose commands.
+    if [[ "${PROMPT_COMMAND:-}" != *"history -a"* ]]; then
+        if [ -n "${PROMPT_COMMAND:-}" ]; then
+            export PROMPT_COMMAND="history -a; history -n; ${PROMPT_COMMAND}"
+        else
+            export PROMPT_COMMAND="history -a; history -n"
+        fi
+    fi
+fi
+EOF
+
+# Add NB_USER to sudoers
+RUN echo "${NB_USER} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/notebook \
+    && usermod --shell /bin/bash ${NB_USER}
+
+#========================================#
+# CVMFS configuration
+#========================================#
+
+RUN mkdir -p /etc/cvmfs/keys/ardc.edu.au
+COPY config/cvmfs/neurodesk.ardc.edu.au.pub /etc/cvmfs/keys/ardc.edu.au/neurodesk.ardc.edu.au.pub
+COPY config/cvmfs/neurodesk.ardc.edu.au.conf* /etc/cvmfs/config.d/
+COPY config/cvmfs/default.local /etc/cvmfs/default.local
+
+#========================================#
+# Storage directories
+#========================================#
+
+RUN mkdir -p /data /neurodesktop-storage
+RUN chown ${NB_UID}:${NB_GID} /neurodesktop-storage \
+    && chmod 770 /neurodesktop-storage
+
+#========================================#
+# Lmod configuration
+#========================================#
+
+COPY config/lmod/module.sh /usr/share/
+
+#========================================#
+# Neurocommand (last - cache buster)
+#========================================#
+
+ADD "https://api.github.com/repos/neurodesk/neurocommand/git/refs/heads/main" /tmp/skipcache
+RUN rm /tmp/skipcache \
+    && git clone https://github.com/neurodesk/neurocommand.git /neurocommand \
+    && cd /neurocommand \
+    && bash build.sh --cli \
+    && bash install.sh \
+    && ln -s /home/${NB_USER}/neurodesktop-storage/containers /neurocommand/local/containers
+
+#========================================#
+# Finalise
+#========================================#
+
+USER ${NB_UID}
+
+WORKDIR "${HOME}"
