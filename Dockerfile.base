@@ -66,6 +66,9 @@ RUN apt-get update --yes \
         libgpgme-dev \
         libossp-uuid-dev \
         libpci3 \
+        # For matplotlib rendering and nbconvert/jupyter-book
+        fonts-liberation \
+        pandoc \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && rm -rf /root/.cache /home/${NB_USER}/.cache \
     # Configure fuse for sshfs
