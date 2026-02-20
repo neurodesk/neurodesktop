@@ -119,48 +119,84 @@ if [ "$EUID" -eq 0 ]; then
 
             if [ ! -d "/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/" ]; then
                 # it is not available outside, so try mounting with fuse inside container
-                # Function to get latency, returns 999 on failure
+
+                # Probe a server with multiple requests and return the median latency.
+                # Using multiple probes reduces noise from transient network conditions.
+                # Uses --no-keepalive so each probe opens a fresh connection,
+                # matching real CVMFS client behaviour.
                 get_latency() {
                     local url="$1"
                     local server_name="$2"
-                    # Redirect informational output to stderr
-                    echo "Testing $url" >&2
-                    echo "Resolving DNS name for $server_name" >&2
+                    local num_probes=3
+                    echo "Testing $url ($num_probes probes)" >&2
                     local resolved_dns
-                    resolved_dns=$(dig +short "$server_name" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
-                    # Redirect debug output to stderr
+                    resolved_dns=$(dig +short "$server_name" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')
                     echo "[DEBUG]: Resolved DNS for $server_name: $resolved_dns" >&2
-                    local output
-                    local exit_code
-                    # Curl output format captures time and status code
-                    output=$(curl --connect-timeout 5 -s -w "%{time_total} %{http_code}" -o /dev/null "$url")
+                    local latencies=()
+                    local i
+                    for i in $(seq 1 "$num_probes"); do
+                        local output exit_code
+                        output=$(curl --no-keepalive --connect-timeout 3 -s -w "%{time_total} %{http_code}" -o /dev/null "$url")
+                        exit_code=$?
+                        if [ $exit_code -eq 0 ]; then
+                            local time status
+                            time=$(echo "$output" | awk '{print $1}')
+                            status=$(echo "$output" | awk '{print $2}')
+                            if [ "$status" -eq 200 ]; then
+                                latencies+=("$time")
+                                echo "  Probe $i: ${time}s" >&2
+                            else
+                                echo "  Probe $i: HTTP $status (failed)" >&2
+                                latencies+=("999")
+                            fi
+                        else
+                            echo "  Probe $i: curl error $exit_code" >&2
+                            latencies+=("999")
+                        fi
+                    done
+                    # Return the median (middle value of sorted list)
+                    printf '%s\n' "${latencies[@]}" | sort -n | sed -n "$((( num_probes + 1 ) / 2))p"
+                }
+
+                # Throughput tiebreaker: download the root catalog from a CVMFS
+                # server and return the transfer time.  The catalog is typically
+                # hundreds of KB to several MB, so this captures sustained
+                # throughput rather than just connection-setup latency.
+                get_throughput_time() {
+                    local base_url="$1"   # e.g. http://server/cvmfs/neurodesk.ardc.edu.au
+                    echo "Throughput test: $base_url" >&2
+                    # Fetch .cvmfspublished and extract the root catalog hash (C line)
+                    local published catalog_hash
+                    published=$(curl --connect-timeout 5 -s "${base_url}/.cvmfspublished")
+                    catalog_hash=$(echo "$published" | awk '/^C/{print substr($0,2); exit}')
+                    if [ -z "$catalog_hash" ]; then
+                        echo "  Could not parse catalog hash" >&2
+                        echo "999"
+                        return
+                    fi
+                    local prefix="${catalog_hash:0:2}"
+                    local suffix="${catalog_hash:2}"
+                    local catalog_url="${base_url}/data/${prefix}/${suffix}C"
+                    echo "  Downloading catalog: $catalog_url" >&2
+                    local output exit_code
+                    output=$(curl --no-keepalive --connect-timeout 10 --max-time 30 -s \
+                        -w "%{time_total} %{size_download} %{speed_download} %{http_code}" \
+                        -o /dev/null "$catalog_url")
                     exit_code=$?
                     if [ $exit_code -eq 0 ]; then
-                        local time
-                        local status
+                        local time size speed status
                         time=$(echo "$output" | awk '{print $1}')
-                        status=$(echo "$output" | awk '{print $2}')
-                        if [ "$status" -eq 200 ]; then
-                            # Echo latency to stdout (captured by command substitution)
+                        size=$(echo "$output" | awk '{print $2}')
+                        speed=$(echo "$output" | awk '{print $3}')
+                        status=$(echo "$output" | awk '{print $4}')
+                        if [ "$status" -eq 200 ] && [ "$size" != "0" ]; then
+                            echo "  Throughput: $(awk "BEGIN {printf \"%.1f\", $speed/1024}") KB/s (${size} bytes in ${time}s)" >&2
                             echo "$time"
-                        else
-                            # Redirect error message to stderr
-                            echo "Curl request to $url failed with HTTP status $status" >&2
-                            # Echo fallback value to stdout (captured by command substitution)
-                            echo "999"
+                            return
                         fi
-                    else
-                        # Handle curl specific errors (e.g., timeout, DNS resolution failure)
-                        # Redirect error message to stderr
-                        echo "Curl command failed for $url with exit code $exit_code" >&2
-                        # Check for timeout error (exit code 28)
-                        if [ $exit_code -eq 28 ]; then
-                            # Redirect error message to stderr
-                            echo "Curl request timed out for $url" >&2
-                        fi
-                        # Echo fallback value to stdout (captured by command substitution)
-                        echo "999"
                     fi
+                    echo "  Catalog download failed (exit $exit_code)" >&2
+                    echo "999"
                 }
 
                 echo "Probing regional servers (Europe, America, Asia)..."
@@ -179,36 +215,106 @@ if [ "$EUID" -eq 0 ]; then
                 AMERICA_url_backup="http://${AMERICA_HOST_BACKUP}/cvmfs/neurodesk.ardc.edu.au/.cvmfspublished"
                 ASIA_url_backup="http://${ASIA_HOST_BACKUP}/cvmfs/neurodesk.ardc.edu.au/.cvmfspublished"
 
-                EUROPE_latency=$(get_latency "$EUROPE_url" "$EUROPE_HOST")
-                # check if latency is 999, if so, try the backup server
-                if [ "$EUROPE_latency" == "999" ]; then
-                    echo "Primary Europe server failed, trying backup..."
-                    EUROPE_latency=$(get_latency "$EUROPE_url_backup" "$EUROPE_HOST_BACKUP")
-                fi
-                echo "Europe Latency: $EUROPE_latency"
+                # Probe all regions in parallel so no region gets a timing
+                # advantage from being tested first or last.
+                _probe_tmpdir=$(mktemp -d)
 
+                (
+                    _lat=$(get_latency "$EUROPE_url" "$EUROPE_HOST")
+                    if [ "$_lat" == "999" ]; then
+                        echo "Primary Europe server failed, trying backup..." >&2
+                        _lat=$(get_latency "$EUROPE_url_backup" "$EUROPE_HOST_BACKUP")
+                    fi
+                    echo "$_lat" > "$_probe_tmpdir/europe"
+                ) &
 
-                AMERICA_latency=$(get_latency "$AMERICA_url" "$AMERICA_HOST")
-                # check if latency is 999, if so, try the backup server
-                if [ "$AMERICA_latency" == "999" ]; then
-                    echo "Primary America server failed, trying backup..."
-                    AMERICA_latency=$(get_latency "$AMERICA_url_backup" "$AMERICA_HOST_BACKUP")
-                fi
-                echo "America Latency: $AMERICA_latency"
-                
-                
-                ASIA_latency=$(get_latency "$ASIA_url" "$ASIA_HOST")
-                # check if latency is 999, if so, try the backup server
-                if [ "$ASIA_latency" == "999" ]; then
-                    echo "Primary Asia server failed, trying backup..."
-                    ASIA_latency=$(get_latency "$ASIA_url_backup" "$ASIA_HOST_BACKUP")
-                fi
-                echo "Asia Latency: $ASIA_latency"
+                (
+                    _lat=$(get_latency "$AMERICA_url" "$AMERICA_HOST")
+                    if [ "$_lat" == "999" ]; then
+                        echo "Primary America server failed, trying backup..." >&2
+                        _lat=$(get_latency "$AMERICA_url_backup" "$AMERICA_HOST_BACKUP")
+                    fi
+                    echo "$_lat" > "$_probe_tmpdir/america"
+                ) &
 
-                # Find the fastest region
+                (
+                    _lat=$(get_latency "$ASIA_url" "$ASIA_HOST")
+                    if [ "$_lat" == "999" ]; then
+                        echo "Primary Asia server failed, trying backup..." >&2
+                        _lat=$(get_latency "$ASIA_url_backup" "$ASIA_HOST_BACKUP")
+                    fi
+                    echo "$_lat" > "$_probe_tmpdir/asia"
+                ) &
+
+                wait
+
+                EUROPE_latency=$(cat "$_probe_tmpdir/europe")
+                AMERICA_latency=$(cat "$_probe_tmpdir/america")
+                ASIA_latency=$(cat "$_probe_tmpdir/asia")
+                rm -rf "$_probe_tmpdir"
+
+                echo "Europe Latency (median of 3): ${EUROPE_latency}s"
+                echo "America Latency (median of 3): ${AMERICA_latency}s"
+                echo "Asia Latency (median of 3): ${ASIA_latency}s"
+
+                # Rank regions by latency
                 echo "Regional latencies (s): europe=${EUROPE_latency}, america=${AMERICA_latency}, asia=${ASIA_latency}"
-                FASTEST_REGION=$(printf "%s europe\n%s america\n%s asia\n" "$EUROPE_latency" "$AMERICA_latency" "$ASIA_latency" | sort -n | head -n 1 | awk '{print $2}')
+                SORTED_REGIONS=$(printf "%s europe\n%s america\n%s asia\n" \
+                    "$EUROPE_latency" "$AMERICA_latency" "$ASIA_latency" | sort -n)
+                FASTEST_REGION=$(echo "$SORTED_REGIONS" | awk 'NR==1{print $2}')
+                FASTEST_LATENCY=$(echo "$SORTED_REGIONS" | awk 'NR==1{print $1}')
+                SECOND_REGION=$(echo "$SORTED_REGIONS" | awk 'NR==2{print $2}')
+                SECOND_LATENCY=$(echo "$SORTED_REGIONS" | awk 'NR==2{print $1}')
 
+                echo "Fastest region by latency: $FASTEST_REGION (${FASTEST_LATENCY}s), runner-up: $SECOND_REGION (${SECOND_LATENCY}s)"
+
+                # When the margin is thin, latency alone is unreliable —
+                # a far-away server can appear fast on a tiny probe but be
+                # slower for actual bulk transfers. Run a throughput
+                # tiebreaker by downloading the real CVMFS root catalog
+                # (hundreds of KB – several MB) from each finalist.
+                if [ "$FASTEST_LATENCY" != "999" ] && [ "$SECOND_LATENCY" != "999" ]; then
+                    MARGIN=$(awk "BEGIN {if ($FASTEST_LATENCY > 0) printf \"%.2f\", ($SECOND_LATENCY - $FASTEST_LATENCY) / $FASTEST_LATENCY; else print 999}")
+                    echo "Latency margin: $(awk "BEGIN {printf \"%.0f\", $MARGIN * 100}")%"
+
+                    if [ "$(awk "BEGIN {print ($MARGIN < 0.40) ? 1 : 0}")" -eq 1 ]; then
+                        echo "Margin is <40% — running throughput tiebreaker between $FASTEST_REGION and $SECOND_REGION..."
+
+                        # Map region name back to its base URL
+                        _region_to_base_url() {
+                            case "$1" in
+                                europe)  echo "http://${EUROPE_HOST}/cvmfs/neurodesk.ardc.edu.au" ;;
+                                america) echo "http://${AMERICA_HOST}/cvmfs/neurodesk.ardc.edu.au" ;;
+                                asia)    echo "http://${ASIA_HOST}/cvmfs/neurodesk.ardc.edu.au" ;;
+                            esac
+                        }
+
+                        _tp_tmpdir=$(mktemp -d)
+                        (get_throughput_time "$(_region_to_base_url "$FASTEST_REGION")" > "$_tp_tmpdir/first") &
+                        (get_throughput_time "$(_region_to_base_url "$SECOND_REGION")" > "$_tp_tmpdir/second") &
+                        wait
+
+                        FIRST_TP=$(cat "$_tp_tmpdir/first")
+                        SECOND_TP=$(cat "$_tp_tmpdir/second")
+                        rm -rf "$_tp_tmpdir"
+
+                        echo "Throughput time for $FASTEST_REGION: ${FIRST_TP}s"
+                        echo "Throughput time for $SECOND_REGION: ${SECOND_TP}s"
+
+                        if [ "$FIRST_TP" != "999" ] && [ "$SECOND_TP" != "999" ]; then
+                            if [ "$(awk "BEGIN {print ($SECOND_TP < $FIRST_TP) ? 1 : 0}")" -eq 1 ]; then
+                                echo "Throughput tiebreaker: switching from $FASTEST_REGION to $SECOND_REGION (faster bulk transfer)"
+                                FASTEST_REGION="$SECOND_REGION"
+                            else
+                                echo "Throughput tiebreaker confirms $FASTEST_REGION"
+                            fi
+                        else
+                            echo "Throughput tiebreaker inconclusive — keeping $FASTEST_REGION"
+                        fi
+                    fi
+                fi
+
+                # Probe Direct vs CDN modes in parallel
                 echo "Probing connection modes (Direct vs CDN)..."
                 DIRECT_HOST=cvmfs-geoproximity.neurodesk.org
                 CDN_HOST=cvmfs.neurodesk.org
@@ -216,10 +322,17 @@ if [ "$EUID" -eq 0 ]; then
                 DIRECT_url="http://${DIRECT_HOST}/cvmfs/neurodesk.ardc.edu.au/.cvmfspublished"
                 CDN_url="http://${CDN_HOST}/cvmfs/neurodesk.ardc.edu.au/.cvmfspublished"
 
-                DIRECT_latency=$(get_latency "$DIRECT_url" "$DIRECT_HOST")
-                echo "Direct Latency: $DIRECT_latency"
-                CDN_latency=$(get_latency "$CDN_url" "$CDN_HOST")
-                echo "CDN Latency: $CDN_latency"
+                _mode_tmpdir=$(mktemp -d)
+                (get_latency "$DIRECT_url" "$DIRECT_HOST" > "$_mode_tmpdir/direct") &
+                (get_latency "$CDN_url" "$CDN_HOST" > "$_mode_tmpdir/cdn") &
+                wait
+
+                DIRECT_latency=$(cat "$_mode_tmpdir/direct")
+                CDN_latency=$(cat "$_mode_tmpdir/cdn")
+                rm -rf "$_mode_tmpdir"
+
+                echo "Direct Latency (median of 3): ${DIRECT_latency}s"
+                echo "CDN Latency (median of 3): ${CDN_latency}s"
 
                 # Determine the fastest mode
                 FASTEST_MODE=$(printf "%s direct\n%s cdn\n" "$DIRECT_latency" "$CDN_latency" | sort -n | head -n 1 | awk '{print $2}')
