@@ -268,11 +268,15 @@ def begin_client_request():
 
 
 def end_client_request():
-    """Update request counters after handling a client request."""
+    """Update request counters after handling a client request.
+
+    Does NOT mark activity — only begin_client_request() does that.
+    A response completing just means the proxy finished; the browser
+    may already be gone (e.g. a long-poll returning after tab close).
+    """
     global active_client_requests
     with shutdown_lock:
         active_client_requests = max(0, active_client_requests - 1)
-    mark_client_activity()
 
 
 def process_group_exists(pgid):
@@ -288,8 +292,129 @@ def process_group_exists(pgid):
         return True
 
 
+def _find_session_pids(sid):
+    """Find all PIDs belonging to the given session, excluding ourselves.
+
+    When start_new_session=True is used, the child becomes the session
+    leader (SID == PID).  All descendants inherit this SID even if they
+    create their own process groups, so scanning by SID catches processes
+    that escape the PGID-based kill.
+    """
+    pids = []
+    my_pid = os.getpid()
+    try:
+        for entry in os.listdir('/proc'):
+            if not entry.isdigit():
+                continue
+            pid = int(entry)
+            if pid == my_pid:
+                continue
+            try:
+                with open(f'/proc/{pid}/stat') as f:
+                    stat_line = f.read()
+                # Format: pid (comm) state ppid pgrp session ...
+                # comm can contain spaces/parens, so find the LAST ')'.
+                close_paren = stat_line.rindex(')')
+                fields = stat_line[close_paren + 2:].split()
+                # fields: 0=state, 1=ppid, 2=pgrp, 3=session
+                proc_sid = int(fields[3])
+                if proc_sid == sid:
+                    pids.append(pid)
+            except (FileNotFoundError, ValueError, PermissionError, IndexError):
+                continue
+    except FileNotFoundError:
+        pass
+    return pids
+
+
+def _kill_orphan_processes(sid):
+    """Kill any descendant processes that escaped the PGID-based kill.
+
+    This handles the case where Apptainer/Singularity child processes
+    (e.g. rserver forks, fuse handlers) create their own process groups
+    and survive os.killpg().  We find them by session ID and SIGKILL them.
+    """
+    if sid is None:
+        return
+
+    remaining = _find_session_pids(sid)
+    if not remaining:
+        return
+
+    log(f"Found {len(remaining)} orphan process(es) in session {sid}: {remaining}")
+    for pid in remaining:
+        try:
+            os.kill(pid, signal.SIGKILL)
+            log(f"Killed orphan PID {pid}")
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    # Give the kernel a moment to reap the killed processes
+    time.sleep(0.5)
+
+    # Check if any survived even SIGKILL (e.g. stuck in uninterruptible I/O)
+    still_alive = _find_session_pids(sid)
+    if still_alive:
+        log(f"Warning: {len(still_alive)} process(es) survived SIGKILL: {still_alive}")
+
+
+def _kill_processes_on_port(port):
+    """Kill any process still listening on the target port.
+
+    Safety net for processes that escaped both the PGID and SID kills
+    (e.g. Apptainer child that called setsid()).  Parses /proc/net/tcp
+    to find socket inodes bound to the port, then matches them against
+    /proc/*/fd to identify owning PIDs.
+    """
+    if port is None:
+        return
+
+    hex_port = f'{port:04X}'
+    target_inodes = set()
+    try:
+        with open('/proc/net/tcp') as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 10:
+                    continue
+                # local_address format: hex_ip:hex_port
+                local_addr = parts[1]
+                if local_addr.endswith(f':{hex_port}'):
+                    inode = parts[9]
+                    if inode != '0':
+                        target_inodes.add(inode)
+    except (FileNotFoundError, PermissionError):
+        return
+
+    if not target_inodes:
+        return
+
+    my_pid = os.getpid()
+    for entry in os.listdir('/proc'):
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        if pid == my_pid:
+            continue
+        try:
+            fd_dir = f'/proc/{pid}/fd'
+            for fd in os.listdir(fd_dir):
+                try:
+                    link = os.readlink(f'{fd_dir}/{fd}')
+                    if link.startswith('socket:['):
+                        inode = link[8:-1]
+                        if inode in target_inodes:
+                            log(f"Killing PID {pid} still bound to port {port}")
+                            os.kill(pid, signal.SIGKILL)
+                            break
+                except (FileNotFoundError, PermissionError):
+                    continue
+        except (FileNotFoundError, PermissionError):
+            continue
+
+
 def stop_container_processes():
-    """Stop the started container/app process group."""
+    """Stop the started container/app process group and all descendants."""
     global container_process, container_pgid
 
     pgid = container_pgid
@@ -301,7 +426,12 @@ def stop_container_processes():
 
     if pgid is None or not process_group_exists(pgid):
         container_pgid = None
+        # Process group gone, but children may have escaped to their own group
+        _kill_processes_on_port(config.target_port)
         return
+
+    # SID == PGID for the session leader (start_new_session=True)
+    sid = pgid
 
     log(f"Stopping process group {pgid} for {config.app_name}")
 
@@ -309,12 +439,16 @@ def stop_container_processes():
         os.killpg(pgid, signal.SIGTERM)
     except ProcessLookupError:
         container_pgid = None
+        _kill_orphan_processes(sid)
+        _kill_processes_on_port(config.target_port)
         return
 
     deadline = time.time() + config.stop_timeout
     while time.time() < deadline:
         if not process_group_exists(pgid):
             container_pgid = None
+            _kill_orphan_processes(sid)
+            _kill_processes_on_port(config.target_port)
             return
         time.sleep(0.2)
 
@@ -324,6 +458,11 @@ def stop_container_processes():
     except ProcessLookupError:
         pass
     container_pgid = None
+
+    # Wait briefly for SIGKILL to take effect before scanning for orphans
+    time.sleep(0.5)
+    _kill_orphan_processes(sid)
+    _kill_processes_on_port(config.target_port)
 
 
 def reset_container_runtime_state(clear_error=True):
@@ -385,6 +524,64 @@ def stop_backend_for_idle(idle_for):
         reset_container_runtime_state(clear_error=True)
         mark_client_activity()
     _close_backend_connections()
+
+
+_close_check_timer = None
+_close_check_lock = threading.Lock()
+
+CLOSE_CHECK_DELAY = 5  # seconds to wait after close beacon before checking
+
+
+def _schedule_close_check():
+    """Schedule a deferred check after a tab-close beacon.
+
+    If no heartbeat arrives within CLOSE_CHECK_DELAY seconds after the
+    close beacon, the backend is stopped immediately instead of waiting
+    for the full idle_timeout (90s).  Multiple close beacons (e.g. from
+    several tabs closing in quick succession) reset the timer so we
+    only check once, after the last one.
+    """
+    global _close_check_timer
+
+    with _close_check_lock:
+        if _close_check_timer is not None:
+            _close_check_timer.cancel()
+        _close_check_timer = threading.Timer(CLOSE_CHECK_DELAY, _perform_close_check)
+        _close_check_timer.daemon = True
+        _close_check_timer.start()
+
+
+def _perform_close_check():
+    """Called CLOSE_CHECK_DELAY seconds after the last close beacon.
+
+    If no activity happened since the beacon (i.e. no heartbeat from
+    another open tab), stop the backend right away.
+    """
+    global _close_check_timer
+
+    with _close_check_lock:
+        _close_check_timer = None
+
+    with shutdown_lock:
+        inflight = active_client_requests
+
+    if inflight > 0:
+        log("Close check: requests still in flight, rescheduling")
+        _schedule_close_check()
+        return
+
+    idle_for = time.time() - last_client_activity
+    if idle_for >= CLOSE_CHECK_DELAY - 1:
+        # No heartbeat arrived since the close beacon
+        log(f"Close check: no heartbeat for {idle_for:.1f}s after close beacon; stopping backend")
+        stop_backend_for_idle(idle_for)
+    else:
+        # Activity was recent — could be a genuine heartbeat from another
+        # tab, or a stale in-flight request completing.  Reschedule to
+        # re-check rather than giving up and waiting for the full 90s
+        # idle timeout.
+        log(f"Close check: activity detected {idle_for:.1f}s ago, rescheduling")
+        _schedule_close_check()
 
 
 def initiate_shutdown(reason):
@@ -577,6 +774,12 @@ def render_splash_template():
 class WebappHandler(http.server.BaseHTTPRequestHandler):
     """HTTP handler that serves splash page or proxies to webapp."""
 
+    # Use buffered writes (default 8 KB) so small chunk-framing writes are
+    # coalesced before hitting the Unix socket.  This reduces syscalls and
+    # Tornado event-loop wakeups.  handle_one_request() calls wfile.flush()
+    # after every response, so no data is left stuck in the buffer.
+    wbufsize = -1
+
     def log_message(self, format, *args):
         """Override to log to file instead of stderr."""
         log(f"HTTP: {format % args}")
@@ -607,7 +810,18 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
         parsed_path = urllib.parse.urlparse(self.path).path
         return parsed_path.endswith(f"/{config.status_endpoint}")
 
+    def _is_close_beacon(self):
+        """Check if this is a tab-close beacon (?closing=1 on status endpoint)."""
+        query = urllib.parse.urlparse(self.path).query
+        return "closing=1" in query
+
     def _handle_request(self, method):
+        # Close beacons must NOT reset the idle timer — otherwise every tab
+        # close extends the backend lifetime by a full idle_timeout period.
+        if self._is_status_endpoint() and method == "POST" and self._is_close_beacon():
+            self._send_status(method, is_close=True)
+            return
+
         begin_client_request()
 
         try:
@@ -704,12 +918,15 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
             return f"{base_path}{path}"
         return location
 
-    def _send_status(self, method):
+    def _send_status(self, method, is_close=False):
         """Send current status as JSON (GET) or heartbeat ack (POST)."""
         if method == "POST":
             self.send_response(204)
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
+            if is_close:
+                log("Close beacon received; scheduling deferred close check")
+                _schedule_close_check()
             return
 
         elapsed = time.time() - startup_start_time if startup_start_time else 0
@@ -822,6 +1039,64 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
 </script>'''
         return inject_script.encode('utf-8')
 
+    def _build_heartbeat_only_script(self, base_path):
+        """Build a heartbeat + close-beacon script WITHOUT base href or replaceState.
+
+        This is safe to inject into ALL apps (including RStudio) because it
+        only adds fetch()-based heartbeats — it never touches the DOM, URLs,
+        or History API.  Used for compressed HTML responses where the full
+        injection (base href + replaceState) would break apps.
+        """
+        inject_script = f'''<script>
+(function() {{
+  var statusUrl = '{base_path.rstrip("/")}/{config.status_endpoint}';
+  var heartbeatIntervalMs = {config.heartbeat_interval * 1000};
+
+  function sendHeartbeat() {{
+    fetch(statusUrl, {{
+      method: 'POST',
+      keepalive: true,
+      credentials: 'same-origin'
+    }}).catch(function() {{}});
+  }}
+
+  var heartbeatTimer = setInterval(sendHeartbeat, heartbeatIntervalMs);
+  sendHeartbeat();
+
+  document.addEventListener('visibilitychange', function() {{
+    if (document.hidden) {{
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }} else {{
+      if (!heartbeatTimer) {{
+        sendHeartbeat();
+        heartbeatTimer = setInterval(sendHeartbeat, heartbeatIntervalMs);
+      }}
+    }}
+  }});
+
+  function notifyClose() {{
+    if (heartbeatTimer) {{
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }}
+    if (navigator.sendBeacon) {{
+      navigator.sendBeacon(statusUrl + '?closing=1', '');
+    }} else {{
+      fetch(statusUrl + '?closing=1', {{
+        method: 'POST',
+        keepalive: true,
+        credentials: 'same-origin'
+      }}).catch(function() {{}});
+    }}
+  }}
+
+  window.addEventListener('pagehide', notifyClose);
+  window.addEventListener('beforeunload', notifyClose);
+}})();
+</script>'''
+        return inject_script.encode('utf-8')
+
     def _send_response_headers(self, response, target_port, omit_content_length=False,
                                omit_content_encoding=False):
         """Send HTTP status and headers from upstream httpx response."""
@@ -854,8 +1129,16 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
 
         Uses a sliding-window overlap buffer so that rewrite patterns spanning
         chunk boundaries are still matched correctly.
+
+        For main HTML pages from compressed backends (gzip/br), we decompress
+        via iter_bytes() and inject a heartbeat-only script (no base-href or
+        replaceState — those break apps like RStudio that read window.location).
+        For uncompressed main HTML, we inject the full script (base-href +
+        replaceState + heartbeat) using iter_raw(), preserving the old behavior
+        that apps like dicompare depend on.
         """
         base_path = self._get_base_path()
+        is_compressed = bool(response.headers.get("content-encoding"))
 
         # Build rewrite map: list of (old_bytes, new_bytes) tuples
         rewrite_map = []
@@ -868,11 +1151,20 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
         max_pattern_len = max((len(old) for old, _ in rewrite_map), default=0)
         overlap_size = max(max_pattern_len - 1, 0)
 
-        # Send headers with chunked transfer encoding (content-length unknown).
-        # Preserve Content-Encoding — we use iter_raw() so bytes are unchanged
-        # and the browser handles decompression.  Rewrites/injection only match
-        # on uncompressed responses (same behaviour as the old urllib code).
-        self._send_response_headers(response, target_port, omit_content_length=True)
+        # For compressed main HTML: decompress (iter_bytes) so we can find
+        # <head> and inject the heartbeat script.  Strip Content-Encoding
+        # since we're sending decompressed bytes.
+        # For everything else: iter_raw preserves original encoding.
+        if is_main_html and is_compressed:
+            omit_ce = True
+            chunk_iter = response.iter_bytes(STREAM_CHUNK_SIZE)
+        else:
+            omit_ce = False
+            chunk_iter = response.iter_raw(STREAM_CHUNK_SIZE)
+
+        self._send_response_headers(response, target_port,
+                                    omit_content_length=True,
+                                    omit_content_encoding=omit_ce)
         self.send_header("Transfer-Encoding", "chunked")
         self.end_headers()
 
@@ -903,17 +1195,21 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
             # Buffer initial data to find <head> and inject script
             head_buffer = b""
             HEAD_BUFFER_LIMIT = 4096
-            remaining_iter = response.iter_raw(STREAM_CHUNK_SIZE)
-            for chunk in remaining_iter:
+            for chunk in chunk_iter:
                 head_buffer += chunk
                 if b'<head>' in head_buffer or b'<HEAD>' in head_buffer:
                     break
                 if len(head_buffer) >= HEAD_BUFFER_LIMIT:
                     break
 
-            # Rewrite paths and inject script into buffered head
+            # Choose injection: full script (base-href + replaceState + heartbeat)
+            # for uncompressed content; heartbeat-only for compressed content
+            # (replaceState breaks apps like RStudio that read window.location).
             head_buffer = rewrite(head_buffer)
-            inject_bytes = self._build_inject_script(base_path)
+            if is_compressed:
+                inject_bytes = self._build_heartbeat_only_script(base_path)
+            else:
+                inject_bytes = self._build_inject_script(base_path)
             if b'<head>' in head_buffer:
                 head_buffer = head_buffer.replace(b'<head>', b'<head>' + inject_bytes, 1)
             elif b'<HEAD>' in head_buffer:
@@ -922,10 +1218,10 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
             self._write_chunk(head_buffer)
 
             # Stream remainder with overlap rewriting
-            stream_with_overlap(remaining_iter)
+            stream_with_overlap(chunk_iter)
         else:
             # Non-HTML text (JS/CSS): stream with overlap rewriting
-            stream_with_overlap(response.iter_raw(STREAM_CHUNK_SIZE))
+            stream_with_overlap(chunk_iter)
 
         self._end_chunked()
 
@@ -976,7 +1272,7 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
 
                 # Determine what processing is needed:
                 # - Path rewriting: for text responses that may contain hard-coded paths
-                # - Base href injection: only for main HTML page
+                # - Base href injection: for main HTML page
                 needs_path_rewrite = (
                     config.path_rewrites and
                     any(ct in content_type for ct in ["text/html", "text/javascript", "application/javascript", "text/css"])
