@@ -36,6 +36,15 @@ if is_false "${NEURODESKTOP_SLURM_ENABLE:-1}"; then
     exit 0
 fi
 
+SLURM_MODE="$(printf '%s' "${NEURODESKTOP_SLURM_MODE:-local}" | tr '[:upper:]' '[:lower:]')"
+if [ "${SLURM_MODE}" = "host" ]; then
+    echo "[INFO] Slurm startup skipped in host mode (NEURODESKTOP_SLURM_MODE=host)."
+    exit 0
+fi
+if [ "${SLURM_MODE}" != "local" ]; then
+    echo "[WARN] Unknown NEURODESKTOP_SLURM_MODE='${NEURODESKTOP_SLURM_MODE:-}'. Falling back to local mode."
+fi
+
 if [ "${EUID}" -ne 0 ]; then
     echo "[WARN] Slurm setup requires root. Skipping."
     exit 0

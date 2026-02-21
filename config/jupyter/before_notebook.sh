@@ -495,9 +495,26 @@ if [ -n "$SLURM_JOB_ID" ]; then
     fi
 fi
 
+# Slurm mode:
+# - local (default): start an in-container single-node Slurm queue.
+# - host: do not start local Slurm; rely on host cluster Slurm via bound config/socket.
+SLURM_MODE_RAW="${NEURODESKTOP_SLURM_MODE:-local}"
+SLURM_MODE="$(printf '%s' "${SLURM_MODE_RAW}" | tr '[:upper:]' '[:lower:]')"
+case "${SLURM_MODE}" in
+    local|host) ;;
+    *)
+        echo "[WARN] Unknown NEURODESKTOP_SLURM_MODE='${SLURM_MODE_RAW}'. Falling back to 'local'."
+        SLURM_MODE=local
+        ;;
+esac
+export NEURODESKTOP_SLURM_MODE="${SLURM_MODE}"
+
 # Start a local single-node Slurm queue inside the container.
 # In auto mode, Slurm defaults to non-cgroup compatibility settings unless explicitly enabled.
-if [ "$EUID" -eq 0 ]; then
+if [ "${NEURODESKTOP_SLURM_MODE}" = "host" ]; then
+    export NEURODESKTOP_SLURM_ENABLE=0
+    echo "[INFO] NEURODESKTOP_SLURM_MODE=host: skipping local Slurm startup."
+elif [ "$EUID" -eq 0 ]; then
     if ! /opt/neurodesktop/setup_and_start_slurm.sh; then
         echo "[WARN] Failed to configure/start local Slurm queue."
     fi

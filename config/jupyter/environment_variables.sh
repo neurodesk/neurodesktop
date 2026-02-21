@@ -93,15 +93,32 @@ if [ -z "${OLLAMA_HOST}" ]; then
         export OLLAMA_HOST="http://host.docker.internal:11434"
 fi
 
-# Local Slurm configuration used by the in-container single-node queue.
-export SLURM_CONF=/etc/slurm/slurm.conf
-if [[ -z "${NEURODESKTOP_SLURM_PARTITION}" ]]; then
-        export NEURODESKTOP_SLURM_PARTITION=neurodesktop
+# Slurm mode:
+# - local (default): use the in-container single-node Slurm queue.
+# - host: rely on host cluster Slurm configuration provided from outside.
+if [[ -z "${NEURODESKTOP_SLURM_MODE}" ]]; then
+        export NEURODESKTOP_SLURM_MODE=local
+else
+        export NEURODESKTOP_SLURM_MODE="$(printf '%s' "${NEURODESKTOP_SLURM_MODE}" | tr '[:upper:]' '[:lower:]')"
 fi
-# Clear inherited account defaults from host environments so sbatch jobs inside the container
-# use the local slurmdbd's "default" account rather than a host-cluster account name.
-unset SBATCH_ACCOUNT
-unset SLURM_ACCOUNT
+
+case "${NEURODESKTOP_SLURM_MODE}" in
+        host)
+                # In host mode we keep host-provided SLURM_CONF and account defaults.
+                ;;
+        *)
+                # Local Slurm configuration used by the in-container single-node queue.
+                export NEURODESKTOP_SLURM_MODE=local
+                export SLURM_CONF=/etc/slurm/slurm.conf
+                if [[ -z "${NEURODESKTOP_SLURM_PARTITION}" ]]; then
+                        export NEURODESKTOP_SLURM_PARTITION=neurodesktop
+                fi
+                # Clear inherited account defaults from host environments so sbatch jobs inside the container
+                # use the local slurmdbd's "default" account rather than a host-cluster account name.
+                unset SBATCH_ACCOUNT
+                unset SLURM_ACCOUNT
+                ;;
+esac
 
 # This is needed to make containers writable as a workaround for macos with Apple Silicon. We need to do it here for the desktop
 # and in the dockerfile for the jupyter notebook

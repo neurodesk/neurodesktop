@@ -6,6 +6,34 @@ Neurodesktop starts a local Slurm controller/worker inside the container with a 
 - Node: current container hostname
 - Limits: detected from container cgroups (`cpu.max`, `memory.max`), with optional Slurm cgroup enforcement when cgroup mode is enabled
 
+### Slurm modes
+
+Neurodesktop supports two Slurm operation modes:
+
+- `NEURODESKTOP_SLURM_MODE=local` (default): start and use the in-container single-node Slurm queue.
+- `NEURODESKTOP_SLURM_MODE=host`: skip in-container Slurm startup and use the host HPC Slurm cluster.
+
+In `host` mode, Neurodesktop preserves host-provided `SLURM_CONF`, `SBATCH_ACCOUNT`, and `SLURM_ACCOUNT`.
+In `local` mode, Neurodesktop sets `SLURM_CONF=/etc/slurm/slurm.conf` and clears inherited account defaults to avoid
+`InvalidAccount` against the local slurmdbd setup.
+
+Example for Apptainer on HPC (host Slurm mode):
+
+```bash
+export APPTAINERENV_NEURODESKTOP_SLURM_MODE=host
+export APPTAINERENV_SLURM_CONF=/etc/slurm/slurm.conf
+export APPTAINERENV_SBATCH_ACCOUNT="${SBATCH_ACCOUNT:-}"
+export APPTAINERENV_SLURM_ACCOUNT="${SLURM_ACCOUNT:-}"
+
+apptainer exec \
+  --bind /etc/slurm:/etc/slurm \
+  --bind /run/munge:/run/munge \
+  neurodesktop.sif \
+  bash -lc 'sinfo && squeue -u "$USER"'
+```
+
+If your site uses a different path for `slurm.conf` or the MUNGE socket, bind those paths instead.
+
 ### Accounting (MariaDB + slurmdbd)
 
 SLURM 23.11+ (as shipped in the Ubuntu 24.04 packages) rejects jobs with
@@ -30,6 +58,7 @@ This means `sbatch`/`srun` jobs submitted inside the container stay inside the c
 
 ### Environment variables
 
+- `NEURODESKTOP_SLURM_MODE=local|host` to select in-container (`local`) or host-cluster (`host`) Slurm mode
 - `NEURODESKTOP_SLURM_ENABLE=0` to disable local Slurm startup
 - `NEURODESKTOP_SLURM_MEMORY_RESERVE_MB=256` memory headroom reserved for desktop/Jupyter processes
 - `NEURODESKTOP_SLURM_PARTITION=neurodesktop` to rename the partition
@@ -85,5 +114,5 @@ If you changed the partition name, override on submit:
 sbatch -p "${NEURODESKTOP_SLURM_PARTITION}" /opt/neurodesktop/slurm_submit_smoke.sbatch
 ```
 
-To prevent inherited host-cluster defaults from causing account errors, Neurodesktop clears `SBATCH_ACCOUNT`
-and `SLURM_ACCOUNT` in `/opt/neurodesktop/environment_variables.sh`.
+In `local` mode, Neurodesktop clears inherited `SBATCH_ACCOUNT` and `SLURM_ACCOUNT`
+in `/opt/neurodesktop/environment_variables.sh` to avoid local-account mismatches.
