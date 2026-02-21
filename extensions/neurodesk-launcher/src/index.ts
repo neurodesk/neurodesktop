@@ -3,6 +3,8 @@ import {
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
 
+import { Notification } from '@jupyterlab/apputils';
+
 import { ILauncher } from '@jupyterlab/launcher';
 
 import { LabIcon } from '@jupyterlab/ui-components';
@@ -26,6 +28,69 @@ interface IServerProcess {
 
 interface IServersInfoResponse {
   server_processes: IServerProcess[];
+}
+
+const DONATION_URL = 'https://donations.uq.edu.au/EAINNEUR';
+const DONATION_MESSAGE =
+  'We rely on your financial support to cover our infrastructure costs. Please support Neurodesk here: https://donations.uq.edu.au/EAINNEUR';
+const DONATION_NOTIFICATION_DISMISSED_KEY =
+  'neurodesk-launcher:donation-notification-dismissed-v1';
+
+let donationNotificationShown = false;
+
+function showDonationNotificationOnce(): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    if (
+      donationNotificationShown ||
+      window.localStorage.getItem(DONATION_NOTIFICATION_DISMISSED_KEY) ===
+        'dismissed'
+    ) {
+      return;
+    }
+    donationNotificationShown = true;
+  } catch {
+    // Keep going if localStorage is unavailable in this browser context.
+  }
+
+  const notificationId = Notification.info(DONATION_MESSAGE, {
+    autoClose: false,
+    actions: [
+      {
+        label: 'Open donation page',
+        caption: 'Open the Neurodesk donations page in a new tab.',
+        displayType: 'link',
+        callback: (_event: MouseEvent) => {
+          window.open(DONATION_URL, '_blank', 'noopener,noreferrer');
+        }
+      }
+    ]
+  });
+
+  const onNotificationChanged = (
+    _manager: unknown,
+    change: Notification.IChange
+  ): void => {
+    if (change.type !== 'removed' || change.notification.id !== notificationId) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        DONATION_NOTIFICATION_DISMISSED_KEY,
+        'dismissed'
+      );
+    } catch {
+      // Ignore storage write errors in restricted browser contexts.
+    }
+
+    Notification.manager.changed.disconnect(onNotificationChanged);
+  };
+
+  Notification.manager.changed.connect(onNotificationChanged);
 }
 
 async function fetchSvgText(
@@ -128,6 +193,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
   autoStart: true,
   requires: [ILauncher],
   activate: async (app: JupyterFrontEnd, launcher: ILauncher) => {
+    showDonationNotificationOnce();
+
     const settings = ServerConnection.makeSettings();
     const infoUrl = URLExt.join(
       settings.baseUrl,
