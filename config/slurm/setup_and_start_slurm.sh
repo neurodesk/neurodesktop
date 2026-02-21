@@ -63,9 +63,89 @@ if ! id munge >/dev/null 2>&1; then
     useradd --system --home-dir /var/lib/munge --shell /usr/sbin/nologin munge
 fi
 
+extract_first_uint() {
+    local raw
+    raw="$(printf '%s' "${1:-}" | tr -d '[:space:]')"
+    if [[ "${raw}" =~ ^([0-9]+) ]]; then
+        echo "${BASH_REMATCH[1]}"
+        return 0
+    fi
+    return 1
+}
+
+parse_memory_to_mb() {
+    local raw value unit
+    raw="$(printf '%s' "${1:-}" | tr -d '[:space:]')"
+    if [ -z "${raw}" ]; then
+        return 1
+    fi
+
+    if [[ "${raw}" =~ ^([0-9]+)([KkMmGgTt]?)$ ]]; then
+        value="${BASH_REMATCH[1]}"
+        unit="${BASH_REMATCH[2]}"
+    else
+        return 1
+    fi
+
+    if [ "${value}" -le 0 ]; then
+        return 1
+    fi
+
+    case "${unit}" in
+        ""|[Mm]) echo "${value}" ;;
+        [Kk]) echo $(((value + 1023) / 1024)) ;;
+        [Gg]) echo $((value * 1024)) ;;
+        [Tt]) echo $((value * 1024 * 1024)) ;;
+        *) return 1 ;;
+    esac
+}
+
+detect_slurm_cpu_limit() {
+    local slurm_cpu_limit
+    slurm_cpu_limit="$(extract_first_uint "${SLURM_CPUS_ON_NODE:-}" || true)"
+    if [ -z "${slurm_cpu_limit}" ]; then
+        slurm_cpu_limit="$(extract_first_uint "${SLURM_JOB_CPUS_PER_NODE:-}" || true)"
+    fi
+    if [ -z "${slurm_cpu_limit}" ]; then
+        slurm_cpu_limit="$(extract_first_uint "${SLURM_CPUS_PER_TASK:-}" || true)"
+    fi
+
+    if [ -n "${slurm_cpu_limit}" ] && [ "${slurm_cpu_limit}" -gt 0 ]; then
+        echo "${slurm_cpu_limit}"
+    fi
+}
+
+detect_slurm_memory_limit_mb() {
+    local slurm_mem_mb mem_per_cpu_mb slurm_cpu_limit
+    slurm_mem_mb="$(parse_memory_to_mb "${SLURM_MEM_PER_NODE:-}" || true)"
+    if [ -n "${slurm_mem_mb}" ] && [ "${slurm_mem_mb}" -gt 0 ]; then
+        echo "${slurm_mem_mb}"
+        return 0
+    fi
+
+    mem_per_cpu_mb="$(parse_memory_to_mb "${SLURM_MEM_PER_CPU:-}" || true)"
+    if [ -z "${mem_per_cpu_mb}" ] || [ "${mem_per_cpu_mb}" -le 0 ]; then
+        return 1
+    fi
+
+    slurm_cpu_limit="$(detect_slurm_cpu_limit || true)"
+    if [ -n "${slurm_cpu_limit}" ] && [ "${slurm_cpu_limit}" -gt 0 ]; then
+        echo $((mem_per_cpu_mb * slurm_cpu_limit))
+        return 0
+    fi
+
+    return 1
+}
+
 detect_cpu_limit() {
     local cpu_limit
     cpu_limit="$(nproc 2>/dev/null || echo 1)"
+
+    local slurm_cpu_limit
+    slurm_cpu_limit="$(detect_slurm_cpu_limit || true)"
+    if [ -n "${slurm_cpu_limit}" ] && [ "${slurm_cpu_limit}" -gt 0 ] && [ "${slurm_cpu_limit}" -lt "${cpu_limit}" ]; then
+        cpu_limit="${slurm_cpu_limit}"
+    fi
 
     if [ -f /sys/fs/cgroup/cpu.max ]; then
         local quota period quota_limit
@@ -78,8 +158,30 @@ detect_cpu_limit() {
         fi
     fi
 
+    local quota_file period_file quota period quota_limit
+    for quota_file in /sys/fs/cgroup/cpu/cpu.cfs_quota_us /sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us /sys/fs/cgroup/cpu.cfs_quota_us; do
+        if [ ! -f "${quota_file}" ]; then
+            continue
+        fi
+
+        period_file="${quota_file%cpu.cfs_quota_us}cpu.cfs_period_us"
+        if [ ! -f "${period_file}" ]; then
+            continue
+        fi
+
+        quota="$(cat "${quota_file}")"
+        period="$(cat "${period_file}")"
+        if [ -n "${quota:-}" ] && [ "${quota}" -gt 0 ] && [ -n "${period:-}" ] && [ "${period}" -gt 0 ]; then
+            quota_limit="$(awk -v q="$quota" -v p="$period" 'BEGIN { v=int(q/p); if (v < 1) v = 1; print v }')"
+            if [ "${quota_limit}" -lt "${cpu_limit}" ]; then
+                cpu_limit="${quota_limit}"
+            fi
+            break
+        fi
+    done
+
     local cpuset_file cpuset_value cpuset_limit
-    for cpuset_file in /sys/fs/cgroup/cpuset.cpus.effective /sys/fs/cgroup/cpuset.cpus; do
+    for cpuset_file in /sys/fs/cgroup/cpuset.cpus.effective /sys/fs/cgroup/cpuset.cpus /sys/fs/cgroup/cpuset/cpuset.cpus.effective /sys/fs/cgroup/cpuset/cpuset.cpus; do
         if [ -f "${cpuset_file}" ]; then
             cpuset_value="$(tr -d '[:space:]' < "${cpuset_file}")"
             if [ -n "${cpuset_value}" ]; then
@@ -114,9 +216,14 @@ detect_cpu_limit() {
 }
 
 detect_memory_limit_mb() {
-    local mem_kb mem_mb cgroup_bytes cgroup_mb reserve_mb
+    local mem_kb mem_mb cgroup_bytes cgroup_mb reserve_mb slurm_mem_mb cgroup_bytes_file
     mem_kb="$(awk '/MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || echo 1048576)"
     mem_mb=$((mem_kb / 1024))
+
+    slurm_mem_mb="$(detect_slurm_memory_limit_mb || true)"
+    if [ -n "${slurm_mem_mb}" ] && [ "${slurm_mem_mb}" -gt 0 ] && [ "${slurm_mem_mb}" -lt "${mem_mb}" ]; then
+        mem_mb="${slurm_mem_mb}"
+    fi
 
     if [ -f /sys/fs/cgroup/memory.max ]; then
         cgroup_bytes="$(cat /sys/fs/cgroup/memory.max)"
@@ -127,6 +234,23 @@ detect_memory_limit_mb() {
             fi
         fi
     fi
+
+    for cgroup_bytes_file in /sys/fs/cgroup/memory/memory.limit_in_bytes /sys/fs/cgroup/memory.limit_in_bytes; do
+        if [ ! -f "${cgroup_bytes_file}" ]; then
+            continue
+        fi
+
+        cgroup_bytes="$(cat "${cgroup_bytes_file}")"
+        if ! [[ "${cgroup_bytes}" =~ ^[0-9]+$ ]] || [ "${cgroup_bytes}" -le 0 ]; then
+            continue
+        fi
+
+        cgroup_mb=$((cgroup_bytes / 1024 / 1024))
+        if [ "${cgroup_mb}" -gt 0 ] && [ "${cgroup_mb}" -lt "${mem_mb}" ]; then
+            mem_mb="${cgroup_mb}"
+        fi
+        break
+    done
 
     reserve_mb="${NEURODESKTOP_SLURM_MEMORY_RESERVE_MB:-256}"
     if ! [[ "${reserve_mb}" =~ ^[0-9]+$ ]]; then

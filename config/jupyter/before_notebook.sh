@@ -428,70 +428,158 @@ fi
 
 # Note: environment_variables.sh is sourced via /etc/bash.bashrc (set in Dockerfile)
 
-# Read cgroup v2 limits and set environment variables for jupyter-resource-usage
-echo "Detecting container resource limits from cgroup v2..."
+# Read cgroup limits and set environment variables for jupyter-resource-usage
+extract_first_uint() {
+    local raw
+    raw="$(printf '%s' "${1:-}" | tr -d '[:space:]')"
+    if [[ "${raw}" =~ ^([0-9]+) ]]; then
+        echo "${BASH_REMATCH[1]}"
+        return 0
+    fi
+    return 1
+}
+
+parse_memory_to_mb() {
+    local raw value unit
+    raw="$(printf '%s' "${1:-}" | tr -d '[:space:]')"
+    if [ -z "${raw}" ]; then
+        return 1
+    fi
+
+    if [[ "${raw}" =~ ^([0-9]+)([KkMmGgTt]?)$ ]]; then
+        value="${BASH_REMATCH[1]}"
+        unit="${BASH_REMATCH[2]}"
+    else
+        return 1
+    fi
+
+    if [ "${value}" -le 0 ]; then
+        return 1
+    fi
+
+    case "${unit}" in
+        ""|[Mm]) echo "${value}" ;;
+        [Kk]) echo $(((value + 1023) / 1024)) ;;
+        [Gg]) echo $((value * 1024)) ;;
+        [Tt]) echo $((value * 1024 * 1024)) ;;
+        *) return 1 ;;
+    esac
+}
+
+detect_slurm_cpu_limit() {
+    local slurm_cpu_limit
+    slurm_cpu_limit="$(extract_first_uint "${SLURM_CPUS_ON_NODE:-}" || true)"
+    if [ -z "${slurm_cpu_limit}" ]; then
+        slurm_cpu_limit="$(extract_first_uint "${SLURM_JOB_CPUS_PER_NODE:-}" || true)"
+    fi
+    if [ -z "${slurm_cpu_limit}" ]; then
+        slurm_cpu_limit="$(extract_first_uint "${SLURM_CPUS_PER_TASK:-}" || true)"
+    fi
+
+    if [ -n "${slurm_cpu_limit}" ] && [ "${slurm_cpu_limit}" -gt 0 ]; then
+        echo "${slurm_cpu_limit}"
+    fi
+}
+
+detect_slurm_mem_limit_bytes() {
+    local mem_per_node_mb mem_per_cpu_mb slurm_cpu_limit
+    mem_per_node_mb="$(parse_memory_to_mb "${SLURM_MEM_PER_NODE:-}" || true)"
+    if [ -n "${mem_per_node_mb}" ] && [ "${mem_per_node_mb}" -gt 0 ]; then
+        echo $((mem_per_node_mb * 1024 * 1024))
+        return 0
+    fi
+
+    mem_per_cpu_mb="$(parse_memory_to_mb "${SLURM_MEM_PER_CPU:-}" || true)"
+    if [ -z "${mem_per_cpu_mb}" ] || [ "${mem_per_cpu_mb}" -le 0 ]; then
+        return 1
+    fi
+
+    slurm_cpu_limit="$(detect_slurm_cpu_limit || true)"
+    if [ -n "${slurm_cpu_limit}" ] && [ "${slurm_cpu_limit}" -gt 0 ]; then
+        echo $((mem_per_cpu_mb * slurm_cpu_limit * 1024 * 1024))
+        return 0
+    fi
+
+    return 1
+}
+
+echo "Detecting container resource limits from cgroups..."
 if [ -f "/sys/fs/cgroup/memory.max" ]; then
-    CGROUP_MEM_LIMIT=$(cat /sys/fs/cgroup/memory.max)
-    # Check if it's not "max" (unlimited)
-    if [ "$CGROUP_MEM_LIMIT" != "max" ]; then
-        export MEM_LIMIT="$CGROUP_MEM_LIMIT"
-        echo "Memory limit detected: $(numfmt --to=iec "$CGROUP_MEM_LIMIT")"
+    CGROUP_MEM_LIMIT="$(cat /sys/fs/cgroup/memory.max)"
+    if [ "${CGROUP_MEM_LIMIT}" != "max" ]; then
+        export MEM_LIMIT="${CGROUP_MEM_LIMIT}"
+        echo "Memory limit detected (cgroup v2): $(numfmt --to=iec "${CGROUP_MEM_LIMIT}")"
+    else
+        echo "Memory limit: unlimited"
+    fi
+elif [ -f "/sys/fs/cgroup/memory/memory.limit_in_bytes" ] || [ -f "/sys/fs/cgroup/memory.limit_in_bytes" ]; then
+    CGROUP_MEM_LIMIT_FILE="/sys/fs/cgroup/memory/memory.limit_in_bytes"
+    if [ ! -f "${CGROUP_MEM_LIMIT_FILE}" ]; then
+        CGROUP_MEM_LIMIT_FILE="/sys/fs/cgroup/memory.limit_in_bytes"
+    fi
+    CGROUP_MEM_LIMIT="$(cat "${CGROUP_MEM_LIMIT_FILE}")"
+    if [[ "${CGROUP_MEM_LIMIT}" =~ ^[0-9]+$ ]] && [ "${CGROUP_MEM_LIMIT}" -gt 0 ] && [ "${CGROUP_MEM_LIMIT}" -lt 9000000000000000000 ]; then
+        export MEM_LIMIT="${CGROUP_MEM_LIMIT}"
+        echo "Memory limit detected (cgroup v1): $(numfmt --to=iec "${CGROUP_MEM_LIMIT}")"
     else
         echo "Memory limit: unlimited"
     fi
 else
-    echo "cgroup v2 memory.max not found (may be running on older kernel or non-Linux system)"
+    echo "No cgroup memory limit file found."
 fi
 
 if [ -f "/sys/fs/cgroup/cpu.max" ]; then
-    # cpu.max format: "$MAX $PERIOD" (e.g., "200000 100000" = 2 CPUs)
-    CPU_MAX_LINE=$(cat /sys/fs/cgroup/cpu.max)
-    if [ "$CPU_MAX_LINE" != "max 100000" ]; then
-        CPU_QUOTA=$(echo "$CPU_MAX_LINE" | awk '{print $1}')
-        CPU_PERIOD=$(echo "$CPU_MAX_LINE" | awk '{print $2}')
-        # Calculate CPU limit as a decimal (e.g., 2.0 for 2 CPUs)
-        CPU_LIMIT=$(awk "BEGIN {printf \"%.2f\", $CPU_QUOTA/$CPU_PERIOD}")
-        export CPU_LIMIT="$CPU_LIMIT"
-        echo "CPU limit detected: $CPU_LIMIT CPUs"
+    CPU_MAX_LINE="$(cat /sys/fs/cgroup/cpu.max)"
+    CPU_QUOTA="$(echo "${CPU_MAX_LINE}" | awk '{print $1}')"
+    CPU_PERIOD="$(echo "${CPU_MAX_LINE}" | awk '{print $2}')"
+    if [ "${CPU_QUOTA}" != "max" ] && [[ "${CPU_PERIOD}" =~ ^[0-9]+$ ]] && [ "${CPU_PERIOD}" -gt 0 ]; then
+        if [[ "${CPU_QUOTA}" =~ ^[0-9]+$ ]]; then
+            CPU_LIMIT="$(awk "BEGIN {printf \"%.2f\", ${CPU_QUOTA}/${CPU_PERIOD}}")"
+            export CPU_LIMIT="${CPU_LIMIT}"
+            echo "CPU limit detected (cgroup v2): ${CPU_LIMIT} CPUs"
+        fi
     else
         echo "CPU limit: unlimited"
     fi
 else
-    echo "cgroup v2 cpu.max not found (may be running on older kernel or non-Linux system)"
+    CGROUP_CPU_QUOTA_FILE=""
+    for quota_file in /sys/fs/cgroup/cpu/cpu.cfs_quota_us /sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us /sys/fs/cgroup/cpu.cfs_quota_us; do
+        if [ -f "${quota_file}" ]; then
+            CGROUP_CPU_QUOTA_FILE="${quota_file}"
+            break
+        fi
+    done
+
+    if [ -n "${CGROUP_CPU_QUOTA_FILE}" ]; then
+        CPU_QUOTA="$(cat "${CGROUP_CPU_QUOTA_FILE}")"
+        CPU_PERIOD_FILE="${CGROUP_CPU_QUOTA_FILE%cpu.cfs_quota_us}cpu.cfs_period_us"
+        CPU_PERIOD="$(cat "${CPU_PERIOD_FILE}" 2>/dev/null || echo 0)"
+        if [ "${CPU_QUOTA}" -gt 0 ] && [ "${CPU_PERIOD}" -gt 0 ]; then
+            CPU_LIMIT="$(awk "BEGIN {printf \"%.2f\", ${CPU_QUOTA}/${CPU_PERIOD}}")"
+            export CPU_LIMIT="${CPU_LIMIT}"
+            echo "CPU limit detected (cgroup v1): ${CPU_LIMIT} CPUs"
+        else
+            echo "CPU limit: unlimited"
+        fi
+    else
+        echo "No cgroup cpu limit file found."
+    fi
 fi
 
 # SLURM limit detection (overrides cgroup limits if present)
-if [ -n "$SLURM_JOB_ID" ]; then
-    echo "Running inside a SLURM job (Job ID: $SLURM_JOB_ID). Detecting SLURM limits..."
-    
-    # Memory Limit
-    if [ -n "$SLURM_MEM_PER_NODE" ]; then
-        # SLURM_MEM_PER_NODE is in MB
-        echo "SLURM_MEM_PER_NODE detected: ${SLURM_MEM_PER_NODE} MB"
-        export MEM_LIMIT=$(($SLURM_MEM_PER_NODE * 1024 * 1024))
-    elif [ -n "$SLURM_MEM_PER_CPU" ] && [ -n "$SLURM_JOB_CPUS_PER_NODE" ]; then
-        echo "SLURM_MEM_PER_CPU detected: ${SLURM_MEM_PER_CPU} MB"
-        # Extract the number of CPUs on the first node (simplification)
-        CPU_ALLOC=$(echo "$SLURM_JOB_CPUS_PER_NODE" | sed 's/(.*//') 
-        if [[ "$CPU_ALLOC" =~ ^[0-9]+$ ]]; then
-            export MEM_LIMIT=$(($SLURM_MEM_PER_CPU * $CPU_ALLOC * 1024 * 1024))
-        fi
-    fi
-    if [ -n "$MEM_LIMIT" ]; then
-        echo "Memory limit set from SLURM: $(numfmt --to=iec "$MEM_LIMIT")"
+if [ -n "${SLURM_JOB_ID:-}" ]; then
+    echo "Running inside a SLURM job (Job ID: ${SLURM_JOB_ID}). Detecting SLURM limits..."
+
+    SLURM_MEM_LIMIT_BYTES="$(detect_slurm_mem_limit_bytes || true)"
+    if [ -n "${SLURM_MEM_LIMIT_BYTES}" ] && [ "${SLURM_MEM_LIMIT_BYTES}" -gt 0 ]; then
+        export MEM_LIMIT="${SLURM_MEM_LIMIT_BYTES}"
+        echo "Memory limit set from SLURM: $(numfmt --to=iec "${MEM_LIMIT}")"
     fi
 
-    # CPU Limit
-    if [ -n "$SLURM_CPUS_PER_TASK" ]; then
-        export CPU_LIMIT="$SLURM_CPUS_PER_TASK"
-        echo "SLURM_CPUS_PER_TASK detected: $CPU_LIMIT"
-    elif [ -n "$SLURM_JOB_CPUS_PER_NODE" ]; then
-        # Extract the number of CPUs on the first node (simplification)
-        CPU_ALLOC=$(echo "$SLURM_JOB_CPUS_PER_NODE" | sed 's/(.*//')
-        if [[ "$CPU_ALLOC" =~ ^[0-9]+$ ]]; then
-            export CPU_LIMIT="$CPU_ALLOC"
-            echo "SLURM_JOB_CPUS_PER_NODE detected: $CPU_LIMIT"
-        fi
+    SLURM_CPU_LIMIT="$(detect_slurm_cpu_limit || true)"
+    if [ -n "${SLURM_CPU_LIMIT}" ] && [ "${SLURM_CPU_LIMIT}" -gt 0 ]; then
+        export CPU_LIMIT="${SLURM_CPU_LIMIT}"
+        echo "CPU limit set from SLURM: ${CPU_LIMIT}"
     fi
 fi
 

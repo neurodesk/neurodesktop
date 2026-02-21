@@ -4,7 +4,7 @@ Neurodesktop starts a local Slurm controller/worker inside the container with a 
 
 - Partition/queue: `neurodesktop`
 - Node: current container hostname
-- Limits: detected from container cgroups (`cpu.max`, `memory.max`), with optional Slurm cgroup enforcement when cgroup mode is enabled
+- Limits: detected from host Slurm allocations when available (`SLURM_CPUS_ON_NODE`, `SLURM_JOB_CPUS_PER_NODE`, `SLURM_MEM_PER_NODE`, `SLURM_MEM_PER_CPU`), with cgroup (`cpu.max`, `memory.max`) and system fallbacks
 
 ### Slurm modes
 
@@ -70,6 +70,14 @@ This means `sbatch`/`srun` jobs submitted inside the container stay inside the c
 - `NEURODESKTOP_SLURM_LEGACY_CGROUP_PLUGIN=cgroup/v1` to override legacy compatibility fallback plugin
 - `NEURODESKTOP_SLURM_LEGACY_CGROUP_MOUNTPOINT=/tmp/cgroup` to override legacy compatibility fallback mountpoint
 - `NEURODESKTOP_SLURM_ENABLE_TASK_AFFINITY=1` to opt in to `task/affinity` (default is disabled for container compatibility)
+
+### Limit detection order (local mode)
+
+In local mode, `setup_and_start_slurm.sh` sizes the single-node queue from the most restrictive values it can detect:
+
+1. Host Slurm job environment (preferred in Apptainer on HPC): `SLURM_CPUS_ON_NODE`, `SLURM_JOB_CPUS_PER_NODE`, `SLURM_CPUS_PER_TASK`, `SLURM_MEM_PER_NODE`, `SLURM_MEM_PER_CPU`
+2. Container cgroup limits (v2 and v1 paths)
+3. Host-visible defaults (`nproc`, `/proc/meminfo`)
 
 ### Cgroup mode
 
