@@ -16,6 +16,9 @@ Neurodesktop supports two Slurm operation modes:
 In `host` mode, Neurodesktop preserves host-provided `SLURM_CONF`, `SBATCH_ACCOUNT`, and `SLURM_ACCOUNT`.
 In `local` mode, Neurodesktop sets `SLURM_CONF=/etc/slurm/slurm.conf` and clears inherited account defaults to avoid
 `InvalidAccount` against the local slurmdbd setup.
+When `NEURODESKTOP_SLURM_MODE` is unset, Neurodesktop automatically defaults to `host` mode if both of the following are true:
+- it detects an Apptainer/Singularity runtime
+- it detects a host Slurm allocation (`SLURM_JOB_ID` is set)
 
 Example for Apptainer on HPC (host Slurm mode):
 

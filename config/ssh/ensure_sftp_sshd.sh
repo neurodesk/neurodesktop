@@ -15,6 +15,15 @@ warn() {
     echo "[WARN] $1"
 }
 
+emit_sshd_log_preview() {
+    local log_file="$1"
+    if [ -f "${log_file}" ]; then
+        sed -n '1,12p' "${log_file}" | while IFS= read -r line; do
+            warn "sshd: ${line}"
+        done
+    fi
+}
+
 ensure_sshd_config() {
     mkdir -p "${SSH_DIR}"
     chmod 700 "${SSH_DIR}" 2>/dev/null || true
@@ -103,6 +112,27 @@ ensure_authorized_sftp_key() {
     return 0
 }
 
+write_fallback_sshd_config() {
+    local config_file="$1"
+    cat > "${config_file}" <<EOF
+Port ${SFTP_SSH_PORT}
+ListenAddress 127.0.0.1
+HostKey ${SSH_HOST_ED25519_KEY}
+HostKey ${SSH_HOST_RSA_KEY}
+AuthorizedKeysFile ${AUTHORIZED_KEYS_FILE}
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+UsePAM no
+PermitRootLogin no
+X11Forwarding no
+StrictModes no
+PidFile ${SFTP_SSH_PID_FILE}
+Subsystem sftp internal-sftp
+EOF
+}
+
 port_is_listening() {
     if ! command -v ss >/dev/null 2>&1; then
         return 1
@@ -113,6 +143,7 @@ port_is_listening() {
 
 start_sshd() {
     local -a sshd_prefix=()
+    local ssh_config_to_use validation_log startup_log fallback_config
 
     if port_is_listening; then
         return 0
@@ -133,21 +164,39 @@ start_sshd() {
         sudo chmod 755 /run/sshd
     fi
 
-    if ! "${sshd_prefix[@]}" /usr/sbin/sshd -t -f "${SSH_CONFIG}" >/dev/null 2>&1; then
-        warn "sshd config validation failed for ${SSH_CONFIG}."
-        return 1
+    ssh_config_to_use="${SSH_CONFIG}"
+    validation_log="$(mktemp /tmp/sshd-validate.XXXXXX)"
+    startup_log="$(mktemp /tmp/sshd-start.XXXXXX)"
+
+    if ! "${sshd_prefix[@]}" /usr/sbin/sshd -t -f "${ssh_config_to_use}" >"${validation_log}" 2>&1; then
+        warn "sshd config validation failed for ${ssh_config_to_use}. Retrying with minimal fallback config."
+        emit_sshd_log_preview "${validation_log}"
+
+        fallback_config="${SSH_DIR}/sshd_config.fallback"
+        write_fallback_sshd_config "${fallback_config}"
+        ssh_config_to_use="${fallback_config}"
+
+        if ! "${sshd_prefix[@]}" /usr/sbin/sshd -t -f "${ssh_config_to_use}" >"${validation_log}" 2>&1; then
+            warn "Fallback sshd config validation failed for ${ssh_config_to_use}."
+            emit_sshd_log_preview "${validation_log}"
+            rm -f "${validation_log}" "${startup_log}"
+            return 1
+        fi
     fi
 
     if ! "${sshd_prefix[@]}" /usr/sbin/sshd \
-        -f "${SSH_CONFIG}" \
+        -f "${ssh_config_to_use}" \
         -p "${SFTP_SSH_PORT}" \
         -h "${SSH_HOST_ED25519_KEY}" \
         -h "${SSH_HOST_RSA_KEY}" \
-        -o "PidFile=${SFTP_SSH_PID_FILE}"; then
+        -o "PidFile=${SFTP_SSH_PID_FILE}" >"${startup_log}" 2>&1; then
         warn "Failed to start sshd on port ${SFTP_SSH_PORT}."
+        emit_sshd_log_preview "${startup_log}"
+        rm -f "${validation_log}" "${startup_log}"
         return 1
     fi
 
+    rm -f "${validation_log}" "${startup_log}"
     return 0
 }
 

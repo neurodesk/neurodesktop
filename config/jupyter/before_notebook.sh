@@ -2,15 +2,54 @@
 
 # order: start_notebook.sh -> ### before_notebook.sh ### -> jupyterlab_startup.sh -> jupyter_notebook_config.py
 
+is_apptainer_runtime() {
+    [ -n "${SINGULARITY_NAME:-}" ] || \
+    [ -n "${APPTAINER_NAME:-}" ] || \
+    [ -n "${APPTAINER_CONTAINER:-}" ] || \
+    [ -n "${SINGULARITY_CONTAINER:-}" ] || \
+    [ -n "${APPTAINER_COMMAND:-}" ] || \
+    [ -n "${SINGULARITY_COMMAND:-}" ] || \
+    [ -d "/.apptainer.d" ] || \
+    [ -d "/.singularity.d" ]
+}
+
+can_chown_path_with_runner() {
+    local path="$1"
+    shift
+    local owner probe_file
+    local -a chown_runner=("$@")
+
+    owner="$(stat -c "%u:%g" "${path}" 2>/dev/null || true)"
+    if [ -z "${owner}" ]; then
+        owner="${NB_UID}:${NB_GID}"
+    fi
+
+    probe_file="${path}/.neurodesktop-chown-probe-$$"
+    if touch "${probe_file}" >/dev/null 2>&1; then
+        if ! "${chown_runner[@]}" "${NB_UID}:${NB_GID}" "${probe_file}" >/dev/null 2>&1; then
+            rm -f "${probe_file}" >/dev/null 2>&1 || true
+            return 1
+        fi
+        rm -f "${probe_file}" >/dev/null 2>&1 || true
+        return 0
+    fi
+
+    "${chown_runner[@]}" "${owner}" "${path}" >/dev/null 2>&1
+}
+
 fix_home_ownership_if_needed() {
     local home_dir="/home/${NB_USER}"
+    local current_uid current_gid
+    local -a chown_runner
+
+    if is_apptainer_runtime; then
+        return
+    fi
 
     if [ ! -d "$home_dir" ]; then
         return
     fi
 
-    local current_uid
-    local current_gid
     current_uid=$(stat -c "%u" "$home_dir")
     current_gid=$(stat -c "%g" "$home_dir")
 
@@ -20,11 +59,21 @@ fix_home_ownership_if_needed() {
 
     echo "Fixing ownership of $home_dir (was $current_uid:$current_gid, setting to $NB_UID:$NB_GID)"
     if [ "$EUID" -eq 0 ]; then
-        chown "$NB_UID:$NB_GID" "$home_dir"
+        chown_runner=(chown)
     elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
-        sudo -n chown "$NB_UID:$NB_GID" "$home_dir"
+        chown_runner=(sudo -n chown)
     else
         echo "[WARN] Unable to fix $home_dir ownership: requires root or passwordless sudo."
+        return
+    fi
+
+    if ! can_chown_path_with_runner "$home_dir" "${chown_runner[@]}"; then
+        echo "[WARN] Skipping ownership fix for $home_dir: chown unsupported in this runtime/filesystem."
+        return
+    fi
+
+    if ! "${chown_runner[@]}" "$NB_UID:$NB_GID" "$home_dir"; then
+        echo "[WARN] Failed to fix ownership of $home_dir."
     fi
 }
 
@@ -586,7 +635,12 @@ fi
 # Slurm mode:
 # - local (default): start an in-container single-node Slurm queue.
 # - host: do not start local Slurm; rely on host cluster Slurm via bound config/socket.
-SLURM_MODE_RAW="${NEURODESKTOP_SLURM_MODE:-local}"
+if [ -z "${NEURODESKTOP_SLURM_MODE:-}" ] && [ -n "${SLURM_JOB_ID:-}" ] && is_apptainer_runtime; then
+    SLURM_MODE_RAW="host"
+    echo "[INFO] Detected Apptainer/Singularity inside a host SLURM job; defaulting NEURODESKTOP_SLURM_MODE=host."
+else
+    SLURM_MODE_RAW="${NEURODESKTOP_SLURM_MODE:-local}"
+fi
 SLURM_MODE="$(printf '%s' "${SLURM_MODE_RAW}" | tr '[:upper:]' '[:lower:]')"
 case "${SLURM_MODE}" in
     local|host) ;;
@@ -671,17 +725,35 @@ if [ -f "/home/${NB_USER}/.vnc/passwd" ] && [ "$(stat -c %a /home/${NB_USER}/.vn
 fi
 
 apply_chown_if_needed() {
+    local dir="$1"
+    local current_uid current_gid
+    local -a chown_runner
+
     # If running in Apptainer/Singularity, we likely don't want to mess with chown
-    if [ -n "$SINGULARITY_NAME" ] || [ -n "$APPTAINER_NAME" ] || [ -n "$APPTAINER_CONTAINER" ] || [ -n "$SINGULARITY_CONTAINER" ]; then
+    if is_apptainer_runtime; then
         return
     fi
-    local dir=$1
-    local recursive=$2
-    if [ -d "$dir" ]; then
-        current_uid=$(stat -c "%u" "$dir")
-        current_gid=$(stat -c "%g" "$dir")
-        if [ "$current_uid" != "$NB_UID" ] || [ "$current_gid" != "$NB_GID" ]; then
-            chown -R "${NB_UID}:${NB_GID}" "$dir"
+
+    if [ "$EUID" -eq 0 ]; then
+        chown_runner=(chown)
+    elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+        chown_runner=(sudo -n chown)
+    else
+        echo "[WARN] Unable to fix ownership of ${dir}: requires root or passwordless sudo."
+        return
+    fi
+
+    if [ -d "${dir}" ]; then
+        current_uid=$(stat -c "%u" "${dir}")
+        current_gid=$(stat -c "%g" "${dir}")
+        if [ "${current_uid}" != "${NB_UID}" ] || [ "${current_gid}" != "${NB_GID}" ]; then
+            if ! can_chown_path_with_runner "${dir}" "${chown_runner[@]}"; then
+                echo "[WARN] Skipping ownership fix for ${dir}: chown unsupported in this runtime/filesystem."
+                return
+            fi
+            if ! "${chown_runner[@]}" -R "${NB_UID}:${NB_GID}" "${dir}"; then
+                echo "[WARN] Failed to fix ownership of ${dir}."
+            fi
         fi
     fi
 }

@@ -24,32 +24,78 @@ trap cleanup_startup_lock EXIT
 # Each file is copied if missing, or migrated when image defaults are newer.
 source /opt/neurodesktop/restore_home_defaults.sh
 
+is_apptainer_runtime() {
+    [ -n "${SINGULARITY_NAME:-}" ] || \
+    [ -n "${APPTAINER_NAME:-}" ] || \
+    [ -n "${APPTAINER_CONTAINER:-}" ] || \
+    [ -n "${SINGULARITY_CONTAINER:-}" ] || \
+    [ -n "${APPTAINER_COMMAND:-}" ] || \
+    [ -n "${SINGULARITY_COMMAND:-}" ] || \
+    [ -d "/.apptainer.d" ] || \
+    [ -d "/.singularity.d" ]
+}
+
+can_chown_path_with_runner() {
+    local path="$1"
+    shift
+    local owner probe_file
+    local -a chown_runner=("$@")
+
+    owner="$(stat -c "%u:%g" "${path}" 2>/dev/null || true)"
+    if [ -z "${owner}" ]; then
+        owner="${NB_UID}:${NB_GID}"
+    fi
+
+    probe_file="${path}/.neurodesktop-chown-probe-$$"
+    if touch "${probe_file}" >/dev/null 2>&1; then
+        if ! "${chown_runner[@]}" "${NB_UID}:${NB_GID}" "${probe_file}" >/dev/null 2>&1; then
+            rm -f "${probe_file}" >/dev/null 2>&1 || true
+            return 1
+        fi
+        rm -f "${probe_file}" >/dev/null 2>&1 || true
+        return 0
+    fi
+
+    "${chown_runner[@]}" "${owner}" "${path}" >/dev/null 2>&1
+}
+
 # Function to check and apply chown if necessary
 apply_chown_if_needed() {
+    local dir="$1"
+    local recursive="$2"
+    local current_uid current_gid
+    local -a chown_runner
+
     # If running in Apptainer/Singularity, we likely don't want to mess with chown
-    if [ -n "$SINGULARITY_NAME" ] || [ -n "$APPTAINER_NAME" ] || [ -n "$APPTAINER_CONTAINER" ] || [ -n "$SINGULARITY_CONTAINER" ]; then
+    if is_apptainer_runtime; then
         return
     fi
 
-    local dir=$1
-    local recursive=$2
-    if [ -d "$dir" ]; then
-        current_uid=$(stat -c "%u" "$dir")
-        current_gid=$(stat -c "%g" "$dir")
-        if [ "$current_uid" != "$NB_UID" ] || [ "$current_gid" != "$NB_GID" ]; then
+    if [ -d "${dir}" ]; then
+        current_uid=$(stat -c "%u" "${dir}")
+        current_gid=$(stat -c "%g" "${dir}")
+        if [ "${current_uid}" != "${NB_UID}" ] || [ "${current_gid}" != "${NB_GID}" ]; then
             chown_runner=(chown)
             if [ "$EUID" -ne 0 ]; then
                 if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
                     chown_runner=(sudo -n chown)
                 else
-                    echo "[WARN] Unable to fix ownership of $dir: requires root or passwordless sudo."
+                    echo "[WARN] Unable to fix ownership of ${dir}: requires root or passwordless sudo."
                     return
                 fi
             fi
-            if [ "$recursive" = true ]; then
-                "${chown_runner[@]}" -R ${NB_UID}:${NB_GID} "$dir"
+
+            if ! can_chown_path_with_runner "${dir}" "${chown_runner[@]}"; then
+                echo "[WARN] Skipping ownership fix for ${dir}: chown unsupported in this runtime/filesystem."
+                return
+            fi
+
+            if [ "${recursive}" = true ]; then
+                "${chown_runner[@]}" -R "${NB_UID}:${NB_GID}" "${dir}" || \
+                    echo "[WARN] Failed to fix ownership of ${dir} recursively."
             else
-                "${chown_runner[@]}" ${NB_UID}:${NB_GID} "$dir"
+                "${chown_runner[@]}" "${NB_UID}:${NB_GID}" "${dir}" || \
+                    echo "[WARN] Failed to fix ownership of ${dir}."
             fi
         fi
     fi
@@ -255,7 +301,9 @@ ensure_codeserver_extensions &
 echo "[INFO] Setting up VNC..."
 mkdir -p "${HOME}/.vnc"
 if sudo -n true 2>/dev/null; then
-    chown "${NB_USER}" "${HOME}/.vnc"
+    if ! is_apptainer_runtime; then
+        sudo -n chown "${NB_USER}" "${HOME}/.vnc" 2>/dev/null || true
+    fi
 fi
 
 # Generate VNC password if not existing (fallback if restore failed)

@@ -93,11 +93,26 @@ if [ -z "${OLLAMA_HOST}" ]; then
         export OLLAMA_HOST="http://host.docker.internal:11434"
 fi
 
+is_apptainer_runtime() {
+        [ -n "${SINGULARITY_NAME:-}" ] || \
+        [ -n "${APPTAINER_NAME:-}" ] || \
+        [ -n "${APPTAINER_CONTAINER:-}" ] || \
+        [ -n "${SINGULARITY_CONTAINER:-}" ] || \
+        [ -n "${APPTAINER_COMMAND:-}" ] || \
+        [ -n "${SINGULARITY_COMMAND:-}" ] || \
+        [ -d "/.apptainer.d" ] || \
+        [ -d "/.singularity.d" ]
+}
+
 # Slurm mode:
 # - local (default): use the in-container single-node Slurm queue.
 # - host: rely on host cluster Slurm configuration provided from outside.
 if [[ -z "${NEURODESKTOP_SLURM_MODE}" ]]; then
-        export NEURODESKTOP_SLURM_MODE=local
+        if [[ -n "${SLURM_JOB_ID:-}" ]] && is_apptainer_runtime; then
+                export NEURODESKTOP_SLURM_MODE=host
+        else
+                export NEURODESKTOP_SLURM_MODE=local
+        fi
 else
         export NEURODESKTOP_SLURM_MODE="$(printf '%s' "${NEURODESKTOP_SLURM_MODE}" | tr '[:upper:]' '[:lower:]')"
 fi

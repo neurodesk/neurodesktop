@@ -349,36 +349,85 @@ fi
 # Provides real accounting so SLURM 23.11+ does not reject jobs with
 # Reason=InvalidAccount when accounting_storage/none is used.
 
+ensure_mysql_user() {
+    if id mysql >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if useradd --system --home-dir /var/lib/mysql --shell /usr/sbin/nologin mysql >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo "[WARN] mysql user is missing and could not be created. Skipping MariaDB-backed accounting."
+    return 1
+}
+
+initialize_mysql_data_dir() {
+    local -a init_cmd
+
+    if command -v mariadb-install-db >/dev/null 2>&1; then
+        init_cmd=(mariadb-install-db)
+    elif command -v mysql_install_db >/dev/null 2>&1; then
+        init_cmd=(mysql_install_db)
+    else
+        echo "[WARN] No MariaDB initialization command found (mariadb-install-db/mysql_install_db)."
+        return 1
+    fi
+
+    "${init_cmd[@]}" --user=mysql --datadir=/var/lib/mysql >/dev/null 2>&1
+}
+
 start_mariadb() {
+    local _i mariadb_log mariadb_pid
+
     if pgrep -x mariadbd >/dev/null 2>&1 || pgrep -x mysqld >/dev/null 2>&1; then
         return 0
     fi
 
+    if ! ensure_mysql_user; then
+        return 1
+    fi
+
+    mkdir -p /var/lib/mysql /run/mysqld
+    if ! chown -R mysql:mysql /var/lib/mysql /run/mysqld >/dev/null 2>&1; then
+        echo "[WARN] Could not prepare /var/lib/mysql or /run/mysqld for mysql user."
+        return 1
+    fi
+
     # Initialise data directory if empty
     if [ ! -d /var/lib/mysql/mysql ]; then
-        mysql_install_db --user=mysql --datadir=/var/lib/mysql >/dev/null 2>&1 || {
-            echo "[WARN] mysql_install_db failed."
+        if ! initialize_mysql_data_dir; then
+            echo "[WARN] MariaDB data directory initialization failed."
             return 1
-        }
+        fi
     fi
 
     # Socket-only (no TCP) — no port exposure
-    mkdir -p /run/mysqld
-    chown mysql:mysql /run/mysqld
+    mariadb_log="/var/log/slurm/mariadbd.log"
+    : > "${mariadb_log}" || true
+    chown mysql:mysql "${mariadb_log}" >/dev/null 2>&1 || true
+
     /usr/sbin/mariadbd --user=mysql --datadir=/var/lib/mysql \
         --socket=/run/mysqld/mysqld.sock \
         --skip-networking \
-        --pid-file=/run/mysqld/mysqld.pid &
+        --pid-file=/run/mysqld/mysqld.pid \
+        >"${mariadb_log}" 2>&1 &
+    mariadb_pid=$!
 
     # Wait for socket (up to 15 seconds)
-    local _i
     for _i in $(seq 1 30); do
         if [ -S /run/mysqld/mysqld.sock ]; then
             return 0
         fi
+        if ! kill -0 "${mariadb_pid}" >/dev/null 2>&1; then
+            echo "[WARN] MariaDB exited before creating its socket. Recent log output:"
+            tail -n 20 "${mariadb_log}" 2>/dev/null || true
+            return 1
+        fi
         sleep 0.5
     done
     echo "[WARN] MariaDB socket did not appear within 15 seconds."
+    tail -n 20 "${mariadb_log}" 2>/dev/null || true
     return 1
 }
 
