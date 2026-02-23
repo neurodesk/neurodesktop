@@ -10,15 +10,15 @@ Neurodesktop starts a local Slurm controller/worker inside the container with a 
 
 Neurodesktop supports two Slurm operation modes:
 
-- `NEURODESKTOP_SLURM_MODE=local` (default): start and use the in-container single-node Slurm queue.
+- `NEURODESKTOP_SLURM_MODE=local` (default outside Apptainer): start and use the in-container single-node Slurm queue.
 - `NEURODESKTOP_SLURM_MODE=host`: skip in-container Slurm startup and use the host HPC Slurm cluster.
 
 In `host` mode, Neurodesktop preserves host-provided `SLURM_CONF`, `SBATCH_ACCOUNT`, and `SLURM_ACCOUNT`.
 In `local` mode, Neurodesktop sets `SLURM_CONF=/etc/slurm/slurm.conf` and clears inherited account defaults to avoid
 `InvalidAccount` against the local slurmdbd setup.
-When `NEURODESKTOP_SLURM_MODE` is unset, Neurodesktop automatically defaults to `host` mode if both of the following are true:
-- it detects an Apptainer/Singularity runtime
-- it detects a host Slurm allocation (`SLURM_JOB_ID` is set)
+When `NEURODESKTOP_SLURM_MODE` is unset, Neurodesktop automatically defaults to `host` mode
+whenever it detects an Apptainer/Singularity runtime.
+To force in-container Slurm in Apptainer, set `NEURODESKTOP_SLURM_MODE=local`.
 
 Example for Apptainer on HPC (host Slurm mode):
 
@@ -31,11 +31,13 @@ export APPTAINERENV_SLURM_ACCOUNT="${SLURM_ACCOUNT:-}"
 apptainer exec \
   --bind /etc/slurm:/etc/slurm \
   --bind /run/munge:/run/munge \
+  --bind /var/run/munge:/var/run/munge \
   neurodesktop.sif \
   bash -lc 'sinfo && squeue -u "$USER"'
 ```
 
 If your site uses a different path for `slurm.conf` or the MUNGE socket, bind those paths instead.
+Neurodesktop will auto-detect and export `SLURM_CONF` and `MUNGE_SOCKET` in host mode when those paths are present.
 
 ### Accounting (MariaDB + slurmdbd)
 

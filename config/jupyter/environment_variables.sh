@@ -104,11 +104,73 @@ is_apptainer_runtime() {
         [ -d "/.singularity.d" ]
 }
 
+slurm_conf_is_local_neurodesktop() {
+        local conf_file="$1"
+        [ -r "${conf_file}" ] && grep -Eq '^ClusterName=neurodesktop([[:space:]]|$)' "${conf_file}" 2>/dev/null
+}
+
+resolve_host_slurm_conf() {
+        local conf_file
+        if [ -n "${SLURM_CONF:-}" ] && [ -r "${SLURM_CONF}" ]; then
+                if ! slurm_conf_is_local_neurodesktop "${SLURM_CONF}"; then
+                        echo "${SLURM_CONF}"
+                        return 0
+                fi
+        fi
+
+        for conf_file in \
+                /etc/slurm/slurm.conf \
+                /etc/slurm-llnl/slurm.conf \
+                /run/host/etc/slurm/slurm.conf \
+                /host/etc/slurm/slurm.conf
+        do
+                if [ ! -r "${conf_file}" ]; then
+                        continue
+                fi
+                if slurm_conf_is_local_neurodesktop "${conf_file}"; then
+                        continue
+                fi
+                echo "${conf_file}"
+                return 0
+        done
+        return 1
+}
+
+resolve_munge_socket() {
+        local socket_path
+        for socket_path in \
+                "${MUNGE_SOCKET:-}" \
+                /run/munge/munge.socket.2 \
+                /var/run/munge/munge.socket.2
+        do
+                if [ -n "${socket_path}" ] && [ -S "${socket_path}" ]; then
+                        echo "${socket_path}"
+                        return 0
+                fi
+        done
+        return 1
+}
+
+configure_host_slurm_environment() {
+        local host_slurm_conf host_munge_socket
+        host_slurm_conf="$(resolve_host_slurm_conf || true)"
+        if [ -n "${host_slurm_conf}" ]; then
+                export SLURM_CONF="${host_slurm_conf}"
+        elif [ -n "${SLURM_CONF:-}" ] && slurm_conf_is_local_neurodesktop "${SLURM_CONF}"; then
+                unset SLURM_CONF
+        fi
+
+        host_munge_socket="$(resolve_munge_socket || true)"
+        if [ -n "${host_munge_socket}" ]; then
+                export MUNGE_SOCKET="${host_munge_socket}"
+        fi
+}
+
 # Slurm mode:
-# - local (default): use the in-container single-node Slurm queue.
+# - local: use the in-container single-node Slurm queue.
 # - host: rely on host cluster Slurm configuration provided from outside.
 if [[ -z "${NEURODESKTOP_SLURM_MODE}" ]]; then
-        if [[ -n "${SLURM_JOB_ID:-}" ]] && is_apptainer_runtime; then
+        if is_apptainer_runtime; then
                 export NEURODESKTOP_SLURM_MODE=host
         else
                 export NEURODESKTOP_SLURM_MODE=local
@@ -120,6 +182,7 @@ fi
 case "${NEURODESKTOP_SLURM_MODE}" in
         host)
                 # In host mode we keep host-provided SLURM_CONF and account defaults.
+                configure_host_slurm_environment
                 ;;
         *)
                 # Local Slurm configuration used by the in-container single-node queue.
