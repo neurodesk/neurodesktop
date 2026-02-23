@@ -38,6 +38,17 @@ const DONATION_NOTIFICATION_DISMISSED_KEY =
 
 let donationNotificationShown = false;
 
+const BYTES_PER_GB = 1024 ** 3;
+const MEMORY_SEGMENT_REGEX =
+  /(Mem:\s*)(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?\s*(B|KB|MB|GB|TB)\b/;
+const UNIT_TO_GB_FACTOR: Record<string, number> = {
+  B: 1 / BYTES_PER_GB,
+  KB: 1024 / BYTES_PER_GB,
+  MB: (1024 ** 2) / BYTES_PER_GB,
+  GB: 1,
+  TB: 1024
+};
+
 function showDonationNotificationOnce(): void {
   if (typeof window === 'undefined') {
     return;
@@ -91,6 +102,57 @@ function showDonationNotificationOnce(): void {
   };
 
   Notification.manager.changed.connect(onNotificationChanged);
+}
+
+function normalizeMemorySegmentToGb(text: string): string {
+  const match = text.match(MEMORY_SEGMENT_REGEX);
+  if (!match) {
+    return text;
+  }
+
+  const [fullMatch, prefix, currentRaw, limitRaw, unitRaw] = match;
+  const factor = UNIT_TO_GB_FACTOR[unitRaw.toUpperCase()];
+  if (!factor) {
+    return text;
+  }
+
+  const current = Number.parseFloat(currentRaw);
+  if (Number.isNaN(current)) {
+    return text;
+  }
+
+  const currentGb = (current * factor).toFixed(2);
+  let replacement = `${prefix}${currentGb} GB`;
+
+  if (limitRaw !== undefined) {
+    const limit = Number.parseFloat(limitRaw);
+    if (!Number.isNaN(limit)) {
+      replacement = `${prefix}${currentGb} / ${(limit * factor).toFixed(2)} GB`;
+    }
+  }
+
+  return text.replace(fullMatch, replacement);
+}
+
+function updateResourceUsageUnits(): void {
+  document
+    .querySelectorAll<HTMLElement>('[title="Current resource usage"]')
+    .forEach(el => {
+      const text = el.textContent;
+      if (!text || !text.includes('Mem:')) {
+        return;
+      }
+
+      const normalized = normalizeMemorySegmentToGb(text);
+      if (normalized !== text) {
+        el.textContent = normalized;
+      }
+    });
+}
+
+function startResourceUsageUnitOverride(): void {
+  updateResourceUsageUnits();
+  window.setInterval(updateResourceUsageUnits, 1000);
 }
 
 async function fetchSvgText(
@@ -194,6 +256,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
   requires: [ILauncher],
   activate: async (app: JupyterFrontEnd, launcher: ILauncher) => {
     showDonationNotificationOnce();
+    startResourceUsageUnitOverride();
 
     const settings = ServerConnection.makeSettings();
     const infoUrl = URLExt.join(
