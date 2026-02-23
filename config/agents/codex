@@ -1,10 +1,10 @@
 #!/bin/bash
 # OpenAI Codex CLI wrapper script
-# Copies AGENT.md to current directory as AGENTS.md, then starts Codex CLI
+# Copies AGENTS.md to current directory as AGENTS.md, then starts Codex CLI
 
-# Copy AGENT.md from /opt to current directory as AGENTS.md (Codex uses AGENTS.md)
+# Copy AGENTS.md from /opt to current directory as AGENTS.md (Codex uses AGENTS.md)
 if [ ! -f ./AGENTS.md ]; then
-    cp /opt/AGENT.md ./AGENTS.md
+    cp /opt/AGENTS.md ./AGENTS.md
 fi
 
 # Copy codex config from home directory to current directory's .codex folder

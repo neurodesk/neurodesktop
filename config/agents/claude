@@ -1,10 +1,10 @@
 #!/bin/bash
 # Claude Code wrapper script
-# Copies ~/AGENT.md and settings.local.json to current directory, then starts Claude Code
+# Copies ~/AGENTS.md and settings.local.json to current directory, then starts Claude Code
 
-# Copy AGENT.md from home directory to current directory as CLAUDE.md
+# Copy AGENTS.md from home directory to current directory as CLAUDE.md
 if [ ! -f ./CLAUDE.md ]; then
-    cp /opt/AGENT.md ./CLAUDE.md
+    cp /opt/AGENTS.md ./CLAUDE.md
 fi
 
 # Copy settings.local.json from home directory to current directory's .claude folder

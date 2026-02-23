@@ -486,7 +486,7 @@ COPY config/agents/claude_settings.local.json /opt/jovyan_defaults/.claude/setti
 COPY config/agents/opencode_config.json /opt/jovyan_defaults/.config/opencode/opencode.json
 COPY config/agents/codex_config.json /opt/jovyan_defaults/.codex/config.json
 COPY config/ssh/sshd_config /opt/jovyan_defaults/.ssh/sshd_config
-COPY config/agents/AGENT.md /opt/jovyan_defaults/.jupyter/nbi/rules/neurodesk.md
+COPY config/agents/AGENTS.md /opt/jovyan_defaults/.jupyter/nbi/rules/neurodesk.md
 
 # Special: bashrc content to append (not replace)
 COPY config/lxde/.bashrc /opt/jovyan_defaults/.bashrc_append
@@ -505,8 +505,8 @@ RUN chmod +x /opt/jovyan_defaults/.vnc/xstartup \
 COPY --chown=root:users config/jupyter/restore_home_defaults.sh /opt/neurodesktop/restore_home_defaults.sh
 RUN chmod +rx /opt/neurodesktop/restore_home_defaults.sh
 
-# Add AGENT.md to /opt for reference
-COPY config/agents/AGENT.md /opt/AGENT.md
+# Add AGENTS.md to /opt for reference
+COPY config/agents/AGENTS.md /opt/AGENTS.md
 
 # Add AI agent wrapper scripts to /usr/local/sbin/
 COPY --chown=root:root config/agents/claude /usr/local/sbin/claude

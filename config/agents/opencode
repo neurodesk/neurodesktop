@@ -1,6 +1,6 @@
 #!/bin/bash
 # OpenCode wrapper script
-# Copies AGENT.md, discovers working model backends, updates OpenCode config,
+# Copies AGENTS.md, discovers working model backends, updates OpenCode config,
 # lets the user choose a default model, then starts OpenCode.
 
 OPENCODE_CONFIG_DIR="${HOME}/.config/opencode"
@@ -34,9 +34,9 @@ WORKING_MODELS=()
 WORKING_MODEL_LABELS=()
 SELECTED_MODEL=""
 
-# Copy AGENT.md from /opt to current directory.
-if [ ! -f ./AGENT.md ]; then
-    cp /opt/AGENT.md ./AGENT.md
+# Copy AGENTS.md from /opt to current directory.
+if [ ! -f ./AGENTS.md ]; then
+    cp /opt/AGENTS.md ./AGENTS.md
 fi
 
 ensure_opencode_config_file() {
