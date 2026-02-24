@@ -108,6 +108,81 @@ apply_chown_if_needed "${HOME}" true
 # apply_chown_if_needed "${HOME}/.ssh" true
 # apply_chown_if_needed "${HOME}/.local/share/jupyter" true
 
+sanitize_jupyterlab_workspaces() {
+    local workspace_dir="${HOME}/.jupyter/lab/workspaces"
+    local workspace_file
+    local backup_file
+
+    if [ ! -d "${workspace_dir}" ]; then
+        return
+    fi
+
+    while IFS= read -r -d '' workspace_file; do
+        if python3 - "${workspace_file}" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as workspace_fp:
+    json.load(workspace_fp)
+PY
+        then
+            continue
+        fi
+
+        backup_file="${workspace_file}.invalid-$(date +%Y%m%d%H%M%S)-$$"
+        if mv "${workspace_file}" "${backup_file}" 2>/dev/null; then
+            echo "[WARN] Invalid JupyterLab workspace JSON detected. Moved ${workspace_file} to ${backup_file}."
+        else
+            rm -f "${workspace_file}" 2>/dev/null || true
+            echo "[WARN] Invalid JupyterLab workspace JSON detected. Removed ${workspace_file}."
+        fi
+    done < <(find "${workspace_dir}" -maxdepth 1 -type f -name '*.jupyterlab-workspace' -print0 2>/dev/null)
+}
+
+sanitize_jupyterlab_workspaces
+
+ensure_jupyterlab_disabled_extensions() {
+    local labconfig_dir="${HOME}/.jupyter/labconfig"
+    local page_config="${labconfig_dir}/page_config.json"
+
+    mkdir -p "${labconfig_dir}" 2>/dev/null || true
+
+    if ! python3 - "${page_config}" <<'PY' >/dev/null 2>&1
+import json
+import sys
+from pathlib import Path
+
+page_config_path = Path(sys.argv[1])
+payload = {}
+
+if page_config_path.exists():
+    try:
+        loaded = json.loads(page_config_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            payload = loaded
+    except Exception:
+        payload = {}
+
+disabled_extensions = payload.get("disabledExtensions")
+if not isinstance(disabled_extensions, dict):
+    disabled_extensions = {}
+
+disabled_extensions["@jupyterhub/jupyter-server-proxy"] = True
+disabled_extensions["@jupyterlab/apputils-extension:announcements"] = True
+payload["disabledExtensions"] = disabled_extensions
+
+page_config_path.write_text(
+    json.dumps(payload, indent=2, sort_keys=True) + "\n",
+    encoding="utf-8"
+)
+PY
+    then
+        echo "[WARN] Failed to ensure JupyterLab disabledExtensions in ${page_config}."
+    fi
+}
+
+ensure_jupyterlab_disabled_extensions
+
 mkdir -p "${HOME}/.ssh"
 chmod 700 "${HOME}/.ssh"
 

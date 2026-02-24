@@ -32,7 +32,7 @@ interface IServersInfoResponse {
 
 const DONATION_URL = 'https://donations.uq.edu.au/EAINNEUR';
 const DONATION_MESSAGE =
-  'We rely on your financial support to cover our infrastructure costs. Please support Neurodesk here: https://donations.uq.edu.au/EAINNEUR';
+  'We rely on your financial support to cover our infrastructure costs. Please support us here: https://donations.uq.edu.au/EAINNEUR';
 const DONATION_NOTIFICATION_DISMISSED_KEY =
   'neurodesk-launcher:donation-notification-dismissed-v1';
 

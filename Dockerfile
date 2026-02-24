@@ -472,6 +472,7 @@ RUN mkdir -p /opt/jovyan_defaults/.itksnap.org/ITK-SNAP \
     && mkdir -p /opt/jovyan_defaults/.claude \
     && mkdir -p /opt/jovyan_defaults/.codex \
     && mkdir -p /opt/jovyan_defaults/.ssh \
+    && mkdir -p /opt/jovyan_defaults/.jupyter/labconfig \
     && mkdir -p /opt/jovyan_defaults/.jupyter/nbi/rules
 
 # Copy configuration files to defaults directory
@@ -486,6 +487,7 @@ COPY config/agents/claude_settings.local.json /opt/jovyan_defaults/.claude/setti
 COPY config/agents/opencode_config.json /opt/jovyan_defaults/.config/opencode/opencode.json
 COPY config/agents/codex_config.json /opt/jovyan_defaults/.codex/config.json
 COPY config/ssh/sshd_config /opt/jovyan_defaults/.ssh/sshd_config
+COPY config/jupyter/page_config.json /opt/jovyan_defaults/.jupyter/labconfig/page_config.json
 COPY config/agents/AGENTS.md /opt/jovyan_defaults/.jupyter/nbi/rules/neurodesk.md
 
 # Special: bashrc content to append (not replace)

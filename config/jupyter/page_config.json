@@ -1,0 +1,6 @@
+{
+  "disabledExtensions": {
+    "@jupyterhub/jupyter-server-proxy": true,
+    "@jupyterlab/apputils-extension:announcements": true
+  }
+}
