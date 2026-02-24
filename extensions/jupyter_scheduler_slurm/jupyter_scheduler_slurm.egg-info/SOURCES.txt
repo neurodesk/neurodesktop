@@ -1,0 +1,9 @@
+README.md
+pyproject.toml
+jupyter_scheduler_slurm/__init__.py
+jupyter_scheduler_slurm/executors.py
+jupyter_scheduler_slurm.egg-info/PKG-INFO
+jupyter_scheduler_slurm.egg-info/SOURCES.txt
+jupyter_scheduler_slurm.egg-info/dependency_links.txt
+jupyter_scheduler_slurm.egg-info/requires.txt
+jupyter_scheduler_slurm.egg-info/top_level.txt

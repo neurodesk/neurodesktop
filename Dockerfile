@@ -320,6 +320,13 @@ RUN cd /tmp/neurodesk-launcher \
     && /opt/conda/bin/jupyter labextension disable @jupyterhub/jupyter-server-proxy \
     && rm -rf /home/${NB_USER}/.cache
 
+# Install Slurm execution backend for jupyter_scheduler
+COPY --chown=${NB_USER}:users extensions/jupyter_scheduler_slurm /tmp/jupyter_scheduler_slurm
+RUN cd /tmp/jupyter_scheduler_slurm \
+    && /opt/conda/bin/pip install . \
+    && rm -rf /tmp/jupyter_scheduler_slurm \
+    && rm -rf /home/${NB_USER}/.cache
+
 #========================================#
 # Configuration (as root user)
 #========================================#

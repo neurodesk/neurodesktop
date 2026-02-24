@@ -1,0 +1,23 @@
+Metadata-Version: 2.4
+Name: jupyter-scheduler-slurm
+Version: 0.1.0
+Summary: Slurm execution backend for jupyter_scheduler
+Author: Neurodesk
+License: BSD-3-Clause
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: jupyter_scheduler>=2.0.0
+Requires-Dist: nbformat>=5.0.0
+Requires-Dist: papermill>=2.0.0
+
+# jupyter-scheduler-slurm
+
+Slurm-backed execution manager for `jupyter_scheduler`.
+
+This package is intentionally small and is configured in Neurodesktop via:
+
+- `c.Scheduler.execution_manager_class = "jupyter_scheduler_slurm.executors.SlurmExecutionManager"`
+
+Neurodesktop enables this backend when:
+
+- `NEURODESKTOP_JUPYTER_SCHEDULER_BACKEND=slurm`

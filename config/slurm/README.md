@@ -76,6 +76,35 @@ This means `sbatch`/`srun` jobs submitted inside the container stay inside the c
 - `NEURODESKTOP_SLURM_LEGACY_CGROUP_MOUNTPOINT=/tmp/cgroup` to override legacy compatibility fallback mountpoint
 - `NEURODESKTOP_SLURM_ENABLE_TASK_AFFINITY=1` to opt in to `task/affinity` (default is disabled for container compatibility)
 
+### Jupyter Scheduler notebook jobs via Slurm
+
+Neurodesktop includes a custom execution manager for `jupyter_scheduler` so Notebook Jobs can be submitted with
+`sbatch` instead of running directly in the Jupyter server process.
+
+Enable it with:
+
+```bash
+export NEURODESKTOP_JUPYTER_SCHEDULER_BACKEND=slurm
+```
+
+Optional Slurm submit controls for Notebook Jobs:
+
+- `NEURODESKTOP_JUPYTER_SCHEDULER_SLURM_PARTITION=<partition>` (or use the job's `compute_type` if provided)
+- `NEURODESKTOP_JUPYTER_SCHEDULER_SLURM_ACCOUNT=<account>` (fallbacks: `SBATCH_ACCOUNT`, `SLURM_ACCOUNT`)
+- `NEURODESKTOP_JUPYTER_SCHEDULER_SLURM_TIME=HH:MM:SS`
+- `NEURODESKTOP_JUPYTER_SCHEDULER_SLURM_MEM=<value>` (for example `16G`)
+- `NEURODESKTOP_JUPYTER_SCHEDULER_SLURM_CPUS_PER_TASK=<n>`
+- `NEURODESKTOP_JUPYTER_SCHEDULER_SLURM_QOS=<qos>`
+- `NEURODESKTOP_JUPYTER_SCHEDULER_SLURM_EXTRA_ARGS=\"...\"` additional raw `sbatch` arguments
+- `NEURODESKTOP_JUPYTER_SCHEDULER_SLURM_POLL_INTERVAL_SECONDS=5`
+- `NEURODESKTOP_JUPYTER_SCHEDULER_SLURM_MAX_MISSING_POLLS=24`
+
+Notes:
+
+- This backend requires `sbatch`, `squeue`, and ideally `sacct` or `scontrol` in the runtime environment.
+- For host-cluster submission, make sure host Slurm config and MUNGE socket are available as described above.
+- Notebook Jobs stop/delete actions are currently disabled for this backend to avoid unsafe partial cancellation behavior.
+
 ### Limit detection order (local mode)
 
 In local mode, `setup_and_start_slurm.sh` sizes the single-node queue from the most restrictive values it can detect:

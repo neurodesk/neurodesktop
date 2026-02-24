@@ -39,6 +39,21 @@ c.ServerProxy.servers = {
   }# {{WEBAPP_SERVERS}}
 }
 
+# Optional jupyter_scheduler backend override.
+# Supported built-in toggle: NEURODESKTOP_JUPYTER_SCHEDULER_BACKEND=slurm
+scheduler_execution_manager_class = os.environ.get(
+    "NEURODESKTOP_JUPYTER_SCHEDULER_EXECUTION_MANAGER_CLASS", ""
+).strip()
+scheduler_backend = os.environ.get(
+    "NEURODESKTOP_JUPYTER_SCHEDULER_BACKEND", ""
+).strip().lower()
+if scheduler_execution_manager_class:
+    c.Scheduler.execution_manager_class = scheduler_execution_manager_class
+elif scheduler_backend == "slurm":
+    c.Scheduler.execution_manager_class = (
+        "jupyter_scheduler_slurm.executors.SlurmExecutionManager"
+    )
+
 # c.ServerApp.root_dir = '/' # this causes an error when clicking on the little house icon when being located in the home directory
 c.ServerApp.preferred_dir = os.getcwd()
 c.FileContentsManager.allow_hidden = True
