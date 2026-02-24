@@ -20,7 +20,7 @@ When `NEURODESKTOP_SLURM_MODE` is unset, Neurodesktop automatically defaults to 
 whenever it detects an Apptainer/Singularity runtime.
 To force in-container Slurm in Apptainer, set `NEURODESKTOP_SLURM_MODE=local`.
 
-Example for Apptainer on HPC (host Slurm mode):
+Example for Apptainer on HPC (host Slurm mode, `AuthType=auth/munge`):
 
 ```bash
 export APPTAINERENV_NEURODESKTOP_SLURM_MODE=host
@@ -36,8 +36,20 @@ apptainer exec \
   bash -lc 'sinfo && squeue -u "$USER"'
 ```
 
-If your site uses a different path for `slurm.conf` or the MUNGE socket, bind those paths instead.
-Neurodesktop will auto-detect and export `SLURM_CONF` and `MUNGE_SOCKET` in host mode when those paths are present.
+For clusters using `AuthType=auth/slurm` (`sackd`), bind the host Slurm runtime socket path(s) as well:
+
+```bash
+apptainer exec \
+  --bind /etc/slurm:/etc/slurm \
+  --bind /run/slurm:/run/slurm \
+  --bind /run/slurmctld:/run/slurmctld \
+  --bind /run/slurmdbd:/run/slurmdbd \
+  neurodesktop.sif \
+  bash -lc 'sinfo && squeue -u "$USER"'
+```
+
+If your site uses different paths for `slurm.conf`, MUNGE, or `sack.socket`, bind those paths instead.
+Neurodesktop will auto-detect and export `SLURM_CONF`, `MUNGE_SOCKET`, and `SLURM_SACK_SOCKET` in host mode when available.
 
 ### Accounting (MariaDB + slurmdbd)
 

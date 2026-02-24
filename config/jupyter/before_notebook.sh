@@ -47,6 +47,44 @@ resolve_host_slurm_conf() {
     return 1
 }
 
+read_slurm_conf_value() {
+    local conf_file="$1"
+    local key="$2"
+    [ -r "${conf_file}" ] || return 1
+
+    awk -F= -v key="${key}" '
+        /^[[:space:]]*#/ { next }
+        {
+            line=$0
+            sub(/^[[:space:]]+/, "", line)
+            if (line ~ ("^" key "[[:space:]]*=")) {
+                sub(/^[^=]*=/, "", line)
+                sub(/[[:space:]]+#.*$/, "", line)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+                print line
+                exit
+            }
+        }
+    ' "${conf_file}"
+}
+
+resolve_slurm_auth_type() {
+    local conf_file="$1"
+    local auth_type
+
+    auth_type="$(read_slurm_conf_value "${conf_file}" "AuthType" || true)"
+    if [ -n "${auth_type}" ]; then
+        printf '%s\n' "${auth_type}" | tr '[:upper:]' '[:lower:]'
+        return 0
+    fi
+    return 1
+}
+
+resolve_slurm_cluster_name() {
+    local conf_file="$1"
+    read_slurm_conf_value "${conf_file}" "ClusterName"
+}
+
 resolve_munge_socket() {
     local socket_path
     for socket_path in \
@@ -62,8 +100,35 @@ resolve_munge_socket() {
     return 1
 }
 
+resolve_sack_socket() {
+    local cluster_name="$1"
+    local cluster_socket=""
+    local socket_path
+
+    if [ -n "${cluster_name}" ]; then
+        cluster_socket="/run/slurm-${cluster_name}/sack.socket"
+    fi
+
+    for socket_path in \
+        "${SLURM_SACK_SOCKET:-}" \
+        "${cluster_socket}" \
+        /run/slurm/sack.socket \
+        /run/slurmctld/sack.socket \
+        /run/slurmdbd/sack.socket \
+        /var/run/slurm/sack.socket \
+        /var/run/slurmctld/sack.socket \
+        /var/run/slurmdbd/sack.socket
+    do
+        if [ -n "${socket_path}" ] && [ -S "${socket_path}" ]; then
+            echo "${socket_path}"
+            return 0
+        fi
+    done
+    return 1
+}
+
 configure_host_slurm_environment() {
-    local host_slurm_conf host_munge_socket
+    local host_slurm_conf host_munge_socket host_sack_socket host_auth_type host_cluster_name
     host_slurm_conf="$(resolve_host_slurm_conf || true)"
     if [ -n "${host_slurm_conf}" ]; then
         export SLURM_CONF="${host_slurm_conf}"
@@ -75,13 +140,43 @@ configure_host_slurm_environment() {
         echo "[WARN] Bind your host Slurm config (for example: --bind /etc/slurm:/etc/slurm)."
     fi
 
+    host_auth_type=""
+    host_cluster_name=""
+    if [ -n "${host_slurm_conf}" ]; then
+        host_auth_type="$(resolve_slurm_auth_type "${host_slurm_conf}" || true)"
+        host_cluster_name="$(resolve_slurm_cluster_name "${host_slurm_conf}" || true)"
+    fi
+
     host_munge_socket="$(resolve_munge_socket || true)"
     if [ -n "${host_munge_socket}" ]; then
         export MUNGE_SOCKET="${host_munge_socket}"
-    else
-        echo "[WARN] Host Slurm mode selected but no MUNGE socket was found."
-        echo "[WARN] Bind /run/munge or /var/run/munge into the container."
     fi
+
+    host_sack_socket="$(resolve_sack_socket "${host_cluster_name}" || true)"
+    if [ -n "${host_sack_socket}" ]; then
+        export SLURM_SACK_SOCKET="${host_sack_socket}"
+    fi
+
+    case "${host_auth_type}" in
+        auth/munge)
+            if [ -z "${host_munge_socket}" ]; then
+                echo "[WARN] Host Slurm uses AuthType=auth/munge but no MUNGE socket was found."
+                echo "[WARN] Bind /run/munge or /var/run/munge into the container."
+            fi
+            ;;
+        auth/slurm)
+            if [ -z "${host_sack_socket}" ]; then
+                echo "[WARN] Host Slurm uses AuthType=auth/slurm but no sack.socket was found."
+                echo "[WARN] Bind the host Slurm runtime directory (for example: --bind /run/slurm:/run/slurm)."
+            fi
+            ;;
+        *)
+            if [ -z "${host_munge_socket}" ] && [ -z "${host_sack_socket}" ]; then
+                echo "[WARN] Host Slurm mode selected but neither MUNGE nor sack.socket was found."
+                echo "[WARN] Bind your host auth socket paths (for example /run/munge or /run/slurm)."
+            fi
+            ;;
+    esac
 }
 
 can_chown_path_with_runner() {
