@@ -51,6 +51,7 @@ ARG TOMCAT_REL="9"
 ARG TOMCAT_VERSION="9.0.112"
 ARG GUACAMOLE_VERSION="1.6.0"
 ARG CODE_SERVER_VERSION="4.104.2"
+ARG CURSOR_VERSION="2.5"
 
 ENV LANG=""
 ENV LANGUAGE=""
@@ -235,6 +236,31 @@ RUN set -eux; \
     ln -sf /opt/code-server/bin/code-server /usr/local/bin/code-server; \
     rm -f "/tmp/${cs_tar}"
 
+# Install Cursor from official update endpoint (extract payload only to avoid apt repo side effects)
+RUN set -eux; \
+    deb_arch="$(dpkg --print-architecture || true)"; \
+    kernel_arch="$(uname -m || true)"; \
+    cursor_arch=""; \
+    for arch in "${deb_arch}" "${kernel_arch}"; do \
+        case "${arch}" in \
+            amd64|x86_64) cursor_arch="x64" ;; \
+            arm64|aarch64) cursor_arch="arm64" ;; \
+        esac; \
+        if [ -n "${cursor_arch}" ]; then break; fi; \
+    done; \
+    if [ -z "${cursor_arch}" ]; then \
+        echo "Unsupported architecture for Cursor: deb_arch=${deb_arch} kernel_arch=${kernel_arch}" >&2; \
+        exit 1; \
+    fi; \
+    cursor_deb="/tmp/cursor-${CURSOR_VERSION}-${cursor_arch}.deb"; \
+    curl -fL --retry 5 --retry-all-errors --retry-delay 2 \
+        "https://api2.cursor.sh/updates/download/golden/linux-${cursor_arch}-deb/cursor/${CURSOR_VERSION}" \
+        -o "${cursor_deb}"; \
+    dpkg-deb -x "${cursor_deb}" /; \
+    ln -sf /usr/share/cursor/bin/cursor /usr/local/bin/cursor; \
+    ln -sf /usr/share/cursor/bin/cursor-tunnel /usr/local/bin/cursor-tunnel; \
+    rm -f "${cursor_deb}"
+
 # Install AI coding assistants
 RUN npm install -g @openai/codex \
     && rm -rf /root/.npm \
@@ -364,6 +390,7 @@ COPY config/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/
 COPY --chown=root:users config/jupyter/jupyterlab_startup.sh /opt/neurodesktop/jupyterlab_startup.sh
 COPY --chown=root:users config/guacamole/guacamole.sh /opt/neurodesktop/guacamole.sh
 COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
+COPY --chown=root:users config/jupyter/cursor_jupyter_launcher.sh /opt/neurodesktop/cursor_jupyter_launcher.sh
 COPY --chown=root:users config/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh
 COPY --chown=root:users config/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh
 COPY --chown=root:users config/slurm/test_slurm_setup.sh /opt/neurodesktop/test_slurm_setup.sh
@@ -389,6 +416,7 @@ RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/jupyterlab_startup.sh \
     /opt/neurodesktop/guacamole.sh \
     /opt/neurodesktop/environment_variables.sh \
+    /opt/neurodesktop/cursor_jupyter_launcher.sh \
     /opt/neurodesktop/ensure_sftp_sshd.sh \
     /opt/neurodesktop/setup_and_start_slurm.sh \
     /opt/neurodesktop/test_slurm_setup.sh \

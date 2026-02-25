@@ -36,6 +36,21 @@ c.ServerProxy.servers = {
       'icon_path': '/opt/vscode_logo.svg',
       'category': 'Neurodesk'
     }
+  },
+  'cursor': {
+    'command': [
+      '/opt/neurodesktop/cursor_jupyter_launcher.sh',
+      '{port}',
+      home_dir
+    ],
+    'timeout': 600,
+    'new_browser_tab': True,
+    'launcher_entry': {
+      'path_info': 'cursor',
+      'title': 'Cursor',
+      'icon_path': '/usr/share/cursor/resources/app/out/media/code-icon.svg',
+      'category': 'Neurodesk'
+    }
   }# {{WEBAPP_SERVERS}}
 }
 
