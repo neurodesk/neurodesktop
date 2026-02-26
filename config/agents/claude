@@ -59,7 +59,7 @@ if is_apptainer_runtime; then
         extra_args+=(--strict-mcp-config)
     fi
     if [ "${has_mcp_config_arg}" -eq 0 ]; then
-        extra_args+=(--mcp-config '{}')
+        extra_args+=(--mcp-config '{"mcpServers":{}}')
     fi
 fi
 
