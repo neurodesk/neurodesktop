@@ -2,6 +2,17 @@
 # Claude Code wrapper script
 # Copies ~/AGENTS.md and settings.local.json to current directory, then starts Claude Code
 
+is_apptainer_runtime() {
+    [ -n "${SINGULARITY_NAME:-}" ] || \
+    [ -n "${APPTAINER_NAME:-}" ] || \
+    [ -n "${APPTAINER_CONTAINER:-}" ] || \
+    [ -n "${SINGULARITY_CONTAINER:-}" ] || \
+    [ -n "${APPTAINER_COMMAND:-}" ] || \
+    [ -n "${SINGULARITY_COMMAND:-}" ] || \
+    [ -d "/.apptainer.d" ] || \
+    [ -d "/.singularity.d" ]
+}
+
 # Copy AGENTS.md from home directory to current directory as CLAUDE.md
 if [ ! -f ./CLAUDE.md ]; then
     cp /opt/AGENTS.md ./CLAUDE.md
@@ -28,4 +39,28 @@ if [ ! -x "${CLAUDE_BIN}" ]; then
     exit 127
 fi
 
-exec "${CLAUDE_BIN}" --allow-dangerously-skip-permissions "$@"
+extra_args=()
+has_mcp_config_arg=0
+has_strict_mcp_config_arg=0
+
+for arg in "$@"; do
+    case "$arg" in
+        --mcp-config|--mcp-config=*)
+            has_mcp_config_arg=1
+            ;;
+        --strict-mcp-config)
+            has_strict_mcp_config_arg=1
+            ;;
+    esac
+done
+
+if is_apptainer_runtime; then
+    if [ "${has_strict_mcp_config_arg}" -eq 0 ]; then
+        extra_args+=(--strict-mcp-config)
+    fi
+    if [ "${has_mcp_config_arg}" -eq 0 ]; then
+        extra_args+=(--mcp-config '{}')
+    fi
+fi
+
+exec "${CLAUDE_BIN}" --allow-dangerously-skip-permissions "${extra_args[@]}" "$@"

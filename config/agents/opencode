@@ -67,11 +67,31 @@ print(json.dumps(sys.argv[1:]))
 PY
 }
 
+sanitize_neurodesk_api_key() {
+    local raw_key="$1"
+    local sanitized_key
+
+    # Remove control characters that can break headers/config parsing.
+    sanitized_key=$(printf "%s" "${raw_key}" | tr -d '\000-\010\013\014\016-\037\177')
+    # Normalize CRLF/newline artifacts and trim surrounding whitespace.
+    sanitized_key="${sanitized_key//$'\r'/}"
+    sanitized_key="${sanitized_key//$'\n'/}"
+    sanitized_key=$(printf "%s" "${sanitized_key}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
+    printf "%s" "${sanitized_key}"
+}
+
 load_neurodesk_api_key_from_bashrc() {
     local bashrc_file="${HOME}/.bashrc"
     local key_from_bashrc
 
-    if [ -n "${NEURODESK_API_KEY:-}" ] || [ ! -f "${bashrc_file}" ]; then
+    if [ -n "${NEURODESK_API_KEY:-}" ]; then
+        NEURODESK_API_KEY=$(sanitize_neurodesk_api_key "${NEURODESK_API_KEY}")
+        export NEURODESK_API_KEY
+        return 0
+    fi
+
+    if [ ! -f "${bashrc_file}" ]; then
         return 0
     fi
 
@@ -80,6 +100,8 @@ load_neurodesk_api_key_from_bashrc() {
         -e 's/^[[:space:]]*export[[:space:]]+NEURODESK_API_KEY="([^"]+)"[[:space:]]*$/\1/p' \
         -e 's/^[[:space:]]*export[[:space:]]+NEURODESK_API_KEY=([^[:space:]#]+)[[:space:]]*$/\1/p' \
         "${bashrc_file}" | tail -n 1)
+
+    key_from_bashrc=$(sanitize_neurodesk_api_key "${key_from_bashrc}")
 
     if [ -n "${key_from_bashrc}" ]; then
         export NEURODESK_API_KEY="${key_from_bashrc}"
