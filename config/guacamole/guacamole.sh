@@ -5,6 +5,56 @@ if [ "$(uname -m)" == "aarch64" ]; then
     export JAVA_TOOL_OPTIONS="-XX:UseSVE=0"
 fi
 
+GUACAMOLE_MAPPING_FILE="/etc/guacamole/user-mapping.xml"
+
+update_guacamole_vnc_port() {
+    local vnc_port="$1"
+    local tmp_mapping
+
+    if [ ! -f "${GUACAMOLE_MAPPING_FILE}" ]; then
+        echo "[WARN] Guacamole mapping file not found at ${GUACAMOLE_MAPPING_FILE}"
+        return 1
+    fi
+
+    tmp_mapping="$(mktemp /tmp/guacamole-user-mapping.XXXXXX)" || {
+        echo "[WARN] Failed to create temporary mapping file."
+        return 1
+    }
+
+    if awk -v vnc_port="${vnc_port}" '
+        BEGIN { in_connection=0; is_vnc=0; updated=0 }
+        {
+            line=$0
+            if ($0 ~ /<connection[[:space:]>]/) {
+                in_connection=1
+                is_vnc=0
+            }
+            if (in_connection && $0 ~ /<protocol>[[:space:]]*vnc[[:space:]]*<\/protocol>/) {
+                is_vnc=1
+            }
+            if (in_connection && is_vnc && $0 ~ /<param name="port">[0-9]+<\/param>/ && !updated) {
+                sub(/<param name="port">[0-9]+<\/param>/, "<param name=\"port\">" vnc_port "</param>", line)
+                updated=1
+            }
+            print line
+            if ($0 ~ /<\/connection>/) {
+                in_connection=0
+                is_vnc=0
+            }
+        }
+        END { exit(updated ? 0 : 1) }
+    ' "${GUACAMOLE_MAPPING_FILE}" > "${tmp_mapping}"; then
+        cat "${tmp_mapping}" > "${GUACAMOLE_MAPPING_FILE}"
+        rm -f "${tmp_mapping}"
+        echo "[INFO] Updated Guacamole VNC port to ${vnc_port} in ${GUACAMOLE_MAPPING_FILE}"
+        return 0
+    fi
+
+    rm -f "${tmp_mapping}"
+    echo "[WARN] Failed to update VNC port in ${GUACAMOLE_MAPPING_FILE}; Guacamole may still point to 5901."
+    return 1
+}
+
 # # Tomcat
 # if sudo -n true 2>/dev/null; then
 #     sudo --preserve-env=JAVA_TOOL_OPTIONS /usr/local/tomcat/bin/startup.sh
@@ -65,10 +115,13 @@ done
 
 if [ $DISPLAY_NUM -gt $MAX_DISPLAY ]; then
     echo "ERROR: Could not find available display (tried :1 to :${MAX_DISPLAY})"
+    exit 1
 fi
 
 export DISPLAY=:${DISPLAY_NUM}
-xset -display :${DISPLAY_NUM} s off
+VNC_PORT=$((5900 + DISPLAY_NUM))
+update_guacamole_vnc_port "${VNC_PORT}" || true
+xset -display :${DISPLAY_NUM} s off || true
 
 # Guacamole
 # sudo service guacd start
