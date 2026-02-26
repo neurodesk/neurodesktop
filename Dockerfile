@@ -232,8 +232,12 @@ RUN set -eux; \
     tar -xzf "/tmp/${cs_tar}" -C /tmp; \
     rm -rf /opt/code-server; \
     mv "/tmp/code-server-${CODE_SERVER_VERSION}-linux-${cs_arch}" /opt/code-server; \
+    # code-server currently ships basic-ftp@5.0.5 in npm-shrinkwrap.json; update to the patched release.
+    cd /opt/code-server; \
+    npm update --no-audit --no-fund basic-ftp; \
     ln -sf /opt/code-server/bin/code-server /usr/local/bin/code-server; \
-    rm -f "/tmp/${cs_tar}"
+    rm -f "/tmp/${cs_tar}"; \
+    npm cache clean --force
 
 # Install AI coding assistants
 RUN npm install -g @openai/codex \
