@@ -146,14 +146,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git tag ${BUILDDATE}
-          if gh api /repos/${GITHUB_REPOSITORY}/git/refs/tags/${BUILDDATE} >/dev/null 2>&1; then
-            echo "Updating existing tag ${BUILDDATE}"
-            gh api --method PATCH -H "Accept: application/vnd.github+json" /repos/${GITHUB_REPOSITORY}/git/refs/tags/${BUILDDATE} -f sha="${GITHUB_SHA}" -F force=true
-          else
-            echo "Creating new tag ${BUILDDATE}"
-            gh api --method POST -H "Accept: application/vnd.github+json" /repos/${GITHUB_REPOSITORY}/git/refs -f ref="refs/tags/${BUILDDATE}" -f sha="${GITHUB_SHA}"
-          fi
+          # Delete existing tag if present (ignore errors if it doesn't exist)
+          gh api --method DELETE -H "Accept: application/vnd.github+json" /repos/${GITHUB_REPOSITORY}/git/refs/tags/${BUILDDATE} 2>/dev/null || true
+          echo "Creating tag ${BUILDDATE}"
+          gh api --method POST -H "Accept: application/vnd.github+json" /repos/${GITHUB_REPOSITORY}/git/refs -f ref="refs/tags/${BUILDDATE}" -f sha="${GITHUB_SHA}"
       - name: Generate issue on job failure
         if: always() && failure()
         uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
