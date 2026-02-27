@@ -151,6 +151,10 @@ jobs:
           sudo docker builder prune --force
           echo "Available space after cleanup:"
           df -h
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.ref }}
       - name: Login to GHCR
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
         with:
@@ -159,8 +163,19 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull container image
         run: docker pull $IMAGEID:latest
+      - name: Initialize CVMFS
+        uses: cvmfs-contrib/github-action-cvmfs@v3
+      - name: Configure Neurodesk CVMFS
+        run: |
+          sudo mkdir -p /etc/cvmfs/keys/ardc.edu.au
+          sudo cp config/cvmfs/neurodesk.ardc.edu.au.pub /etc/cvmfs/keys/ardc.edu.au/neurodesk.ardc.edu.au.pub
+          sudo cp config/cvmfs/neurodesk.ardc.edu.au.conf /etc/cvmfs/config.d/
+          sudo cp config/cvmfs/default.local /etc/cvmfs/default.local
+          sudo cvmfs_config update
+          sudo cvmfs_config setup
+          sudo ls /cvmfs/neurodesk.ardc.edu.au
       - name: Test container image
-        run: docker run --rm -t $IMAGEID:latest pytest /opt/tests/
+        run: docker run --rm -t -v /cvmfs:/cvmfs:shared $IMAGEID:latest pytest /opt/tests/
       - name: Scan container image
         uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5
         with:

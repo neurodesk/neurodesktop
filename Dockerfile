@@ -272,6 +272,7 @@ RUN /opt/conda/bin/pip install \
     nipype \
     nbdev \
     nf-core \
+    snakemake \
     pydra==1.0a7 \
     nipoppy \
     matplotlib \

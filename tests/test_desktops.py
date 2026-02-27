@@ -45,7 +45,8 @@ def test_vnc_startup(tmp_path):
     assert code == 0, f"Could not generate vncpasswd: {output}"
     
     # Pick a random display port like :99
-    code, output = run_cmd(f"vncserver -rfbauth {pwd_file} :99")
+    # Use the container's default xstartup instead of ~/.vnc/xstartup because restore_home_defaults hasn't run
+    code, output = run_cmd(f"USER=jovyan vncserver -xstartup /opt/jovyan_defaults/.vnc/xstartup -rfbauth {pwd_file} :99")
     assert code == 0, f"VNC server failed to start: {output}"
     
     # Give it a second
