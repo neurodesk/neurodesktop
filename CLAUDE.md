@@ -7,9 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Neurodesktop is a plug-and-play, browser-accessible, containerised data analysis environment for neuroimaging research. It provides a complete desktop environment with neuroimaging tools accessible through JupyterLab and Apache Guacamole.
 
 ## Tests
-when making changes to the Dockerfile, make sure to run the tests in /opt/neurodesktop/tests/ to ensure that the changes do not break any existing functionality.
+when making changes to the Dockerfile, make sure to run the tests in /opt/tests/ to ensure that the changes do not break any existing functionality.
 ```
-pytest /opt/neurodesktop/tests/
+pytest /opt/tests/
 ``` 
 
 ## Build and Development Commands

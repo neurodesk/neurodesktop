@@ -160,7 +160,7 @@ jobs:
       - name: Pull container image
         run: docker pull $IMAGEID:latest
       - name: Test container image
-        run: docker run --rm -t $IMAGEID:latest pytest /opt/neurodesktop/tests/
+        run: docker run --rm -t $IMAGEID:latest pytest /opt/tests/
       - name: Scan container image
         uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5
         with:

@@ -359,7 +359,7 @@ COPY --chown=root:users config/guacamole/guacamole.sh /opt/neurodesktop/guacamol
 COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
 COPY --chown=root:users config/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh
 COPY --chown=root:users config/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh
-COPY --chown=root:users tests /opt/neurodesktop/tests
+COPY --chown=root:users tests /opt/tests
 # COPY --chown=root:users config/guacamole/user-mapping.xml /etc/guacamole/user-mapping.xml
 
 # Generic webapp infrastructure
