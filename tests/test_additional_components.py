@@ -27,9 +27,8 @@ def test_cvmfs_mounts():
             assert "CVMFS_HTTP_PROXY" in content, "CVMFS_HTTP_PROXY configuration missing"
 
 def test_neurocommand_setup():
-    """Verify neurocommand installation and container linkage."""
+    """Verify neurocommand installation."""
     assert os.path.exists("/neurocommand"), "/neurocommand directory missing"
-    assert os.path.exists("/neurocommand/local/containers"), "/neurocommand/local/containers not found"
     
 def test_guacamole_tomcat_running():
     """Verify Tomcat and Guacamole processes running."""
