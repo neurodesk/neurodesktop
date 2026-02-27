@@ -32,7 +32,7 @@ interface IServersInfoResponse {
 
 const DONATION_URL = 'https://donations.uq.edu.au/EAINNEUR';
 const DONATION_MESSAGE =
-  'Neurodesk relies on your support to cover infrastructure costs. You can support us through donating here https://donations.uq.edu.au/EAINNEUR';
+  'Neurodesk relies on your support for infrastructure costs. You can donate here https://donations.uq.edu.au/EAINNEUR';
 const DONATION_NOTIFICATION_DISMISSED_KEY =
   'neurodesk-launcher:donation-notification-dismissed-v1';
 
@@ -58,7 +58,7 @@ function showDonationNotificationOnce(): void {
     if (
       donationNotificationShown ||
       window.localStorage.getItem(DONATION_NOTIFICATION_DISMISSED_KEY) ===
-        'dismissed'
+      'dismissed'
     ) {
       return;
     }
