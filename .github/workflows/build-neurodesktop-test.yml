@@ -16,13 +16,13 @@ on:
   workflow_dispatch:
     inputs:
       force_push:
-        description: 'Force push?'
+        description: "Force push?"
         type: boolean
         required: true
         default: false
   schedule:
-    - cron:  '0 17 * * *'
-    
+    - cron: "0 17 * * *"
+
 env:
   DOCKERHUB_ORG: ${{ vars.DOCKERHUB_ORG }}
   # Set only for self-hosted runners to optimize build performance
@@ -35,73 +35,73 @@ jobs:
     runs-on:
       group: arc-base
     steps:
-    - name: Fetch github api rate limit
-      run: |
-        GITHUB_RATE_REMAINING=$(curl -H "Accept: application/vnd.github.v3+json" https://api.github.com/rate_limit | jq '.rate.remaining')
-        echo "GITHUB_RATE_REMAINING=${GITHUB_RATE_REMAINING}"
-        echo "GITHUB_RATE_REMAINING=$GITHUB_RATE_REMAINING" >> $GITHUB_ENV
-    - name: Checkout repository
-      if: ${{ env.GITHUB_RATE_REMAINING > 0 }}
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      with:
-        ref: ${{ github.ref }}
-    - name: Set environment variables
-      if: ${{ env.GITHUB_RATE_REMAINING > 0 }}
-      run: |
-        IMAGENAME="neurodesktop-test"
-        BUILDDATE=`date +%Y-%m-%d`
-        IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
-        IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
+      - name: Fetch github api rate limit
+        run: |
+          GITHUB_RATE_REMAINING=$(curl -H "Accept: application/vnd.github.v3+json" https://api.github.com/rate_limit | jq '.rate.remaining')
+          echo "GITHUB_RATE_REMAINING=${GITHUB_RATE_REMAINING}"
+          echo "GITHUB_RATE_REMAINING=$GITHUB_RATE_REMAINING" >> $GITHUB_ENV
+      - name: Checkout repository
+        if: ${{ env.GITHUB_RATE_REMAINING > 0 }}
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.ref }}
+      - name: Set environment variables
+        if: ${{ env.GITHUB_RATE_REMAINING > 0 }}
+        run: |
+          IMAGENAME="neurodesktop-test"
+          BUILDDATE=`date +%Y-%m-%d`
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
 
-        echo "BUILDDATE=$BUILDDATE"
-        echo "IMAGEID=$IMAGEID"
-        echo "IMAGENAME=$IMAGENAME"
+          echo "BUILDDATE=$BUILDDATE"
+          echo "IMAGEID=$IMAGEID"
+          echo "IMAGENAME=$IMAGENAME"
 
-        echo "BUILDDATE=$BUILDDATE" >> $GITHUB_ENV
-        echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
-        echo "IMAGENAME=$IMAGENAME" >> $GITHUB_ENV
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2
-      # this is for testing the arc runners.
-      with:
-        driver-opts: |
-          network=host
-      # commenting out for now to test arc runners vs github runners
-    - name: Login to GHCR
-      uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
-      with:
-        registry: ghcr.io
-        username: ${{ github.repository_owner }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    - name: Set PUSH_IMAGES
-      run: |
-        PUSH_IMAGES="${IMAGEID}"
-        if [ ! -z "${DOCKERHUB_ORG}" ]; then
-          PUSH_IMAGES="${PUSH_IMAGES}, ${DOCKERHUB_ORG}/${IMAGENAME}"
-        fi
-        echo "PUSH_IMAGES=$PUSH_IMAGES"
-        echo "PUSH_IMAGES=$PUSH_IMAGES" >> $GITHUB_ENV
-    - name: Login to DockerHub
-      if: ${{ env.DOCKERHUB_ORG != '' }}
-      uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_PASSWORD }}
-    - name: Get new image metadata
-      id: meta
-      uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804
-      with:
-        images: ${{ env.PUSH_IMAGES }}
-        tags: |
-          ${{ env.BUILDDATE }}
-          latest
-        labels: |
-          org.opencontainers.image.description=Neurodesktop
-    - name: Build and push new image
-      uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4
-      with:
+          echo "BUILDDATE=$BUILDDATE" >> $GITHUB_ENV
+          echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
+          echo "IMAGENAME=$IMAGENAME" >> $GITHUB_ENV
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2
+        # this is for testing the arc runners.
+        with:
+          driver-opts: |
+            network=host
+        # commenting out for now to test arc runners vs github runners
+      - name: Login to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set PUSH_IMAGES
+        run: |
+          PUSH_IMAGES="${IMAGEID}"
+          if [ ! -z "${DOCKERHUB_ORG}" ]; then
+            PUSH_IMAGES="${PUSH_IMAGES}, ${DOCKERHUB_ORG}/${IMAGENAME}"
+          fi
+          echo "PUSH_IMAGES=$PUSH_IMAGES"
+          echo "PUSH_IMAGES=$PUSH_IMAGES" >> $GITHUB_ENV
+      - name: Login to DockerHub
+        if: ${{ env.DOCKERHUB_ORG != '' }}
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+      - name: Get new image metadata
+        id: meta
+        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804
+        with:
+          images: ${{ env.PUSH_IMAGES }}
+          tags: |
+            ${{ env.BUILDDATE }}
+            latest
+          labels: |
+            org.opencontainers.image.description=Neurodesktop
+      - name: Build and push new image
+        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4
+        with:
           context: .
           platforms: linux/amd64,linux/arm64
           provenance: false # fixes unknown/unknown arch builds
@@ -109,24 +109,24 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-    # - name: Create github tag (if changes found)
-    #   run: |
-    #     git tag ${BUILDDATE}
-    #     git push origin -f --tags
-    #     # echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
-    - name: Generate issue on job failure
-      if: always() && failure()
-      uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
-      env: 
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GITHUB_WORKFLOW: ${{ env.GITHUB_WORKFLOW }}
-        GITHUB_SERVER_URL: ${{ env.GITHUB_SERVER_URL }}
-        GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
-        GITHUB_RUN_ID: ${{ env.GITHUB_RUN_ID }}
-      with:
-        filename: .github/job_failure_issue_template.md
-        update_existing: true
-        search_existing: open
+      # - name: Create github tag (if changes found)
+      #   run: |
+      #     git tag ${BUILDDATE}
+      #     git push origin -f --tags
+      #     # echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
+      - name: Generate issue on job failure
+        if: always() && failure()
+        uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_WORKFLOW: ${{ env.GITHUB_WORKFLOW }}
+          GITHUB_SERVER_URL: ${{ env.GITHUB_SERVER_URL }}
+          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
+          GITHUB_RUN_ID: ${{ env.GITHUB_RUN_ID }}
+        with:
+          filename: .github/job_failure_issue_template.md
+          update_existing: true
+          search_existing: open
   scan-image:
     needs: build-image
     runs-on: ubuntu-22.04
@@ -145,7 +145,7 @@ jobs:
           echo "BUILDDATE=$BUILDDATE" >> $GITHUB_ENV
           echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
           echo "IMAGENAME=$IMAGENAME" >> $GITHUB_ENV
-      - name: Free up build space 
+      - name: Free up build space
         run: |
           echo "Available space before cleanup:"
           df -h
@@ -167,12 +167,14 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull container image
         run: docker pull $IMAGEID:latest
+      - name: Test container image
+        run: docker run --rm -t $IMAGEID:latest pytest /opt/neurodesktop/tests/
       - name: Container image scan
         uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5
         with:
           image-ref: ${{ env.IMAGEID }}:latest
           format: table
-          exit-code: '1'
+          exit-code: "1"
           severity: CRITICAL
           timeout: 25m0s
           # These are VS Code metadata package manifests inside code-server, not runtime npm libraries.
@@ -180,7 +182,7 @@ jobs:
       - name: Generate issue on job failure
         if: always() && failure()
         uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
-        env: 
+        env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_WORKFLOW: ${{ env.GITHUB_WORKFLOW }}
           GITHUB_SERVER_URL: ${{ env.GITHUB_SERVER_URL }}
