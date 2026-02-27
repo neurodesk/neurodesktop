@@ -12,11 +12,12 @@ if [[ -z "${USER}" ]]; then
     export USER=${NB_USER}
 fi
 
-export MODULEPATH=/neurodesktop-storage/containers/modules/:/cvmfs/neurodesk.ardc.edu.au/containers/modules/
+export NEURODESKTOP_LOCAL_CONTAINERS="${NEURODESKTOP_LOCAL_CONTAINERS:-/neurodesktop-storage/containers}"
+export MODULEPATH=${NEURODESKTOP_LOCAL_CONTAINERS}/modules/:/cvmfs/neurodesk.ardc.edu.au/containers/modules/
 
 # Only setup MODULEPATH if a module system is installed
 if [ -f '/usr/share/module.sh' ]; then
-        export OFFLINE_MODULES=/neurodesktop-storage/containers/modules/
+        export OFFLINE_MODULES=${NEURODESKTOP_LOCAL_CONTAINERS}/modules/
         export CVMFS_MODULES=/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/
 
         if [ ! -d $CVMFS_MODULES ]; then
