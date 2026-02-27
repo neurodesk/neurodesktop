@@ -13,33 +13,33 @@ USER root
 # Install base image dependencies
 RUN apt-get update --yes \
     && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
-        software-properties-common \
-        openjdk-21-jre-headless \
-        build-essential \
-        libcairo2-dev \
-        libjpeg-turbo8-dev \
-        libpng-dev \
-        libtool-bin \
-        uuid-dev \
-        freerdp2-dev \
-        libvncserver-dev \
-        libssl-dev \
-        libwebp-dev \
-        libssh2-1-dev \
-        libpango1.0-dev \
-        tigervnc-common \
-        tigervnc-standalone-server \
-        tigervnc-tools \
-        xorgxrdp \
-        xrdp \
-        lxde \
-        acl \
-        wget \
-        curl \
-        dirmngr \
-        gpg \
-        gpg-agent \
-        apt-transport-https \
+    software-properties-common \
+    openjdk-21-jre-headless \
+    build-essential \
+    libcairo2-dev \
+    libjpeg-turbo8-dev \
+    libpng-dev \
+    libtool-bin \
+    uuid-dev \
+    freerdp2-dev \
+    libvncserver-dev \
+    libssl-dev \
+    libwebp-dev \
+    libssh2-1-dev \
+    libpango1.0-dev \
+    tigervnc-common \
+    tigervnc-standalone-server \
+    tigervnc-tools \
+    xorgxrdp \
+    xrdp \
+    lxde \
+    acl \
+    wget \
+    curl \
+    dirmngr \
+    gpg \
+    gpg-agent \
+    apt-transport-https \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # add a static strace executable to /opt which we can copy to containers for debugging:
@@ -127,68 +127,68 @@ RUN wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb 
 # Install Tools and Libs
 RUN apt-get update --yes \
     && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
-        aria2 \
-        bc \
-        davfs2 \
-        dnsutils \
-        gedit \
-        gh \
-        git \
-        git-annex \
-        gnome-keyring \
-        graphviz \
-        htop \
-        imagemagick \
-        iputils-ping \
-        less \
-        libgfortran5 \
-        libgpgme-dev \
-        libossp-uuid-dev \
-        libpci3 \
-        libreoffice-core \
-        lmod \
-        lua-bit32 \
-        lua-filesystem \
-        lua-json \
-        lua-lpeg \
-        lua-posix \
-        lua-term \
-        lua5.2 \
-        lxtask \
-        man-db \
-        nano \
-        nextcloud-client \
-        nodejs \
-        openssh-client \
-        openssh-server \
-        owncloud-client \
-        pciutils \
-        python3-setuptools \
-        qdirstat \
-        rsync \
-        rclone \
-        s3fs \
-        screen \
-        slurm-client \
-        slurm-wlm-basic-plugins \
-        slurmctld \
-        slurmd \
-        slurmdbd \
-        mariadb-server \
-        sshfs \
-        munge \
-        tcllib \
-        tk \
-        tmux \
-        tree \
-        uidmap \
-        unzip \
-        vim \
-        xdg-utils \
-        yarn \
-        zip \
-        tcsh \
-        && apt-get clean && rm -rf /var/lib/apt/lists/*
+    aria2 \
+    bc \
+    davfs2 \
+    dnsutils \
+    gedit \
+    gh \
+    git \
+    git-annex \
+    gnome-keyring \
+    graphviz \
+    htop \
+    imagemagick \
+    iputils-ping \
+    less \
+    libgfortran5 \
+    libgpgme-dev \
+    libossp-uuid-dev \
+    libpci3 \
+    libreoffice-core \
+    lmod \
+    lua-bit32 \
+    lua-filesystem \
+    lua-json \
+    lua-lpeg \
+    lua-posix \
+    lua-term \
+    lua5.2 \
+    lxtask \
+    man-db \
+    nano \
+    nextcloud-client \
+    nodejs \
+    openssh-client \
+    openssh-server \
+    owncloud-client \
+    pciutils \
+    python3-setuptools \
+    qdirstat \
+    rsync \
+    rclone \
+    s3fs \
+    screen \
+    slurm-client \
+    slurm-wlm-basic-plugins \
+    slurmctld \
+    slurmd \
+    slurmdbd \
+    mariadb-server \
+    sshfs \
+    munge \
+    tcllib \
+    tk \
+    tmux \
+    tree \
+    uidmap \
+    unzip \
+    vim \
+    xdg-utils \
+    yarn \
+    zip \
+    tcsh \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Nextflow ecosystem tools
 ENV NF_NEURO_MODULES_DIR=/opt/nf-neuro/modules
@@ -205,7 +205,7 @@ RUN mkdir -p "${NF_TEST_HOME}" \
     && chmod 755 /usr/local/bin/nf-test \
     && mkdir -p /opt/nf-neuro \
     && git clone --depth=1 https://github.com/nf-neuro/modules.git "${NF_NEURO_MODULES_DIR}" \
-    && chown -R ${NB_UID}:${NB_GID} /opt/nf-neuro "${NF_TEST_HOME}" \
+    && chown -R ${NB_UID}:${NB_GID} /opt/nf-neuro "${NF_TEST_HOME}" "${HOME}/.nextflow" \
     && rm -rf /root/.cache "${HOME}/.nf-test" /tmp/nf-test /tmp/nextflow
 
 # Install code-server as a prebuilt binary (more reliable than npm package install)
@@ -214,21 +214,21 @@ RUN set -eux; \
     kernel_arch="$(uname -m || true)"; \
     cs_arch=""; \
     for arch in "${deb_arch}" "${kernel_arch}"; do \
-        case "${arch}" in \
-            amd64|x86_64) cs_arch="amd64" ;; \
-            arm64|aarch64) cs_arch="arm64" ;; \
-            armhf|armv7l|armv7) cs_arch="armv7l" ;; \
-        esac; \
-        if [ -n "${cs_arch}" ]; then break; fi; \
+    case "${arch}" in \
+    amd64|x86_64) cs_arch="amd64" ;; \
+    arm64|aarch64) cs_arch="arm64" ;; \
+    armhf|armv7l|armv7) cs_arch="armv7l" ;; \
+    esac; \
+    if [ -n "${cs_arch}" ]; then break; fi; \
     done; \
     if [ -z "${cs_arch}" ]; then \
-        echo "Unsupported architecture for code-server: deb_arch=${deb_arch} kernel_arch=${kernel_arch}" >&2; \
-        exit 1; \
+    echo "Unsupported architecture for code-server: deb_arch=${deb_arch} kernel_arch=${kernel_arch}" >&2; \
+    exit 1; \
     fi; \
     cs_tar="code-server-${CODE_SERVER_VERSION}-linux-${cs_arch}.tar.gz"; \
     curl -fL --retry 5 --retry-all-errors --retry-delay 2 \
-        "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/${cs_tar}" \
-        -o "/tmp/${cs_tar}"; \
+    "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/${cs_tar}" \
+    -o "/tmp/${cs_tar}"; \
     tar -xzf "/tmp/${cs_tar}" -C /tmp; \
     rm -rf /opt/code-server; \
     mv "/tmp/code-server-${CODE_SERVER_VERSION}-linux-${cs_arch}" /opt/code-server; \
@@ -245,9 +245,9 @@ RUN npm install -g @openai/codex \
     && su - "${NB_USER}" -c 'curl -fsSL https://claude.ai/install.sh | bash -s -- stable' \
     && mkdir -p /opt/jovyan_defaults/.local/bin \
     && if [ -x /home/jovyan/.local/bin/claude ]; then \
-        cp -L /home/jovyan/.local/bin/claude /opt/jovyan_defaults/.local/bin/claude; \
+    cp -L /home/jovyan/.local/bin/claude /opt/jovyan_defaults/.local/bin/claude; \
     else \
-        cp -L /home/jovyan/.local/share/claude/versions/* /opt/jovyan_defaults/.local/bin/claude; \
+    cp -L /home/jovyan/.local/share/claude/versions/* /opt/jovyan_defaults/.local/bin/claude; \
     fi \
     && chmod +x /opt/jovyan_defaults/.local/bin/claude \
     && rm -rf /home/${NB_USER}/.cache \
@@ -262,7 +262,7 @@ RUN curl -fsSL https://opencode.ai/install | bash \
 RUN add-apt-repository ppa:mozillateam/ppa \
     && apt-get update --yes \
     && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
-        --target-release 'o=LP-PPA-mozillateam' firefox \
+    --target-release 'o=LP-PPA-mozillateam' firefox \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 COPY config/firefox/mozillateamppa /etc/apt/preferences.d/mozillateamppa
@@ -282,37 +282,38 @@ RUN conda config --system --prepend envs_dirs '~/conda-environments'
 
 # Install Python packages and JupyterLab extensions
 RUN /opt/conda/bin/pip install \
-        datalad \
-        nipype \
-        nbdev \
-        nf-core \
-        pydra==1.0a7 \
-        nipoppy \
-        matplotlib \
-        datalad-container \
-        datalad-osf \
-        osfclient \
-        watermark \
-        ipyniivue \
-        jupyter-server-proxy \
-        jupyterlmod \
-        jupyterlab-git \
-        notebook_intelligence \
-        jupyterlab_rise \
-        jupyterlab-niivue==0.2.5 \
-        jupyterlab_myst \
-        jupyter-sshd-proxy \
-        papermill \
-        ipycanvas \
-        jupyter-resource-usage \
-        jupyter_scheduler \
-        jupyterlab-slurm@git+https://github.com/NERSC/jupyterlab-slurm.git@main \
-        httpx \
-        ipywidgets==7.8.5 \
-        ipyvolume \
-        jupyterlab_widgets \
-        nbgitpuller \
-        xnat \
+    datalad \
+    nipype \
+    nbdev \
+    nf-core \
+    pydra==1.0a7 \
+    nipoppy \
+    matplotlib \
+    datalad-container \
+    datalad-osf \
+    osfclient \
+    watermark \
+    ipyniivue \
+    jupyter-server-proxy \
+    jupyterlmod \
+    jupyterlab-git \
+    notebook_intelligence \
+    jupyterlab_rise \
+    jupyterlab-niivue==0.2.5 \
+    jupyterlab_myst \
+    jupyter-sshd-proxy \
+    papermill \
+    ipycanvas \
+    jupyter-resource-usage \
+    jupyter_scheduler \
+    jupyterlab-slurm@git+https://github.com/NERSC/jupyterlab-slurm.git@main \
+    httpx \
+    ipywidgets==7.8.5 \
+    ipyvolume \
+    jupyterlab_widgets \
+    nbgitpuller \
+    xnat \
+    pytest \
     && /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
     && rm -rf /home/${NB_USER}/.cache
 
@@ -355,7 +356,7 @@ RUN rm /usr/bin/lxpolkit
 
 # enable rootless mounts: 
 RUN chmod +x /usr/bin/fusermount
-    
+
 # Add notebook startup scripts
 # https://jupyter-docker-stacks.readthedocs.io/en/latest/using/common.html
 RUN mkdir -p /usr/local/bin/start-notebook.d/ \
@@ -373,6 +374,7 @@ COPY --chown=root:users config/slurm/setup_and_start_slurm.sh /opt/neurodesktop/
 COPY --chown=root:users config/slurm/test_slurm_setup.sh /opt/neurodesktop/test_slurm_setup.sh
 COPY --chown=root:users config/slurm/slurm_submit_smoke.sbatch /opt/neurodesktop/slurm_submit_smoke.sbatch
 COPY --chown=root:users config/nextflow/test_nextflow.sh /opt/neurodesktop/test_nextflow.sh
+COPY --chown=root:users tests /opt/neurodesktop/tests
 # COPY --chown=root:users config/guacamole/user-mapping.xml /etc/guacamole/user-mapping.xml
 
 # Generic webapp infrastructure
@@ -383,11 +385,11 @@ COPY --chown=root:users config/jupyter/jupyter_notebook_config.py.template /opt/
 
 # Fetch webapps.json from neurocommand and generate jupyter config
 RUN curl -fsSL https://raw.githubusercontent.com/neurodesk/neurocommand/main/neurodesk/webapps.json \
-        -o /opt/neurodesktop/webapps.json \
+    -o /opt/neurodesktop/webapps.json \
     && python3 /opt/neurodesktop/scripts/generate_jupyter_config.py \
-        /opt/neurodesktop/webapps.json \
-        /opt/neurodesktop/jupyter_notebook_config.py.template \
-        /etc/jupyter/jupyter_notebook_config.py
+    /opt/neurodesktop/webapps.json \
+    /opt/neurodesktop/jupyter_notebook_config.py.template \
+    /etc/jupyter/jupyter_notebook_config.py
 
 RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/jupyterlab_startup.sh \
@@ -416,7 +418,7 @@ RUN ln -sf /etc/guacamole/user-mapping-vnc.xml /etc/guacamole/user-mapping.xml
 
 # Add NB_USER to sudoers
 RUN echo "${NB_USER} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/notebook \
-# The following apply to Singleuser mode only. See config/jupyter/before_notebook.sh for Notebook mode
+    # The following apply to Singleuser mode only. See config/jupyter/before_notebook.sh for Notebook mode
     && /usr/bin/printf '%s\n%s\n' 'password' 'password' | passwd ${NB_USER} \
     && usermod --shell /bin/bash ${NB_USER}
 

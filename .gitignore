@@ -9,3 +9,4 @@ extensions/neurodesk-launcher/lib/
 extensions/neurodesk-launcher/node_modules/
 extensions/neurodesk-launcher/neurodesk_launcher/labextension/
 extensions/neurodesk-launcher/tsconfig.tsbuildinfo
+*.pyc
