@@ -39,7 +39,7 @@ rule run_bet:
         \"\"\"
         source /opt/neurodesktop/environment_variables.sh || true
         source /usr/share/lmod/lmod/init/bash || true
-        export MODULEPATH=/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/all:/opt/neurocommand/local/containers/modules/all:${MODULEPATH:-}
+        export MODULEPATH=/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/all:/opt/neurocommand/local/containers/modules/all:${{MODULEPATH:-}}
         module load fsl
         
         # We'll just run bet on a non-existent file and catch the specific error OR run bet --help and pipe to output

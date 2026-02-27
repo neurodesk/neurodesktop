@@ -53,7 +53,7 @@ def test_vnc_startup(tmp_path):
     time.sleep(2)
     
     # Check if the process Xtigervnc or vncserver is running for display :99
-    code, output = run_cmd("ps aux | grep -v grep | grep -E 'Xtigervnc.*:99'")
+    code, output = run_cmd("ps auxww | grep -v grep | grep -E 'Xtigervnc.*:99'")
     if code != 0:
         _, log_content = run_cmd(f"cat {tmp_path}/.vnc/*:99.log || true")
         assert False, f"Xtigervnc :99 process is not running. VNC startup crashed.\\nLog:\\n{log_content}\\n\\nPS Output:\\n{output}"
