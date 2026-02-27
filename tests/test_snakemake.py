@@ -38,11 +38,13 @@ rule run_bet:
         "output.nii.gz"
     shell:
         \"\"\"
+        #!/bin/bash
         source /opt/neurodesktop/environment_variables.sh || true
         source /usr/share/lmod/lmod/init/bash || true
         export MODULEPATH=/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/all:/opt/neurocommand/local/containers/modules/all:${{MODULEPATH:-}}
-        # Check if fsl module is available before trying to load and use it
-        if module avail fsl >/dev/null 2>&1 || module -t avail 2>&1 | grep -q "^fsl/"; then
+        # Use a more robust check that works in strict bash/sh environments
+        echo "Checking for FSL module..."
+        if [ -n "$(module -t avail fsl 2>&1 | grep -i fsl)" ]; then
             module load fsl
             bet && touch {output} || touch {output}
         else

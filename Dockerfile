@@ -267,6 +267,7 @@ RUN conda install -c conda-forge nb_conda_kernels \
 RUN conda config --system --prepend envs_dirs '~/conda-environments'
 
 # Install Python packages and JupyterLab extensions
+ARG BUST_CACHE_PIP=2
 RUN /opt/conda/bin/pip install \
     datalad \
     nipype \
