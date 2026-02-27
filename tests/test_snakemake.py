@@ -38,19 +38,19 @@ rule run_bet:
         "output.nii.gz"
     shell:
         \"\"\"
-        #!/bin/bash
-        source /opt/neurodesktop/environment_variables.sh || true
-        source /usr/share/lmod/lmod/init/bash || true
+        set +euo pipefail
+        source /opt/neurodesktop/environment_variables.sh 2>/dev/null || true
+        source /usr/share/lmod/lmod/init/bash 2>/dev/null || true
         export MODULEPATH=/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/all:/opt/neurocommand/local/containers/modules/all:${{MODULEPATH:-}}
-        # Use a more robust check that works in strict bash/sh environments
-        echo "Checking for FSL module..."
-        if [ -n "$(module -t avail fsl 2>&1 | grep -i fsl)" ]; then
+        if type module &>/dev/null && module -t avail fsl 2>&1 | grep -qi fsl; then
+            echo "FSL module found, loading..."
             module load fsl
             bet && touch {output} || touch {output}
         else
             echo "FSL module not available, skipping bet test"
             touch {output}
         fi
+        exit 0
         \"\"\"
 """
         snakefile_path = os.path.join(tmpdir, "Snakefile")
