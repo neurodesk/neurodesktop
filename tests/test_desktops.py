@@ -46,15 +46,17 @@ def test_vnc_startup(tmp_path):
     
     # Pick a random display port like :99
     # Use the container's default xstartup instead of ~/.vnc/xstartup because restore_home_defaults hasn't run
-    code, output = run_cmd(f"USER=jovyan vncserver -xstartup /opt/jovyan_defaults/.vnc/xstartup -rfbauth {pwd_file} :99")
+    code, output = run_cmd(f"USER=jovyan HOME={tmp_path} vncserver -xstartup /opt/jovyan_defaults/.vnc/xstartup -rfbauth {pwd_file} :99")
     assert code == 0, f"VNC server failed to start: {output}"
     
     # Give it a second
     time.sleep(2)
     
     # Check if the process Xtigervnc or vncserver is running for display :99
-    code, output = run_cmd("ps aux | grep -E 'Xtigervnc.*:99'")
-    assert code == 0, f"Xtigervnc :99 process is not running. VNC startup crashed. {output}"
+    code, output = run_cmd("ps aux | grep -v grep | grep -E 'Xtigervnc.*:99'")
+    if code != 0:
+        _, log_content = run_cmd(f"cat {tmp_path}/.vnc/*:99.log || true")
+        assert False, f"Xtigervnc :99 process is not running. VNC startup crashed.\\nLog:\\n{log_content}\\n\\nPS Output:\\n{output}"
     
     # Clean up
     run_cmd("vncserver -kill :99")
