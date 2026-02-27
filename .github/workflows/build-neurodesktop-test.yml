@@ -110,10 +110,17 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
       # - name: Create github tag (if changes found)
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       #   run: |
       #     git tag ${BUILDDATE}
-      #     git push origin -f --tags
-      #     # echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
+      #     if gh api /repos/${GITHUB_REPOSITORY}/git/refs/tags/${BUILDDATE} >/dev/null 2>&1; then
+      #       echo "Updating existing tag ${BUILDDATE}"
+      #       gh api --method PATCH -H "Accept: application/vnd.github+json" /repos/${GITHUB_REPOSITORY}/git/refs/tags/${BUILDDATE} -f sha="${GITHUB_SHA}" -F force=true
+      #     else
+      #       echo "Creating new tag ${BUILDDATE}"
+      #       gh api --method POST -H "Accept: application/vnd.github+json" /repos/${GITHUB_REPOSITORY}/git/refs -f ref="refs/tags/${BUILDDATE}" -f sha="${GITHUB_SHA}"
+      #     fi
       - name: Generate issue on job failure
         if: always() && failure()
         uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
