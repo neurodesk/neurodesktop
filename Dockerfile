@@ -84,10 +84,6 @@ RUN wget -q "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/bina
     && ldconfig \
     && rm -r /tmp/guacamole-server-${GUACAMOLE_VERSION}
 
-# # Set home directory default acls
-# RUN chmod g+rwxs /home/${NB_USER}
-# RUN setfacl -dRm u::rwX,g::rwX,o::0 /home/${NB_USER}
-
 # #========================================#
 # # Software (as root user)
 # #========================================#
@@ -113,16 +109,6 @@ RUN wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb 
     && apt-get update --yes \
     && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends cvmfs \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# # Install CVMFS
-# RUN wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb -P /tmp \
-#     && dpkg -i /tmp/cvmfs-release-latest_all.deb \
-#     && rm /tmp/cvmfs-release-latest_all.deb
-
-# # Install CVMFS Packages
-# RUN apt-get update --yes \
-#     && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends cvmfs \
-#     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Tools and Libs
 RUN apt-get update --yes \
@@ -371,9 +357,6 @@ COPY --chown=root:users config/guacamole/guacamole.sh /opt/neurodesktop/guacamol
 COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
 COPY --chown=root:users config/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh
 COPY --chown=root:users config/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh
-COPY --chown=root:users config/slurm/test_slurm_setup.sh /opt/neurodesktop/test_slurm_setup.sh
-COPY --chown=root:users config/slurm/slurm_submit_smoke.sbatch /opt/neurodesktop/slurm_submit_smoke.sbatch
-COPY --chown=root:users config/nextflow/test_nextflow.sh /opt/neurodesktop/test_nextflow.sh
 COPY --chown=root:users tests /opt/neurodesktop/tests
 # COPY --chown=root:users config/guacamole/user-mapping.xml /etc/guacamole/user-mapping.xml
 
@@ -397,9 +380,6 @@ RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/environment_variables.sh \
     /opt/neurodesktop/ensure_sftp_sshd.sh \
     /opt/neurodesktop/setup_and_start_slurm.sh \
-    /opt/neurodesktop/test_slurm_setup.sh \
-    /opt/neurodesktop/slurm_submit_smoke.sbatch \
-    /opt/neurodesktop/test_nextflow.sh \
     /opt/neurodesktop/webapp_launcher.sh \
     /opt/neurodesktop/webapp_wrapper/webapp_wrapper.py \
     /opt/neurodesktop/scripts/generate_jupyter_config.py \
