@@ -9,7 +9,7 @@ Neurodesktop is a plug-and-play, browser-accessible, containerised data analysis
 ## Build and Development Commands
 
 ### Tests
-when making changes to the project, make sure you add tests for new functionality and run the tests in /opt/tests/ to ensure that your changes do not break existing functionality.
+when making changes to the project, make sure you add tests for new functionality, build the container and run the tests inside the container under /opt/tests/ to ensure that your changes do not break existing functionality.
 ```
 pytest /opt/tests/
 ``` 

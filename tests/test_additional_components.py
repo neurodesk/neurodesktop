@@ -1,5 +1,6 @@
 import subprocess
 import os
+import re
 import pytest
 
 def run_cmd(cmd):
@@ -38,6 +39,19 @@ def test_guacamole_tomcat_running():
     # Just asserting the binaries and wrappers exist
     assert os.path.exists("/usr/local/tomcat/webapps/ROOT.war"), "Guacamole webapp ROOT.war missing"
     assert os.path.exists("/usr/local/tomcat/bin/startup.sh"), "Tomcat startup script missing"
+
+
+def test_tomcat_request_header_limit_hardened():
+    """Verify Tomcat accepts larger request headers for browser compatibility."""
+    server_xml_path = "/usr/local/tomcat/conf/server.xml"
+    assert os.path.exists(server_xml_path), "Tomcat server.xml missing"
+
+    with open(server_xml_path, "r", encoding="utf-8") as server_xml_file:
+        server_xml = server_xml_file.read()
+
+    match = re.search(r'maxHttpRequestHeaderSize="(\d+)"', server_xml)
+    assert match is not None, "Tomcat maxHttpRequestHeaderSize is not configured"
+    assert int(match.group(1)) >= 65536, "Tomcat maxHttpRequestHeaderSize should be at least 65536"
     
 def test_desktop_storage():
     """Verify neurodesktop-storage is accessible."""

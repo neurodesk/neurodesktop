@@ -70,6 +70,9 @@ RUN wget -q https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v${TOMCA
     && mv /tmp/apache-tomcat-${TOMCAT_VERSION} /usr/local/tomcat \
     && mv /usr/local/tomcat/webapps /usr/local/tomcat/webapps.dist \
     && mkdir /usr/local/tomcat/webapps \
+    && if ! grep -q 'maxHttpRequestHeaderSize=' /usr/local/tomcat/conf/server.xml; then \
+        sed -i '/<Connector port="8080" protocol="HTTP\/1\.1"/ s#\([[:space:]]*/>\)# maxHttpRequestHeaderSize="65536"\1#' /usr/local/tomcat/conf/server.xml; \
+    fi \
     && chmod +x /usr/local/tomcat/bin/*.sh
 
 # Install Apache Guacamole
