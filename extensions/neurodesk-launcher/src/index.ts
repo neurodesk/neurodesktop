@@ -30,9 +30,9 @@ interface IServersInfoResponse {
   server_processes: IServerProcess[];
 }
 
-const DONATION_URL = 'https://donations.uq.edu.au/EAINNEUR';
+const DONATION_URL = 'https://neurodesk.org/overview/donate/';
 const DONATION_MESSAGE =
-  'Neurodesk relies on your support for infrastructure costs. You can donate here https://donations.uq.edu.au/EAINNEUR';
+  'Neurodesk relies on your support - please donate here https://neurodesk.org/overview/donate/ - Thank you!';
 const DONATION_NOTIFICATION_DISMISSED_KEY =
   'neurodesk-launcher:donation-notification-dismissed-v1';
 
