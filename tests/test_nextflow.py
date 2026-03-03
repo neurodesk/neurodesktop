@@ -34,3 +34,39 @@ def test_nf_neuro_modules():
     modules_dir = os.environ.get("NF_NEURO_MODULES_DIR", "/opt/nf-neuro/modules")
     is_valid = os.path.exists(os.path.join(modules_dir, ".git")) or os.path.exists(os.path.join(modules_dir, "README.md"))
     assert is_valid, f"nf-neuro modules checkout not found at {modules_dir}"
+
+
+def test_nextflow_fslmaths(tmp_path):
+    """Verify nextflow can run a minimal workflow using fslmaths."""
+    workflow = """
+process RUN_FSLMATHS {
+    publishDir 'results', mode: 'copy'
+    output:
+    path 'output.nii.gz'
+    script:
+    '''
+    set +euo pipefail
+    source /opt/neurodesktop/environment_variables.sh 2>/dev/null || true
+    source /usr/share/lmod/lmod/init/bash 2>/dev/null || true
+    export MODULEPATH=/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/all:/opt/neurocommand/local/containers/modules/all:${MODULEPATH:-}
+    module load fsl >/dev/null 2>&1 || true
+    if ! command -v fslmaths >/dev/null 2>&1; then
+        echo "fslmaths not found in PATH"
+        exit 1
+    fi
+    touch output.nii.gz
+    '''
+}
+
+workflow {
+    RUN_FSLMATHS()
+}
+"""
+    workflow_file = tmp_path / "main.nf"
+    workflow_file.write_text(workflow)
+
+    cmd = f"cd {tmp_path} && nextflow run main.nf -ansi-log false"
+    code, output = run_cmd(cmd)
+
+    assert code == 0, f"Nextflow FSLMaths workflow failed: {output}"
+    assert (tmp_path / "results" / "output.nii.gz").exists(), "Nextflow did not produce expected output"

@@ -14,14 +14,8 @@ def test_nipype_importable():
     assert code == 0, f"Failed to import nipype: {output}"
     assert len(output) > 0, "No version output string found"
 
-def test_nipype_fsl_bet(tmp_path):
-    """Verify we can run a simple FSL BET command via nipype."""
-    # Create a minimal valid-ish NIfTI file or just an empty file if that's enough to trigger BET
-    # Actually, BET requires a valid NIfTI header. To avoid uploading a binary, we can test 
-    # if the fsl.BET() node can be imported from nipype and built into a command successfully.
-    # It might fail if FSL is missing from path. We can test just the command line generation
-    # or actually running it if FSL is installed.
-    # 
+def test_nipype_fslmaths(tmp_path):
+    """Verify we can build a simple FSLMaths command via nipype."""
     # Attempt to load FSL using the python lmod package
     try:
         import importlib.util
@@ -48,20 +42,19 @@ def test_nipype_fsl_bet(tmp_path):
     except Exception as e:
         print(f"Warning: could not load fsl via python lmod: {e}")
 
-    code, _ = run_cmd("command -v bet")
-    assert code == 0, "FSL 'bet' command not in PATH even after lmod. FSL module loading failed!"
+    code, _ = run_cmd("command -v fslmaths")
+    assert code == 0, "FSL 'fslmaths' command not in PATH even after lmod. FSL module loading failed!"
 
     import nipype.interfaces.fsl as fsl
-    btr = fsl.BET()
-    # Provide a dummy file just to see if it generates the command correctly
+    maths = fsl.ImageMaths()
     dummy_in = tmp_path / "dummy.nii.gz"
-    dummy_in.touch() # Create empty file
+    dummy_in.touch()
 
-    btr.inputs.in_file = str(dummy_in)
-    btr.inputs.frac = 0.5
-    btr.inputs.out_file = str(tmp_path / "dummy_brain.nii.gz")
-    cmdline = btr.cmdline
+    maths.inputs.in_file = str(dummy_in)
+    maths.inputs.op_string = "-add 0"
+    maths.inputs.out_file = str(tmp_path / "dummy_maths.nii.gz")
+    cmdline = maths.cmdline
     
-    assert "bet" in cmdline, f"BET command not generated properly: {cmdline}"
+    assert "fslmaths" in cmdline, f"FSLMaths command not generated properly: {cmdline}"
     assert "dummy.nii.gz" in cmdline, f"Input file not in command line: {cmdline}"
-    assert "-f 0.5" in cmdline, f"Fractional intensity threshold not in command line: {cmdline}"
+    assert "-add 0" in cmdline, f"Math operation not in command line: {cmdline}"
