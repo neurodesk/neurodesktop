@@ -33,10 +33,6 @@ interface IServersInfoResponse {
 const DONATION_URL = 'https://neurodesk.org/overview/donate/';
 const DONATION_MESSAGE =
   'Neurodesk relies on your support - please donate here https://neurodesk.org/overview/donate/ - Thank you!';
-const DONATION_NOTIFICATION_DISMISSED_KEY =
-  'neurodesk-launcher:donation-notification-dismissed-v1';
-
-let donationNotificationShown = false;
 
 const BYTES_PER_GB = 1024 ** 3;
 const MEMORY_SEGMENT_REGEX =
@@ -49,25 +45,12 @@ const UNIT_TO_GB_FACTOR: Record<string, number> = {
   TB: 1024
 };
 
-function showDonationNotificationOnce(): void {
+function showDonationNotificationOnStartup(): void {
   if (typeof window === 'undefined') {
     return;
   }
 
-  try {
-    if (
-      donationNotificationShown ||
-      window.localStorage.getItem(DONATION_NOTIFICATION_DISMISSED_KEY) ===
-      'dismissed'
-    ) {
-      return;
-    }
-    donationNotificationShown = true;
-  } catch {
-    // Keep going if localStorage is unavailable in this browser context.
-  }
-
-  const notificationId = Notification.info(DONATION_MESSAGE, {
+  Notification.info(DONATION_MESSAGE, {
     autoClose: false,
     actions: [
       {
@@ -80,28 +63,6 @@ function showDonationNotificationOnce(): void {
       }
     ]
   });
-
-  const onNotificationChanged = (
-    _manager: unknown,
-    change: Notification.IChange
-  ): void => {
-    if (change.type !== 'removed' || change.notification.id !== notificationId) {
-      return;
-    }
-
-    try {
-      window.localStorage.setItem(
-        DONATION_NOTIFICATION_DISMISSED_KEY,
-        'dismissed'
-      );
-    } catch {
-      // Ignore storage write errors in restricted browser contexts.
-    }
-
-    Notification.manager.changed.disconnect(onNotificationChanged);
-  };
-
-  Notification.manager.changed.connect(onNotificationChanged);
 }
 
 function normalizeMemorySegmentToGb(text: string): string {
@@ -255,7 +216,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
   autoStart: true,
   requires: [ILauncher],
   activate: async (app: JupyterFrontEnd, launcher: ILauncher) => {
-    showDonationNotificationOnce();
+    showDonationNotificationOnStartup();
     startResourceUsageUnitOverride();
 
     const settings = ServerConnection.makeSettings();
