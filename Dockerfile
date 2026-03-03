@@ -71,8 +71,16 @@ RUN wget -q https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v${TOMCA
     && mv /usr/local/tomcat/webapps /usr/local/tomcat/webapps.dist \
     && mkdir /usr/local/tomcat/webapps \
     && if ! grep -q 'maxHttpRequestHeaderSize=' /usr/local/tomcat/conf/server.xml; then \
-        sed -i '/<Connector port="8080" protocol="HTTP\/1\.1"/ s#\([[:space:]]*/>\)# maxHttpRequestHeaderSize="65536"\1#' /usr/local/tomcat/conf/server.xml; \
+        sed -i '/<Connector port="8080" protocol="HTTP\/1\.1"/,/^[[:space:]]*\/>/ s|^[[:space:]]*\/>$|               maxHttpRequestHeaderSize="65536"\
+               />|' /usr/local/tomcat/conf/server.xml; \
     fi \
+    # Prevent cookie accumulation (Safari "Request header too large" fix):
+    # 1. Set sessionCookiePath="/" so all cookies share one path (no duplicates per sub-path)
+    # 2. Add Rfc6265CookieProcessor with SameSite=Lax (Strict breaks proxied access in Safari)
+    && sed -i 's|<Context>|<Context sessionCookiePath="/">|' /usr/local/tomcat/conf/context.xml \
+    && sed -i '/<Context sessionCookiePath/a\    <CookieProcessor className="org.apache.tomcat.util.http.Rfc6265CookieProcessor" sameSiteCookies="Lax" />' /usr/local/tomcat/conf/context.xml \
+    # 3. Set Max-Age on session cookie so browsers auto-expire it (24h) in default web.xml
+    && sed -i '/<session-config>/,/<\/session-config>/c\    <session-config>\n        <session-timeout>30</session-timeout>\n        <cookie-config>\n            <max-age>86400</max-age>\n            <http-only>true</http-only>\n        </cookie-config>\n    </session-config>' /usr/local/tomcat/conf/web.xml \
     && chmod +x /usr/local/tomcat/bin/*.sh
 
 # Install Apache Guacamole
@@ -178,6 +186,18 @@ RUN apt-get update --yes \
     zip \
     tcsh \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Extract Guacamole WAR and patch its web.xml to set session cookie Max-Age.
+# Guacamole's own WEB-INF/web.xml overrides Tomcat's conf/web.xml, so without
+# this patch cookies have no expiry and Safari accumulates them until headers
+# exceed the size limit ("Request header is too large").
+RUN unzip -q /usr/local/tomcat/webapps/ROOT.war -d /usr/local/tomcat/webapps/ROOT \
+    && rm /usr/local/tomcat/webapps/ROOT.war \
+    && if grep -q '<session-config>' /usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml; then \
+        sed -i '/<session-config>/,/<\/session-config>/c\    <session-config>\n        <session-timeout>30</session-timeout>\n        <cookie-config>\n            <max-age>86400</max-age>\n            <http-only>true</http-only>\n        </cookie-config>\n    </session-config>' /usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml; \
+    else \
+        sed -i 's|</web-app>|    <session-config>\n        <session-timeout>30</session-timeout>\n        <cookie-config>\n            <max-age>86400</max-age>\n            <http-only>true</http-only>\n        </cookie-config>\n    </session-config>\n</web-app>|' /usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml; \
+    fi
 
 # Install Nextflow ecosystem tools
 ENV NF_NEURO_MODULES_DIR=/opt/nf-neuro/modules

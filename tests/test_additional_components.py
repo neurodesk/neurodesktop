@@ -37,7 +37,7 @@ def test_guacamole_tomcat_running():
     code, output = run_cmd("ps aux | grep '[g]uacd'")
     # We might not be running services inside the build container yet (services are started in startup scripts)
     # Just asserting the binaries and wrappers exist
-    assert os.path.exists("/usr/local/tomcat/webapps/ROOT.war"), "Guacamole webapp ROOT.war missing"
+    assert os.path.exists("/usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml"), "Guacamole webapp missing (expected extracted ROOT directory)"
     assert os.path.exists("/usr/local/tomcat/bin/startup.sh"), "Tomcat startup script missing"
 
 
@@ -52,7 +52,44 @@ def test_tomcat_request_header_limit_hardened():
     match = re.search(r'maxHttpRequestHeaderSize="(\d+)"', server_xml)
     assert match is not None, "Tomcat maxHttpRequestHeaderSize is not configured"
     assert int(match.group(1)) >= 65536, "Tomcat maxHttpRequestHeaderSize should be at least 65536"
-    
+
+
+def test_tomcat_session_cookie_path():
+    """Verify context.xml sets sessionCookiePath to prevent duplicate path-scoped cookies."""
+    context_xml_path = "/usr/local/tomcat/conf/context.xml"
+    assert os.path.exists(context_xml_path), "Tomcat context.xml missing"
+
+    with open(context_xml_path, "r", encoding="utf-8") as f:
+        context_xml = f.read()
+
+    assert 'sessionCookiePath="/"' in context_xml, \
+        "context.xml must set sessionCookiePath=\"/\" to prevent cookie accumulation"
+    assert "Rfc6265CookieProcessor" in context_xml, \
+        "context.xml must configure Rfc6265CookieProcessor"
+    assert 'sameSiteCookies="Lax"' in context_xml, \
+        "CookieProcessor must set sameSiteCookies to Lax"
+
+
+def test_tomcat_session_cookie_max_age():
+    """Verify Guacamole's web.xml sets Max-Age on session cookie so browsers auto-expire it."""
+    guac_web_xml_path = "/usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml"
+    assert os.path.exists(guac_web_xml_path), \
+        "Guacamole web.xml missing - ROOT.war should be extracted during build"
+
+    with open(guac_web_xml_path, "r", encoding="utf-8") as f:
+        web_xml = f.read()
+
+    assert "<cookie-config>" in web_xml, \
+        "Guacamole web.xml must contain <cookie-config> for session cookie settings"
+    match = re.search(r"<max-age>(\d+)</max-age>", web_xml)
+    assert match is not None, "Guacamole web.xml must set <max-age> in <cookie-config>"
+    max_age = int(match.group(1))
+    assert 0 < max_age <= 86400, \
+        f"Session cookie max-age should be between 1 and 86400 seconds, got {max_age}"
+    assert "<http-only>true</http-only>" in web_xml, \
+        "Session cookie must be HttpOnly"
+
+
 def test_desktop_storage():
     """Verify neurodesktop-storage is accessible."""
     assert os.path.exists("/neurodesktop-storage"), "/neurodesktop-storage is missing"

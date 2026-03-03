@@ -14,6 +14,21 @@ fi
 
 docker build . -t neurodesktop:latest
 
+# Ask whether to run unit tests inside the newly built image
+read -r -p "Run unit tests with pytest before starting container? [Y/n]: " RUN_TESTS
+case "${RUN_TESTS:-Y}" in
+    [Nn]|[Nn][Oo])
+        echo "Skipping unit tests."
+        ;;
+    *)
+        echo "Running unit tests with pytest..."
+        docker run --rm -t --privileged --user=root \
+            -e CVMFS_DISABLE=false \
+            -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
+            neurodesktop:latest pytest /opt/tests/
+        ;;
+esac
+
 
 
 # podman build . -t neurodesktop:latest
