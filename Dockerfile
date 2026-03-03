@@ -423,10 +423,8 @@ COPY --chown=${NB_UID}:${NB_GID} config/guacamole/user-mapping-vnc.xml /etc/guac
 COPY --chown=${NB_UID}:${NB_GID} config/guacamole/user-mapping-vnc-rdp.xml /etc/guacamole/user-mapping-vnc-rdp.xml
 RUN ln -sf /etc/guacamole/user-mapping-vnc.xml /etc/guacamole/user-mapping.xml
 
-# Add NB_USER to sudoers
-RUN echo "${NB_USER} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/notebook \
-    # The following apply to Singleuser mode only. See config/jupyter/before_notebook.sh for Notebook mode
-    && /usr/bin/printf '%s\n%s\n' 'password' 'password' | passwd ${NB_USER} \
+# Configure NB_USER account defaults.
+RUN /usr/bin/printf '%s\n%s\n' 'password' 'password' | passwd ${NB_USER} \
     && usermod --shell /bin/bash ${NB_USER}
 
 # Enable deletion of non-empty-directories in JupyterLab: https://github.com/jupyter/notebook/issues/4916

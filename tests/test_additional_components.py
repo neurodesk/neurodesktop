@@ -93,3 +93,26 @@ def test_tomcat_session_cookie_max_age():
 def test_desktop_storage():
     """Verify neurodesktop-storage is accessible."""
     assert os.path.exists("/neurodesktop-storage"), "/neurodesktop-storage is missing"
+
+
+def test_grant_sudo_no_disables_passwordless_sudo():
+    """Verify GRANT_SUDO=no disables passwordless sudo for NB_USER."""
+    nb_user = os.environ.get("NB_USER", "jovyan")
+    code, current_user = run_cmd("id -un")
+    assert code == 0, f"Failed to determine current user: {current_user}"
+
+    if os.geteuid() == 0:
+        code, output = run_cmd(
+            f"su -s /bin/bash -c 'env GRANT_SUDO=no sudo -n true' {nb_user}"
+        )
+    elif current_user == nb_user:
+        code, output = run_cmd("env GRANT_SUDO=no sudo -n true")
+    else:
+        pytest.skip(
+            f"Test requires root or NB_USER ({nb_user}); current user is {current_user}"
+        )
+
+    assert code != 0, (
+        "GRANT_SUDO=no should disable passwordless sudo, "
+        f"but sudo still succeeded. Output: {output}"
+    )

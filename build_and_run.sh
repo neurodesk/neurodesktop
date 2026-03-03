@@ -24,6 +24,7 @@ case "${RUN_TESTS:-Y}" in
         echo "Running unit tests with pytest..."
         docker run --rm -t --privileged --user=root \
             -e CVMFS_DISABLE=false \
+            -e GRANT_SUDO=no \
             -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
             neurodesktop:latest pytest /opt/tests/
         ;;
@@ -97,6 +98,7 @@ docker run --shm-size=1gb -it --privileged --user=root \
     --add-host=host.docker.internal:host-gateway \
     -e OLLAMA_HOST="http://host.docker.internal:11434" \
     -e CVMFS_DISABLE=false \
+    -e GRANT_SUDO=no \
     -p 127.0.0.1:8888:8888 \
     --cpus=10 --memory=32g \
     -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \

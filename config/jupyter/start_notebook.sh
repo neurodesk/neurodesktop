@@ -8,6 +8,38 @@ if [ -z "$RESTARTABLE" ]; then
 export RESTARTABLE='yes'
 fi
 
+is_truthy() {
+    case "${1,,}" in
+        yes|y|true|1)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+configure_sudo_access() {
+    local grant_sudo_value target_user
+
+    if [ "$(id -u)" -ne 0 ]; then
+        return
+    fi
+
+    target_user="${NB_USER:-jovyan}"
+    grant_sudo_value="${GRANT_SUDO:-yes}"
+
+    if is_truthy "${grant_sudo_value}"; then
+        mkdir -p /etc/sudoers.d
+        echo "${target_user} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/notebook
+        chmod 440 /etc/sudoers.d/notebook
+    else
+        rm -f /etc/sudoers.d/notebook
+    fi
+}
+
+configure_sudo_access
+
 # HOME_UID=$(stat -c "%u" ${HOME})
 # HOME_GID=$(stat -c "%g" ${HOME})
 
