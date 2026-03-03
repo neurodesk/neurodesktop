@@ -32,7 +32,7 @@ interface IServersInfoResponse {
 
 const DONATION_URL = 'https://neurodesk.org/overview/donate/';
 const DONATION_MESSAGE =
-  'Neurodesk relies on your support - please donate here https://neurodesk.org/overview/donate/ - Thank you!';
+  'Neurodesk relies on your support. Please consider donating through https://neurodesk.org/overview/donate/ - Thank you!';
 
 const BYTES_PER_GB = 1024 ** 3;
 const MEMORY_SEGMENT_REGEX =
