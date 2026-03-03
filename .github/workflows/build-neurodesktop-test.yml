@@ -185,7 +185,13 @@ jobs:
           sudo cvmfs_config setup
           sudo ls /cvmfs/neurodesk.ardc.edu.au
       - name: Test container image
-        run: docker run --rm -t -v /cvmfs:/cvmfs:shared $IMAGEID:latest pytest /opt/tests/
+        run: |
+          docker run --rm -t --privileged --user=root \
+            -v /cvmfs:/cvmfs:shared \
+            -e CVMFS_DISABLE=false \
+            -e GRANT_SUDO=no \
+            -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
+            $IMAGEID:latest pytest /opt/tests/
       - name: Container image scan
         uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5
         with:
