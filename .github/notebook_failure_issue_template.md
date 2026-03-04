@@ -3,6 +3,7 @@ title: "Notebook Test Job failure - {{ env.GITHUB_WORKFLOW }}"
 assignees:
   - stebo85
   - aswinnarayanan
+  - akshitbeniwal
 labels:
   - bug
 ---
@@ -25,7 +26,7 @@ labels:
 
 ### Description
 
-@aswinnarayanan @stebo85 - The notebook execution test has failed for the **{{ env.SERVER_NAME }}**.
+@aswinnarayanan @stebo85 @akshitbeniwal - The notebook execution test has failed for the **{{ env.SERVER_NAME }}**.
 
 ### Additional Info
 - The failure occurred during automated testing of notebook functionality (FSL BET course)

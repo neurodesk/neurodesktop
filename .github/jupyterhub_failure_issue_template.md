@@ -3,6 +3,7 @@ title: "Job failure - {{ env.GITHUB_WORKFLOW }}"
 assignees:
   - stebo85
   - aswinnarayanan
+  - akshitbeniwal
 labels:
   - bug
 ---
@@ -22,7 +23,7 @@ labels:
 - **Date:** {{ date | date('YYYY-MM-DD HH:mm:ss UTC') }}
 
 ### Description
-@aswinnarayanan @stebo85 - The JupyterHub API testing job has failed for the **{{ env.SERVER_NAME }}** server. Please investigate the failure.
+@aswinnarayanan @stebo85 @akshitbeniwal - The JupyterHub API testing job has failed for the **{{ env.SERVER_NAME }}** server. Please investigate the failure.
 
 
 ### Additional Information
