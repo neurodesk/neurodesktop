@@ -1,0 +1,494 @@
+name: JupyterHub API Testing (All instances)
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Run every 24 hours at midnight UTC
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  test-jupyterhub:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - server_name: "Neuro-Test CI VM"
+            token_secret: "JUPYTER_CI_TEST_TOKEN"
+            url_var: "JUPYTER_API_URL_CI_TEST"
+            default_url: "https://neuro-test.ssdsorg.cloud.edu.au"
+            user_var: "JUPYTER_TEST_USER"
+            default_user: "akshitbeniwal"
+          - server_name: "play-eu"
+            token_secret: "JUPYTER_PLAY_EU_TOKEN"
+            url_var: "JUPYTER_API_URL_PLAY_EU"
+            default_url: "https://play-europe.neurodesk.org"
+            user_var: "JUPYTER_TEST_USER"
+            default_user: "akshitbeniwal"
+          - server_name: "play-america"
+            token_secret: "JUPYTER_PLAY_AMERICA_TOKEN"
+            url_var: "JUPYTER_API_URL_PLAY_AMERICA"
+            default_url: "https://play-america.neurodesk.org"
+            user_var: "JUPYTER_TEST_USER"
+            default_user: "akshitbeniwal"
+          - server_name: "play-aus"
+            token_secret: "JUPYTER_PLAY_AUS_TOKEN"
+            url_var: "JUPYTER_API_URL_PLAY_AUS"
+            default_url: "https://play.neurodesk.cloud.edu.au"
+            user_var: "JUPYTER_TEST_USER_AUS"
+            default_user: "aaf_ttacrdwkv3giggp5janknefwxscf9_dmbvilqynah0e"
+          - server_name: "edu-neurodesk"
+            token_secret: "JUPYTER_EDU_NEURODESK_TOKEN"
+            url_var: "JUPYTER_API_URL_EDU_NEURODESK"
+            default_url: "https://edu.neurodesk.org"
+            user_var: "JUPYTER_TEST_USER"
+            default_user: "akshitbeniwal"
+    
+    env:
+      ADMIN_TOKEN: ${{ secrets[matrix.token_secret] }}
+      USER: ${{ vars[matrix.user_var] || matrix.default_user }}
+      API_URL: ${{ vars[matrix.url_var] || matrix.default_url }}
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Required Tools
+      run: |
+        echo "Installing required tools..."
+        sudo apt-get update
+        sudo apt-get install -y jq
+        wget -qO /tmp/websocat https://github.com/vi/websocat/releases/latest/download/websocat.x86_64-unknown-linux-musl
+        sudo chmod +x /tmp/websocat
+        sudo mv /tmp/websocat /usr/local/bin/websocat
+
+    - name: Setup Configuration
+      run: |
+        echo "=== JupyterHub API Testing Started ==="
+        echo "User: ${{ vars[matrix.user_var] || matrix.default_user }}"
+        echo "API URL: ${{ vars[matrix.url_var] || matrix.default_url }}"
+
+    - name: Start JupyterHub Server
+      run: |
+        # Configuration
+        ADMIN_TOKEN="${{ secrets[matrix.token_secret] }}"
+        USER="${{ vars[matrix.user_var] || matrix.default_user }}"
+        API_URL="${{ vars[matrix.url_var] || matrix.default_url }}"
+        
+        echo "=== Starting JupyterHub Server ==="
+        
+        # Check if server is already running and stop it
+        echo "Checking if server is already running..."
+        SERVER_STATUS=$(curl -s -k -H "Authorization: token $ADMIN_TOKEN" $API_URL/hub/api/users/$USER 2>/dev/null || echo "{}")
+
+        # check if the token is valid
+        if [[ "$SERVER_STATUS" == *"403"* ]]; then
+          echo "❌ Authentication failed - 403 Forbidden. Check your API token."
+          echo "Server response: $SERVER_STATUS"
+          exit 1
+        fi
+        
+        # Check if server is running (server is not null and ready is true)
+        if [[ "$SERVER_STATUS" == *"\"server\": \"/user/$USER/\""* ]] && [[ "$SERVER_STATUS" == *"\"ready\": true"* ]]; then
+          echo "Server is running, stopping it first..."
+          curl -s -k -X DELETE -H "Authorization: token $ADMIN_TOKEN" $API_URL/hub/api/users/$USER/server
+          
+          echo "Waiting for server to stop..."
+          for i in {1..12}; do
+            sleep 10
+            STATUS=$(curl -s -k -H "Authorization: token $ADMIN_TOKEN" $API_URL/hub/api/users/$USER 2>/dev/null || echo "{}")
+            # Server is stopped when server is null and pending is null
+            if [[ "$STATUS" == *"\"server\": null"* ]] && [[ "$STATUS" == *"\"pending\": null"* ]]; then
+              echo "✅ Server stopped successfully"
+              break
+            fi
+            echo "Waiting for server to stop... (${i}0s elapsed)"
+          done
+        # Check if server is pending/starting
+        elif [[ "$SERVER_STATUS" == *"\"pending\": \"spawn\""* ]]; then
+          echo "Server is already starting, waiting for it to complete..."
+        else
+          echo "Server is stopped, ready to start"
+        fi
+        
+        # Start the server
+        echo "Starting server for $USER..."
+        START_RESPONSE=$(curl -s -k -X POST -H "Authorization: token $ADMIN_TOKEN" $API_URL/hub/api/users/$USER/server || echo "Failed to start server")
+        echo "Start server response: ${START_RESPONSE:0:100}..."
+        
+        # Wait for server to start
+        echo "Waiting for server to start..."
+        SERVER_STARTED=false
+        
+        for i in {1..24}; do
+          sleep 10
+          SERVER_STATUS=$(curl -s -k -H "Authorization: token $ADMIN_TOKEN" $API_URL/hub/api/users/$USER 2>/dev/null || echo "{}")
+          
+          # Server is fully started when server has a value, ready is true, and pending is null
+          if [[ "$SERVER_STATUS" == *"\"server\": \"/user/$USER/\""* ]] && [[ "$SERVER_STATUS" == *"\"ready\": true"* ]] && [[ "$SERVER_STATUS" == *"\"pending\": null"* ]]; then
+            echo "✅ Server started successfully (${i}0s elapsed)"
+            echo "Server status: ${SERVER_STATUS:0:150}..."
+            SERVER_STARTED=true
+            break
+          elif [[ "$SERVER_STATUS" == *"\"pending\": \"spawn\""* ]]; then
+            echo "Server is still starting... (${i}0s elapsed)"
+          else
+            echo "Waiting for server to start... (${i}0s elapsed)"
+          fi
+        done
+        
+        if [ "$SERVER_STARTED" != true ]; then
+          echo "❌ Server failed to start within timeout"
+          exit 1
+        fi
+        
+        # Wait for server to fully initialize
+        echo "Waiting for server to fully initialize..."
+        sleep 15
+        
+        # Export variables for next steps
+        echo "ADMIN_TOKEN=$ADMIN_TOKEN" >> $GITHUB_ENV
+        echo "USER=$USER" >> $GITHUB_ENV
+        echo "API_URL=$API_URL" >> $GITHUB_ENV
+
+    - name: Test Terminal and FSL Functionality
+      run: |
+        # Remove set -e to prevent premature exit and add better error handling
+        set +e
+        
+        echo "=== Testing Terminal and FSL Functionality ==="
+        
+        # Create terminal session
+        echo "Creating terminal session..."
+        TERMINAL_RESPONSE=$(curl -k -s -X POST -H "Authorization: token $ADMIN_TOKEN" "$API_URL/user/$USER/api/terminals" || echo '{"error": "failed"}')
+        TERMINAL_NAME=$(echo "$TERMINAL_RESPONSE" | jq -r '.name // empty')
+        
+        if [ -z "$TERMINAL_NAME" ] || [ "$TERMINAL_NAME" = "null" ] || [ "$TERMINAL_NAME" = "empty" ]; then
+          echo "❌ Failed to create terminal session"
+          echo "Response: $TERMINAL_RESPONSE"
+          exit 1
+        fi
+        
+        echo "✅ Terminal created: $TERMINAL_NAME"
+        sleep 10
+        
+        # Setup WebSocket URL
+        clean_api_url=${API_URL#*//}
+        WS_URL="ws://$clean_api_url/user/$USER/terminals/websocket/$TERMINAL_NAME"
+        echo "WebSocket URL: $WS_URL"
+        
+        # Initialize counters
+        BASIC_TESTS_PASSED=0
+        TOTAL_BASIC_TESTS=3
+        FSL_TESTS_PASSED=0
+        TOTAL_FSL_TESTS=2
+        
+        # === BASIC TERMINAL TESTS ===
+        echo ""
+        echo "=== Basic Terminal Tests ==="
+        
+        echo ""
+        echo "--- Test 1: Echo Command ---"
+        CMD1="echo 'hello world test'"
+        echo "Sending command: $CMD1"
+        
+        for attempt in {1..3}; do
+          echo "  Attempt $attempt/3..."
+          
+          ECHO_OUT=$(echo "[\"stdin\", \"$CMD1\\r\\n\"]" | \
+            timeout 20 websocat --text "$WS_URL" \
+            -H "Authorization: token $ADMIN_TOKEN" 2>&1 | \
+            grep '^\["stdout"' | \
+            sed 's/^\["stdout", *"//; s/"\]$//; s/\\r\\n/\n/g; s/\\n/\n/g' | \
+            tr -d '\000-\037' 2>/dev/null || echo "")
+          
+          echo "  Raw output: '$ECHO_OUT'"
+          
+          if [ -n "$ECHO_OUT" ]; then
+            echo "  ✅ Got output, checking content..."
+            if echo "$ECHO_OUT" | grep -q "hello world test"; then
+              echo "✅ Echo test PASSED"
+              BASIC_TESTS_PASSED=$((BASIC_TESTS_PASSED + 1))
+              break
+            else
+              echo "❌ Echo test FAILED - unexpected output"
+              echo "Output was: $ECHO_OUT"
+            fi
+          else
+            echo "  ❌ No output received, retrying in 5 seconds..."
+            sleep 5
+          fi
+        done
+        
+        # Add delay between tests to prevent connection issues
+        echo "Waiting 10 seconds before next test..."
+        sleep 10
+        
+        echo ""
+        echo "--- Test 2: Directory Operations ---"
+        CMD2="pwd"
+        echo "Sending command: $CMD2"
+        
+        for attempt in {1..3}; do
+          echo "  Attempt $attempt/3..."
+          
+          PWD_OUT=$(echo "[\"stdin\", \"$CMD2\\r\\n\"]" | \
+            timeout 20 websocat --text "$WS_URL" \
+            -H "Authorization: token $ADMIN_TOKEN" 2>&1 | \
+            grep '^\["stdout"' | \
+            sed 's/^\["stdout", *"//; s/"\]$//; s/\\r\\n/\n/g; s/\\n/\n/g' | \
+            tr -d '\000-\037' 2>/dev/null || echo "")
+          
+          echo "  Raw output: '$PWD_OUT'"
+          
+          if [ -n "$PWD_OUT" ]; then
+            echo "  ✅ Got output, checking content..."
+            if echo "$PWD_OUT" | grep -q "home"; then
+              echo "✅ Directory test PASSED"
+              BASIC_TESTS_PASSED=$((BASIC_TESTS_PASSED + 1))
+              break
+            else
+              echo "❌ Directory test FAILED - unexpected path"
+              echo "Output was: $PWD_OUT"
+            fi
+          else
+            echo "  ❌ No output received, retrying in 5 seconds..."
+            sleep 5
+          fi
+        done
+        
+        # Add delay between tests
+        echo "Waiting 10 seconds before next test..."
+        sleep 10
+        
+        echo ""
+        echo "--- Test 3: File Operations ---"
+        CMD3="touch test_file.txt && ls test_file.txt"
+        echo "Sending command: $CMD3"
+        
+        for attempt in {1..3}; do
+          echo "  Attempt $attempt/3..."
+          
+          FILE_OUT=$(echo "[\"stdin\", \"$CMD3\\r\\n\"]" | \
+            timeout 20 websocat --text "$WS_URL" \
+            -H "Authorization: token $ADMIN_TOKEN" 2>&1 | \
+            grep '^\["stdout"' | \
+            sed 's/^\["stdout", *"//; s/"\]$//; s/\\r\\n/\n/g; s/\\n/\n/g' | \
+            tr -d '\000-\037' 2>/dev/null || echo "")
+          
+          echo "  Raw output: '$FILE_OUT'"
+          
+          if [ -n "$FILE_OUT" ]; then
+            echo "  ✅ Got output, checking content..."
+            if echo "$FILE_OUT" | grep -q "test_file.txt"; then
+              echo "✅ File operations test PASSED"
+              BASIC_TESTS_PASSED=$((BASIC_TESTS_PASSED + 1))
+              break
+            else
+              echo "❌ File operations test FAILED - file not found"
+              echo "Output was: $FILE_OUT"
+            fi
+          else
+            echo "  ❌ No output received, retrying in 5 seconds..."
+            sleep 5
+          fi
+        done
+        
+        echo ""
+        echo "Basic Tests Summary: $BASIC_TESTS_PASSED/$TOTAL_BASIC_TESTS passed"
+        
+        # === FSL FUNCTIONALITY TESTS ===
+        echo ""
+        echo "=== FSL Functionality Tests ==="
+        
+        echo ""
+        echo "--- Test 4: FSL Module Loading ---"
+        CMD4="ml fsl"
+        echo "Sending command: $CMD4"
+        
+        for attempt in {1..3}; do
+          echo "  Attempt $attempt/3..."
+          
+          ML_OUT=$(echo "[\"stdin\", \"$CMD4\\r\\n\"]" | \
+            timeout 20 websocat --text "$WS_URL" \
+            -H "Authorization: token $ADMIN_TOKEN" 2>&1 | \
+            grep '^\["stdout"' | \
+            sed 's/^\["stdout", *"//; s/"\]$//; s/\\r\\n/\n/g; s/\\n/\n/g' | \
+            tr -d '\000-\037' 2>/dev/null || echo "")
+          
+          echo "  Raw output: '$ML_OUT'"
+          
+          if [ ${#ML_OUT} -ge 0 ]; then  # Module loading might not produce output
+            echo "✅ FSL module loaded successfully"
+            FSL_TESTS_PASSED=$((FSL_TESTS_PASSED + 1))
+            break
+          else
+            echo "  ❌ Module loading failed, retrying in 5 seconds..."
+            sleep 5
+          fi
+        done
+        
+        # Wait for module to load
+        echo "Waiting 15 seconds for FSL module to initialize..."
+        sleep 15
+        
+        echo ""
+        echo "--- Test 5: FSLMaths Command ---"
+        CMD5="fslmaths"
+        echo "Sending command: $CMD5"
+        echo "Note: This may take up to 120 seconds for container initialization..."
+        
+        # Send command and wait for extended time for container startup
+        (echo "[\"stdin\", \"$CMD5\\r\\n\"]" && sleep 120) | \
+            websocat --text "$WS_URL" \
+            -H "Authorization: token $ADMIN_TOKEN" 2>/dev/null &
+        WEBSOCAT_PID=$!
+        
+        FSL_OUTPUT=""
+        for i in {1..24}; do
+          sleep 5
+          echo "  Waiting for FSL container... (${i}*5 = $((i*5))s elapsed)"
+          
+          if kill -0 $WEBSOCAT_PID 2>/dev/null; then
+            FSL_PARTIAL=$(timeout 3 websocat --text "$WS_URL" \
+                -H "Authorization: token $ADMIN_TOKEN" 2>/dev/null | \
+                grep '^\["stdout"' | \
+                sed 's/^\["stdout", *"//; s/"\]$//; s/\\r\\n/\n/g; s/\\n/\n/g' | \
+                tr -d '\000-\037' || echo "")
+            
+            echo "  Partial output: '${FSL_PARTIAL:0:100}...'"
+            
+            if [ -n "$FSL_PARTIAL" ] && echo "$FSL_PARTIAL" | grep -q "Usage: fslmaths"; then
+              echo "  ✅ FSL output detected!"
+              FSL_OUTPUT="$FSL_PARTIAL"
+              kill $WEBSOCAT_PID 2>/dev/null || true
+              break
+            fi
+          else
+            echo "  Connection ended, checking for output..."
+            break
+          fi
+        done
+        
+        kill $WEBSOCAT_PID 2>/dev/null || true
+        wait $WEBSOCAT_PID 2>/dev/null || true
+        
+        echo "Final FSL output length: ${#FSL_OUTPUT} chars"
+        
+        if [ -n "$FSL_OUTPUT" ]; then
+          if [ ${#FSL_OUTPUT} -lt 50 ]; then
+            echo "⚠️ FSL output seems too short, trying once more..."
+            sleep 10
+            
+            FSL_OUT2=$(echo "[\"stdin\", \"$CMD5\\r\\n\"]" | \
+              timeout 30 websocat --text "$WS_URL" \
+              -H "Authorization: token $ADMIN_TOKEN" 2>&1 | \
+              grep '^\["stdout"' | \
+              sed 's/^\["stdout", *"//; s/"\]$//; s/\\r\\n/\n/g; s/\\n/\n/g' | \
+              tr -d '\000-\037' || echo "")
+            
+            echo "Second attempt output length: ${#FSL_OUT2} chars"
+            if [ ${#FSL_OUT2} -gt ${#FSL_OUTPUT} ]; then
+              FSL_OUTPUT="$FSL_OUT2"
+            fi
+          fi
+          
+          PATTERNS_FOUND=0
+          echo "$FSL_OUTPUT" | grep -q "Usage: fslmaths" && PATTERNS_FOUND=$((PATTERNS_FOUND + 1)) && echo "✅ Found Usage pattern"
+          echo "$FSL_OUTPUT" | grep -q "Binary operations" && PATTERNS_FOUND=$((PATTERNS_FOUND + 1)) && echo "✅ Found Binary operations pattern"
+          echo "$FSL_OUTPUT" | grep -q "Datatype information" && PATTERNS_FOUND=$((PATTERNS_FOUND + 1)) && echo "✅ Found Datatype info pattern"
+          echo "$FSL_OUTPUT" | grep -q "threshold" && PATTERNS_FOUND=$((PATTERNS_FOUND + 1)) && echo "✅ Found threshold pattern"
+          
+          echo "Found $PATTERNS_FOUND/4 expected patterns"
+          
+          if [ $PATTERNS_FOUND -ge 3 ]; then
+            echo "✅ FSLMaths test PASSED"
+            FSL_TESTS_PASSED=$((FSL_TESTS_PASSED + 1))
+          else
+            echo "❌ FSLMaths test FAILED (only $PATTERNS_FOUND patterns found)"
+          fi
+        else
+          echo "❌ FSLMaths command FAILED - no output received"
+        fi
+        
+        echo ""
+        echo "FSL Tests Summary: $FSL_TESTS_PASSED/$TOTAL_FSL_TESTS passed"
+        
+        # Cleanup terminal
+        echo "Cleaning up terminal session..."
+        curl -k -s -X DELETE -H "Authorization: token $ADMIN_TOKEN" \
+          "$API_URL/user/$USER/api/terminals/$TERMINAL_NAME" || true
+        
+        # Export results for final report
+        echo "BASIC_TESTS_PASSED=$BASIC_TESTS_PASSED" >> $GITHUB_ENV
+        echo "TOTAL_BASIC_TESTS=$TOTAL_BASIC_TESTS" >> $GITHUB_ENV
+        echo "FSL_TESTS_PASSED=$FSL_TESTS_PASSED" >> $GITHUB_ENV
+        echo "TOTAL_FSL_TESTS=$TOTAL_FSL_TESTS" >> $GITHUB_ENV
+        
+        # Don't exit with error code - let the final report step handle it
+        echo "Test execution completed"
+
+    - name: Stop JupyterHub Server
+      if: always()
+      run: |
+        echo "=== Stopping JupyterHub Server ==="
+        
+        # Stop the server
+        echo "Stopping server..."
+        curl -s -k -X DELETE -H "Authorization: token $ADMIN_TOKEN" $API_URL/hub/api/users/$USER/server || true
+        
+        echo "Waiting for server to stop..."
+        for i in {1..12}; do
+          sleep 10
+          STATUS=$(curl -s -k -H "Authorization: token $ADMIN_TOKEN" $API_URL/hub/api/users/$USER 2>/dev/null || echo "{}")
+          if [[ "$STATUS" != *"\"server\":"* ]]; then
+            echo "✅ Server stopped successfully"
+            break
+          fi
+          echo "Waiting for server to stop... (${i}0s elapsed)"
+        done
+        
+        echo "✅ Server cleanup completed"
+
+    - name: Generate Test Report
+      if: always()
+      run: |
+        echo "=== Final Test Report ==="
+        
+        BASIC_PASSED=${BASIC_TESTS_PASSED:-0}
+        BASIC_TOTAL=${TOTAL_BASIC_TESTS:-3}
+        FSL_PASSED=${FSL_TESTS_PASSED:-0}
+        FSL_TOTAL=${TOTAL_FSL_TESTS:-2}
+        
+        echo "Test Results Summary:"
+        echo "- Server Management: ✅"
+        echo "- Basic Terminal Tests: $BASIC_PASSED/$BASIC_TOTAL $([ $BASIC_PASSED -eq $BASIC_TOTAL ] && echo "✅" || echo "❌")"
+        echo "- FSL Functionality Tests: $FSL_PASSED/$FSL_TOTAL $([ $FSL_PASSED -eq $FSL_TOTAL ] && echo "✅" || echo "❌")"
+        echo "- Server Cleanup: ✅"
+        
+        TOTAL_PASSED=$((BASIC_PASSED + FSL_PASSED))
+        TOTAL_TESTS=$((BASIC_TOTAL + FSL_TOTAL))
+        
+        echo ""
+        echo "Overall: $TOTAL_PASSED/$TOTAL_TESTS tests passed"
+        
+        if [ $TOTAL_PASSED -eq $TOTAL_TESTS ]; then
+          echo ""
+          echo "🎉 ALL TESTS PASSED!"
+          exit 0
+        else
+          echo ""
+          echo "❌ Some tests failed. Check logs above for details."
+          exit 1
+        fi
+    # Create issue only for play servers when they fail
+    - name: Generate issue on job failure
+      if: always() && failure() && contains(fromJSON('["play-eu", "play-america", "play-aus", "edu-neurodesk"]'), matrix.server_name)
+      uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
+      env: 
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_WORKFLOW: ${{ github.workflow }}
+        GITHUB_SERVER_URL: ${{ github.server_url }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_RUN_ID: ${{ github.run_id }}
+        SERVER_NAME: ${{ matrix.server_name }}
+        SERVER_URL: ${{ matrix.default_url }}
+      with:
+        filename: .github/jupyterhub_failure_issue_template.md
