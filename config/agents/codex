@@ -26,5 +26,25 @@ if [ "${1:-}" = "login" ]; then
     exec /usr/bin/codex login --device-auth "$@"
 fi
 
+# `--yolo` maps to dangerous bypass flags and conflicts with `--full-auto`.
+# Keep default full-auto behavior unless caller already requested yolo/bypass
+# (or explicitly set --full-auto).
+has_yolo_or_bypass=0
+has_full_auto=0
+for arg in "$@"; do
+    case "$arg" in
+        --yolo|--dangerously-bypass-approvals-and-sandbox)
+            has_yolo_or_bypass=1
+            ;;
+        --full-auto)
+            has_full_auto=1
+            ;;
+    esac
+done
+
 # Start Codex CLI using the actual binary path (not this wrapper)
+if [ "${has_yolo_or_bypass}" -eq 1 ] || [ "${has_full_auto}" -eq 1 ]; then
+    exec /usr/bin/codex "$@"
+fi
+
 exec /usr/bin/codex --full-auto "$@"
