@@ -150,6 +150,11 @@ jobs:
           gh api --method DELETE -H "Accept: application/vnd.github+json" /repos/${GITHUB_REPOSITORY}/git/refs/tags/${BUILDDATE} 2>/dev/null || true
           echo "Creating tag ${BUILDDATE}"
           gh api --method POST -H "Accept: application/vnd.github+json" /repos/${GITHUB_REPOSITORY}/git/refs -f ref="refs/tags/${BUILDDATE}" -f sha="${GITHUB_SHA}"
+      - name: Checkout repository for failure issue template
+        if: always() && failure()
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.ref }}
       - name: Generate issue on job failure
         if: always() && failure()
         uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
@@ -230,6 +235,11 @@ jobs:
           timeout: 25m0s
           # These are VS Code metadata package manifests inside code-server, not runtime npm libraries.
           skip-files: /opt/rclone-v1.60.1-linux-amd64/README.txt,/opt/rclone-v1.60.1-linux-amd64/README.html,/opt/rclone-v1.60.1-linux-amd64/rclone.1,/opt/code-server/lib/vscode/package.json,/opt/code-server/lib/vscode/extensions/handlebars/package.json
+      - name: Checkout repository for failure issue template
+        if: always() && failure()
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.ref }}
       - name: Generate issue on job failure
         if: always() && failure()
         uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
