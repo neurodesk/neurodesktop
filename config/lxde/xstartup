@@ -1,3 +1,5 @@
 #!/bin/sh
+eval "$(dbus-launch --sh-syntax)"
+export DBUS_SESSION_BUS_ADDRESS
 /usr/bin/startlxde
 vncconfig -nowin -noiconic &

@@ -390,7 +390,7 @@ fi
 # Create xstartup if not existing (fallback if restore failed)
 if [ ! -f "${HOME}/.vnc/xstartup" ]; then
     echo "[INFO] Creating VNC xstartup (not found in restored defaults)..."
-    printf '%s\n' '#!/bin/sh' '/usr/bin/startlxde' 'vncconfig -nowin -noiconic &' > "${HOME}/.vnc/xstartup"
+    printf '%s\n' '#!/bin/sh' 'eval "$(dbus-launch --sh-syntax)"' 'export DBUS_SESSION_BUS_ADDRESS' '/usr/bin/startlxde' 'vncconfig -nowin -noiconic &' > "${HOME}/.vnc/xstartup"
 fi
 
 # Ensure correct permissions

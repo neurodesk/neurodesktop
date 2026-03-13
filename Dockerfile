@@ -33,6 +33,7 @@ RUN apt-get update --yes \
     xorgxrdp \
     xrdp \
     lxde \
+    dbus-x11 \
     acl \
     wget \
     curl \
