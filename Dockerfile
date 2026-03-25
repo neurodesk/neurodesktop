@@ -101,11 +101,7 @@ RUN wget -q "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/bina
 # #========================================#
 
 # Add Software sources
-RUN add-apt-repository ppa:nextcloud-devs/client \
-    && chmod -R 770 /home/${NB_USER}/.launchpadlib \
-    && chown -R ${NB_UID}:${NB_GID} /home/${NB_USER}/.launchpadlib \
-    && rm -rf /home/${NB_USER}/.cache \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Workaround for CVMFS to break systemctl by replacing it with a dummy script
@@ -155,7 +151,7 @@ RUN apt-get update --yes \
     lxtask \
     man-db \
     nano \
-    nextcloud-client \
+    nextcloud-desktop \
     nodejs \
     openssh-client \
     openssh-server \
