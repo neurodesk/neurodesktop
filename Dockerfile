@@ -513,7 +513,8 @@ RUN chmod +x /opt/jovyan_defaults/.vnc/xstartup \
 
 # Copy restore script
 COPY --chown=root:users config/jupyter/restore_home_defaults.sh /opt/neurodesktop/restore_home_defaults.sh
-RUN chmod +rx /opt/neurodesktop/restore_home_defaults.sh
+COPY --chown=root:users config/jupyter/update_page_config.py /opt/neurodesktop/update_page_config.py
+RUN chmod +rx /opt/neurodesktop/restore_home_defaults.sh /opt/neurodesktop/update_page_config.py
 
 # Add AGENTS.md to /opt for reference
 COPY config/agents/AGENTS.md /opt/AGENTS.md

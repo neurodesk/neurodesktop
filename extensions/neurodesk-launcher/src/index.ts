@@ -11,7 +11,7 @@ import { LabIcon } from '@jupyterlab/ui-components';
 
 import { ServerConnection } from '@jupyterlab/services';
 
-import { URLExt } from '@jupyterlab/coreutils';
+import { PageConfig, URLExt } from '@jupyterlab/coreutils';
 
 interface ILauncherEntry {
   enabled: boolean;
@@ -33,6 +33,8 @@ interface IServersInfoResponse {
 const DONATION_URL = 'https://neurodesk.org/overview/donate/';
 const DONATION_MESSAGE =
   'Neurodesk relies on your support. Please consider donating through https://neurodesk.org/overview/donate/ - Thank you!';
+const SUPPORTER_MARKER_PATH = '.config/neurodesk_supporter';
+const SUPPORTER_PAGE_CONFIG_OPTION = 'neurodeskSupporter';
 
 const BYTES_PER_GB = 1024 ** 3;
 const MEMORY_SEGMENT_REGEX =
@@ -45,8 +47,48 @@ const UNIT_TO_GB_FACTOR: Record<string, number> = {
   TB: 1024
 };
 
-function showDonationNotificationOnStartup(): void {
+function donationNotificationSuppressedFromPageConfig(): boolean {
+  return (
+    PageConfig.getOption(SUPPORTER_PAGE_CONFIG_OPTION).toLowerCase() === 'true'
+  );
+}
+
+async function supporterMarkerExists(
+  app: JupyterFrontEnd
+): Promise<boolean> {
+  try {
+    const model = await app.serviceManager.contents.get(SUPPORTER_MARKER_PATH, {
+      content: false
+    });
+    return model.type === 'file';
+  } catch (error) {
+    if (
+      error instanceof ServerConnection.ResponseError &&
+      error.response.status === 404
+    ) {
+      return false;
+    }
+
+    console.warn(
+      'neurodesk-launcher: failed to check supporter marker file',
+      error
+    );
+    return false;
+  }
+}
+
+async function showDonationNotificationOnStartup(
+  app: JupyterFrontEnd
+): Promise<void> {
   if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (donationNotificationSuppressedFromPageConfig()) {
+    return;
+  }
+
+  if (await supporterMarkerExists(app)) {
     return;
   }
 
@@ -216,7 +258,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
   autoStart: true,
   requires: [ILauncher],
   activate: async (app: JupyterFrontEnd, launcher: ILauncher) => {
-    showDonationNotificationOnStartup();
+    void showDonationNotificationOnStartup(app);
     startResourceUsageUnitOverride();
 
     const settings = ServerConnection.makeSettings();

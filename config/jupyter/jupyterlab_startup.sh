@@ -141,47 +141,26 @@ PY
 
 sanitize_jupyterlab_workspaces
 
-ensure_jupyterlab_disabled_extensions() {
+ensure_jupyterlab_page_config() {
     local labconfig_dir="${HOME}/.jupyter/labconfig"
     local page_config="${labconfig_dir}/page_config.json"
+    local supporter_flag="${HOME}/.config/neurodesk_supporter"
+    local updater_script="/opt/neurodesktop/update_page_config.py"
 
     mkdir -p "${labconfig_dir}" 2>/dev/null || true
 
-    if ! python3 - "${page_config}" <<'PY' >/dev/null 2>&1
-import json
-import sys
-from pathlib import Path
+    if [ ! -f "${updater_script}" ]; then
+        echo "[WARN] ${updater_script} not found."
+        return
+    fi
 
-page_config_path = Path(sys.argv[1])
-payload = {}
-
-if page_config_path.exists():
-    try:
-        loaded = json.loads(page_config_path.read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            payload = loaded
-    except Exception:
-        payload = {}
-
-disabled_extensions = payload.get("disabledExtensions")
-if not isinstance(disabled_extensions, dict):
-    disabled_extensions = {}
-
-disabled_extensions["@jupyterhub/jupyter-server-proxy"] = True
-disabled_extensions["@jupyterlab/apputils-extension:announcements"] = True
-payload["disabledExtensions"] = disabled_extensions
-
-page_config_path.write_text(
-    json.dumps(payload, indent=2, sort_keys=True) + "\n",
-    encoding="utf-8"
-)
-PY
+    if ! python3 "${updater_script}" "${page_config}" "${supporter_flag}" >/dev/null 2>&1
     then
-        echo "[WARN] Failed to ensure JupyterLab disabledExtensions in ${page_config}."
+        echo "[WARN] Failed to ensure JupyterLab page config in ${page_config}."
     fi
 }
 
-ensure_jupyterlab_disabled_extensions
+ensure_jupyterlab_page_config
 
 mkdir -p "${HOME}/.ssh"
 chmod 700 "${HOME}/.ssh"
