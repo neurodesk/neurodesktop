@@ -556,6 +556,8 @@ RUN rm /tmp/skipcache \
     && bash install.sh \
     && ln -s /neurodesktop-storage/containers /neurocommand/local/containers
 
-USER ${NB_UID}
+# Start the container as root so docker-stacks runs before-notebook hooks with
+# the privileges needed to bootstrap local Slurm/CVMFS, then drops to NB_USER.
+USER root
 
-WORKDIR "${HOME}"
+WORKDIR "/home/${NB_USER}"

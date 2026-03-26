@@ -293,20 +293,25 @@ if [ ! -L "/neurocommand/local/containers" ]; then
   ln -s "${NEURODESKTOP_LOCAL_CONTAINERS:-/neurodesktop-storage/containers}" "/neurocommand/local/containers"
 fi
 
-# Create a cpufino file with a valid CPU Mhz entry for ARM cpus
+# Create a cpuinfo file with a valid CPU MHz entry for ARM CPUs.
 echo "[INFO] Checking for ARM CPU and adding a CPU Mhz entry in /proc/cpuinfo to work around a bug in Matlab that expects this value to be present."
 if ! grep -iq 'cpu.*hz' /proc/cpuinfo; then
-    mkdir -p ${HOME}/.local
-    cpuinfo_file=${HOME}/.local/cpuinfo_with_ARM_MHz_fix
-    cp /proc/cpuinfo $cpuinfo_file
-    chmod u+rw $cpuinfo_file
-    sed -i '/^$/c\cpu MHz         : 2245.778\n' $cpuinfo_file
+    mkdir -p "${HOME}/.local"
+    cpuinfo_file="${HOME}/.local/cpuinfo_with_ARM_MHz_fix"
+    cp /proc/cpuinfo "${cpuinfo_file}"
+    chmod u+rw "${cpuinfo_file}"
+    sed -i '/^$/c\cpu MHz         : 2245.778\n' "${cpuinfo_file}"
     # add vendor and model name as well:
-    sed -i '/^$/c\vendor_id       : ARM\nmodel name      : Apple-M\n' $cpuinfo_file
+    sed -i '/^$/c\vendor_id       : ARM\nmodel name      : Apple-M\n' "${cpuinfo_file}"
     if sudo -n true 2>/dev/null; then
-        sudo mount --bind $cpuinfo_file /proc/cpuinfo
+        if sudo mount --bind "${cpuinfo_file}" /proc/cpuinfo >/dev/null 2>&1; then
+            echo "[INFO] Added CPU Mhz entry in /proc/cpuinfo to work around a bug in Matlab that expects this value to be present."
+        else
+            echo "[WARN] Unable to bind-mount ${cpuinfo_file} over /proc/cpuinfo in this runtime. Continuing without the Matlab CPU Mhz workaround."
+        fi
+    else
+        echo "[WARN] Passwordless sudo is unavailable; skipping the Matlab CPU Mhz workaround."
     fi
-    echo "[INFO] Added CPU Mhz entry in /proc/cpuinfo to work around a bug in Matlab that expects this value to be present."
 fi
 
 # ensure overlay directory exists

@@ -279,12 +279,16 @@ if [ "$EUID" -eq 0 ]; then
         usermod --shell /bin/bash "${NB_USER}"
     fi
 
-    # Make sure binfmt_misc is mounted in the place apptainer expects it. This is most likely a bug in apptainer and is a workaround for now on apple silicon when CVMFS is disabled.
+    # Make sure binfmt_misc is mounted in the place apptainer expects it. Some
+    # runtimes (for example Kubernetes/containerd) do not allow mounting here,
+    # so this must remain best-effort rather than aborting startup.
     if [ -d "/proc/sys/fs/binfmt_misc" ]; then
         # Check if binfmt_misc is already mounted
         if ! mountpoint -q /proc/sys/fs/binfmt_misc; then
             echo "binfmt_misc directory exists but is not mounted. Mounting now..."
-            sudo mount -t binfmt_misc binfmt /proc/sys/fs/binfmt_misc
+            if ! mount -t binfmt_misc binfmt /proc/sys/fs/binfmt_misc >/dev/null 2>&1; then
+                echo "[WARN] Unable to mount /proc/sys/fs/binfmt_misc in this runtime. Continuing without it."
+            fi
         else
             echo "binfmt_misc is already mounted."
         fi
