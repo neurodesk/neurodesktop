@@ -184,6 +184,46 @@ RUN apt-get update --yes \
     tcsh \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Install a targeted TinyTeX toolchain for notebook PDF export without pulling
+# in the larger Debian TeX Live package set.
+RUN HOME=/root /bin/bash -lc 'set -euo pipefail; \
+    mkdir -p /root/.local/bin; \
+    curl -fsSL https://yihui.org/tinytex/install-bin-unix.sh | sh; \
+    mv /root/.TinyTeX /opt/TinyTeX; \
+    tlmgr_path="$(echo /opt/TinyTeX/bin/*/tlmgr)"; \
+    "${tlmgr_path}" option sys_bin /usr/local/bin >/dev/null; \
+    "${tlmgr_path}" path add >/dev/null; \
+    "${tlmgr_path}" install \
+    tcolorbox \
+    parskip \
+    caption \
+    float \
+    geometry \
+    amsmath \
+    amsfonts \
+    latex \
+    upquote \
+    eurosym \
+    fontspec \
+    unicode-math \
+    fancyvrb \
+    grffile \
+    adjustbox \
+    hyperref \
+    titling \
+    tools \
+    booktabs \
+    enumitem \
+    ulem \
+    soul \
+    jknapltx \
+    rsfs \
+    graphics \
+    iftex \
+    xcolor \
+    pdfcol; \
+    rm -rf /root/.cache /root/.local'
+
 # Extract Guacamole WAR and patch its web.xml to set session cookie Max-Age.
 # Guacamole's own WEB-INF/web.xml overrides Tomcat's conf/web.xml, so without
 # this patch cookies have no expiry and Safari accumulates them until headers
