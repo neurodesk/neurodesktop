@@ -31,16 +31,24 @@ def test_cvmfs_mounts():
             content = f.read()
             assert "CVMFS_HTTP_PROXY" in content, "CVMFS_HTTP_PROXY configuration missing"
 
+
+def test_cvmfs_runtime_components_installed():
+    """Verify the final image keeps the CVMFS runtime packages and helpers."""
+    code, _ = run_cmd("dpkg-query -W cvmfs autofs uuid-dev >/dev/null 2>&1")
+    assert code == 0, "cvmfs, autofs, and uuid-dev must remain installed in the runtime image"
+
+    assert os.path.exists("/etc/init.d/autofs"), "autofs init script missing"
+
+    code, output = run_cmd("command -v cvmfs_config")
+    assert code == 0, f"cvmfs_config not found in PATH: {output}"
+
+
 def test_neurocommand_setup():
     """Verify neurocommand installation."""
     assert os.path.exists("/neurocommand"), "/neurocommand directory missing"
     
-def test_guacamole_tomcat_running():
-    """Verify Tomcat and Guacamole processes running."""
-    # Guacd process check
-    code, output = run_cmd("ps aux | grep '[g]uacd'")
-    # We might not be running services inside the build container yet (services are started in startup scripts)
-    # Just asserting the binaries and wrappers exist
+def test_guacamole_webapp_files_exist():
+    """Verify the Guacamole web application was unpacked into Tomcat."""
     assert os.path.exists("/usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml"), "Guacamole webapp missing (expected extracted ROOT directory)"
     assert os.path.exists("/usr/local/tomcat/bin/startup.sh"), "Tomcat startup script missing"
 
@@ -97,6 +105,15 @@ def test_tomcat_session_cookie_max_age():
 def test_desktop_storage():
     """Verify neurodesktop-storage is accessible."""
     assert os.path.exists("/neurodesktop-storage"), "/neurodesktop-storage is missing"
+
+
+def test_build_only_toolchain_removed():
+    """Verify the broad build-only toolchain is not retained in the runtime image."""
+    code, output = run_cmd("dpkg-query -W -f='${Status}' build-essential 2>/dev/null")
+    assert code != 0, (
+        "build-essential should be removed after build-only packages are purged. "
+        f"Found: {output}"
+    )
 
 
 def test_grant_sudo_no_disables_passwordless_sudo():

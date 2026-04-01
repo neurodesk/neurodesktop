@@ -1,9 +1,12 @@
-FROM quay.io/jupyter/base-notebook:2026-01-26
+FROM quay.io/jupyter/base-notebook:2026-03-23
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
 
 LABEL maintainer="Neurodesk Project <www.neurodesk.org>"
 
 USER root
+
+ARG BUILD_ONLY_APT_PACKAGES="build-essential libcairo2-dev libjpeg-turbo8-dev libpng-dev libtool-bin freerdp2-dev libvncserver-dev libssl-dev libwebp-dev libssh2-1-dev libpango1.0-dev"
+ARG GUACAMOLE_RUNTIME_APT_PACKAGES="libfreerdp2-2t64 libfreerdp-client2-2t64 libwinpr2-2t64 libvncclient1"
 
 #========================================#
 # Core services
@@ -15,18 +18,8 @@ RUN apt-get update --yes \
     && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
     software-properties-common \
     openjdk-21-jre-headless \
-    build-essential \
-    libcairo2-dev \
-    libjpeg-turbo8-dev \
-    libpng-dev \
-    libtool-bin \
-    uuid-dev \
-    freerdp2-dev \
-    libvncserver-dev \
-    libssl-dev \
-    libwebp-dev \
-    libssh2-1-dev \
-    libpango1.0-dev \
+    ${BUILD_ONLY_APT_PACKAGES} \
+    ${GUACAMOLE_RUNTIME_APT_PACKAGES} \
     tigervnc-common \
     tigervnc-standalone-server \
     tigervnc-tools \
@@ -115,7 +108,10 @@ RUN wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb 
     && dpkg -i /tmp/cvmfs-release-latest_all.deb \
     && rm /tmp/cvmfs-release-latest_all.deb \
     && apt-get update --yes \
-    && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends cvmfs \
+    && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
+    autofs \
+    cvmfs \
+    uuid-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Tools and Libs
@@ -380,6 +376,12 @@ RUN cd /tmp/neurodesk-launcher \
 #========================================#
 
 USER root
+
+# Remove the broad build-only headers and toolchains after the Guacamole build.
+# Keep the Guacamole runtime libraries and CVMFS runtime dependencies installed.
+RUN build_only_apt_packages="${BUILD_ONLY_APT_PACKAGES} libgpgme-dev libossp-uuid-dev" \
+    && DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove ${build_only_apt_packages} \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # # Customise logo, wallpaper, terminal
 COPY config/jupyter/neurodesk_brain_logo.svg /opt/neurodesk_brain_logo.svg
