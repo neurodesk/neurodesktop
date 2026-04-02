@@ -34,6 +34,7 @@ RUN apt-get update --yes \
     gpg \
     gpg-agent \
     apt-transport-https \
+    && usermod -a -G ssl-cert xrdp \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # add a static strace executable to /opt which we can copy to containers for debugging:
@@ -420,6 +421,7 @@ COPY config/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/
 # Note: jupyter_notebook_config.py is generated from template + webapps.json below
 COPY --chown=root:users config/jupyter/jupyterlab_startup.sh /opt/neurodesktop/jupyterlab_startup.sh
 COPY --chown=root:users config/guacamole/guacamole.sh /opt/neurodesktop/guacamole.sh
+COPY --chown=root:users config/guacamole/ensure_rdp_backend.sh /opt/neurodesktop/ensure_rdp_backend.sh
 COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
 COPY --chown=root:users config/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh
 COPY --chown=root:users config/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh
@@ -443,6 +445,7 @@ RUN curl -fsSL https://raw.githubusercontent.com/neurodesk/neurocommand/main/neu
 RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/jupyterlab_startup.sh \
     /opt/neurodesktop/guacamole.sh \
+    /opt/neurodesktop/ensure_rdp_backend.sh \
     /opt/neurodesktop/environment_variables.sh \
     /opt/neurodesktop/ensure_sftp_sshd.sh \
     /opt/neurodesktop/setup_and_start_slurm.sh \

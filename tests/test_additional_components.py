@@ -119,38 +119,26 @@ def test_build_only_toolchain_removed():
 def test_grant_sudo_no_disables_passwordless_sudo():
     """Verify GRANT_SUDO=no removes Neurodesktop's managed passwordless sudo rule."""
     nb_user = os.environ.get("NB_USER", "jovyan")
+    grant_sudo = os.environ.get("GRANT_SUDO", "").lower()
 
-    if os.path.exists(NOTEBOOK_SUDOERS_PATH):
-        with open(NOTEBOOK_SUDOERS_PATH, "r", encoding="utf-8") as f:
-            sudoers_content = f.read()
+    if grant_sudo not in {"no", "n", "false", "0"}:
+        pytest.skip("This assertion only applies when the container starts with GRANT_SUDO=no")
 
-        assert not re.search(
-            rf"^{re.escape(nb_user)}\s+ALL=\(ALL\)\s+NOPASSWD:ALL$",
-            sudoers_content,
-            re.MULTILINE,
-        ), (
-            "GRANT_SUDO=no should remove Neurodesktop's managed passwordless sudo "
-            f"rule for {nb_user}, but {NOTEBOOK_SUDOERS_PATH} still grants it."
-        )
+    assert not os.path.exists(NOTEBOOK_SUDOERS_PATH), (
+        "GRANT_SUDO=no should remove Neurodesktop's managed passwordless sudo "
+        f"rule for {nb_user}, but {NOTEBOOK_SUDOERS_PATH} still exists."
+    )
 
     code, current_user = run_cmd("id -un")
     assert code == 0, f"Failed to determine current user: {current_user}"
 
     if os.geteuid() == 0:
-        code, output = run_cmd(
-            f"su -s /bin/bash -c 'env GRANT_SUDO=no sudo -n true' {nb_user}"
-        )
+        code, output = run_cmd(f"su -s /bin/bash -c 'sudo -n true' {nb_user}")
     elif current_user == nb_user:
-        code, output = run_cmd("env GRANT_SUDO=no sudo -n true")
+        code, output = run_cmd("sudo -n true")
     else:
         pytest.skip(
             f"Test requires root or NB_USER ({nb_user}); current user is {current_user}"
-        )
-
-    if code == 0:
-        pytest.skip(
-            "Passwordless sudo is granted by the runtime even without "
-            "Neurodesktop's managed sudoers rule."
         )
 
     assert code != 0, (

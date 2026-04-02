@@ -62,8 +62,11 @@ update_guacamole_vnc_port() {
 /usr/local/tomcat/bin/startup.sh
 
 # RDP
-if sudo -n true 2>/dev/null; then
-    sudo service xrdp start
+if [ -x /opt/neurodesktop/ensure_rdp_backend.sh ]; then
+    /opt/neurodesktop/ensure_rdp_backend.sh || \
+        echo "[WARN] Failed to initialize RDP backend for Guacamole."
+else
+    echo "[WARN] /opt/neurodesktop/ensure_rdp_backend.sh not found."
 fi
 
 # SSH/SFTP
