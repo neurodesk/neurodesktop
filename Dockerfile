@@ -104,11 +104,14 @@ RUN apt-get update --yes \
     && usermod -a -G ssl-cert xrdp \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Copy Guacamole server binaries and libraries from builder
+# Copy Guacamole server binaries and libraries from builder.
+# Use tar round-trip to preserve symlinks (COPY dereferences them, tripling
+# disk usage and producing ldconfig warnings).
 COPY --from=builder /usr/local/sbin/guacd /usr/local/sbin/guacd
-COPY --from=builder /usr/local/lib/libguac* /usr/local/lib/
 COPY --from=builder /etc/init.d/guacd /etc/init.d/guacd
-RUN ldconfig
+RUN --mount=type=bind,from=builder,source=/usr/local/lib,target=/tmp/builder-lib \
+    cd /tmp/builder-lib && tar cf - libguac* | tar xf - -C /usr/local/lib/ \
+    && ldconfig
 
 # Copy code-server from builder (already patched)
 COPY --from=builder /opt/code-server /opt/code-server
