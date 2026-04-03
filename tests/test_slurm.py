@@ -25,22 +25,58 @@ def test_slurm_commands_available():
         code, _ = run_cmd(f"command -v {cmd}")
         assert code == 0, f"Command missing: {cmd}"
 
+def _slurm_should_be_running():
+    """Return True if Slurm is expected to be running in this environment."""
+    enable = os.environ.get("NEURODESKTOP_SLURM_ENABLE", "1")
+    mode = os.environ.get("NEURODESKTOP_SLURM_MODE", "local")
+    return enable not in ("0", "false", "no") and mode == "local"
+
+
+def _skip_if_slurm_not_expected():
+    """Skip the test if Slurm is intentionally disabled."""
+    if not _slurm_should_be_running():
+        pytest.skip("Slurm is disabled via NEURODESKTOP_SLURM_ENABLE=0 or non-local mode")
+
+
+def test_slurm_setup_when_enabled():
+    """When Slurm is expected, verify config and services were set up."""
+    if not _slurm_should_be_running():
+        pytest.skip("Slurm is disabled — nothing to assert")
+
+    assert os.path.exists("/etc/slurm/slurm.conf"), (
+        "Slurm is enabled but /etc/slurm/slurm.conf is missing — "
+        "startup scripts failed to configure Slurm"
+    )
+    assert os.path.exists("/run/munge/munge.socket.2"), (
+        "Slurm is enabled but MUNGE socket missing at /run/munge/munge.socket.2 — "
+        "munged failed to start"
+    )
+    code, output = run_cmd("scontrol ping")
+    assert code == 0, (
+        f"Slurm is enabled but slurmctld is not responding: {output}"
+    )
+
+
 def test_munge_socket_exists():
     """Verify MUNGE socket is present."""
+    _skip_if_slurm_not_expected()
     assert os.path.exists("/run/munge/munge.socket.2"), "MUNGE socket missing"
 
 def test_munge_credential_generation():
     """Verify MUNGE credential generation works for current user."""
+    _skip_if_slurm_not_expected()
     code, output = run_cmd("munge -n")
     assert code == 0, f"MUNGE credential generation failed: {output}"
 
 def test_slurmctld_ping():
     """Verify slurmctld is reachable."""
+    _skip_if_slurm_not_expected()
     code, output = run_cmd("scontrol ping")
     assert code == 0, f"slurmctld ping failed: {output}"
 
 def test_node_state():
     """Verify the compute node is healthy."""
+    _skip_if_slurm_not_expected()
     code, hostname = run_cmd("hostname -s")
     if code != 0:
         _, hostname = run_cmd("hostname")
@@ -65,12 +101,14 @@ def test_node_state():
 
 def test_srun_smoke_test():
     """Verify srun can execute a basic command."""
+    _skip_if_slurm_not_expected()
     partition_name = os.environ.get("NEURODESKTOP_SLURM_PARTITION", "neurodesktop")
     code, output = run_cmd(f"srun -I20 -N1 -n1 -p {partition_name} /bin/hostname")
     assert code == 0, f"srun smoke test failed: {output}"
 
 def test_sbatch_account_check():
     """Verify sbatch submits correctly and does not fail with InvalidAccount."""
+    _skip_if_slurm_not_expected()
     partition_name = os.environ.get("NEURODESKTOP_SLURM_PARTITION", "neurodesktop")
     code, output = run_cmd(f"sbatch --parsable -p {partition_name} --time=00:01:00 --ntasks=1 --cpus-per-task=1 --mem=64M --wrap '/bin/true'")
     assert code == 0, f"sbatch check failed to submit: {output}"

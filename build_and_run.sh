@@ -1,11 +1,13 @@
 #!/bin/bash
 set -e
 
-if docker ps --all | grep neurodesktop; then
-    if docker ps --all | grep neurodeskapp; then
-        echo "detected a Neurodeskapp container and ignoring it!"
-    else
-        bash stop_and_clean.sh
+if [ "${1:-}" != "test" ]; then
+    if docker ps --all | grep -w neurodesktop; then
+        if docker ps --all | grep neurodeskapp; then
+            echo "detected a Neurodeskapp container and ignoring it!"
+        else
+            bash stop_and_clean.sh
+        fi
     fi
 fi
 # docker build -t neurodesktop:latest .
@@ -19,21 +21,96 @@ fi
 
 docker build . -t neurodesktop:latest
 
-# Ask whether to run unit tests inside the newly built image
-# read -r -p "Run unit tests with pytest before starting container? [Y/n]: " RUN_TESTS
-# case "${RUN_TESTS:-Y}" in
-#     [Nn]|[Nn][Oo])
-#         echo "Skipping unit tests."
-#         ;;
-#     *)
-#         echo "Running unit tests with pytest..."
-#         docker run --rm -t --privileged --user=root \
-#             -e CVMFS_DISABLE=false \
-#             -e GRANT_SUDO=no \
-#             -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
-#             neurodesktop:latest pytest /opt/tests/
-#         ;;
-# esac
+if [ "${1:-}" = "test" ]; then
+    echo "============================================================"
+    echo "Running tests across multiple configurations (parallel)"
+    echo "============================================================"
+
+    # Define configurations: "cvmfs_disable:grant_sudo"
+    CONFIGS=("false:no" "false:yes" "true:no" "true:yes")
+    PIDS=()
+    LOGDIR=$(mktemp -d)
+
+    # Start all containers in parallel
+    for i in "${!CONFIGS[@]}"; do
+        IFS=':' read -r cvmfs_disable grant_sudo <<< "${CONFIGS[$i]}"
+        name="neurodesktop-test-${i}"
+        label="CVMFS_DISABLE=${cvmfs_disable}, GRANT_SUDO=${grant_sudo}"
+        logfile="${LOGDIR}/${name}.log"
+
+        docker rm -f "$name" 2>/dev/null || true
+        docker volume create "${name}-home" 2>/dev/null || true
+
+        echo "Starting: ${label} (${name})"
+        docker run -d --shm-size=1gb --privileged --user=root \
+            --name "$name" \
+            --mount "source=${name}-home,target=/home/jovyan" \
+            -v ~/neurodesktop-storage:/neurodesktop-storage \
+            -e CVMFS_DISABLE="${cvmfs_disable}" \
+            -e GRANT_SUDO="${grant_sudo}" \
+            -e NEURODESKTOP_CVMFS_STARTUP_MODE=eager \
+            -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
+            neurodesktop:latest >/dev/null
+    done
+
+    # Wait for all containers to be ready, then run tests in parallel
+    for i in "${!CONFIGS[@]}"; do
+        IFS=':' read -r cvmfs_disable grant_sudo <<< "${CONFIGS[$i]}"
+        name="neurodesktop-test-${i}"
+        label="CVMFS_DISABLE=${cvmfs_disable}, GRANT_SUDO=${grant_sudo}"
+        logfile="${LOGDIR}/${name}.log"
+
+        (
+            # Wait for Jupyter readiness
+            for attempt in $(seq 1 60); do
+                if docker exec "$name" curl -sf http://localhost:8888/api/status >/dev/null 2>&1; then
+                    break
+                fi
+                sleep 2
+            done
+
+            echo "============================================================"
+            echo "Config: ${label}"
+            echo "============================================================"
+            docker exec "$name" pytest /opt/tests/ -v
+        ) > "$logfile" 2>&1 &
+        PIDS+=($!)
+    done
+
+    echo "Waiting for all test runs to complete..."
+
+    # Collect results
+    FAILED=0
+    for i in "${!CONFIGS[@]}"; do
+        IFS=':' read -r cvmfs_disable grant_sudo <<< "${CONFIGS[$i]}"
+        name="neurodesktop-test-${i}"
+        label="CVMFS_DISABLE=${cvmfs_disable}, GRANT_SUDO=${grant_sudo}"
+        logfile="${LOGDIR}/${name}.log"
+
+        wait "${PIDS[$i]}" && status="PASSED" || { status="FAILED"; FAILED=1; }
+
+        echo ""
+        echo "============================================================"
+        echo "${status}: ${label}"
+        echo "============================================================"
+        cat "$logfile"
+
+        docker rm -f "$name" 2>/dev/null || true
+        docker volume rm "${name}-home" 2>/dev/null || true
+    done
+
+    rm -rf "$LOGDIR"
+
+    echo ""
+    echo "============================================================"
+    if [ $FAILED -eq 0 ]; then
+        echo "ALL CONFIGURATIONS PASSED"
+    else
+        echo "SOME CONFIGURATIONS FAILED"
+    fi
+    echo "============================================================"
+    exit $FAILED
+fi
 
 
 

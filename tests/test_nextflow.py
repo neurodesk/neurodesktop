@@ -2,10 +2,11 @@ import subprocess
 import os
 import pytest
 
-def run_cmd(cmd):
+def run_cmd(cmd, timeout=180):
     """Utility to run a shell command and return its exit code and output."""
     process = subprocess.run(
-        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        timeout=timeout,
     )
     return process.returncode, process.stdout.strip()
 
@@ -38,6 +39,11 @@ def test_nf_neuro_modules():
 
 def test_nextflow_fslmaths(tmp_path):
     """Verify nextflow can run a minimal workflow using fslmaths."""
+    cvmfs_disable = os.environ.get("CVMFS_DISABLE", "false").lower()
+    if cvmfs_disable in ["true", "1"]:
+        pytest.skip("CVMFS is disabled (CVMFS_DISABLE=true)")
+    if not os.path.isdir("/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules"):
+        pytest.fail("CVMFS is enabled but neurodesk-modules not mounted — startup scripts failed")
     workflow = """
 process RUN_FSLMATHS {
     publishDir 'results', mode: 'copy'

@@ -28,7 +28,7 @@ class TestDeferredStartup:
         assert os.path.isfile(script), f"{script} not found"
         assert os.access(script, os.X_OK), f"{script} is not executable"
 
-    def test_deferred_startup_log_present_in_lazy_mode(self):
+    def test_deferred_startup_log(self):
         """In lazy mode (default), the deferred startup log should exist."""
         cvmfs_mode = os.environ.get("NEURODESKTOP_CVMFS_STARTUP_MODE", "lazy")
         slurm_mode = os.environ.get("NEURODESKTOP_SLURM_STARTUP_MODE", "lazy")
@@ -109,7 +109,7 @@ class TestDeferredStartup:
 class TestSlurmEventualReadiness:
     """When Slurm is enabled and lazy, it should become ready after Jupyter."""
 
-    def test_slurm_eventually_responds_to_ping(self):
+    def test_slurm_responds_after_deferred(self):
         """After deferred startup completes, scontrol ping should succeed."""
         slurm_mode = os.environ.get("NEURODESKTOP_SLURM_STARTUP_MODE", "lazy")
         slurm_enable = os.environ.get("NEURODESKTOP_SLURM_ENABLE", "1")
@@ -151,7 +151,7 @@ class TestSlurmEventualReadiness:
 class TestEagerStartupMode:
     """Verify eager mode preserves synchronous startup behavior."""
 
-    def test_eager_cvmfs_skips_deferred_worker(self):
+    def test_eager_no_deferred_worker(self):
         """When CVMFS and Slurm are both eager, no deferred worker log should exist."""
         cvmfs_mode = os.environ.get("NEURODESKTOP_CVMFS_STARTUP_MODE", "lazy")
         slurm_mode = os.environ.get("NEURODESKTOP_SLURM_STARTUP_MODE", "lazy")
@@ -168,7 +168,7 @@ class TestEagerStartupMode:
 class TestCvmfsSelectionCache:
     """Verify CVMFS selection is cached for subsequent boots."""
 
-    def test_cvmfs_cache_created_after_mount(self):
+    def test_cvmfs_cache_exists(self):
         """After CVMFS mounts successfully, a cache file should exist."""
         cvmfs_disable = os.environ.get("CVMFS_DISABLE", "false").lower()
         if cvmfs_disable in ["true", "1"]:

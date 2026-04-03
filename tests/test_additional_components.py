@@ -32,7 +32,7 @@ def test_cvmfs_mounts():
             assert "CVMFS_HTTP_PROXY" in content, "CVMFS_HTTP_PROXY configuration missing"
 
 
-def test_cvmfs_runtime_components_installed():
+def test_cvmfs_runtime_packages():
     """Verify the final image keeps the CVMFS runtime packages and helpers."""
     code, _ = run_cmd("dpkg-query -W cvmfs autofs uuid-dev >/dev/null 2>&1")
     assert code == 0, "cvmfs, autofs, and uuid-dev must remain installed in the runtime image"
@@ -47,13 +47,13 @@ def test_neurocommand_setup():
     """Verify neurocommand installation."""
     assert os.path.exists("/neurocommand"), "/neurocommand directory missing"
     
-def test_guacamole_webapp_files_exist():
+def test_guacamole_webapp():
     """Verify the Guacamole web application was unpacked into Tomcat."""
     assert os.path.exists("/usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml"), "Guacamole webapp missing (expected extracted ROOT directory)"
     assert os.path.exists("/usr/local/tomcat/bin/startup.sh"), "Tomcat startup script missing"
 
 
-def test_tomcat_request_header_limit_hardened():
+def test_tomcat_header_size():
     """Verify Tomcat accepts larger request headers for browser compatibility."""
     server_xml_path = "/usr/local/tomcat/conf/server.xml"
     assert os.path.exists(server_xml_path), "Tomcat server.xml missing"
@@ -66,7 +66,7 @@ def test_tomcat_request_header_limit_hardened():
     assert int(match.group(1)) >= 65536, "Tomcat maxHttpRequestHeaderSize should be at least 65536"
 
 
-def test_tomcat_session_cookie_path():
+def test_tomcat_cookie_path():
     """Verify context.xml sets sessionCookiePath to prevent duplicate path-scoped cookies."""
     context_xml_path = "/usr/local/tomcat/conf/context.xml"
     assert os.path.exists(context_xml_path), "Tomcat context.xml missing"
@@ -82,7 +82,7 @@ def test_tomcat_session_cookie_path():
         "CookieProcessor must set sameSiteCookies to Lax"
 
 
-def test_tomcat_session_cookie_max_age():
+def test_tomcat_cookie_max_age():
     """Verify Guacamole's web.xml sets Max-Age on session cookie so browsers auto-expire it."""
     guac_web_xml_path = "/usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml"
     assert os.path.exists(guac_web_xml_path), \
@@ -107,7 +107,7 @@ def test_desktop_storage():
     assert os.path.exists("/neurodesktop-storage"), "/neurodesktop-storage is missing"
 
 
-def test_build_only_toolchain_removed():
+def test_build_toolchain_removed():
     """Verify the broad build-only toolchain is not retained in the runtime image."""
     code, output = run_cmd("dpkg-query -W -f='${Status}' build-essential 2>/dev/null")
     assert code != 0, (
@@ -116,7 +116,7 @@ def test_build_only_toolchain_removed():
     )
 
 
-def test_grant_sudo_no_disables_passwordless_sudo():
+def test_grant_sudo_no():
     """Verify GRANT_SUDO=no removes Neurodesktop's managed passwordless sudo rule."""
     nb_user = os.environ.get("NB_USER", "jovyan")
     grant_sudo = os.environ.get("GRANT_SUDO", "").lower()

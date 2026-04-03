@@ -25,7 +25,7 @@ def load_update_page_config_module():
     pytest.skip("update_page_config.py is not available in this environment")
 
 
-def test_update_page_config_sets_supporter_false_when_marker_missing(tmp_path):
+def test_page_config_no_supporter(tmp_path):
     """Verify missing supporter marker keeps the donation banner enabled."""
     module = load_update_page_config_module()
     page_config_path = tmp_path / ".jupyter" / "labconfig" / "page_config.json"
@@ -46,7 +46,7 @@ def test_update_page_config_sets_supporter_false_when_marker_missing(tmp_path):
         assert written_payload["disabledExtensions"][extension_name] is expected_state
 
 
-def test_update_page_config_preserves_existing_settings_and_sets_supporter_true(tmp_path):
+def test_page_config_supporter_preserves(tmp_path):
     """Verify existing config survives while the supporter marker suppresses the banner."""
     module = load_update_page_config_module()
     page_config_path = tmp_path / ".jupyter" / "labconfig" / "page_config.json"

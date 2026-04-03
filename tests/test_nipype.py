@@ -1,8 +1,9 @@
 import subprocess
+import os
 import pytest
 import sys
 
-def run_cmd(cmd):
+def run_cmd(cmd, timeout=180):
     """Utility to run a shell command and return its exit code and output."""
     process = subprocess.run(
         cmd,
@@ -11,6 +12,7 @@ def run_cmd(cmd):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        timeout=timeout,
     )
     return process.returncode, process.stdout.strip()
 
@@ -51,7 +53,14 @@ def test_nipype_fslmaths(tmp_path):
         print(f"Warning: could not load fsl via python lmod: {e}")
 
     code, _ = run_cmd("command -v fslmaths")
-    assert code == 0, "FSL 'fslmaths' command not in PATH even after lmod. FSL module loading failed!"
+    if code != 0:
+        cvmfs_disable = os.environ.get("CVMFS_DISABLE", "false").lower()
+        if cvmfs_disable in ["true", "1"]:
+            pytest.skip("fslmaths not available — CVMFS is disabled")
+        pytest.fail(
+            "fslmaths not in PATH after module load — CVMFS is enabled but "
+            "FSL module failed to load. Startup scripts may have failed."
+        )
 
     import nipype.interfaces.fsl as fsl
     maths = fsl.ImageMaths()
