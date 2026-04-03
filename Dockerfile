@@ -1,32 +1,91 @@
-FROM quay.io/jupyter/base-notebook:2026-01-26
+###############################################################################
+# Stage 1: Builder — compile Guacamole server, patch code-server, install codex
+###############################################################################
+FROM quay.io/jupyter/base-notebook:2026-03-23 AS builder
+# https://quay.io/repository/jupyter/base-notebook?tab=tags
+
+USER root
+
+ARG BUILD_ONLY_APT_PACKAGES="build-essential libcairo2-dev libjpeg-turbo8-dev libpng-dev libtool-bin freerdp2-dev libvncserver-dev libssl-dev libwebp-dev libssh2-1-dev libpango1.0-dev"
+ARG GUACAMOLE_VERSION="1.6.0"
+ARG CODE_SERVER_VERSION="4.104.2"
+
+# Install build dependencies + nodejs for npm operations
+RUN apt-get update --yes \
+    && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
+    ${BUILD_ONLY_APT_PACKAGES} \
+    wget \
+    curl \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install --yes --no-install-recommends nodejs yarn \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Build Guacamole server
+RUN wget -q "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/source/guacamole-server-${GUACAMOLE_VERSION}.tar.gz" -P /tmp \
+    && tar xvf /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz -C /tmp \
+    && rm /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz \
+    && cd /tmp/guacamole-server-${GUACAMOLE_VERSION} \
+    && ./configure --with-init-dir=/etc/init.d \
+    && make \
+    && make install \
+    && ldconfig \
+    && rm -r /tmp/guacamole-server-${GUACAMOLE_VERSION}
+
+# Install code-server as a prebuilt binary and patch basic-ftp
+RUN set -eux; \
+    deb_arch="$(dpkg --print-architecture || true)"; \
+    kernel_arch="$(uname -m || true)"; \
+    cs_arch=""; \
+    for arch in "${deb_arch}" "${kernel_arch}"; do \
+    case "${arch}" in \
+    amd64|x86_64) cs_arch="amd64" ;; \
+    arm64|aarch64) cs_arch="arm64" ;; \
+    armhf|armv7l|armv7) cs_arch="armv7l" ;; \
+    esac; \
+    if [ -n "${cs_arch}" ]; then break; fi; \
+    done; \
+    if [ -z "${cs_arch}" ]; then \
+    echo "Unsupported architecture for code-server: deb_arch=${deb_arch} kernel_arch=${kernel_arch}" >&2; \
+    exit 1; \
+    fi; \
+    cs_tar="code-server-${CODE_SERVER_VERSION}-linux-${cs_arch}.tar.gz"; \
+    curl -fL --retry 5 --retry-all-errors --retry-delay 2 \
+    "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/${cs_tar}" \
+    -o "/tmp/${cs_tar}"; \
+    tar -xzf "/tmp/${cs_tar}" -C /tmp; \
+    rm -rf /opt/code-server; \
+    mv "/tmp/code-server-${CODE_SERVER_VERSION}-linux-${cs_arch}" /opt/code-server; \
+    # code-server currently ships basic-ftp@5.0.5 in npm-shrinkwrap.json; update to the patched release.
+    cd /opt/code-server; \
+    npm update --no-audit --no-fund basic-ftp; \
+    rm -f "/tmp/${cs_tar}"; \
+    npm cache clean --force
+
+
+
+###############################################################################
+# Stage 2: Final runtime image
+###############################################################################
+FROM quay.io/jupyter/base-notebook:2026-03-23
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
 
 LABEL maintainer="Neurodesk Project <www.neurodesk.org>"
 
 USER root
 
+ARG GUACAMOLE_RUNTIME_APT_PACKAGES="libfreerdp2-2t64 libfreerdp-client2-2t64 libwinpr2-2t64 libvncclient1"
+
 #========================================#
 # Core services
 #========================================#
 
 
-# Install base image dependencies
+# Install base image dependencies (runtime only — build deps are in the builder stage)
 RUN apt-get update --yes \
     && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
     software-properties-common \
     openjdk-21-jre-headless \
-    build-essential \
-    libcairo2-dev \
-    libjpeg-turbo8-dev \
-    libpng-dev \
-    libtool-bin \
-    uuid-dev \
-    freerdp2-dev \
-    libvncserver-dev \
-    libssl-dev \
-    libwebp-dev \
-    libssh2-1-dev \
-    libpango1.0-dev \
+    ${GUACAMOLE_RUNTIME_APT_PACKAGES} \
     tigervnc-common \
     tigervnc-standalone-server \
     tigervnc-tools \
@@ -41,7 +100,22 @@ RUN apt-get update --yes \
     gpg \
     gpg-agent \
     apt-transport-https \
+    xz-utils \
+    && usermod -a -G ssl-cert xrdp \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Copy Guacamole server binaries and libraries from builder.
+# Use tar round-trip to preserve symlinks (COPY dereferences them, tripling
+# disk usage and producing ldconfig warnings).
+COPY --from=builder /usr/local/sbin/guacd /usr/local/sbin/guacd
+COPY --from=builder /etc/init.d/guacd /etc/init.d/guacd
+RUN --mount=type=bind,from=builder,source=/usr/local/lib,target=/tmp/builder-lib \
+    cd /tmp/builder-lib && tar cf - libguac* | tar xf - -C /usr/local/lib/ \
+    && ldconfig
+
+# Copy code-server from builder (already patched)
+COPY --from=builder /opt/code-server /opt/code-server
+RUN ln -sf /opt/code-server/bin/code-server /usr/local/bin/code-server
 
 # add a static strace executable to /opt which we can copy to containers for debugging:
 RUN mkdir -p /opt/strace \
@@ -51,7 +125,6 @@ RUN mkdir -p /opt/strace \
 ARG TOMCAT_REL="9"
 ARG TOMCAT_VERSION="9.0.112"
 ARG GUACAMOLE_VERSION="1.6.0"
-ARG CODE_SERVER_VERSION="4.104.2"
 
 ENV LANG=""
 ENV LANGUAGE=""
@@ -84,25 +157,12 @@ RUN wget -q https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v${TOMCA
     && sed -i '/<session-config>/,/<\/session-config>/c\    <session-config>\n        <session-timeout>30</session-timeout>\n        <cookie-config>\n            <max-age>86400</max-age>\n            <http-only>true</http-only>\n        </cookie-config>\n    </session-config>' /usr/local/tomcat/conf/web.xml \
     && chmod +x /usr/local/tomcat/bin/*.sh
 
-# Install Apache Guacamole
-RUN wget -q "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/binary/guacamole-${GUACAMOLE_VERSION}.war" -O /usr/local/tomcat/webapps/ROOT.war \
-    && wget -q "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/source/guacamole-server-${GUACAMOLE_VERSION}.tar.gz" -P /tmp \
-    && tar xvf /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz -C /tmp \
-    && rm /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz \
-    && cd /tmp/guacamole-server-${GUACAMOLE_VERSION} \
-    && ./configure --with-init-dir=/etc/init.d \
-    && make \
-    && make install \
-    && ldconfig \
-    && rm -r /tmp/guacamole-server-${GUACAMOLE_VERSION}
+# Install Apache Guacamole WAR
+RUN wget -q "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/binary/guacamole-${GUACAMOLE_VERSION}.war" -O /usr/local/tomcat/webapps/ROOT.war
 
 # #========================================#
 # # Software (as root user)
 # #========================================#
-
-# Add Software sources
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Workaround for CVMFS to break systemctl by replacing it with a dummy script
 RUN mv /usr/bin/systemctl /usr/bin/systemctl.orig \
@@ -115,7 +175,10 @@ RUN wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb 
     && dpkg -i /tmp/cvmfs-release-latest_all.deb \
     && rm /tmp/cvmfs-release-latest_all.deb \
     && apt-get update --yes \
-    && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends cvmfs \
+    && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
+    autofs \
+    cvmfs \
+    uuid-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Tools and Libs
@@ -152,7 +215,6 @@ RUN apt-get update --yes \
     man-db \
     nano \
     nextcloud-desktop \
-    nodejs \
     openssh-client \
     openssh-server \
     owncloud-client \
@@ -179,7 +241,6 @@ RUN apt-get update --yes \
     unzip \
     vim \
     xdg-utils \
-    yarn \
     zip \
     tcsh \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -254,36 +315,14 @@ RUN mkdir -p "${NF_TEST_HOME}" \
     && chown -R ${NB_UID}:${NB_GID} /opt/nf-neuro "${NF_TEST_HOME}" "${HOME}/.nextflow" \
     && rm -rf /root/.cache "${HOME}/.nf-test" /tmp/nf-test /tmp/nextflow
 
-# Install code-server as a prebuilt binary (more reliable than npm package install)
-RUN set -eux; \
-    deb_arch="$(dpkg --print-architecture || true)"; \
-    kernel_arch="$(uname -m || true)"; \
-    cs_arch=""; \
-    for arch in "${deb_arch}" "${kernel_arch}"; do \
-    case "${arch}" in \
-    amd64|x86_64) cs_arch="amd64" ;; \
-    arm64|aarch64) cs_arch="arm64" ;; \
-    armhf|armv7l|armv7) cs_arch="armv7l" ;; \
-    esac; \
-    if [ -n "${cs_arch}" ]; then break; fi; \
-    done; \
-    if [ -z "${cs_arch}" ]; then \
-    echo "Unsupported architecture for code-server: deb_arch=${deb_arch} kernel_arch=${kernel_arch}" >&2; \
-    exit 1; \
-    fi; \
-    cs_tar="code-server-${CODE_SERVER_VERSION}-linux-${cs_arch}.tar.gz"; \
-    curl -fL --retry 5 --retry-all-errors --retry-delay 2 \
-    "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/${cs_tar}" \
-    -o "/tmp/${cs_tar}"; \
-    tar -xzf "/tmp/${cs_tar}" -C /tmp; \
-    rm -rf /opt/code-server; \
-    mv "/tmp/code-server-${CODE_SERVER_VERSION}-linux-${cs_arch}" /opt/code-server; \
-    # code-server currently ships basic-ftp@5.0.5 in npm-shrinkwrap.json; update to the patched release.
-    cd /opt/code-server; \
-    npm update --no-audit --no-fund basic-ftp; \
-    ln -sf /opt/code-server/bin/code-server /usr/local/bin/code-server; \
-    rm -f "/tmp/${cs_tar}"; \
-    npm cache clean --force
+# Install build tools temporarily — nodejs is needed by codex CLI at runtime and
+# by hatch-jupyter-builder to compile JupyterLab extensions from source (e.g.
+# jupyterlab-slurm, neurodesk-launcher). build-essential provides gcc for pip
+# packages with C extensions (e.g. psutil, traits). build-essential is removed
+# after extensions are built (see purge step below); nodejs stays for codex.
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install --yes --no-install-recommends nodejs build-essential \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install AI coding assistants
 RUN npm install -g @openai/codex \
@@ -381,6 +420,13 @@ RUN cd /tmp/neurodesk-launcher \
 
 USER root
 
+# Remove build-time packages: -dev headers for pip native extensions and
+# build-essential for C extensions. nodejs stays — codex CLI needs it at runtime.
+# (Guacamole build deps are already excluded via multi-stage build.)
+RUN DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove \
+    libgpgme-dev libossp-uuid-dev build-essential \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # # Customise logo, wallpaper, terminal
 COPY config/jupyter/neurodesk_brain_logo.svg /opt/neurodesk_brain_logo.svg
 COPY config/jupyter/neurodesk_brain_icon.svg /opt/neurodesk_brain_icon.svg
@@ -394,18 +440,10 @@ COPY config/lmod/module.sh /usr/share/
 # Configure tiling of windows SHIFT-ALT-CTR-{Left,right,top,Bottom} and other openbox desktop mods
 COPY ./config/lxde/rc.xml /etc/xdg/openbox
 
-# Allow the root user to access the sshfs mount
-# https://github.com/neurodesk/neurodesk/issues/47
-RUN sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf
-
-# Fetch singularity bind mount list and create placeholder mountpoints
-# RUN mkdir -p `curl https://raw.githubusercontent.com/NeuroDesk/neurocontainers/master/recipes/globalMountPointList.txt`
-
-# Fix "No session for pid prompt"
-RUN rm /usr/bin/lxpolkit
-
-# enable rootless mounts: 
-RUN chmod +x /usr/bin/fusermount
+# Allow root user to access sshfs mount, fix "No session for pid prompt", enable rootless mounts
+RUN sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf \
+    && rm /usr/bin/lxpolkit \
+    && chmod +x /usr/bin/fusermount
 
 # Add notebook startup scripts
 # https://jupyter-docker-stacks.readthedocs.io/en/latest/using/common.html
@@ -418,6 +456,7 @@ COPY config/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/
 # Note: jupyter_notebook_config.py is generated from template + webapps.json below
 COPY --chown=root:users config/jupyter/jupyterlab_startup.sh /opt/neurodesktop/jupyterlab_startup.sh
 COPY --chown=root:users config/guacamole/guacamole.sh /opt/neurodesktop/guacamole.sh
+COPY --chown=root:users config/guacamole/ensure_rdp_backend.sh /opt/neurodesktop/ensure_rdp_backend.sh
 COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
 COPY --chown=root:users config/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh
 COPY --chown=root:users config/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh
@@ -441,6 +480,7 @@ RUN curl -fsSL https://raw.githubusercontent.com/neurodesk/neurocommand/main/neu
 RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/jupyterlab_startup.sh \
     /opt/neurodesktop/guacamole.sh \
+    /opt/neurodesktop/ensure_rdp_backend.sh \
     /opt/neurodesktop/environment_variables.sh \
     /opt/neurodesktop/ensure_sftp_sshd.sh \
     /opt/neurodesktop/setup_and_start_slurm.sh \
@@ -453,19 +493,17 @@ RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
 # Create Guacamole configurations (user-mapping.xml gets filled in the startup.sh script)
 RUN mkdir -p /etc/guacamole \
     && echo -e "user-mapping: /etc/guacamole/user-mapping.xml\nguacd-hostname: 127.0.0.1" > /etc/guacamole/guacamole.properties \
-    && echo -e "[server]\nbind_host = 127.0.0.1\nbind_port = 4822" > /etc/guacamole/guacd.conf
-RUN chown -R ${NB_UID}:${NB_GID} /etc/guacamole
-RUN chown -R ${NB_UID}:${NB_GID} /usr/local/tomcat
+    && echo -e "[server]\nbind_host = 127.0.0.1\nbind_port = 4822" > /etc/guacamole/guacd.conf \
+    && chown -R ${NB_UID}:${NB_GID} /etc/guacamole \
+    && chown -R ${NB_UID}:${NB_GID} /usr/local/tomcat
 COPY --chown=${NB_UID}:${NB_GID} config/guacamole/user-mapping-vnc.xml /etc/guacamole/user-mapping-vnc.xml
 COPY --chown=${NB_UID}:${NB_GID} config/guacamole/user-mapping-vnc-rdp.xml /etc/guacamole/user-mapping-vnc-rdp.xml
 RUN ln -sf /etc/guacamole/user-mapping-vnc.xml /etc/guacamole/user-mapping.xml
 
-# Configure NB_USER account defaults.
+# Configure NB_USER account defaults and JupyterLab settings
 RUN /usr/bin/printf '%s\n%s\n' 'password' 'password' | passwd ${NB_USER} \
-    && usermod --shell /bin/bash ${NB_USER}
-
-# Enable deletion of non-empty-directories in JupyterLab: https://github.com/jupyter/notebook/issues/4916
-RUN sed -i 's/c.FileContentsManager.delete_to_trash = False/c.FileContentsManager.always_delete_dir = True/g' /etc/jupyter/jupyter_server_config.py \
+    && usermod --shell /bin/bash ${NB_USER} \
+    && sed -i 's/c.FileContentsManager.delete_to_trash = False/c.FileContentsManager.always_delete_dir = True/g' /etc/jupyter/jupyter_server_config.py \
     && printf '\n# Detect dead WebSocket clients quickly (tab closed/network gone)\nc.ServerApp.websocket_ping_interval = 30\nc.ServerApp.websocket_ping_timeout = 60\n' >> /etc/jupyter/jupyter_server_config.py
 
 # Source environment variables in global bashrc for Apptainer/Singularity (which mounts host home)
@@ -572,18 +610,14 @@ RUN chmod +x /usr/local/sbin/claude /usr/local/sbin/opencode /usr/local/sbin/cod
 # Switch to root user
 USER root
 
-
-# Create cvmfs keys
-RUN mkdir -p /etc/cvmfs/keys/ardc.edu.au
+# Create cvmfs keys and data directories
+RUN mkdir -p /etc/cvmfs/keys/ardc.edu.au \
+    && mkdir -p /data /neurodesktop-storage \
+    && chown ${NB_UID}:${NB_GID} /neurodesktop-storage \
+    && chmod 770 /neurodesktop-storage
 COPY config/cvmfs/neurodesk.ardc.edu.au.pub /etc/cvmfs/keys/ardc.edu.au/neurodesk.ardc.edu.au.pub
 COPY config/cvmfs/neurodesk.ardc.edu.au.conf* /etc/cvmfs/config.d/
 COPY config/cvmfs/default.local /etc/cvmfs/default.local
-
-
-# Set up data directory so it exists in the container for the SINGULARITY_BINDPATH
-RUN mkdir -p /data /neurodesktop-storage
-RUN chown ${NB_UID}:${NB_GID} /neurodesktop-storage \
-    && chmod 770 /neurodesktop-storage
 
 # Install neurocommand
 ADD "https://api.github.com/repos/neurodesk/neurocommand/git/refs/heads/main" /tmp/skipcache

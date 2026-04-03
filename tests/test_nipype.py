@@ -1,16 +1,24 @@
 import subprocess
 import pytest
+import sys
 
 def run_cmd(cmd):
     """Utility to run a shell command and return its exit code and output."""
     process = subprocess.run(
-        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        cmd,
+        shell=True,
+        executable="/bin/bash",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
     )
     return process.returncode, process.stdout.strip()
 
 def test_nipype_importable():
     """Verify nipype can be imported and successfully prints its version."""
-    code, output = run_cmd("python -c \"import nipype; print(nipype.__version__)\"")
+    code, output = run_cmd(
+        f'"{sys.executable}" -c "import nipype; print(nipype.__version__)"'
+    )
     assert code == 0, f"Failed to import nipype: {output}"
     assert len(output) > 0, "No version output string found"
 

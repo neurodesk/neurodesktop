@@ -850,6 +850,14 @@ fi
 
 source /opt/neurodesktop/environment_variables.sh > /dev/null 2>&1
 
+if [ -x /opt/neurodesktop/ensure_rdp_backend.sh ]; then
+    if ! /opt/neurodesktop/ensure_rdp_backend.sh; then
+        echo "[WARN] Failed to initialize XRDP backend before Jupyter startup."
+    fi
+else
+    echo "[WARN] /opt/neurodesktop/ensure_rdp_backend.sh not found."
+fi
+
 # Ensure the VNC password file has the correct permissions
 if [ -f "/home/${NB_USER}/.vnc/passwd" ] && [ "$(stat -c %a /home/${NB_USER}/.vnc/passwd)" != "600" ]; then
     chmod 600 "/home/${NB_USER}/.vnc/passwd"

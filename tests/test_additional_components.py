@@ -31,16 +31,24 @@ def test_cvmfs_mounts():
             content = f.read()
             assert "CVMFS_HTTP_PROXY" in content, "CVMFS_HTTP_PROXY configuration missing"
 
+
+def test_cvmfs_runtime_components_installed():
+    """Verify the final image keeps the CVMFS runtime packages and helpers."""
+    code, _ = run_cmd("dpkg-query -W cvmfs autofs uuid-dev >/dev/null 2>&1")
+    assert code == 0, "cvmfs, autofs, and uuid-dev must remain installed in the runtime image"
+
+    assert os.path.exists("/etc/init.d/autofs"), "autofs init script missing"
+
+    code, output = run_cmd("command -v cvmfs_config")
+    assert code == 0, f"cvmfs_config not found in PATH: {output}"
+
+
 def test_neurocommand_setup():
     """Verify neurocommand installation."""
     assert os.path.exists("/neurocommand"), "/neurocommand directory missing"
     
-def test_guacamole_tomcat_running():
-    """Verify Tomcat and Guacamole processes running."""
-    # Guacd process check
-    code, output = run_cmd("ps aux | grep '[g]uacd'")
-    # We might not be running services inside the build container yet (services are started in startup scripts)
-    # Just asserting the binaries and wrappers exist
+def test_guacamole_webapp_files_exist():
+    """Verify the Guacamole web application was unpacked into Tomcat."""
     assert os.path.exists("/usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml"), "Guacamole webapp missing (expected extracted ROOT directory)"
     assert os.path.exists("/usr/local/tomcat/bin/startup.sh"), "Tomcat startup script missing"
 
@@ -99,41 +107,38 @@ def test_desktop_storage():
     assert os.path.exists("/neurodesktop-storage"), "/neurodesktop-storage is missing"
 
 
+def test_build_only_toolchain_removed():
+    """Verify the broad build-only toolchain is not retained in the runtime image."""
+    code, output = run_cmd("dpkg-query -W -f='${Status}' build-essential 2>/dev/null")
+    assert code != 0, (
+        "build-essential should be removed after build-only packages are purged. "
+        f"Found: {output}"
+    )
+
+
 def test_grant_sudo_no_disables_passwordless_sudo():
     """Verify GRANT_SUDO=no removes Neurodesktop's managed passwordless sudo rule."""
     nb_user = os.environ.get("NB_USER", "jovyan")
+    grant_sudo = os.environ.get("GRANT_SUDO", "").lower()
 
-    if os.path.exists(NOTEBOOK_SUDOERS_PATH):
-        with open(NOTEBOOK_SUDOERS_PATH, "r", encoding="utf-8") as f:
-            sudoers_content = f.read()
+    if grant_sudo not in {"no", "n", "false", "0"}:
+        pytest.skip("This assertion only applies when the container starts with GRANT_SUDO=no")
 
-        assert not re.search(
-            rf"^{re.escape(nb_user)}\s+ALL=\(ALL\)\s+NOPASSWD:ALL$",
-            sudoers_content,
-            re.MULTILINE,
-        ), (
-            "GRANT_SUDO=no should remove Neurodesktop's managed passwordless sudo "
-            f"rule for {nb_user}, but {NOTEBOOK_SUDOERS_PATH} still grants it."
-        )
+    assert not os.path.exists(NOTEBOOK_SUDOERS_PATH), (
+        "GRANT_SUDO=no should remove Neurodesktop's managed passwordless sudo "
+        f"rule for {nb_user}, but {NOTEBOOK_SUDOERS_PATH} still exists."
+    )
 
     code, current_user = run_cmd("id -un")
     assert code == 0, f"Failed to determine current user: {current_user}"
 
     if os.geteuid() == 0:
-        code, output = run_cmd(
-            f"su -s /bin/bash -c 'env GRANT_SUDO=no sudo -n true' {nb_user}"
-        )
+        code, output = run_cmd(f"su -s /bin/bash -c 'sudo -n true' {nb_user}")
     elif current_user == nb_user:
-        code, output = run_cmd("env GRANT_SUDO=no sudo -n true")
+        code, output = run_cmd("sudo -n true")
     else:
         pytest.skip(
             f"Test requires root or NB_USER ({nb_user}); current user is {current_user}"
-        )
-
-    if code == 0:
-        pytest.skip(
-            "Passwordless sudo is granted by the runtime even without "
-            "Neurodesktop's managed sudoers rule."
         )
 
     assert code != 0, (
