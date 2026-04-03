@@ -11,6 +11,7 @@ import urllib.request
 import pytest
 import websocket
 
+
 def run_cmd(cmd):
     """Utility to run a shell command and return its exit code and output."""
     process = subprocess.run(
@@ -19,12 +20,19 @@ def run_cmd(cmd):
     return process.returncode, process.stdout.strip()
 
 
+def _can_run_root_cmds():
+    if os.geteuid() == 0:
+        return True
+
+    code, _ = run_cmd("sudo -n true")
+    return code == 0
+
+
 def _run_root_cmd(cmd):
     if os.geteuid() == 0:
         return run_cmd(cmd)
 
-    code, _ = run_cmd("sudo -n true")
-    if code != 0:
+    if not _can_run_root_cmds():
         return 1, "Passwordless sudo is unavailable"
 
     return run_cmd(f"sudo -n bash -lc {shlex.quote(cmd)}")
@@ -79,14 +87,18 @@ def _prepare_guacamole_runtime():
     nb_user = os.environ.get("NB_USER", "jovyan")
     nb_uid = os.environ.get("NB_UID", "1000")
     nb_gid = os.environ.get("NB_GID", "100")
+    root_cmds_available = _can_run_root_cmds()
     home_dir = os.path.expanduser(f"~{nb_user}")
     vnc_dir = os.path.join(home_dir, ".vnc")
     ssh_dir = os.path.join(home_dir, ".ssh")
+    guacamole_mapping = "/etc/guacamole/user-mapping-vnc.xml"
 
     os.makedirs(vnc_dir, exist_ok=True)
     os.makedirs(ssh_dir, exist_ok=True)
-    code, output = _run_root_cmd("mkdir -p /var/run/sshd")
-    assert code == 0, f"Failed to create /var/run/sshd: {output}"
+    if root_cmds_available:
+        code, output = _run_root_cmd("mkdir -p /var/run/sshd")
+        assert code == 0, f"Failed to create /var/run/sshd: {output}"
+        guacamole_mapping = "/etc/guacamole/user-mapping-vnc-rdp.xml"
 
     shutil.copy("/opt/jovyan_defaults/.vnc/passwd", os.path.join(vnc_dir, "passwd"))
     shutil.copy("/opt/jovyan_defaults/.vnc/xstartup", os.path.join(vnc_dir, "xstartup"))
@@ -101,9 +113,9 @@ def _prepare_guacamole_runtime():
 
     if os.path.lexists("/etc/guacamole/user-mapping.xml"):
         os.unlink("/etc/guacamole/user-mapping.xml")
-    os.symlink("/etc/guacamole/user-mapping-vnc-rdp.xml", "/etc/guacamole/user-mapping.xml")
+    os.symlink(guacamole_mapping, "/etc/guacamole/user-mapping.xml")
 
-    return nb_user, home_dir
+    return nb_user, home_dir, root_cmds_available
 
 
 def _start_guacamole_as_user(nb_user, home_dir):
@@ -289,10 +301,14 @@ def test_guacamole_protocol_modules_have_runtime_dependencies():
         )
 
 
-def test_guacamole_api_exposes_rdp_and_vnc_connections():
-    """Start Guacamole and verify its API exposes both desktop connections."""
-    nb_user, home_dir = _prepare_guacamole_runtime()
-    _ensure_rdp_backend_ready()
+def test_guacamole_api_exposes_available_desktop_connections():
+    """Start Guacamole and verify its API exposes the desktop protocols this runtime can support."""
+    nb_user, home_dir, root_cmds_available = _prepare_guacamole_runtime()
+    expected_protocols = ["vnc"]
+
+    if root_cmds_available:
+        _ensure_rdp_backend_ready()
+        expected_protocols.insert(0, "rdp")
 
     process = _start_guacamole_as_user(nb_user, home_dir)
     try:
@@ -307,8 +323,8 @@ def test_guacamole_api_exposes_rdp_and_vnc_connections():
         protocols = sorted(
             connection["protocol"] for connection in connections.values()
         )
-        assert protocols == ["rdp", "vnc"], (
-            "Guacamole API should expose both desktop connections, "
+        assert protocols == expected_protocols, (
+            "Guacamole API exposed unexpected desktop connections, "
             f"found: {protocols}"
         )
     finally:
@@ -327,7 +343,11 @@ def test_xrdp_tls_key_access_is_configured():
 
 def test_guacamole_rdp_tunnel_establishes_desktop_session():
     """Verify the Guacamole RDP tunnel renders a desktop without TLS key permission errors."""
-    nb_user, home_dir = _prepare_guacamole_runtime()
+    nb_user, home_dir, root_cmds_available = _prepare_guacamole_runtime()
+
+    if not root_cmds_available:
+        pytest.skip("RDP smoke test requires root or passwordless sudo to start xrdp")
+
     _ensure_rdp_backend_ready()
 
     process = _start_guacamole_as_user(nb_user, home_dir)
