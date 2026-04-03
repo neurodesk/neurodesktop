@@ -1,14 +1,39 @@
 import subprocess
+import signal
 import os
 import pytest
 
+_ENV_PREAMBLE = (
+    "source /opt/neurodesktop/environment_variables.sh 2>/dev/null; "
+    "source /usr/share/lmod/lmod/init/bash 2>/dev/null; "
+)
+
 def run_cmd(cmd, timeout=180):
-    """Utility to run a shell command and return its exit code and output."""
-    process = subprocess.run(
-        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        timeout=timeout,
+    """Run a shell command and return (exit_code, output). Kills process group on timeout."""
+    process = subprocess.Popen(
+        cmd, shell=True,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        start_new_session=True,
     )
-    return process.returncode, process.stdout.strip()
+    try:
+        stdout, _ = process.communicate(timeout=timeout)
+        return process.returncode, stdout.strip()
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+        raise
+
+def _fsl_available():
+    """Check if FSL module loads and fslmaths is on PATH (30s timeout)."""
+    try:
+        code, _ = run_cmd(
+            _ENV_PREAMBLE +
+            "module load fsl 2>/dev/null; command -v fslmaths",
+            timeout=30,
+        )
+        return code == 0
+    except subprocess.TimeoutExpired:
+        return False
 
 def test_nextflow_version():
     """Verify nextflow is installed and functioning."""
@@ -27,7 +52,7 @@ def test_nf_test_version():
     code, output = run_cmd("nf-test --version")
     if code != 0:
         code, output = run_cmd("nf-test version")
-        
+
     assert code == 0, f"nf-test version check failed: {output}"
 
 def test_nf_neuro_modules():
@@ -44,6 +69,8 @@ def test_nextflow_fslmaths(tmp_path):
         pytest.skip("CVMFS is disabled (CVMFS_DISABLE=true)")
     if not os.path.isdir("/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules"):
         pytest.fail("CVMFS is enabled but neurodesk-modules not mounted — startup scripts failed")
+    if not _fsl_available():
+        pytest.fail("module load fsl failed — fslmaths not available")
     workflow = """
 process RUN_FSLMATHS {
     publishDir 'results', mode: 'copy'

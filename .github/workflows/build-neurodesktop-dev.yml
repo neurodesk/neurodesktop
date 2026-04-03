@@ -202,7 +202,7 @@ jobs:
             fi
             sleep 2
           done
-          docker exec neurodesktop-test pytest /opt/tests/ -v
+          docker exec -u jovyan neurodesktop-test pytest /opt/tests/ -v
           docker rm -f neurodesktop-test
   scan-image:
     needs: build-image

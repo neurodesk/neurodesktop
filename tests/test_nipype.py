@@ -1,20 +1,32 @@
 import subprocess
 import os
+import signal
 import pytest
 import sys
 
+_ENV_PREAMBLE = (
+    "source /opt/neurodesktop/environment_variables.sh 2>/dev/null; "
+    "source /usr/share/lmod/lmod/init/bash 2>/dev/null; "
+)
+
 def run_cmd(cmd, timeout=180):
-    """Utility to run a shell command and return its exit code and output."""
-    process = subprocess.run(
+    """Run a shell command and return (exit_code, output). Kills process group on timeout."""
+    process = subprocess.Popen(
         cmd,
         shell=True,
         executable="/bin/bash",
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        timeout=timeout,
+        start_new_session=True,
     )
-    return process.returncode, process.stdout.strip()
+    try:
+        stdout, _ = process.communicate(timeout=timeout)
+        return process.returncode, stdout.strip()
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+        raise
 
 def test_nipype_importable():
     """Verify nipype can be imported and successfully prints its version."""
@@ -30,20 +42,23 @@ def test_nipype_fslmaths(tmp_path):
     if cvmfs_disable in ["true", "1"]:
         pytest.skip("CVMFS is disabled")
 
-    # Load FSL by sourcing the environment setup (handles MODULEPATH glob expansion)
+    # Load FSL in the full neurodesk environment and capture env vars
     code, output = run_cmd(
-        'source /opt/neurodesktop/environment_variables.sh 2>/dev/null; '
-        'source /usr/share/lmod/lmod/init/bash 2>/dev/null; '
+        _ENV_PREAMBLE +
         'module load fsl 2>/dev/null; '
-        'env'
+        'env',
+        timeout=60,
     )
-    if code == 0:
-        for line in output.splitlines():
-            if "=" in line:
-                key, _, val = line.partition("=")
-                if key in ("PATH", "LD_LIBRARY_PATH", "MODULEPATH",
-                           "FSLDIR", "FSLOUTPUTTYPE"):
-                    os.environ[key] = val
+    if code != 0:
+        pytest.fail("Failed to source neurodesk environment and load FSL module")
+
+    for line in output.splitlines():
+        if "=" in line:
+            key, _, val = line.partition("=")
+            if key in ("PATH", "LD_LIBRARY_PATH", "MODULEPATH",
+                       "FSLDIR", "FSLOUTPUTTYPE", "neurodesk_singularity_opts",
+                       "APPTAINER_BINDPATH"):
+                os.environ[key] = val
 
     code, _ = run_cmd("command -v fslmaths")
     if code != 0:
@@ -61,7 +76,7 @@ def test_nipype_fslmaths(tmp_path):
     maths.inputs.op_string = "-add 0"
     maths.inputs.out_file = str(tmp_path / "dummy_maths.nii.gz")
     cmdline = maths.cmdline
-    
+
     assert "fslmaths" in cmdline, f"FSLMaths command not generated properly: {cmdline}"
     assert "dummy.nii.gz" in cmdline, f"Input file not in command line: {cmdline}"
     assert "-add 0" in cmdline, f"Math operation not in command line: {cmdline}"

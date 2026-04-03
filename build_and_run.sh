@@ -53,7 +53,7 @@ run_single_test() {
         sleep 2
     done
 
-    docker exec "$name" pytest /opt/tests/ -v
+    docker exec -u jovyan "$name" pytest /opt/tests/ -v
     local result=$?
 
     docker rm -f "$name" 2>/dev/null || true
@@ -116,7 +116,7 @@ if [ "${1:-}" = "fulltest" ]; then
             echo "============================================================"
             echo "Config: ${label}"
             echo "============================================================"
-            docker exec "$name" pytest /opt/tests/ -v
+            docker exec -u jovyan "$name" pytest /opt/tests/ -v
         ) > "$logfile" 2>&1 &
         PIDS+=($!)
     done
