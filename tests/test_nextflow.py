@@ -54,10 +54,10 @@ process RUN_FSLMATHS {
     set +euo pipefail
     source /opt/neurodesktop/environment_variables.sh 2>/dev/null || true
     source /usr/share/lmod/lmod/init/bash 2>/dev/null || true
-    export MODULEPATH=/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/all:/opt/neurocommand/local/containers/modules/all:${MODULEPATH:-}
-    module load fsl >/dev/null 2>&1 || true
+    module load fsl 2>&1 || true
     if ! command -v fslmaths >/dev/null 2>&1; then
         echo "fslmaths not found in PATH"
+        echo "MODULEPATH=$MODULEPATH"
         exit 1
     fi
     touch output.nii.gz

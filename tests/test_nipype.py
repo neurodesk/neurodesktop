@@ -26,37 +26,27 @@ def test_nipype_importable():
 
 def test_nipype_fslmaths(tmp_path):
     """Verify we can build a simple FSLMaths command via nipype."""
-    # Attempt to load FSL using the python lmod package
-    try:
-        import importlib.util
-        if importlib.util.find_spec("lmod"):
-            import lmod
-            if hasattr(lmod, 'module'):
-                lmod.module('load', 'fsl')
-            elif hasattr(lmod, 'load'):
-                # Handle async style jupyterlmod if available synchronously
-                pass
-        else:
-            # Fallback to the system Lmod python wrapper
-            import sys
-            import os
-            # Provide MODULEPATH for offline/test environments if not set
-            if not os.environ.get("MODULEPATH"):
-                os.environ["MODULEPATH"] = "/neurodesktop-storage/containers/modules/:/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/"
-            lmod_init = "/usr/share/lmod/lmod/init"
-            if lmod_init not in sys.path:
-                sys.path.insert(0, lmod_init)
-            import env_modules_python as lmod
-            lmod.module('use', '/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/')
-            lmod.module('load', 'fsl')
-    except Exception as e:
-        print(f"Warning: could not load fsl via python lmod: {e}")
+    cvmfs_disable = os.environ.get("CVMFS_DISABLE", "false").lower()
+    if cvmfs_disable in ["true", "1"]:
+        pytest.skip("CVMFS is disabled")
+
+    # Load FSL by sourcing the environment setup (handles MODULEPATH glob expansion)
+    code, output = run_cmd(
+        'source /opt/neurodesktop/environment_variables.sh 2>/dev/null; '
+        'source /usr/share/lmod/lmod/init/bash 2>/dev/null; '
+        'module load fsl 2>/dev/null; '
+        'env'
+    )
+    if code == 0:
+        for line in output.splitlines():
+            if "=" in line:
+                key, _, val = line.partition("=")
+                if key in ("PATH", "LD_LIBRARY_PATH", "MODULEPATH",
+                           "FSLDIR", "FSLOUTPUTTYPE"):
+                    os.environ[key] = val
 
     code, _ = run_cmd("command -v fslmaths")
     if code != 0:
-        cvmfs_disable = os.environ.get("CVMFS_DISABLE", "false").lower()
-        if cvmfs_disable in ["true", "1"]:
-            pytest.skip("fslmaths not available — CVMFS is disabled")
         pytest.fail(
             "fslmaths not in PATH after module load — CVMFS is enabled but "
             "FSL module failed to load. Startup scripts may have failed."

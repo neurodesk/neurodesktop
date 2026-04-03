@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-if [ "${1:-}" != "test" ]; then
+if [ "${1:-}" != "test" ] && [ "${1:-}" != "fulltest" ]; then
     if docker ps --all | grep -w neurodesktop; then
         if docker ps --all | grep neurodeskapp; then
             echo "detected a Neurodeskapp container and ignoring it!"
@@ -21,9 +21,55 @@ fi
 
 docker build . -t neurodesktop:latest
 
-if [ "${1:-}" = "test" ]; then
+run_single_test() {
+    # Run a single test configuration with live output
+    local cvmfs_disable="$1"
+    local grant_sudo="$2"
+    local name="neurodesktop-test"
+
     echo "============================================================"
-    echo "Running tests across multiple configurations (parallel)"
+    echo "Testing: CVMFS_DISABLE=${cvmfs_disable}, GRANT_SUDO=${grant_sudo}"
+    echo "============================================================"
+
+    docker rm -f "$name" 2>/dev/null || true
+    docker volume create "${name}-home" 2>/dev/null || true
+
+    docker run -d --shm-size=1gb --privileged --user=root \
+        --name "$name" \
+        --mount "source=${name}-home,target=/home/jovyan" \
+        -v ~/neurodesktop-storage:/neurodesktop-storage \
+        -e CVMFS_DISABLE="${cvmfs_disable}" \
+        -e GRANT_SUDO="${grant_sudo}" \
+        -e NEURODESKTOP_CVMFS_STARTUP_MODE=eager \
+        -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
+        neurodesktop:latest >/dev/null
+
+    echo "Waiting for container startup..."
+    for i in $(seq 1 60); do
+        if docker exec "$name" curl -sf http://localhost:8888/api/status >/dev/null 2>&1; then
+            echo "Container ready after ~$((i*2))s"
+            break
+        fi
+        sleep 2
+    done
+
+    docker exec "$name" pytest /opt/tests/ -v
+    local result=$?
+
+    docker rm -f "$name" 2>/dev/null || true
+    docker volume rm "${name}-home" 2>/dev/null || true
+    return $result
+}
+
+if [ "${1:-}" = "test" ]; then
+    # Quick test: default user configuration (CVMFS enabled, sudo granted)
+    run_single_test false yes
+    exit $?
+fi
+
+if [ "${1:-}" = "fulltest" ]; then
+    echo "============================================================"
+    echo "Running tests across all configurations (parallel)"
     echo "============================================================"
 
     # Define configurations: "cvmfs_disable:grant_sudo"
@@ -36,7 +82,6 @@ if [ "${1:-}" = "test" ]; then
         IFS=':' read -r cvmfs_disable grant_sudo <<< "${CONFIGS[$i]}"
         name="neurodesktop-test-${i}"
         label="CVMFS_DISABLE=${cvmfs_disable}, GRANT_SUDO=${grant_sudo}"
-        logfile="${LOGDIR}/${name}.log"
 
         docker rm -f "$name" 2>/dev/null || true
         docker volume create "${name}-home" 2>/dev/null || true
@@ -61,7 +106,6 @@ if [ "${1:-}" = "test" ]; then
         logfile="${LOGDIR}/${name}.log"
 
         (
-            # Wait for Jupyter readiness
             for attempt in $(seq 1 60); do
                 if docker exec "$name" curl -sf http://localhost:8888/api/status >/dev/null 2>&1; then
                     break
@@ -79,7 +123,6 @@ if [ "${1:-}" = "test" ]; then
 
     echo "Waiting for all test runs to complete..."
 
-    # Collect results
     FAILED=0
     for i in "${!CONFIGS[@]}"; do
         IFS=':' read -r cvmfs_disable grant_sudo <<< "${CONFIGS[$i]}"

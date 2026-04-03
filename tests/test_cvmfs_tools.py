@@ -1,6 +1,5 @@
 import subprocess
 import os
-import sys
 import pytest
 
 
@@ -47,51 +46,22 @@ def test_cvmfs_setup_when_enabled():
 
 
 def _load_module(module_name):
-    """Load an lmod module, trying multiple approaches."""
-    # Ensure MODULEPATH includes CVMFS modules
-    modulepath = os.environ.get("MODULEPATH", "")
-    cvmfs_modules = "/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules"
-    local_modules = "/opt/neurocommand/local/containers/modules/all"
-    for p in [cvmfs_modules, local_modules]:
-        if p not in modulepath:
-            modulepath = f"{p}:{modulepath}" if modulepath else p
-    os.environ["MODULEPATH"] = modulepath
-
-    # Try python lmod bindings
-    try:
-        import importlib.util
-
-        if importlib.util.find_spec("lmod"):
-            import lmod
-
-            if hasattr(lmod, "module"):
-                lmod.module("load", module_name)
-                return
-    except Exception:
-        pass
-
-    # Fallback to system Lmod python wrapper
-    try:
-        lmod_init = "/usr/share/lmod/lmod/init"
-        if lmod_init not in sys.path:
-            sys.path.insert(0, lmod_init)
-        import env_modules_python as lmod
-
-        lmod.module("use", cvmfs_modules)
-        lmod.module("load", module_name)
-        return
-    except Exception:
-        pass
-
-    # Final fallback: source module via bash
+    """Load an lmod module by sourcing environment_variables.sh first."""
+    # Source the environment setup (which does glob expansion on neurodesk-modules/*)
+    # and then load the requested module, capturing the resulting environment.
     code, output = run_cmd(
-        f'source /usr/share/lmod/lmod/init/bash && module use {cvmfs_modules} && module load {module_name} && env'
+        f'source /opt/neurodesktop/environment_variables.sh 2>/dev/null; '
+        f'source /usr/share/lmod/lmod/init/bash 2>/dev/null; '
+        f'module load {module_name} 2>/dev/null; '
+        f'env'
     )
     if code == 0:
         for line in output.splitlines():
             if "=" in line:
                 key, _, val = line.partition("=")
-                if key in ("PATH", "LD_LIBRARY_PATH", "FSLDIR", "FSLOUTPUTTYPE"):
+                # Only import environment variables that affect tool discovery
+                if key in ("PATH", "LD_LIBRARY_PATH", "MODULEPATH",
+                           "FSLDIR", "FSLOUTPUTTYPE", "FREESURFER_HOME"):
                     os.environ[key] = val
 
 
