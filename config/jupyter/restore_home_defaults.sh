@@ -99,13 +99,37 @@ handle_bashrc_append() {
 
     # Create .bashrc if it doesn't exist
     if [ ! -f "$bashrc" ]; then
-        touch "$bashrc"
+        if ! touch "$bashrc" 2>/dev/null; then
+            if sudo -n true 2>/dev/null; then
+                sudo touch "$bashrc" 2>/dev/null || true
+                if [ -n "$NB_UID" ] && [ -n "$NB_GID" ]; then
+                    sudo chown "$NB_UID:$NB_GID" "$bashrc" 2>/dev/null || true
+                fi
+            else
+                log_warn "Cannot create $bashrc: permission denied."
+                return 1
+            fi
+        fi
     fi
 
-    # Append with marker
-    echo "" >> "$bashrc"
-    echo "$marker" >> "$bashrc"
-    cat "$append_file" >> "$bashrc"
+    # Append with marker, using sudo fallback for permission-constrained homes
+    if { echo ""; echo "$marker"; cat "$append_file"; } >> "$bashrc" 2>/dev/null; then
+        return 0
+    fi
+
+    if sudo -n true 2>/dev/null; then
+        local tmp_append
+        tmp_append="$(mktemp)" || return 1
+        { echo ""; echo "$marker"; cat "$append_file"; } > "$tmp_append"
+        if sudo tee -a "$bashrc" < "$tmp_append" >/dev/null 2>&1; then
+            rm -f "$tmp_append"
+            return 0
+        fi
+        rm -f "$tmp_append"
+    fi
+
+    log_warn "Failed to append Neurodesk additions to $bashrc"
+    return 1
 }
 
 # Create empty directories if they don't exist

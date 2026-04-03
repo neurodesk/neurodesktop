@@ -11,6 +11,11 @@ fi
 # docker build -t neurodesktop:latest .
 # docker run --shm-size=1gb -it --privileged --name neurodesktop -v ~/neurodesktop-storage:/neurodesktop-storage -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -p 8080:8080 neurodesktop:latest
 # -e CVMFS_DISABLE=true # will disable CVMFS for testing purposes
+#
+# Startup mode environment variables (default: lazy for faster Jupyter startup):
+# -e NEURODESKTOP_CVMFS_STARTUP_MODE=lazy|eager  # lazy defers CVMFS mount to after Jupyter is ready
+# -e NEURODESKTOP_SLURM_STARTUP_MODE=lazy|eager   # lazy defers Slurm startup to after Jupyter is ready
+# Use eager to restore the original synchronous startup behavior.
 
 docker build . -t neurodesktop:latest
 
