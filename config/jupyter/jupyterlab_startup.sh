@@ -35,78 +35,7 @@ is_apptainer_runtime() {
     [ -d "/.singularity.d" ]
 }
 
-can_chown_path_with_runner() {
-    local path="$1"
-    shift
-    local owner probe_file
-    local -a chown_runner=("$@")
-
-    owner="$(stat -c "%u:%g" "${path}" 2>/dev/null || true)"
-    if [ -z "${owner}" ]; then
-        owner="${NB_UID}:${NB_GID}"
-    fi
-
-    probe_file="${path}/.neurodesktop-chown-probe-$$"
-    if touch "${probe_file}" >/dev/null 2>&1; then
-        if ! "${chown_runner[@]}" "${NB_UID}:${NB_GID}" "${probe_file}" >/dev/null 2>&1; then
-            rm -f "${probe_file}" >/dev/null 2>&1 || true
-            return 1
-        fi
-        rm -f "${probe_file}" >/dev/null 2>&1 || true
-        return 0
-    fi
-
-    "${chown_runner[@]}" "${owner}" "${path}" >/dev/null 2>&1
-}
-
-# Function to check and apply chown if necessary
-apply_chown_if_needed() {
-    local dir="$1"
-    local recursive="$2"
-    local current_uid current_gid
-    local -a chown_runner
-
-    # If running in Apptainer/Singularity, we likely don't want to mess with chown
-    if is_apptainer_runtime; then
-        return
-    fi
-
-    if [ -d "${dir}" ]; then
-        current_uid=$(stat -c "%u" "${dir}")
-        current_gid=$(stat -c "%g" "${dir}")
-        if [ "${current_uid}" != "${NB_UID}" ] || [ "${current_gid}" != "${NB_GID}" ]; then
-            chown_runner=(chown)
-            if [ "$EUID" -ne 0 ]; then
-                if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
-                    chown_runner=(sudo -n chown)
-                else
-                    echo "[WARN] Unable to fix ownership of ${dir}: requires root or passwordless sudo."
-                    return
-                fi
-            fi
-
-            if ! can_chown_path_with_runner "${dir}" "${chown_runner[@]}"; then
-                echo "[WARN] Skipping ownership fix for ${dir}: chown unsupported in this runtime/filesystem."
-                return
-            fi
-
-            if [ "${recursive}" = true ]; then
-                "${chown_runner[@]}" -R "${NB_UID}:${NB_GID}" "${dir}" || \
-                    echo "[WARN] Failed to fix ownership of ${dir} recursively."
-            else
-                "${chown_runner[@]}" "${NB_UID}:${NB_GID}" "${dir}" || \
-                    echo "[WARN] Failed to fix ownership of ${dir}."
-            fi
-        fi
-    fi
-}
-
-apply_chown_if_needed "${HOME}" true
-# apply_chown_if_needed "${HOME}" false
-# apply_chown_if_needed "${HOME}/.local" false
-# apply_chown_if_needed "${HOME}/.local/share" false
-# apply_chown_if_needed "${HOME}/.ssh" true
-# apply_chown_if_needed "${HOME}/.local/share/jupyter" true
+# Home ownership is handled by before_notebook.sh (fix_home_ownership_if_needed).
 
 sanitize_jupyterlab_workspaces() {
     local workspace_dir="${HOME}/.jupyter/lab/workspaces"
@@ -162,51 +91,10 @@ ensure_jupyterlab_page_config() {
 
 ensure_jupyterlab_page_config
 
+# SSH key generation, guacamole mapping injection, and SSH/SFTP daemon startup
+# are handled on-demand by guacamole.sh when the desktop is opened.
 mkdir -p "${HOME}/.ssh"
 chmod 700 "${HOME}/.ssh"
-
-# # Set .ssh directory permissions
-# chmod -R 700 /home/${NB_USER}/.ssh
-# chown -R ${NB_UID}:${NB_GID} /home/${NB_USER}/.ssh
-# setfacl -dRm u::rwx,g::0,o::0 /home/${NB_USER}/.ssh
-
-# Generate SSH keys
-if [ ! -f "${HOME}/.ssh/guacamole_rsa" ]; then
-    ssh-keygen -q -t rsa -f "${HOME}/.ssh/guacamole_rsa" -b 4096 -m PEM -N '' -C "guacamole@sftp-server"
-fi
-if [ ! -f "${HOME}/.ssh/id_rsa" ]; then
-    ssh-keygen -q -t rsa -f "${HOME}/.ssh/id_rsa" -b 4096 -m PEM -N ''
-fi
-
-AUTHORIZED_KEYS_FILE="${HOME}/.ssh/authorized_keys"
-touch "$AUTHORIZED_KEYS_FILE"
-chmod 600 "$AUTHORIZED_KEYS_FILE"
-
-if ! grep -qF "${NB_USER}@${HOSTNAME}" "$AUTHORIZED_KEYS_FILE"; then
-    cat "${HOME}/.ssh/id_rsa.pub" >> "$AUTHORIZED_KEYS_FILE"
-fi
-
-# Fix sshd_config paths
-if [ -f "${HOME}/.ssh/sshd_config" ]; then
-    sed -i "s|/home/jovyan|${HOME}|g" "${HOME}/.ssh/sshd_config"
-fi
-
-if sudo -n true 2>/dev/null; then
-    ln -sf /etc/guacamole/user-mapping-vnc-rdp.xml /etc/guacamole/user-mapping.xml
-fi
-
-# Insert guacamole private key into user-mapping for ssh/sftp support
-if ! grep 'BEGIN RSA PRIVATE KEY' /etc/guacamole/user-mapping.xml; then
-    sed -i "/private-key/ r ${HOME}/.ssh/guacamole_rsa" /etc/guacamole/user-mapping.xml
-fi
-
-# Start SSH/SFTP endpoint for Guacamole and sync authorized_keys from sftp-private-key.
-if [ -x /opt/neurodesktop/ensure_sftp_sshd.sh ]; then
-    /opt/neurodesktop/ensure_sftp_sshd.sh || \
-        echo "[WARN] Failed to initialize SSH/SFTP service for Guacamole."
-else
-    echo "[WARN] /opt/neurodesktop/ensure_sftp_sshd.sh not found."
-fi
 
 # Create a symlink in home if /data is mounted
 if mountpoint -q /data; then
@@ -350,8 +238,6 @@ ensure_codeserver_extensions() {
 }
 
 ensure_codeserver_extensions &
-
-# SSH/SFTP startup is handled above by /opt/neurodesktop/ensure_sftp_sshd.sh.
 
 # Conda shell hooks are already provided by the base image/defaults.
 # Avoid mutating shell config on each startup.

@@ -455,6 +455,7 @@ COPY config/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/
 # Add jupyter notebook and startup scripts for system-wide configuration
 # Note: jupyter_notebook_config.py is generated from template + webapps.json below
 COPY --chown=root:users config/jupyter/jupyterlab_startup.sh /opt/neurodesktop/jupyterlab_startup.sh
+COPY --chown=root:users config/jupyter/deferred_startup.sh /opt/neurodesktop/deferred_startup.sh
 COPY --chown=root:users config/guacamole/guacamole.sh /opt/neurodesktop/guacamole.sh
 COPY --chown=root:users config/guacamole/ensure_rdp_backend.sh /opt/neurodesktop/ensure_rdp_backend.sh
 COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
@@ -479,6 +480,7 @@ RUN curl -fsSL https://raw.githubusercontent.com/neurodesk/neurocommand/main/neu
 
 RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/jupyterlab_startup.sh \
+    /opt/neurodesktop/deferred_startup.sh \
     /opt/neurodesktop/guacamole.sh \
     /opt/neurodesktop/ensure_rdp_backend.sh \
     /opt/neurodesktop/environment_variables.sh \

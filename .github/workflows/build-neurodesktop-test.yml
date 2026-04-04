@@ -134,35 +134,38 @@ jobs:
           filename: .github/job_failure_issue_template.md
           update_existing: true
           search_existing: open
-  scan-image:
+  test-image:
     needs: build-image
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cvmfs_disable: "false"
+            grant_sudo: "no"
+            needs_cvmfs: true
+          - cvmfs_disable: "false"
+            grant_sudo: "yes"
+            needs_cvmfs: true
+          - cvmfs_disable: "true"
+            grant_sudo: "no"
+            needs_cvmfs: false
+          - cvmfs_disable: "true"
+            grant_sudo: "yes"
+            needs_cvmfs: false
     steps:
       - name: Set environment variables
         run: |
           IMAGENAME="neurodesktop-test"
-          BUILDDATE=`date +%Y-%m-%d`
           IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
           IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
-
-          echo "BUILDDATE=$BUILDDATE"
-          echo "IMAGEID=$IMAGEID"
-          echo "IMAGENAME=$IMAGENAME"
-
-          echo "BUILDDATE=$BUILDDATE" >> $GITHUB_ENV
           echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
-          echo "IMAGENAME=$IMAGENAME" >> $GITHUB_ENV
       - name: Free up build space
         run: |
-          echo "Available space before cleanup:"
-          df -h
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift /usr/lib/android-sdk
           sudo docker image prune --all --force
           sudo docker builder prune --force
-          echo "Available space after cleanup:"
-          df -h
       - name: Checkout repository
-        if: ${{ env.GITHUB_RATE_REMAINING > 0 }}
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.ref }}
@@ -175,8 +178,10 @@ jobs:
       - name: Pull container image
         run: docker pull $IMAGEID:latest
       - name: Initialize CVMFS
+        if: matrix.needs_cvmfs
         uses: cvmfs-contrib/github-action-cvmfs@v3
       - name: Configure Neurodesk CVMFS
+        if: matrix.needs_cvmfs
         run: |
           sudo mkdir -p /etc/cvmfs/keys/ardc.edu.au
           sudo cp config/cvmfs/neurodesk.ardc.edu.au.pub /etc/cvmfs/keys/ardc.edu.au/neurodesk.ardc.edu.au.pub
@@ -184,20 +189,54 @@ jobs:
           sudo cp config/cvmfs/default.local /etc/cvmfs/default.local
           sudo cvmfs_config setup
           sudo ls /cvmfs/neurodesk.ardc.edu.au
-      - name: Test container image
+      - name: Test container (CVMFS=${{ matrix.cvmfs_disable == 'false' && 'on' || 'off' }}, SUDO=${{ matrix.grant_sudo }})
         run: |
-          docker run --rm -t --privileged --user=root \
-            -v /cvmfs:/cvmfs:shared \
-            -e CVMFS_DISABLE=false \
-            -e GRANT_SUDO=no \
+          CVMFS_MOUNT=""
+          if [ "${{ matrix.needs_cvmfs }}" = "true" ]; then
+            CVMFS_MOUNT="-v /cvmfs:/cvmfs:shared"
+          fi
+          docker rm -f neurodesktop-test 2>/dev/null || true
+          docker run -d --shm-size=1gb --privileged --user=root \
+            --name neurodesktop-test \
+            $CVMFS_MOUNT \
+            -e CVMFS_DISABLE=${{ matrix.cvmfs_disable }} \
+            -e GRANT_SUDO=${{ matrix.grant_sudo }} \
+            -e NEURODESKTOP_CVMFS_STARTUP_MODE=eager \
             -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
-            $IMAGEID:latest pytest /opt/tests/
-      - name: Test default startup path with local Slurm
+            $IMAGEID:latest
+          echo "Waiting for container startup..."
+          for i in $(seq 1 60); do
+            if docker exec neurodesktop-test curl -sf http://localhost:8888/api/status >/dev/null 2>&1; then
+              echo "Container ready after ~$((i*2))s"
+              break
+            fi
+            sleep 2
+          done
+          docker exec -u jovyan neurodesktop-test pytest /opt/tests/ -v
+          docker rm -f neurodesktop-test
+  scan-image:
+    needs: build-image
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Set environment variables
         run: |
-          docker run --rm -t \
-            -e CVMFS_DISABLE=true \
-            $IMAGEID:latest \
-            bash -lc 'pytest /opt/tests/test_slurm.py'
+          IMAGENAME="neurodesktop-test"
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
+          echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
+      - name: Free up build space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift /usr/lib/android-sdk
+          sudo docker image prune --all --force
+          sudo docker builder prune --force
+      - name: Login to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull container image
+        run: docker pull $IMAGEID:latest
       - name: Container image scan
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
@@ -206,7 +245,6 @@ jobs:
           exit-code: "1"
           severity: CRITICAL
           timeout: 25m0s
-          # These are VS Code metadata package manifests inside code-server, not runtime npm libraries.
           skip-files: /opt/rclone-v1.60.1-linux-amd64/README.txt,/opt/rclone-v1.60.1-linux-amd64/README.html,/opt/rclone-v1.60.1-linux-amd64/rclone.1,/opt/code-server/lib/vscode/package.json,/opt/code-server/lib/vscode/extensions/handlebars/package.json
       - name: Generate issue on job failure
         if: always() && failure()

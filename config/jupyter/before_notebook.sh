@@ -2,6 +2,12 @@
 
 # order: start_notebook.sh -> ### before_notebook.sh ### -> jupyterlab_startup.sh -> jupyter_notebook_config.py
 
+# Phase timing helpers
+_phase_start() { _PHASE_T0=$(date +%s%3N); echo "[TIMING] $1 started"; }
+_phase_end()   { local elapsed=$(( $(date +%s%3N) - _PHASE_T0 )); echo "[TIMING] $1 completed in ${elapsed}ms"; }
+
+_phase_start "critical-startup"
+
 is_apptainer_runtime() {
     [ -n "${SINGULARITY_NAME:-}" ] || \
     [ -n "${APPTAINER_NAME:-}" ] || \
@@ -296,11 +302,14 @@ if [ "$EUID" -eq 0 ]; then
         echo "binfmt_misc directory does not exist in /proc/sys/fs."
     fi
 
-    if [ ! -d "/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/" ]; then
+    # CVMFS startup mode: lazy (default) defers to background worker; eager preserves synchronous behavior.
+    CVMFS_STARTUP_MODE="${NEURODESKTOP_CVMFS_STARTUP_MODE:-lazy}"
+
+    if [ "$CVMFS_STARTUP_MODE" = "eager" ] && [ ! -d "/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/" ]; then
         # the cvmfs directory is not yet mounted
 
         # check if we have internet connectivity:
-        if nslookup neurodesk.org >/dev/null; then
+        if timeout 3 nslookup neurodesk.org >/dev/null 2>&1; then
             echo "Internet is up"
         else
             export CVMFS_DISABLE=true
@@ -600,6 +609,10 @@ if [ "$EUID" -eq 0 ]; then
             fi
         fi
     fi
+
+    if [ "$CVMFS_STARTUP_MODE" != "eager" ]; then
+        echo "[INFO] NEURODESKTOP_CVMFS_STARTUP_MODE=lazy: deferring CVMFS mount to background worker."
+    fi
 fi
 
 # Source custom scripts in .bashrc if they are not already there
@@ -821,41 +834,60 @@ case "${SLURM_MODE}" in
 esac
 export NEURODESKTOP_SLURM_MODE="${SLURM_MODE}"
 
+# Slurm startup mode: lazy (default) defers to background worker; eager preserves synchronous behavior.
+SLURM_STARTUP_MODE="${NEURODESKTOP_SLURM_STARTUP_MODE:-lazy}"
+
 # Start a local single-node Slurm queue inside the container.
 # In auto mode, Slurm defaults to non-cgroup compatibility settings unless explicitly enabled.
 if [ "${NEURODESKTOP_SLURM_MODE}" = "host" ]; then
     configure_host_slurm_environment
     export NEURODESKTOP_SLURM_ENABLE=0
     echo "[INFO] NEURODESKTOP_SLURM_MODE=host: skipping local Slurm startup."
-elif [ "$EUID" -eq 0 ]; then
-    if ! /opt/neurodesktop/setup_and_start_slurm.sh; then
-        echo "[WARN] Failed to configure/start local Slurm queue."
-    fi
-elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
-    if ! sudo -n env \
-        NB_USER="${NB_USER:-jovyan}" \
-        NEURODESKTOP_SLURM_ENABLE="${NEURODESKTOP_SLURM_ENABLE:-1}" \
-        NEURODESKTOP_SLURM_MEMORY_RESERVE_MB="${NEURODESKTOP_SLURM_MEMORY_RESERVE_MB:-256}" \
-        NEURODESKTOP_SLURM_PARTITION="${NEURODESKTOP_SLURM_PARTITION:-neurodesktop}" \
-        NEURODESKTOP_MUNGE_NUM_THREADS="${NEURODESKTOP_MUNGE_NUM_THREADS:-10}" \
-        NEURODESKTOP_SLURM_USE_CGROUP="${NEURODESKTOP_SLURM_USE_CGROUP:-auto}" \
-        NEURODESKTOP_SLURM_CGROUP_PLUGIN="${NEURODESKTOP_SLURM_CGROUP_PLUGIN:-autodetect}" \
-        NEURODESKTOP_SLURM_CGROUP_MOUNTPOINT="${NEURODESKTOP_SLURM_CGROUP_MOUNTPOINT:-/sys/fs/cgroup}" \
-        /opt/neurodesktop/setup_and_start_slurm.sh; then
-        echo "[WARN] Failed to configure/start local Slurm queue via passwordless sudo."
+elif [ "$SLURM_STARTUP_MODE" = "eager" ]; then
+    if [ "$EUID" -eq 0 ]; then
+        if ! /opt/neurodesktop/setup_and_start_slurm.sh; then
+            echo "[WARN] Failed to configure/start local Slurm queue."
+        fi
+    elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+        if ! sudo -n env \
+            NB_USER="${NB_USER:-jovyan}" \
+            NEURODESKTOP_SLURM_ENABLE="${NEURODESKTOP_SLURM_ENABLE:-1}" \
+            NEURODESKTOP_SLURM_MEMORY_RESERVE_MB="${NEURODESKTOP_SLURM_MEMORY_RESERVE_MB:-256}" \
+            NEURODESKTOP_SLURM_PARTITION="${NEURODESKTOP_SLURM_PARTITION:-neurodesktop}" \
+            NEURODESKTOP_MUNGE_NUM_THREADS="${NEURODESKTOP_MUNGE_NUM_THREADS:-10}" \
+            NEURODESKTOP_SLURM_USE_CGROUP="${NEURODESKTOP_SLURM_USE_CGROUP:-auto}" \
+            NEURODESKTOP_SLURM_CGROUP_PLUGIN="${NEURODESKTOP_SLURM_CGROUP_PLUGIN:-autodetect}" \
+            NEURODESKTOP_SLURM_CGROUP_MOUNTPOINT="${NEURODESKTOP_SLURM_CGROUP_MOUNTPOINT:-/sys/fs/cgroup}" \
+            /opt/neurodesktop/setup_and_start_slurm.sh; then
+            echo "[WARN] Failed to configure/start local Slurm queue via passwordless sudo."
+        fi
+    else
+        echo "[WARN] Not running as root and passwordless sudo is unavailable; skipping local Slurm startup."
     fi
 else
-    echo "[WARN] Not running as root and passwordless sudo is unavailable; skipping local Slurm startup."
+    echo "[INFO] NEURODESKTOP_SLURM_STARTUP_MODE=lazy: deferring Slurm startup to background worker."
 fi
+
+# Save the user-provided CVMFS_DISABLE before environment_variables.sh may
+# auto-set it to true (because CVMFS isn't mounted yet in lazy mode).
+_ORIG_CVMFS_DISABLE="${CVMFS_DISABLE:-false}"
 
 source /opt/neurodesktop/environment_variables.sh > /dev/null 2>&1
 
-if [ -x /opt/neurodesktop/ensure_rdp_backend.sh ]; then
-    if ! /opt/neurodesktop/ensure_rdp_backend.sh; then
-        echo "[WARN] Failed to initialize XRDP backend before Jupyter startup."
+_phase_end "critical-startup"
+
+# RDP backend is started on-demand by guacamole.sh when the desktop is opened.
+
+# Launch deferred startup worker for lazy CVMFS and/or Slurm.
+# Pass the original CVMFS_DISABLE so the worker ignores the auto-set value.
+CVMFS_STARTUP_MODE="${NEURODESKTOP_CVMFS_STARTUP_MODE:-lazy}"
+if [ "$CVMFS_STARTUP_MODE" = "lazy" ] || [ "$SLURM_STARTUP_MODE" = "lazy" ]; then
+    if [ -x /opt/neurodesktop/deferred_startup.sh ]; then
+        echo "[INFO] Launching deferred startup worker (CVMFS=$CVMFS_STARTUP_MODE, Slurm=$SLURM_STARTUP_MODE)..."
+        CVMFS_DISABLE="${_ORIG_CVMFS_DISABLE}" /opt/neurodesktop/deferred_startup.sh &
+    else
+        echo "[WARN] /opt/neurodesktop/deferred_startup.sh not found. Deferred startup skipped."
     fi
-else
-    echo "[WARN] /opt/neurodesktop/ensure_rdp_backend.sh not found."
 fi
 
 # Ensure the VNC password file has the correct permissions

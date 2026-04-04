@@ -25,7 +25,7 @@ def test_coding_agent_opencode():
     code, output = run_cmd("command -v opencode")
     assert code == 0, f"OpenCode agent command missing: {output}"
 
-def test_coding_agent_codex_yolo_does_not_add_full_auto(tmp_path):
+def test_codex_yolo_no_full_auto(tmp_path):
     """Verify Codex wrapper does not combine --yolo with --full-auto."""
     wrapper_path = Path("/usr/local/sbin/codex")
     if not wrapper_path.exists():
@@ -66,7 +66,7 @@ def test_coding_agent_codex_yolo_does_not_add_full_auto(tmp_path):
     assert "ARG:--yolo" in result.stdout
     assert "ARG:--full-auto" not in result.stdout
 
-def test_coding_agent_codex_adds_full_auto_by_default(tmp_path):
+def test_codex_default_full_auto(tmp_path):
     """Verify Codex wrapper keeps full-auto default when no yolo/bypass flag is passed."""
     wrapper_path = Path("/usr/local/sbin/codex")
     if not wrapper_path.exists():
@@ -107,7 +107,7 @@ def test_coding_agent_codex_adds_full_auto_by_default(tmp_path):
     assert "ARG:--full-auto" in result.stdout
     assert "ARG:--version" in result.stdout
 
-def test_coding_agent_claude_replaces_dangling_symlink(tmp_path):
+def test_claude_replaces_dangling_symlink(tmp_path):
     """Verify Claude wrapper restores binary when ~/.local/bin/claude is a dangling symlink."""
     wrapper_path = Path("/usr/local/sbin/claude")
     if not wrapper_path.exists():

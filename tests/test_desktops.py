@@ -277,7 +277,7 @@ def test_guacamole_config_exists():
     assert os.path.exists("/etc/guacamole/user-mapping-vnc.xml"), "Guacamole user-mapping missing"
 
 
-def test_guacamole_protocol_modules_have_runtime_dependencies():
+def test_guac_protocol_libs():
     """Verify Guacamole's RDP and VNC protocol modules can resolve their shared libraries."""
     modules = [
         "/usr/local/lib/libguac-client-rdp.so.0.0.0",
@@ -301,7 +301,7 @@ def test_guacamole_protocol_modules_have_runtime_dependencies():
         )
 
 
-def test_guacamole_api_exposes_available_desktop_connections():
+def test_guac_api_connections():
     """Start Guacamole and verify its API exposes the desktop protocols this runtime can support."""
     nb_user, home_dir, root_cmds_available = _prepare_guacamole_runtime()
     expected_protocols = ["vnc"]
@@ -331,7 +331,7 @@ def test_guacamole_api_exposes_available_desktop_connections():
         _cleanup_guacamole_process(process)
 
 
-def test_xrdp_tls_key_access_is_configured():
+def test_xrdp_tls_key_access():
     """Verify xrdp can read its TLS private key via ssl-cert group membership."""
     code, output = run_cmd("id -nG xrdp")
     assert code == 0, f"Failed to inspect xrdp group membership: {output}"
@@ -341,7 +341,7 @@ def test_xrdp_tls_key_access_is_configured():
     )
 
 
-def test_guacamole_rdp_tunnel_establishes_desktop_session():
+def test_guac_rdp_tunnel():
     """Verify the Guacamole RDP tunnel renders a desktop without TLS key permission errors."""
     nb_user, home_dir, root_cmds_available = _prepare_guacamole_runtime()
 

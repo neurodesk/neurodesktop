@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# Phase timing helpers
+_phase_start() { _PHASE_T0=$(date +%s%3N); echo "[TIMING] $1 started"; }
+_phase_end()   { local elapsed=$(( $(date +%s%3N) - _PHASE_T0 )); echo "[TIMING] $1 completed in ${elapsed}ms"; }
+
+_phase_start "guacamole-startup"
+
 # -XX:UseSVE=0 only exists on aarch64 so only add it if it exists. Check using `uname -m`
 if [ "$(uname -m)" == "aarch64" ]; then
     export JAVA_TOOL_OPTIONS="-XX:UseSVE=0"
@@ -60,6 +66,38 @@ update_guacamole_vnc_port() {
 #     sudo --preserve-env=JAVA_TOOL_OPTIONS /usr/local/tomcat/bin/startup.sh
 # fi
 /usr/local/tomcat/bin/startup.sh
+
+# Generate SSH keys if needed (moved from jupyterlab_startup.sh for lazy startup)
+mkdir -p "${HOME}/.ssh"
+chmod 700 "${HOME}/.ssh"
+if [ ! -f "${HOME}/.ssh/guacamole_rsa" ]; then
+    ssh-keygen -q -t rsa -f "${HOME}/.ssh/guacamole_rsa" -b 4096 -m PEM -N '' -C "guacamole@sftp-server"
+fi
+if [ ! -f "${HOME}/.ssh/id_rsa" ]; then
+    ssh-keygen -q -t rsa -f "${HOME}/.ssh/id_rsa" -b 4096 -m PEM -N ''
+fi
+
+AUTHORIZED_KEYS_FILE="${HOME}/.ssh/authorized_keys"
+touch "$AUTHORIZED_KEYS_FILE"
+chmod 600 "$AUTHORIZED_KEYS_FILE"
+if ! grep -qF "${NB_USER}@${HOSTNAME}" "$AUTHORIZED_KEYS_FILE" 2>/dev/null; then
+    cat "${HOME}/.ssh/id_rsa.pub" >> "$AUTHORIZED_KEYS_FILE"
+fi
+
+# Fix sshd_config paths
+if [ -f "${HOME}/.ssh/sshd_config" ]; then
+    sed -i "s|/home/jovyan|${HOME}|g" "${HOME}/.ssh/sshd_config"
+fi
+
+# Set up guacamole user-mapping
+if sudo -n true 2>/dev/null; then
+    ln -sf /etc/guacamole/user-mapping-vnc-rdp.xml /etc/guacamole/user-mapping.xml
+fi
+
+# Insert guacamole private key into user-mapping for ssh/sftp support
+if ! grep 'BEGIN RSA PRIVATE KEY' /etc/guacamole/user-mapping.xml 2>/dev/null; then
+    sed -i "/private-key/ r ${HOME}/.ssh/guacamole_rsa" /etc/guacamole/user-mapping.xml
+fi
 
 # RDP
 if [ -x /opt/neurodesktop/ensure_rdp_backend.sh ]; then
@@ -130,3 +168,5 @@ xset -display :${DISPLAY_NUM} s off || true
 # sudo service guacd start
 guacd -b 127.0.0.1
 echo "    Running guacamole"
+
+_phase_end "guacamole-startup"

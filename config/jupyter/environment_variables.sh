@@ -12,6 +12,10 @@ if [[ -z "${USER}" ]]; then
     export USER=${NB_USER}
 fi
 
+fi
+
+# MODULEPATH and CVMFS detection run on every source so that new shells
+# pick up CVMFS after a deferred (lazy) mount completes.
 export NEURODESKTOP_LOCAL_CONTAINERS="${NEURODESKTOP_LOCAL_CONTAINERS:-/neurodesktop-storage/containers}"
 export MODULEPATH=${NEURODESKTOP_LOCAL_CONTAINERS}/modules/:/cvmfs/neurodesk.ardc.edu.au/containers/modules/
 
@@ -26,13 +30,13 @@ if [ -f '/usr/share/module.sh' ]; then
         else
                 MODULEPATH=${CVMFS_MODULES}*
                 export MODULEPATH=`echo $MODULEPATH | sed 's/ /:/g'`
+                export CVMFS_DISABLE=false
 
                 # if the offline modules directory exists, we can use it and will prefer it over cvmfs
                 if [ -d ${OFFLINE_MODULES} ]; then
                         export MODULEPATH=${OFFLINE_MODULES}:$MODULEPATH
                 fi
         fi
-fi
 fi
 
 # Show informational messages in interactive terminals (outside the NEURODESKTOP_ENV_SOURCED guard so they show on each new terminal)
