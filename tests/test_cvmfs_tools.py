@@ -50,11 +50,11 @@ def _skip_if_cvmfs_disabled():
 
 
 def _fsl_available():
-    """Check if FSL module loads and fslmaths is on PATH (with 30s timeout)."""
+    """Check if FSL module loads and fslmaths is on PATH."""
     try:
         code, _ = run_neuro_cmd(
             "module load fsl 2>/dev/null; command -v fslmaths",
-            timeout=30,
+            timeout=120,
         )
         return code == 0
     except subprocess.TimeoutExpired:
@@ -142,6 +142,7 @@ class TestFslMaths:
         output_image = str(tmp_path / "test_output.nii.gz")
 
         # Run fslmaths inside the full neurodesk environment
+        # Timeout is generous: on arm64, fslmaths runs via QEMU emulation
         code, output = run_neuro_cmd(
             f"module load fsl 2>/dev/null; "
             f'FSLDIR="${{FSLDIR:-}}"; '
@@ -149,7 +150,7 @@ class TestFslMaths:
             f'[ -f "$test_img" ] || test_img="$FSLDIR/data/standard/MNI152_T1_1mm.nii.gz"; '
             f'[ -f "$test_img" ] || {{ echo "No FSL test image found. FSLDIR=$FSLDIR"; exit 2; }}; '
             f'fslmaths "$test_img" -add 0 {output_image}',
-            timeout=180,
+            timeout=600,
         )
         if code == 2:
             pytest.skip(f"No standard FSL test image found: {output}")
@@ -179,7 +180,7 @@ class TestFslMaths:
             f'fslmaths "$test_img" -mul 2 {multiplied}; '
             f'mult_mean=$(fslstats {multiplied} -m); '
             f'echo "orig=$orig_mean mult=$mult_mean"',
-            timeout=180,
+            timeout=600,
         )
         if code == 2:
             pytest.skip(f"No standard FSL test image found: {output}")

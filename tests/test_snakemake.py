@@ -30,7 +30,7 @@ def _fsl_available():
         code, _ = run_cmd(
             _ENV_PREAMBLE +
             "module load fsl 2>/dev/null; command -v fslmaths",
-            timeout=30,
+            timeout=120,
         )
         return code == 0
     except subprocess.TimeoutExpired:
