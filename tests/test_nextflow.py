@@ -11,7 +11,7 @@ _ENV_PREAMBLE = (
 def run_cmd(cmd, timeout=180):
     """Run a shell command and return (exit_code, output). Kills process group on timeout."""
     process = subprocess.Popen(
-        cmd, shell=True,
+        cmd, shell=True, executable='/bin/bash',
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         start_new_session=True,
     )
