@@ -305,7 +305,7 @@ RUN mkdir -p "${NF_TEST_HOME}" \
     && curl -fsSL https://get.nextflow.io | bash \
     && mv /tmp/nextflow /usr/local/bin/nextflow \
     && chmod 755 /usr/local/bin/nextflow \
-    && wget -qO- https://get.nf-test.com | bash \
+    && wget -qO- https://get.nf-test.com | bash -s 0.9.5 \
     && test -f "${HOME}/.nf-test/nf-test.jar" \
     && cp -a "${HOME}/.nf-test/." "${NF_TEST_HOME}/" \
     && printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'exec java -jar /opt/nf-test/nf-test.jar "$@"' > /usr/local/bin/nf-test \
