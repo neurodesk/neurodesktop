@@ -98,6 +98,8 @@ jobs:
           context: .
           load: true
           tags: ${{ env.IMAGEID }}:${{ env.BUILDDATE }}
+          build-args: |
+            NEURODESKTOP_VERSION=${{ env.BUILDDATE }}
           cache-from: type=registry,ref=${{ env.IMAGEID }}:latest
           cache-to: type=inline
       - name: Get rootfs of new image
@@ -139,6 +141,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            NEURODESKTOP_VERSION=${{ env.BUILDDATE }}
           cache-from: type=registry,ref=${{ env.IMAGEID }}:latest
           cache-to: type=inline
       - name: Create github tag (if changes found)
