@@ -637,4 +637,9 @@ RUN rm /tmp/skipcache \
 # the privileges needed to bootstrap local Slurm/CVMFS, then drops to NB_USER.
 USER root
 
+# Bake the version into the image (CI passes the build date; local builds get "development").
+# Placed at the end so earlier layers remain cacheable when only the version changes.
+ARG NEURODESKTOP_VERSION="development"
+ENV NEURODESKTOP_VERSION=${NEURODESKTOP_VERSION}
+
 WORKDIR "/home/${NB_USER}"
