@@ -7,7 +7,7 @@
   "provider": {
     "neurodesk": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "Neurodesk vLLM",
+      "name": "Neurodesk LiteLLM",
       "options": {
         "baseURL": "https://llm.neurodesk.org/v1",
         "apiKey": "{env:NEURODESK_API_KEY}"
