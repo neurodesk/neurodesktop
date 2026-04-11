@@ -21,7 +21,9 @@ OLLAMA_RUNNING=0
 OLLAMA_STATUS="not checked"
 NEURODESK_RUNNING=0
 NEURODESK_REQUIRES_KEY=0
+NEURODESK_MODELS_FROM_SERVER=0
 NEURODESK_STATUS="not checked"
+NEURODESK_API_KEY_WAS_PROMPTED=0
 OLLAMA_MODEL_CONTEXTS_JSON="{}"
 OLLAMA_DEFAULT_CONTEXT_LIMIT=32768
 OLLAMA_DEFAULT_OUTPUT_LIMIT=8192
@@ -333,9 +335,11 @@ check_neurodesk_server() {
     local response_file
     local http_code
     local model_name
+    local model_count
 
     NEURODESK_RUNNING=0
     NEURODESK_REQUIRES_KEY=0
+    NEURODESK_MODELS_FROM_SERVER=0
     NEURODESK_MODELS=()
 
     if ! command -v curl >/dev/null 2>&1; then
@@ -382,11 +386,18 @@ PY
             )
         fi
 
-        if [ "${#NEURODESK_MODELS[@]}" -eq 0 ]; then
+        model_count="${#NEURODESK_MODELS[@]}"
+        if [ "${model_count}" -gt 0 ]; then
+            NEURODESK_MODELS_FROM_SERVER=1
+        else
             NEURODESK_MODELS=("${NEURODESK_DEFAULT_MODEL_ID}")
         fi
 
-        NEURODESK_STATUS="running"
+        if [ "${model_count}" -gt 0 ]; then
+            NEURODESK_STATUS="running with ${model_count} LiteLLM model(s)"
+        else
+            NEURODESK_STATUS="running, but no LiteLLM models were returned; using ${NEURODESK_DEFAULT_MODEL_ID}"
+        fi
         rm -f "${response_file}"
         return 0
     fi
@@ -438,6 +449,8 @@ build_working_model_choices() {
     if [ "${NEURODESK_RUNNING}" -eq 1 ] && [ "${#NEURODESK_MODELS[@]}" -gt 0 ]; then
         if [ "${NEURODESK_REQUIRES_KEY}" -eq 1 ] && [ -z "${NEURODESK_API_KEY:-}" ]; then
             neurodesk_suffix=" (requires API key setup)"
+        elif [ "${NEURODESK_REQUIRES_KEY}" -eq 1 ]; then
+            neurodesk_suffix=" (requires a valid API key)"
         fi
 
         for model_name in "${NEURODESK_MODELS[@]}"; do
@@ -543,7 +556,7 @@ OLLAMA_DEFAULT_OUTPUT_LIMIT = positive_int(ollama_default_output_limit) or 8192
 fallbacks = {
     "neurodesk": {
         "npm": "@ai-sdk/openai-compatible",
-        "name": "Neurodesk vLLM",
+        "name": "Neurodesk LiteLLM",
         "options": {
             "baseURL": neurodesk_base_url,
             "apiKey": "{env:NEURODESK_API_KEY}",
@@ -593,6 +606,7 @@ def apply_models(provider_key: str, model_ids):
     elif provider_key == "jetstream":
         options["baseURL"] = jetstream_base_url
     elif provider_key == "neurodesk":
+        provider_cfg["name"] = "Neurodesk LiteLLM"
         options["baseURL"] = neurodesk_base_url
         options.setdefault("apiKey", "{env:NEURODESK_API_KEY}")
 
@@ -771,6 +785,66 @@ choose_default_model() {
     done
 }
 
+# Show LiteLLM models and let first-time key setup choose a real model.
+choose_neurodesk_litellm_model() {
+    local idx
+    local choice
+    local default_idx=1
+    local selected_neurodesk_model=""
+
+    if [ "${#NEURODESK_MODELS[@]}" -eq 0 ]; then
+        return 1
+    fi
+
+    if [ "${NEURODESK_MODELS_FROM_SERVER}" -ne 1 ]; then
+        return 1
+    fi
+
+    case "${SELECTED_MODEL}" in
+        neurodesk/*)
+            selected_neurodesk_model="${SELECTED_MODEL#neurodesk/}"
+            ;;
+    esac
+
+    echo "Available llm.neurodesk.org LiteLLM models:"
+    for idx in "${!NEURODESK_MODELS[@]}"; do
+        printf "%d) %s\n" "$((idx + 1))" "${NEURODESK_MODELS[$idx]}"
+        if [ "${NEURODESK_MODELS[$idx]}" = "${selected_neurodesk_model}" ]; then
+            default_idx=$((idx + 1))
+        fi
+    done
+
+    if [ "${#NEURODESK_MODELS[@]}" -eq 1 ]; then
+        SELECTED_MODEL="neurodesk/${NEURODESK_MODELS[0]}"
+        return 0
+    fi
+
+    if [ ! -t 0 ]; then
+        SELECTED_MODEL="neurodesk/${NEURODESK_MODELS[$((default_idx - 1))]}"
+        return 0
+    fi
+
+    while true; do
+        read -r -p "Choose the default LiteLLM model [${default_idx}]: " choice
+        if [ -z "${choice}" ]; then
+            choice="${default_idx}"
+        fi
+
+        case "${choice}" in
+            ''|*[!0-9]*)
+                echo "Invalid choice. Enter a number."
+                ;;
+            *)
+                if [ "${choice}" -ge 1 ] && [ "${choice}" -le "${#NEURODESK_MODELS[@]}" ]; then
+                    SELECTED_MODEL="neurodesk/${NEURODESK_MODELS[$((choice - 1))]}"
+                    return 0
+                fi
+                echo "Invalid choice. Enter a number between 1 and ${#NEURODESK_MODELS[@]}."
+                ;;
+        esac
+    done
+}
+
 # Step 7: If user chose llm.neurodesk.org, guide them through API key setup/export.
 ensure_neurodesk_api_key_for_selection() {
     local entered_key=""
@@ -783,31 +857,40 @@ ensure_neurodesk_api_key_for_selection() {
             ;;
     esac
 
+    NEURODESK_API_KEY_WAS_PROMPTED=0
     load_neurodesk_api_key_from_bashrc
     if [ -n "${NEURODESK_API_KEY:-}" ] && [ "${NEURODESK_REQUIRES_KEY}" -eq 0 ]; then
         return 0
     fi
 
     if [ ! -t 0 ]; then
+        if [ -n "${NEURODESK_API_KEY:-}" ] && [ "${NEURODESK_REQUIRES_KEY}" -eq 1 ]; then
+            echo "Selected ${SELECTED_MODEL}, but the current NEURODESK_API_KEY was rejected by llm.neurodesk.org." >&2
+            echo "Generate a new API key at https://llm.neurodesk.org/ui/ and export it as NEURODESK_API_KEY." >&2
+            return 1
+        fi
         echo "Selected ${SELECTED_MODEL}, but NEURODESK_API_KEY is not set and no interactive prompt is possible." >&2
         return 1
     fi
 
     if [ -n "${NEURODESK_API_KEY:-}" ] && [ "${NEURODESK_REQUIRES_KEY}" -eq 1 ]; then
         echo "The existing NEURODESK_API_KEY was rejected by llm.neurodesk.org."
-        echo "Please enter a new key."
+        echo "Please generate a new API key at https://llm.neurodesk.org/ui/ and paste it below."
     fi
 
-    echo "You selected llm.neurodesk.org."
-    echo "1) Open https://llm.neurodesk.org and create an account (if needed)."
-    echo "2) Create an API key in the Neurodesk web app."
-    echo "3) Paste the key below; this wrapper will export it and save it to ~/.bashrc."
+    echo "Configuring llm.neurodesk.org."
+    echo "1) Open https://llm.neurodesk.org/ui/ and create an account (if needed)."
+    echo "2) Generate an API key in the Neurodesk LiteLLM web app."
+    echo "3) Paste the key below; input is hidden and this wrapper will save it to ~/.bashrc."
 
     while [ -z "${entered_key}" ]; do
-        read -r -s -p "Paste Neurodesk API key: " entered_key
+        read -r -s -p "Paste Neurodesk API key (input hidden, press Enter when done): " entered_key
         echo
+        entered_key=$(sanitize_neurodesk_api_key "${entered_key}")
         if [ -z "${entered_key}" ]; then
             echo "API key cannot be empty. Please try again."
+        else
+            echo "API key received (input hidden)."
         fi
     done
 
@@ -818,6 +901,7 @@ ensure_neurodesk_api_key_for_selection() {
         echo "Warning: failed to save key to ${HOME}/.bashrc, but it is exported for this session." >&2
     fi
 
+    NEURODESK_API_KEY_WAS_PROMPTED=1
     return 0
 }
 
@@ -850,6 +934,19 @@ ensure_opencode_model_selection() {
     echo "Ollama: ${OLLAMA_STATUS}"
     echo "llm.neurodesk.org: ${NEURODESK_STATUS}"
 
+    if [ "${NEURODESK_REQUIRES_KEY}" -eq 1 ] && [ -n "${NEURODESK_API_KEY:-}" ]; then
+        SELECTED_MODEL="neurodesk/${NEURODESK_DEFAULT_MODEL_ID}"
+        if ensure_neurodesk_api_key_for_selection; then
+            echo "Rechecking llm.neurodesk.org with the new API key..."
+            check_neurodesk_server
+            echo "llm.neurodesk.org: ${NEURODESK_STATUS}"
+        else
+            echo "Neurodesk API key refresh was not completed. Continuing with other available models." >&2
+        fi
+        SELECTED_MODEL=""
+        NEURODESK_API_KEY_WAS_PROMPTED=0
+    fi
+
     build_working_model_choices
 
     # Step 4: Always refresh OpenCode providers/models using detected possibilities.
@@ -873,6 +970,12 @@ ensure_opencode_model_selection() {
     if [[ "${SELECTED_MODEL}" == neurodesk/* ]]; then
         selected_neurodesk_model="${SELECTED_MODEL#neurodesk/}"
         check_neurodesk_server
+        if [ "${NEURODESK_API_KEY_WAS_PROMPTED}" -eq 1 ]; then
+            if ! choose_neurodesk_litellm_model; then
+                echo "No LiteLLM models were returned for this key. Keeping ${SELECTED_MODEL}." >&2
+            fi
+            selected_neurodesk_model="${SELECTED_MODEL#neurodesk/}"
+        fi
         if ! array_contains "${selected_neurodesk_model}" "${NEURODESK_MODELS[@]}"; then
             NEURODESK_MODELS=("${selected_neurodesk_model}" "${NEURODESK_MODELS[@]}")
         fi

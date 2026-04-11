@@ -1,5 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "autoupdate": false,
   "instructions": [
     "/opt/AGENTS.md"
   ],
@@ -7,7 +8,7 @@
   "provider": {
     "neurodesk": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "Neurodesk vLLM",
+      "name": "Neurodesk LiteLLM",
       "options": {
         "baseURL": "https://llm.neurodesk.org/v1",
         "apiKey": "{env:NEURODESK_API_KEY}"

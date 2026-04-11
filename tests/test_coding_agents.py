@@ -1,5 +1,8 @@
-import subprocess
+import errno
+import json
 import os
+import subprocess
+import time
 from pathlib import Path
 import pytest
 
@@ -24,6 +27,335 @@ def test_coding_agent_opencode():
     """Verify OpenCode agent wrapper is available."""
     code, output = run_cmd("command -v opencode")
     assert code == 0, f"OpenCode agent command missing: {output}"
+
+def run_pty_command(args, input_text, cwd, env, timeout=15):
+    """Run an interactive wrapper under a PTY and collect combined output."""
+    import pty
+    import select
+
+    master_fd, slave_fd = pty.openpty()
+    process = subprocess.Popen(
+        args,
+        cwd=cwd,
+        env=env,
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
+        close_fds=True,
+    )
+    os.close(slave_fd)
+
+    output = bytearray()
+    deadline = time.monotonic() + timeout
+
+    try:
+        if input_text:
+            os.write(master_fd, input_text.encode("utf-8"))
+
+        while True:
+            if time.monotonic() > deadline:
+                process.kill()
+                raise subprocess.TimeoutExpired(
+                    args, timeout, output=output.decode("utf-8", errors="replace")
+                )
+
+            readable, _, _ = select.select([master_fd], [], [], 0.1)
+            if readable:
+                try:
+                    chunk = os.read(master_fd, 4096)
+                except OSError as exc:
+                    if exc.errno == errno.EIO:
+                        break
+                    raise
+                if not chunk:
+                    break
+                output.extend(chunk)
+
+            if process.poll() is not None:
+                while True:
+                    readable, _, _ = select.select([master_fd], [], [], 0)
+                    if not readable:
+                        break
+                    try:
+                        chunk = os.read(master_fd, 4096)
+                    except OSError as exc:
+                        if exc.errno == errno.EIO:
+                            break
+                        raise
+                    if not chunk:
+                        break
+                    output.extend(chunk)
+                break
+
+        return process.wait(timeout=1), output.decode("utf-8", errors="replace")
+    finally:
+        os.close(master_fd)
+        if process.poll() is None:
+            process.kill()
+
+def make_opencode_litellm_wrapper(tmp_path):
+    """Create a testable OpenCode wrapper with fake LiteLLM responses."""
+    wrapper_path = Path("/usr/local/sbin/opencode")
+    if not wrapper_path.exists():
+        pytest.skip("OpenCode wrapper not installed in this environment")
+
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    fake_bin_dir = tmp_path / "bin"
+    fake_bin_dir.mkdir()
+
+    default_config = tmp_path / "opencode-default.json"
+    default_config.write_text(
+        json.dumps(
+            {
+                "$schema": "https://opencode.ai/config.json",
+                "model": "neurodesk/devstral-small-2",
+                "provider": {
+                    "neurodesk": {
+                        "npm": "@ai-sdk/openai-compatible",
+                        "name": "Neurodesk vLLM",
+                        "options": {
+                            "baseURL": "https://llm.neurodesk.org/v1",
+                            "apiKey": "{env:NEURODESK_API_KEY}",
+                        },
+                        "models": {
+                            "devstral-small-2": {
+                                "name": "Devstral Small 2 24B",
+                                "limit": {"context": 131000, "output": 8192},
+                            }
+                        },
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_curl = fake_bin_dir / "curl"
+    fake_curl.write_text(
+        """#!/bin/sh
+outfile=""
+auth=""
+url=""
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -o)
+            outfile="$2"
+            shift 2
+            ;;
+        -H)
+            case "$2" in
+                Authorization:*) auth="$2" ;;
+            esac
+            shift 2
+            ;;
+        http://*|https://*)
+            url="$1"
+            shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+if [ -z "$outfile" ]; then
+    outfile="/dev/null"
+fi
+
+case "$url" in
+    *llm.neurodesk.org*/models)
+        case "$auth" in
+            "Authorization: Bearer neurodesk-test-key"|"Authorization: Bearer new-neurodesk-key")
+                printf '%s' '{"data":[{"id":"model-alpha"},{"id":"openai/gpt-4.1-mini"}]}' > "$outfile"
+                printf '200'
+                ;;
+            *)
+                printf '%s' '{"error":{"message":"Authentication Error, No api key passed in."}}' > "$outfile"
+                printf '401'
+                ;;
+        esac
+        ;;
+    *llm.jetstream-cloud.org*)
+        printf '%s' '{"error":"unavailable"}' > "$outfile"
+        printf '503'
+        ;;
+    *127.0.0.1:11434/api/tags*)
+        if [ "${FAKE_OLLAMA_MODELS:-}" = "1" ]; then
+            printf '%s' '{"models":[{"name":"local-model:latest"}]}' > "$outfile"
+            printf '200'
+        else
+            printf '%s' '{}' > "$outfile"
+            printf '000'
+        fi
+        ;;
+    *127.0.0.1:9/api/tags*)
+        if [ "${FAKE_OLLAMA_MODELS:-}" = "1" ]; then
+            printf '%s' '{"models":[{"name":"local-model:latest"}]}' > "$outfile"
+            printf '200'
+        else
+            printf '%s' '{}' > "$outfile"
+            printf '000'
+        fi
+        ;;
+    *host.docker.internal:11434/api/tags*)
+        if [ "${FAKE_OLLAMA_MODELS:-}" = "1" ]; then
+            printf '%s' '{"models":[{"name":"local-model:latest"}]}' > "$outfile"
+            printf '200'
+        else
+            printf '%s' '{}' > "$outfile"
+            printf '000'
+        fi
+        ;;
+    *api/tags*)
+        printf '%s' '{}' > "$outfile"
+        printf '000'
+        ;;
+    *)
+        printf '%s' '{}' > "$outfile"
+        printf '000'
+        ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    fake_curl.chmod(0o755)
+
+    fake_opencode = tmp_path / "fake-opencode"
+    fake_opencode.write_text("#!/bin/sh\necho \"FAKE_OPENCODE:$*\"\n", encoding="utf-8")
+    fake_opencode.chmod(0o755)
+
+    test_wrapper = tmp_path / "opencode-wrapper-test"
+    wrapper_contents = wrapper_path.read_text(encoding="utf-8")
+    wrapper_contents = wrapper_contents.replace(
+        'OPENCODE_DEFAULT_CONFIG_FILE="/opt/jovyan_defaults/.config/opencode/opencode.json"',
+        f'OPENCODE_DEFAULT_CONFIG_FILE="{default_config}"',
+    )
+    wrapper_contents = wrapper_contents.replace("/usr/bin/opencode", str(fake_opencode))
+    test_wrapper.write_text(wrapper_contents, encoding="utf-8")
+    test_wrapper.chmod(0o755)
+
+    (tmp_path / "AGENTS.md").write_text("test", encoding="utf-8")
+
+    env = {
+        **os.environ,
+        "HOME": str(home_dir),
+        "PATH": f"{fake_bin_dir}:{os.environ['PATH']}",
+        "TERM": "xterm",
+    }
+    env.pop("NEURODESK_API_KEY", None)
+    env.pop("OPENCODE_MODEL_PROFILE", None)
+
+    return test_wrapper, home_dir, env
+
+def test_opencode_shows_litellm_models_after_api_key_creation(tmp_path):
+    """Verify first-time Neurodesk key setup shows LiteLLM models and updates OpenCode."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)],
+        "neurodesk-test-key\n2\n",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert returncode == 0, output
+    assert "Open https://llm.neurodesk.org/ui/ and create an account" in output
+    assert "Paste Neurodesk API key (input hidden, press Enter when done):" in output
+    assert "API key received (input hidden)." in output
+    assert "Available llm.neurodesk.org LiteLLM models:" in output
+    assert "1) model-alpha" in output
+    assert "2) openai/gpt-4.1-mini" in output
+    assert "OpenCode default model set to neurodesk/openai/gpt-4.1-mini." in output
+
+    user_config = json.loads(
+        (home_dir / ".config" / "opencode" / "opencode.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    neurodesk_provider = user_config["provider"]["neurodesk"]
+    assert user_config["model"] == "neurodesk/openai/gpt-4.1-mini"
+    assert neurodesk_provider["name"] == "Neurodesk LiteLLM"
+    assert list(neurodesk_provider["models"]) == ["model-alpha", "openai/gpt-4.1-mini"]
+
+def test_opencode_rejected_neurodesk_key_points_to_litellm_ui(tmp_path):
+    """Verify rejected Neurodesk keys ask users to generate a replacement via LiteLLM UI."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    env["NEURODESK_API_KEY"] = "expired-neurodesk-key"
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)],
+        "new-neurodesk-key\n1\n",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert returncode == 0, output
+    assert (
+        "llm.neurodesk.org: running, but the current NEURODESK_API_KEY is rejected (HTTP 401)"
+        in output
+    )
+    assert (
+        "Please generate a new API key at https://llm.neurodesk.org/ui/ and paste it below."
+        in output
+    )
+    assert "Paste Neurodesk API key (input hidden, press Enter when done):" in output
+    assert "API key received (input hidden)." in output
+    assert "Rechecking llm.neurodesk.org with the new API key..." in output
+    assert "Working models detected:" in output
+    assert "1) llm.neurodesk.org / model-alpha" in output
+    assert "2) llm.neurodesk.org / openai/gpt-4.1-mini" in output
+    assert "llm.neurodesk.org / devstral-small-2 (requires a valid API key)" not in output
+    assert "OpenCode default model set to neurodesk/model-alpha." in output
+
+    bashrc = (home_dir / ".bashrc").read_text(encoding="utf-8")
+    assert "new-neurodesk-key" in bashrc
+    assert "expired-neurodesk-key" not in bashrc
+
+    user_config = json.loads(
+        (home_dir / ".config" / "opencode" / "opencode.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert user_config["model"] == "neurodesk/model-alpha"
+
+def test_opencode_rejected_neurodesk_key_refreshes_before_mixed_model_picker(tmp_path):
+    """Verify a rejected Neurodesk key is refreshed before showing mixed providers."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    env["NEURODESK_API_KEY"] = "expired-neurodesk-key"
+    env["FAKE_OLLAMA_MODELS"] = "1"
+    env["OLLAMA_HOST"] = "http://127.0.0.1:9"
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)],
+        "new-neurodesk-key\n3\n",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert returncode == 0, output
+    assert (
+        output.index(
+            "Please generate a new API key at https://llm.neurodesk.org/ui/ and paste it below."
+        )
+        < output.index("Working models detected:")
+    )
+    assert "API key received (input hidden)." in output
+    assert "1) Local Ollama / local-model:latest" in output
+    assert "2) llm.neurodesk.org / model-alpha" in output
+    assert "3) llm.neurodesk.org / openai/gpt-4.1-mini" in output
+    assert "llm.neurodesk.org / devstral-small-2 (requires a valid API key)" not in output
+    assert "OpenCode default model set to neurodesk/openai/gpt-4.1-mini." in output
+
+    user_config = json.loads(
+        (home_dir / ".config" / "opencode" / "opencode.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    neurodesk_provider = user_config["provider"]["neurodesk"]
+    assert user_config["model"] == "neurodesk/openai/gpt-4.1-mini"
+    assert list(neurodesk_provider["models"]) == ["model-alpha", "openai/gpt-4.1-mini"]
 
 def test_codex_yolo_no_full_auto(tmp_path):
     """Verify Codex wrapper does not combine --yolo with --full-auto."""
