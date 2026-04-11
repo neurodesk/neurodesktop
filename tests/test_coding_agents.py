@@ -182,6 +182,33 @@ case "$url" in
         printf '503'
         ;;
     *127.0.0.1:11434/api/tags*)
+        if [ "${FAKE_OLLAMA_MODELS:-}" = "1" ]; then
+            printf '%s' '{"models":[{"name":"local-model:latest"}]}' > "$outfile"
+            printf '200'
+        else
+            printf '%s' '{}' > "$outfile"
+            printf '000'
+        fi
+        ;;
+    *127.0.0.1:9/api/tags*)
+        if [ "${FAKE_OLLAMA_MODELS:-}" = "1" ]; then
+            printf '%s' '{"models":[{"name":"local-model:latest"}]}' > "$outfile"
+            printf '200'
+        else
+            printf '%s' '{}' > "$outfile"
+            printf '000'
+        fi
+        ;;
+    *host.docker.internal:11434/api/tags*)
+        if [ "${FAKE_OLLAMA_MODELS:-}" = "1" ]; then
+            printf '%s' '{"models":[{"name":"local-model:latest"}]}' > "$outfile"
+            printf '200'
+        else
+            printf '%s' '{}' > "$outfile"
+            printf '000'
+        fi
+        ;;
+    *api/tags*)
         printf '%s' '{}' > "$outfile"
         printf '000'
         ;;
@@ -271,7 +298,11 @@ def test_opencode_rejected_neurodesk_key_points_to_litellm_ui(tmp_path):
         "Please generate a new API key at https://llm.neurodesk.org/ui/ and paste it below."
         in output
     )
-    assert "Available llm.neurodesk.org LiteLLM models:" in output
+    assert "Rechecking llm.neurodesk.org with the new API key..." in output
+    assert "Working models detected:" in output
+    assert "1) llm.neurodesk.org / model-alpha" in output
+    assert "2) llm.neurodesk.org / openai/gpt-4.1-mini" in output
+    assert "llm.neurodesk.org / devstral-small-2 (requires a valid API key)" not in output
     assert "OpenCode default model set to neurodesk/model-alpha." in output
 
     bashrc = (home_dir / ".bashrc").read_text(encoding="utf-8")
@@ -284,6 +315,42 @@ def test_opencode_rejected_neurodesk_key_points_to_litellm_ui(tmp_path):
         )
     )
     assert user_config["model"] == "neurodesk/model-alpha"
+
+def test_opencode_rejected_neurodesk_key_refreshes_before_mixed_model_picker(tmp_path):
+    """Verify a rejected Neurodesk key is refreshed before showing mixed providers."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    env["NEURODESK_API_KEY"] = "expired-neurodesk-key"
+    env["FAKE_OLLAMA_MODELS"] = "1"
+    env["OLLAMA_HOST"] = "http://127.0.0.1:9"
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)],
+        "new-neurodesk-key\n3\n",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert returncode == 0, output
+    assert (
+        output.index(
+            "Please generate a new API key at https://llm.neurodesk.org/ui/ and paste it below."
+        )
+        < output.index("Working models detected:")
+    )
+    assert "1) Local Ollama / local-model:latest" in output
+    assert "2) llm.neurodesk.org / model-alpha" in output
+    assert "3) llm.neurodesk.org / openai/gpt-4.1-mini" in output
+    assert "llm.neurodesk.org / devstral-small-2 (requires a valid API key)" not in output
+    assert "OpenCode default model set to neurodesk/openai/gpt-4.1-mini." in output
+
+    user_config = json.loads(
+        (home_dir / ".config" / "opencode" / "opencode.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    neurodesk_provider = user_config["provider"]["neurodesk"]
+    assert user_config["model"] == "neurodesk/openai/gpt-4.1-mini"
+    assert list(neurodesk_provider["models"]) == ["model-alpha", "openai/gpt-4.1-mini"]
 
 def test_codex_yolo_no_full_auto(tmp_path):
     """Verify Codex wrapper does not combine --yolo with --full-auto."""
