@@ -262,6 +262,8 @@ def test_opencode_shows_litellm_models_after_api_key_creation(tmp_path):
 
     assert returncode == 0, output
     assert "Open https://llm.neurodesk.org/ui/ and create an account" in output
+    assert "Paste Neurodesk API key (input hidden, press Enter when done):" in output
+    assert "API key received (input hidden)." in output
     assert "Available llm.neurodesk.org LiteLLM models:" in output
     assert "1) model-alpha" in output
     assert "2) openai/gpt-4.1-mini" in output
@@ -298,6 +300,8 @@ def test_opencode_rejected_neurodesk_key_points_to_litellm_ui(tmp_path):
         "Please generate a new API key at https://llm.neurodesk.org/ui/ and paste it below."
         in output
     )
+    assert "Paste Neurodesk API key (input hidden, press Enter when done):" in output
+    assert "API key received (input hidden)." in output
     assert "Rechecking llm.neurodesk.org with the new API key..." in output
     assert "Working models detected:" in output
     assert "1) llm.neurodesk.org / model-alpha" in output
@@ -337,6 +341,7 @@ def test_opencode_rejected_neurodesk_key_refreshes_before_mixed_model_picker(tmp
         )
         < output.index("Working models detected:")
     )
+    assert "API key received (input hidden)." in output
     assert "1) Local Ollama / local-model:latest" in output
     assert "2) llm.neurodesk.org / model-alpha" in output
     assert "3) llm.neurodesk.org / openai/gpt-4.1-mini" in output

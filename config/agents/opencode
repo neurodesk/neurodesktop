@@ -881,14 +881,16 @@ ensure_neurodesk_api_key_for_selection() {
     echo "Configuring llm.neurodesk.org."
     echo "1) Open https://llm.neurodesk.org/ui/ and create an account (if needed)."
     echo "2) Generate an API key in the Neurodesk LiteLLM web app."
-    echo "3) Paste the key below; this wrapper will export it and save it to ~/.bashrc."
+    echo "3) Paste the key below; input is hidden and this wrapper will save it to ~/.bashrc."
 
     while [ -z "${entered_key}" ]; do
-        read -r -s -p "Paste Neurodesk API key: " entered_key
+        read -r -s -p "Paste Neurodesk API key (input hidden, press Enter when done): " entered_key
         echo
         entered_key=$(sanitize_neurodesk_api_key "${entered_key}")
         if [ -z "${entered_key}" ]; then
             echo "API key cannot be empty. Please try again."
+        else
+            echo "API key received (input hidden)."
         fi
     done
 
