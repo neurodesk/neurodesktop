@@ -1,0 +1,11 @@
+# Default Codex CLI configuration for Neurodesktop.
+# See https://developers.openai.com/codex/config-reference for all options.
+#
+# The codex wrapper (/usr/local/sbin/codex) manages the
+# [mcp_servers.brain-researcher] block in this file based on whether the
+# BR_MCP_TOKEN environment variable is set (or exported from ~/.bashrc).
+# Run `opencode` once to set BR_MCP_TOKEN interactively.
+
+# Neurodesktop ships a pinned Codex build; auto-updates are managed centrally
+# by the container image, so disable the startup update check.
+check_for_update_on_startup = false

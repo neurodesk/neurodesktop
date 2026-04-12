@@ -1204,6 +1204,12 @@ ensure_opencode_model_selection
 prompt_brain_researcher_mcp_setup
 apply_brain_researcher_mcp_to_opencode_config
 
+if [ -n "${BR_MCP_TOKEN:-}" ]; then
+    echo "Brain Researcher MCP server: ACTIVE (using BR_MCP_TOKEN from env/~/.bashrc)"
+else
+    echo "Brain Researcher MCP server: inactive (decline recorded or token not set)"
+fi
+
 # Start OpenCode using the actual binary path (not this wrapper).
 export TERM=xterm-direct
 exec /usr/bin/opencode "$@"

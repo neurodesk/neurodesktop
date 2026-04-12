@@ -574,7 +574,7 @@ COPY config/conda/conda-readme.md /opt/jovyan_defaults/conda-readme.md
 COPY config/agents/claude_settings.local.json /opt/jovyan_defaults/.claude/settings.local.json
 COPY config/agents/claude_mcp_config.json /opt/jovyan_defaults/.claude/mcp_config.json
 COPY config/agents/opencode_config.json /opt/jovyan_defaults/.config/opencode/opencode.json
-COPY config/agents/codex_config.json /opt/jovyan_defaults/.codex/config.json
+COPY config/agents/codex_config.toml /opt/jovyan_defaults/.codex/config.toml
 COPY config/ssh/sshd_config /opt/jovyan_defaults/.ssh/sshd_config
 COPY config/jupyter/page_config.json /opt/jovyan_defaults/.jupyter/labconfig/page_config.json
 COPY config/agents/AGENTS.md /opt/jovyan_defaults/.jupyter/nbi/rules/neurodesk.md

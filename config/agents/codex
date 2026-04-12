@@ -2,6 +2,10 @@
 # OpenAI Codex CLI wrapper script
 # Copies AGENTS.md to current directory as AGENTS.md, then starts Codex CLI
 
+CODEX_HOME_DIR="${CODEX_HOME:-${HOME}/.codex}"
+CODEX_CONFIG_TOML="${CODEX_HOME_DIR}/config.toml"
+CODEX_DEFAULT_CONFIG_TOML="/opt/jovyan_defaults/.codex/config.toml"
+
 load_br_mcp_token_from_bashrc() {
     local bashrc_file="${HOME}/.bashrc"
     local token_from_bashrc
@@ -31,52 +35,70 @@ if [ ! -f ./AGENTS.md ]; then
     cp /opt/AGENTS.md ./AGENTS.md
 fi
 
-# Copy codex config from home directory to current directory's .codex folder
-if [ ! -f ./.codex/config.json ]; then
-    mkdir -p ./.codex
-    cp /opt/jovyan_defaults/.codex/config.json ./.codex/config.json
+# Ensure ~/.codex/config.toml exists, seeding it from the baked-in default if
+# the user hasn't created one yet. Codex CLI only reads TOML from CODEX_HOME —
+# the legacy ./.codex/config.json path was never read by Codex.
+mkdir -p "${CODEX_HOME_DIR}"
+if [ ! -f "${CODEX_CONFIG_TOML}" ] && [ -f "${CODEX_DEFAULT_CONFIG_TOML}" ]; then
+    cp "${CODEX_DEFAULT_CONFIG_TOML}" "${CODEX_CONFIG_TOML}"
 fi
 
 load_br_mcp_token_from_bashrc
 
-# Ensure the brain-researcher MCP entry exists in ./.codex/config.json when a
-# BR_MCP_TOKEN is available. This merges the entry into any pre-existing user
-# config without clobbering other keys.
-if [ -n "${BR_MCP_TOKEN:-}" ] && [ -f ./.codex/config.json ] && command -v python3 >/dev/null 2>&1; then
-    python3 - ./.codex/config.json <<'PY' || true
-import json
+# Merge / remove the brain-researcher MCP server entry in
+# ~/.codex/config.toml based on whether BR_MCP_TOKEN is set. We use a small
+# Python helper to keep the rest of the TOML intact.
+if command -v python3 >/dev/null 2>&1; then
+    BR_MCP_WANT_ENABLED=$([ -n "${BR_MCP_TOKEN:-}" ] && echo 1 || echo 0) \
+    CODEX_CONFIG_TOML="${CODEX_CONFIG_TOML}" \
+    python3 - <<'PY' || true
 import os
-import sys
+import re
 
-config_path = sys.argv[1]
+config_path = os.environ.get("CODEX_CONFIG_TOML")
+want_enabled = os.environ.get("BR_MCP_WANT_ENABLED", "0") == "1"
+
+if not config_path:
+    raise SystemExit(0)
+
 try:
     with open(config_path, "r", encoding="utf-8") as f:
-        cfg = json.load(f)
-except (OSError, json.JSONDecodeError):
-    sys.exit(0)
+        text = f.read()
+except FileNotFoundError:
+    text = ""
 
-if not isinstance(cfg, dict):
-    sys.exit(0)
+# Remove any previous [mcp_servers.brain-researcher] block we may have written.
+pattern = re.compile(
+    r"(?ms)^\s*#\s*BEGIN brain-researcher MCP\s*\n.*?^\s*#\s*END brain-researcher MCP\s*\n?"
+)
+text = pattern.sub("", text)
 
-mcp_servers = cfg.get("mcpServers")
-if not isinstance(mcp_servers, dict):
-    mcp_servers = {}
+if want_enabled:
+    block = (
+        "\n"
+        "# BEGIN brain-researcher MCP\n"
+        "[mcp_servers.brain-researcher]\n"
+        'url = "https://brain-researcher.com/mcp"\n'
+        'bearer_token_env_var = "BR_MCP_TOKEN"\n'
+        "enabled = true\n"
+        "# END brain-researcher MCP\n"
+    )
+    if text and not text.endswith("\n"):
+        text += "\n"
+    text += block
 
-mcp_servers["brain-researcher"] = {
-    "type": "http",
-    "url": "https://brain-researcher.com/mcp",
-    "headers": {
-        "Authorization": "Bearer ${BR_MCP_TOKEN}"
-    }
-}
-cfg["mcpServers"] = mcp_servers
-
+os.makedirs(os.path.dirname(config_path), exist_ok=True)
 tmp_path = f"{config_path}.tmp"
 with open(tmp_path, "w", encoding="utf-8") as f:
-    json.dump(cfg, f, indent=2)
-    f.write("\n")
+    f.write(text)
 os.replace(tmp_path, config_path)
 PY
+fi
+
+if [ -n "${BR_MCP_TOKEN:-}" ]; then
+    echo "Brain Researcher MCP server: ACTIVE (using BR_MCP_TOKEN from env/~/.bashrc)"
+else
+    echo "Brain Researcher MCP server: inactive (run 'opencode' to set BR_MCP_TOKEN)"
 fi
 
 # In browser-proxied environments (e.g., code-server behind Jupyter),

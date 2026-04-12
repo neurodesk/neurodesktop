@@ -39,6 +39,10 @@ load_br_mcp_token_from_bashrc() {
     fi
 }
 
+# Neurodesktop ships a pinned Claude CLI build; auto-updates are managed
+# centrally by the container image, so disable the in-process updater.
+export DISABLE_AUTOUPDATER=1
+
 # Copy AGENTS.md from home directory to current directory as CLAUDE.md
 if [ ! -f ./CLAUDE.md ]; then
     cp /opt/AGENTS.md ./CLAUDE.md
@@ -52,6 +56,11 @@ fi
 
 load_br_mcp_token_from_bashrc
 
+if [ -n "${BR_MCP_TOKEN:-}" ]; then
+    echo "Brain Researcher MCP server: ACTIVE (using BR_MCP_TOKEN from env/~/.bashrc)"
+else
+    echo "Brain Researcher MCP server: inactive (run 'opencode' to set BR_MCP_TOKEN)"
+fi
 
 # Start Claude Code from the standard user-local path.
 CLAUDE_BIN="${HOME}/.local/bin/claude"
