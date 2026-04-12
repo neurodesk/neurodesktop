@@ -475,10 +475,13 @@ def test_claude_replaces_dangling_symlink(tmp_path):
     test_wrapper.write_text(wrapper_contents, encoding="utf-8")
     test_wrapper.chmod(0o755)
 
+    env = {**os.environ, "HOME": str(home_dir)}
+    env.pop("BR_MCP_TOKEN", None)
+
     result = subprocess.run(
         [str(test_wrapper), "--version"],
         cwd=tmp_path,
-        env={**os.environ, "HOME": str(home_dir)},
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
