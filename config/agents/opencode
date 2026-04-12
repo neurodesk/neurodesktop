@@ -11,6 +11,8 @@ JETSTREAM_BASE_URL="https://llm.jetstream-cloud.org/v1"
 JETSTREAM_MODEL_ID="gpt-oss-120b"
 NEURODESK_BASE_URL="https://llm.neurodesk.org/v1"
 NEURODESK_DEFAULT_MODEL_ID="devstral-small-2"
+BRAIN_RESEARCHER_MCP_URL="https://brain-researcher.com/mcp"
+BRAIN_RESEARCHER_SIGNUP_URL="https://brain-researcher.com/settings"
 
 OLLAMA_HOST_CLEAN="${OLLAMA_HOST:-http://127.0.0.1:11434}"
 OLLAMA_HOST_CLEAN="${OLLAMA_HOST_CLEAN%/}"
@@ -126,6 +128,92 @@ persist_neurodesk_api_key_to_bashrc() {
         echo ""
         echo "# Neurodesk API key for OpenCode"
         printf "export NEURODESK_API_KEY='%s'\n" "${escaped_key}"
+    } >> "${tmp_bashrc}"
+
+    mv "${tmp_bashrc}" "${bashrc_file}"
+}
+
+sanitize_br_mcp_token() {
+    local raw_token="$1"
+    local sanitized_token
+
+    sanitized_token=$(printf "%s" "${raw_token}" | tr -d '\000-\010\013\014\016-\037\177')
+    sanitized_token="${sanitized_token//$'\r'/}"
+    sanitized_token="${sanitized_token//$'\n'/}"
+    sanitized_token=$(printf "%s" "${sanitized_token}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
+    printf "%s" "${sanitized_token}"
+}
+
+load_br_mcp_token_from_bashrc() {
+    local bashrc_file="${HOME}/.bashrc"
+    local token_from_bashrc
+
+    if [ -n "${BR_MCP_TOKEN:-}" ]; then
+        BR_MCP_TOKEN=$(sanitize_br_mcp_token "${BR_MCP_TOKEN}")
+        export BR_MCP_TOKEN
+        return 0
+    fi
+
+    if [ ! -f "${bashrc_file}" ]; then
+        return 0
+    fi
+
+    token_from_bashrc=$(sed -nE \
+        -e "s/^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN='([^']+)'[[:space:]]*$/\1/p" \
+        -e 's/^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN="([^"]+)"[[:space:]]*$/\1/p' \
+        -e 's/^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN=([^[:space:]#]+)[[:space:]]*$/\1/p' \
+        "${bashrc_file}" | tail -n 1)
+
+    token_from_bashrc=$(sanitize_br_mcp_token "${token_from_bashrc}")
+
+    if [ -n "${token_from_bashrc}" ]; then
+        export BR_MCP_TOKEN="${token_from_bashrc}"
+    fi
+}
+
+br_mcp_setup_already_recorded() {
+    local bashrc_file="${HOME}/.bashrc"
+    if [ ! -f "${bashrc_file}" ]; then
+        return 1
+    fi
+    grep -qE '^[[:space:]]*(export[[:space:]]+)?BR_MCP_TOKEN=' "${bashrc_file}" && return 0
+    grep -qE '^[[:space:]]*#[[:space:]]*BR_MCP_DECLINED[[:space:]]*$' "${bashrc_file}" && return 0
+    return 1
+}
+
+persist_br_mcp_token_to_bashrc() {
+    local token="$1"
+    local escaped_token
+    local bashrc_file="${HOME}/.bashrc"
+    local tmp_bashrc
+
+    escaped_token=$(printf "%s" "${token}" | sed "s/'/'\"'\"'/g")
+
+    touch "${bashrc_file}"
+    tmp_bashrc=$(mktemp) || return 1
+
+    grep -vE '^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN=|^[[:space:]]*#[[:space:]]*BR_MCP_DECLINED[[:space:]]*$' "${bashrc_file}" > "${tmp_bashrc}" || true
+    {
+        echo ""
+        echo "# Brain Researcher MCP token"
+        printf "export BR_MCP_TOKEN='%s'\n" "${escaped_token}"
+    } >> "${tmp_bashrc}"
+
+    mv "${tmp_bashrc}" "${bashrc_file}"
+}
+
+persist_br_mcp_decline_to_bashrc() {
+    local bashrc_file="${HOME}/.bashrc"
+    local tmp_bashrc
+
+    touch "${bashrc_file}"
+    tmp_bashrc=$(mktemp) || return 1
+
+    grep -vE '^[[:space:]]*#[[:space:]]*BR_MCP_DECLINED[[:space:]]*$' "${bashrc_file}" > "${tmp_bashrc}" || true
+    {
+        echo ""
+        echo "# BR_MCP_DECLINED"
     } >> "${tmp_bashrc}"
 
     mv "${tmp_bashrc}" "${bashrc_file}"
@@ -905,6 +993,132 @@ ensure_neurodesk_api_key_for_selection() {
     return 0
 }
 
+apply_brain_researcher_mcp_to_opencode_config() {
+    ensure_opencode_config_file
+    if [ ! -f "${OPENCODE_CONFIG_FILE}" ]; then
+        return 0
+    fi
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local want_enabled=0
+    if [ -n "${BR_MCP_TOKEN:-}" ]; then
+        want_enabled=1
+    fi
+
+    BR_MCP_WANT_ENABLED="${want_enabled}" \
+    BR_MCP_URL="${BRAIN_RESEARCHER_MCP_URL}" \
+    python3 - "${OPENCODE_CONFIG_FILE}" <<'PY'
+import json
+import os
+import sys
+
+config_path = sys.argv[1]
+want_enabled = os.environ.get("BR_MCP_WANT_ENABLED", "0") == "1"
+mcp_url = os.environ.get("BR_MCP_URL", "https://brain-researcher.com/mcp")
+
+try:
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+except (OSError, json.JSONDecodeError):
+    sys.exit(0)
+
+mcp = cfg.get("mcp")
+if not isinstance(mcp, dict):
+    mcp = {}
+
+if want_enabled:
+    mcp["brain-researcher"] = {
+        "type": "remote",
+        "url": mcp_url,
+        "enabled": True,
+        "oauth": False,
+        "headers": {
+            "Authorization": "Bearer {env:BR_MCP_TOKEN}"
+        }
+    }
+    cfg["mcp"] = mcp
+else:
+    existing = mcp.get("brain-researcher")
+    if isinstance(existing, dict):
+        existing["enabled"] = False
+        cfg["mcp"] = mcp
+
+tmp_path = f"{config_path}.tmp"
+with open(tmp_path, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
+os.replace(tmp_path, config_path)
+PY
+}
+
+# Ask the user whether to enable the Brain Researcher MCP server and collect a token.
+prompt_brain_researcher_mcp_setup() {
+    local entered_token=""
+    local answer=""
+
+    load_br_mcp_token_from_bashrc
+
+    if [ -n "${BR_MCP_TOKEN:-}" ]; then
+        return 0
+    fi
+
+    if br_mcp_setup_already_recorded; then
+        return 0
+    fi
+
+    if [ ! -t 0 ]; then
+        return 0
+    fi
+
+    echo ""
+    echo "Brain Researcher MCP server setup"
+    echo "The Brain Researcher MCP server provides neuroimaging research tools to the coding agents."
+    echo "You can connect to it with a personal token from ${BRAIN_RESEARCHER_SIGNUP_URL}."
+
+    while true; do
+        read -r -p "Enable the Brain Researcher MCP server for Claude Code, Codex, and OpenCode? [y/N]: " answer
+        case "${answer}" in
+            [Yy]|[Yy][Ee][Ss])
+                break
+                ;;
+            ''|[Nn]|[Nn][Oo])
+                echo "Skipping Brain Researcher MCP setup. Run 'opencode' again to revisit."
+                persist_br_mcp_decline_to_bashrc || true
+                return 0
+                ;;
+            *)
+                echo "Please answer 'y' or 'n'."
+                ;;
+        esac
+    done
+
+    echo "1) Open ${BRAIN_RESEARCHER_SIGNUP_URL} and sign in."
+    echo "2) Under 'Integration', generate a BR_MCP_TOKEN."
+    echo "3) Paste the token below; input is hidden and this wrapper will save it to ~/.bashrc."
+
+    while [ -z "${entered_token}" ]; do
+        read -r -s -p "Paste Brain Researcher MCP token (input hidden, press Enter when done): " entered_token
+        echo
+        entered_token=$(sanitize_br_mcp_token "${entered_token}")
+        if [ -z "${entered_token}" ]; then
+            echo "Token cannot be empty. Please try again."
+        else
+            echo "Brain Researcher MCP token received (input hidden)."
+        fi
+    done
+
+    export BR_MCP_TOKEN="${entered_token}"
+    if persist_br_mcp_token_to_bashrc "${entered_token}"; then
+        echo "Saved BR_MCP_TOKEN to ${HOME}/.bashrc and exported it for this session."
+    else
+        echo "Warning: failed to save token to ${HOME}/.bashrc, but it is exported for this session." >&2
+    fi
+    return 0
+}
+
 ensure_opencode_model_selection() {
     local selected_neurodesk_model=""
 
@@ -987,6 +1201,8 @@ ensure_opencode_model_selection() {
 }
 
 ensure_opencode_model_selection
+prompt_brain_researcher_mcp_setup
+apply_brain_researcher_mcp_to_opencode_config
 
 # Start OpenCode using the actual binary path (not this wrapper).
 export TERM=xterm-direct

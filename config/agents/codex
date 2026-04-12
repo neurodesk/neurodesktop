@@ -2,6 +2,30 @@
 # OpenAI Codex CLI wrapper script
 # Copies AGENTS.md to current directory as AGENTS.md, then starts Codex CLI
 
+load_br_mcp_token_from_bashrc() {
+    local bashrc_file="${HOME}/.bashrc"
+    local token_from_bashrc
+
+    if [ -n "${BR_MCP_TOKEN:-}" ]; then
+        export BR_MCP_TOKEN
+        return 0
+    fi
+
+    if [ ! -f "${bashrc_file}" ]; then
+        return 0
+    fi
+
+    token_from_bashrc=$(sed -nE \
+        -e "s/^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN='([^']+)'[[:space:]]*$/\1/p" \
+        -e 's/^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN="([^"]+)"[[:space:]]*$/\1/p' \
+        -e 's/^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN=([^[:space:]#]+)[[:space:]]*$/\1/p' \
+        "${bashrc_file}" | tail -n 1)
+
+    if [ -n "${token_from_bashrc}" ]; then
+        export BR_MCP_TOKEN="${token_from_bashrc}"
+    fi
+}
+
 # Copy AGENTS.md from /opt to current directory as AGENTS.md (Codex uses AGENTS.md)
 if [ ! -f ./AGENTS.md ]; then
     cp /opt/AGENTS.md ./AGENTS.md
@@ -11,6 +35,48 @@ fi
 if [ ! -f ./.codex/config.json ]; then
     mkdir -p ./.codex
     cp /opt/jovyan_defaults/.codex/config.json ./.codex/config.json
+fi
+
+load_br_mcp_token_from_bashrc
+
+# Ensure the brain-researcher MCP entry exists in ./.codex/config.json when a
+# BR_MCP_TOKEN is available. This merges the entry into any pre-existing user
+# config without clobbering other keys.
+if [ -n "${BR_MCP_TOKEN:-}" ] && [ -f ./.codex/config.json ] && command -v python3 >/dev/null 2>&1; then
+    python3 - ./.codex/config.json <<'PY' || true
+import json
+import os
+import sys
+
+config_path = sys.argv[1]
+try:
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+except (OSError, json.JSONDecodeError):
+    sys.exit(0)
+
+if not isinstance(cfg, dict):
+    sys.exit(0)
+
+mcp_servers = cfg.get("mcpServers")
+if not isinstance(mcp_servers, dict):
+    mcp_servers = {}
+
+mcp_servers["brain-researcher"] = {
+    "type": "http",
+    "url": "https://brain-researcher.com/mcp",
+    "headers": {
+        "Authorization": "Bearer ${BR_MCP_TOKEN}"
+    }
+}
+cfg["mcpServers"] = mcp_servers
+
+tmp_path = f"{config_path}.tmp"
+with open(tmp_path, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
+os.replace(tmp_path, config_path)
+PY
 fi
 
 # In browser-proxied environments (e.g., code-server behind Jupyter),

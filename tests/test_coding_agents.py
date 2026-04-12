@@ -246,6 +246,7 @@ esac
     }
     env.pop("NEURODESK_API_KEY", None)
     env.pop("OPENCODE_MODEL_PROFILE", None)
+    env.pop("BR_MCP_TOKEN", None)
 
     return test_wrapper, home_dir, env
 
@@ -255,7 +256,7 @@ def test_opencode_shows_litellm_models_after_api_key_creation(tmp_path):
 
     returncode, output = run_pty_command(
         [str(test_wrapper)],
-        "neurodesk-test-key\n2\n",
+        "neurodesk-test-key\n2\nn\n",
         cwd=tmp_path,
         env=env,
     )
@@ -268,6 +269,7 @@ def test_opencode_shows_litellm_models_after_api_key_creation(tmp_path):
     assert "1) model-alpha" in output
     assert "2) openai/gpt-4.1-mini" in output
     assert "OpenCode default model set to neurodesk/openai/gpt-4.1-mini." in output
+    assert "Brain Researcher MCP server setup" in output
 
     user_config = json.loads(
         (home_dir / ".config" / "opencode" / "opencode.json").read_text(
@@ -286,7 +288,7 @@ def test_opencode_rejected_neurodesk_key_points_to_litellm_ui(tmp_path):
 
     returncode, output = run_pty_command(
         [str(test_wrapper)],
-        "new-neurodesk-key\n1\n",
+        "new-neurodesk-key\n1\nn\n",
         cwd=tmp_path,
         env=env,
     )
@@ -329,7 +331,7 @@ def test_opencode_rejected_neurodesk_key_refreshes_before_mixed_model_picker(tmp
 
     returncode, output = run_pty_command(
         [str(test_wrapper)],
-        "new-neurodesk-key\n3\n",
+        "new-neurodesk-key\n3\nn\n",
         cwd=tmp_path,
         env=env,
     )
@@ -484,3 +486,310 @@ def test_claude_replaces_dangling_symlink(tmp_path):
     assert not (bin_dir / "claude").is_symlink(), "Dangling symlink was not replaced"
     assert os.access(bin_dir / "claude", os.X_OK), "Restored binary is not executable"
     assert "--allow-dangerously-skip-permissions --version" in result.stdout
+
+
+def test_opencode_brain_researcher_mcp_setup_accept(tmp_path):
+    """Verify the OpenCode wrapper prompts for and persists a Brain Researcher MCP token."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)],
+        "neurodesk-test-key\n2\ny\nbr-mcp-test-token\n",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert returncode == 0, output
+    assert "Brain Researcher MCP server setup" in output
+    assert (
+        "Enable the Brain Researcher MCP server for Claude Code, Codex, and OpenCode?"
+        in output
+    )
+    assert "https://brain-researcher.com/settings" in output
+    assert (
+        "Paste Brain Researcher MCP token (input hidden, press Enter when done):"
+        in output
+    )
+    assert "Brain Researcher MCP token received (input hidden)." in output
+    assert "Saved BR_MCP_TOKEN" in output
+
+    bashrc = (home_dir / ".bashrc").read_text(encoding="utf-8")
+    assert "BR_MCP_TOKEN='br-mcp-test-token'" in bashrc
+    assert "BR_MCP_DECLINED" not in bashrc
+
+    user_config = json.loads(
+        (home_dir / ".config" / "opencode" / "opencode.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    mcp_cfg = user_config.get("mcp", {})
+    assert "brain-researcher" in mcp_cfg
+    brain_cfg = mcp_cfg["brain-researcher"]
+    assert brain_cfg["type"] == "remote"
+    assert brain_cfg["url"] == "https://brain-researcher.com/mcp"
+    assert brain_cfg["enabled"] is True
+    assert (
+        brain_cfg["headers"]["Authorization"] == "Bearer {env:BR_MCP_TOKEN}"
+    )
+
+
+def test_opencode_brain_researcher_mcp_setup_decline(tmp_path):
+    """Verify declining the Brain Researcher prompt records a decline marker."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)],
+        "neurodesk-test-key\n2\nn\n",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert returncode == 0, output
+    assert "Brain Researcher MCP server setup" in output
+    assert "Skipping Brain Researcher MCP setup" in output
+
+    bashrc = (home_dir / ".bashrc").read_text(encoding="utf-8")
+    assert "BR_MCP_DECLINED" in bashrc
+    assert "BR_MCP_TOKEN" not in bashrc
+
+    user_config = json.loads(
+        (home_dir / ".config" / "opencode" / "opencode.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    mcp_cfg = user_config.get("mcp", {})
+    if "brain-researcher" in mcp_cfg:
+        assert mcp_cfg["brain-researcher"].get("enabled") is False
+
+
+def test_opencode_brain_researcher_prompt_skipped_when_token_exists(tmp_path):
+    """Verify the prompt is skipped when BR_MCP_TOKEN is already exported."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    env["BR_MCP_TOKEN"] = "preexisting-token"
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)],
+        "neurodesk-test-key\n2\n",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert returncode == 0, output
+    assert "Brain Researcher MCP server setup" not in output
+
+    user_config = json.loads(
+        (home_dir / ".config" / "opencode" / "opencode.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    mcp_cfg = user_config.get("mcp", {})
+    assert mcp_cfg.get("brain-researcher", {}).get("enabled") is True
+
+
+def _make_claude_wrapper_with_token(tmp_path, bashrc_contents, env_token=None):
+    wrapper_path = Path("/usr/local/sbin/claude")
+    if not wrapper_path.exists():
+        pytest.skip("Claude wrapper not installed in this environment")
+
+    home_dir = tmp_path / "home"
+    bin_dir = home_dir / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+
+    fake_default_claude = tmp_path / "default-claude"
+    fake_default_claude.write_text(
+        "#!/bin/sh\n"
+        "for arg in \"$@\"; do echo \"ARG:${arg}\"; done\n",
+        encoding="utf-8",
+    )
+    fake_default_claude.chmod(0o755)
+
+    mcp_config_file = tmp_path / "claude-mcp-config.json"
+    mcp_config_file.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "brain-researcher": {
+                        "type": "http",
+                        "url": "https://brain-researcher.com/mcp",
+                        "headers": {
+                            "Authorization": "Bearer ${BR_MCP_TOKEN}"
+                        },
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    test_wrapper = tmp_path / "claude-wrapper-test"
+    wrapper_contents = wrapper_path.read_text(encoding="utf-8")
+    wrapper_contents = wrapper_contents.replace(
+        'DEFAULT_CLAUDE_BIN="/opt/jovyan_defaults/.local/bin/claude"',
+        f'DEFAULT_CLAUDE_BIN="{fake_default_claude}"',
+    )
+    wrapper_contents = wrapper_contents.replace(
+        'CLAUDE_DEFAULT_MCP_CONFIG="/opt/jovyan_defaults/.claude/mcp_config.json"',
+        f'CLAUDE_DEFAULT_MCP_CONFIG="{mcp_config_file}"',
+    )
+    test_wrapper.write_text(wrapper_contents, encoding="utf-8")
+    test_wrapper.chmod(0o755)
+
+    if bashrc_contents is not None:
+        (home_dir / ".bashrc").write_text(bashrc_contents, encoding="utf-8")
+
+    env = {**os.environ, "HOME": str(home_dir)}
+    env.pop("BR_MCP_TOKEN", None)
+    if env_token is not None:
+        env["BR_MCP_TOKEN"] = env_token
+
+    return test_wrapper, env, mcp_config_file
+
+
+def test_claude_adds_mcp_config_when_br_token_in_bashrc(tmp_path):
+    """Verify Claude wrapper passes --mcp-config when BR_MCP_TOKEN is set in .bashrc."""
+    test_wrapper, env, mcp_config_file = _make_claude_wrapper_with_token(
+        tmp_path,
+        bashrc_contents="export BR_MCP_TOKEN='from-bashrc-token'\n",
+    )
+
+    result = subprocess.run(
+        [str(test_wrapper), "--version"],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, f"Wrapper execution failed: {result.stdout}"
+    assert f"ARG:--mcp-config" in result.stdout
+    assert f"ARG:{mcp_config_file}" in result.stdout
+
+
+def test_claude_omits_mcp_config_when_no_br_token(tmp_path):
+    """Verify Claude wrapper does not pass --mcp-config without a BR_MCP_TOKEN."""
+    test_wrapper, env, mcp_config_file = _make_claude_wrapper_with_token(
+        tmp_path,
+        bashrc_contents="",
+    )
+
+    result = subprocess.run(
+        [str(test_wrapper), "--version"],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, f"Wrapper execution failed: {result.stdout}"
+    assert f"ARG:{mcp_config_file}" not in result.stdout
+
+
+def test_codex_adds_brain_researcher_mcp_with_token(tmp_path):
+    """Verify Codex wrapper ensures brain-researcher mcpServers entry when token is set."""
+    wrapper_path = Path("/usr/local/sbin/codex")
+    if not wrapper_path.exists():
+        pytest.skip("Codex wrapper not installed in this environment")
+
+    fake_codex = tmp_path / "fake-codex"
+    fake_codex.write_text(
+        "#!/bin/sh\necho \"FAKE_CODEX:$*\"\n",
+        encoding="utf-8",
+    )
+    fake_codex.chmod(0o755)
+
+    test_wrapper = tmp_path / "codex-wrapper-test"
+    wrapper_contents = wrapper_path.read_text(encoding="utf-8")
+    wrapper_contents = wrapper_contents.replace("/usr/bin/codex", str(fake_codex))
+    test_wrapper.write_text(wrapper_contents, encoding="utf-8")
+    test_wrapper.chmod(0o755)
+
+    (tmp_path / "AGENTS.md").write_text("test", encoding="utf-8")
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    (codex_dir / "config.json").write_text("{}", encoding="utf-8")
+
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    (home_dir / ".bashrc").write_text(
+        "export BR_MCP_TOKEN='codex-token-from-bashrc'\n",
+        encoding="utf-8",
+    )
+
+    env = {**os.environ, "HOME": str(home_dir)}
+    env.pop("BR_MCP_TOKEN", None)
+
+    result = subprocess.run(
+        [str(test_wrapper), "--version"],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, f"Wrapper execution failed: {result.stdout}"
+
+    codex_cfg = json.loads(
+        (tmp_path / ".codex" / "config.json").read_text(encoding="utf-8")
+    )
+    assert "mcpServers" in codex_cfg
+    brain_cfg = codex_cfg["mcpServers"]["brain-researcher"]
+    assert brain_cfg["type"] == "http"
+    assert brain_cfg["url"] == "https://brain-researcher.com/mcp"
+    assert brain_cfg["headers"]["Authorization"] == "Bearer ${BR_MCP_TOKEN}"
+
+
+def test_codex_skips_brain_researcher_mcp_without_token(tmp_path):
+    """Verify Codex wrapper leaves user config alone when BR_MCP_TOKEN is unset."""
+    wrapper_path = Path("/usr/local/sbin/codex")
+    if not wrapper_path.exists():
+        pytest.skip("Codex wrapper not installed in this environment")
+
+    fake_codex = tmp_path / "fake-codex"
+    fake_codex.write_text(
+        "#!/bin/sh\necho \"FAKE_CODEX:$*\"\n",
+        encoding="utf-8",
+    )
+    fake_codex.chmod(0o755)
+
+    test_wrapper = tmp_path / "codex-wrapper-test"
+    wrapper_contents = wrapper_path.read_text(encoding="utf-8")
+    wrapper_contents = wrapper_contents.replace("/usr/bin/codex", str(fake_codex))
+    test_wrapper.write_text(wrapper_contents, encoding="utf-8")
+    test_wrapper.chmod(0o755)
+
+    (tmp_path / "AGENTS.md").write_text("test", encoding="utf-8")
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    (codex_dir / "config.json").write_text(
+        json.dumps({"model": "preexisting"}),
+        encoding="utf-8",
+    )
+
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+
+    env = {**os.environ, "HOME": str(home_dir)}
+    env.pop("BR_MCP_TOKEN", None)
+
+    result = subprocess.run(
+        [str(test_wrapper), "--version"],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, f"Wrapper execution failed: {result.stdout}"
+
+    codex_cfg = json.loads(
+        (tmp_path / ".codex" / "config.json").read_text(encoding="utf-8")
+    )
+    assert codex_cfg == {"model": "preexisting"}

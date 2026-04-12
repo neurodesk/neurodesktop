@@ -2,6 +2,8 @@
 # Claude Code wrapper script
 # Copies ~/AGENTS.md and settings.local.json to current directory, then starts Claude Code
 
+CLAUDE_DEFAULT_MCP_CONFIG="/opt/jovyan_defaults/.claude/mcp_config.json"
+
 is_apptainer_runtime() {
     [ -n "${SINGULARITY_NAME:-}" ] || \
     [ -n "${APPTAINER_NAME:-}" ] || \
@@ -13,6 +15,30 @@ is_apptainer_runtime() {
     [ -d "/.singularity.d" ]
 }
 
+load_br_mcp_token_from_bashrc() {
+    local bashrc_file="${HOME}/.bashrc"
+    local token_from_bashrc
+
+    if [ -n "${BR_MCP_TOKEN:-}" ]; then
+        export BR_MCP_TOKEN
+        return 0
+    fi
+
+    if [ ! -f "${bashrc_file}" ]; then
+        return 0
+    fi
+
+    token_from_bashrc=$(sed -nE \
+        -e "s/^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN='([^']+)'[[:space:]]*$/\1/p" \
+        -e 's/^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN="([^"]+)"[[:space:]]*$/\1/p' \
+        -e 's/^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN=([^[:space:]#]+)[[:space:]]*$/\1/p' \
+        "${bashrc_file}" | tail -n 1)
+
+    if [ -n "${token_from_bashrc}" ]; then
+        export BR_MCP_TOKEN="${token_from_bashrc}"
+    fi
+}
+
 # Copy AGENTS.md from home directory to current directory as CLAUDE.md
 if [ ! -f ./CLAUDE.md ]; then
     cp /opt/AGENTS.md ./CLAUDE.md
@@ -21,8 +47,10 @@ fi
 # Copy settings.local.json from home directory to current directory's .claude folder
 if [ ! -f ./.claude/settings.local.json ]; then
     mkdir -p ./.claude
-    cp /opt/jovyan_defaults/.claude/settings.local.json ./.claude/settings.local.json    
+    cp /opt/jovyan_defaults/.claude/settings.local.json ./.claude/settings.local.json
 fi
+
+load_br_mcp_token_from_bashrc
 
 
 # Start Claude Code from the standard user-local path.
@@ -65,8 +93,14 @@ if is_apptainer_runtime; then
         extra_args+=(--strict-mcp-config)
     fi
     if [ "${has_mcp_config_arg}" -eq 0 ]; then
-        extra_args+=(--mcp-config '{"mcpServers":{}}')
+        if [ -n "${BR_MCP_TOKEN:-}" ] && [ -f "${CLAUDE_DEFAULT_MCP_CONFIG}" ]; then
+            extra_args+=(--mcp-config "${CLAUDE_DEFAULT_MCP_CONFIG}")
+        else
+            extra_args+=(--mcp-config '{"mcpServers":{}}')
+        fi
     fi
+elif [ "${has_mcp_config_arg}" -eq 0 ] && [ -n "${BR_MCP_TOKEN:-}" ] && [ -f "${CLAUDE_DEFAULT_MCP_CONFIG}" ]; then
+    extra_args+=(--mcp-config "${CLAUDE_DEFAULT_MCP_CONFIG}")
 fi
 
 exec "${CLAUDE_BIN}" --allow-dangerously-skip-permissions "${extra_args[@]}" "$@"

@@ -572,6 +572,7 @@ COPY config/lxde/libfm.conf /opt/jovyan_defaults/.config/libfm/libfm.conf
 COPY config/lxde/xstartup /opt/jovyan_defaults/.vnc/xstartup
 COPY config/conda/conda-readme.md /opt/jovyan_defaults/conda-readme.md
 COPY config/agents/claude_settings.local.json /opt/jovyan_defaults/.claude/settings.local.json
+COPY config/agents/claude_mcp_config.json /opt/jovyan_defaults/.claude/mcp_config.json
 COPY config/agents/opencode_config.json /opt/jovyan_defaults/.config/opencode/opencode.json
 COPY config/agents/codex_config.json /opt/jovyan_defaults/.codex/config.json
 COPY config/ssh/sshd_config /opt/jovyan_defaults/.ssh/sshd_config

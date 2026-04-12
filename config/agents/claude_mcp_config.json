@@ -1,10 +1,4 @@
 {
-  "model": "gpt-oss-120b",
-  "provider": "openai",
-  "baseURL": "https://llm.jetstream-cloud.org/v1",
-  "approvalMode": "suggest",
-  "fullAutoErrorMode": "ask-user",
-  "notify": true,
   "mcpServers": {
     "brain-researcher": {
       "type": "http",
