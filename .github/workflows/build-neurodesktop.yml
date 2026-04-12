@@ -29,6 +29,14 @@ env:
 jobs:
   build-image:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - arch: amd64
+            docker_platform: linux/amd64
+          - arch: arm64
+            docker_platform: linux/arm64
     steps:
       - name: Fetch github api rate limit
         run: |
@@ -86,67 +94,97 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Get rootfs of cached image
-        if: steps.check_image.outputs.exists != 'true'
-        run: |
-          docker pull $IMAGEID:latest && ROOTFS_CACHE=$(docker inspect --format='{{.RootFS}}' $IMAGEID:latest) && docker rmi $IMAGEID:latest || true
-          echo "ROOTFS_CACHE=$ROOTFS_CACHE" >> $GITHUB_ENV
-      - name: Build new image
+      - name: Build and push arch image
         if: steps.check_image.outputs.exists != 'true'
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4
         with:
           context: .
-          load: true
-          tags: ${{ env.IMAGEID }}:${{ env.BUILDDATE }}
+          platforms: ${{ matrix.platform.docker_platform }}
+          provenance: false
+          push: true
+          tags: ${{ env.IMAGEID }}:${{ matrix.platform.arch }}
           build-args: |
             NEURODESKTOP_VERSION=${{ env.BUILDDATE }}
           cache-from: type=registry,ref=${{ env.IMAGEID }}:latest
           cache-to: type=inline
-      - name: Get rootfs of new image
-        if: steps.check_image.outputs.exists != 'true'
+      - name: Checkout repository for failure issue template
+        if: always() && failure()
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.ref }}
+      - name: Generate issue on job failure
+        if: always() && failure()
+        uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        with:
+          filename: .github/job_failure_issue_template.md
+          update_existing: true
+          search_existing: open
+
+  merge-manifests:
+    needs: build-image
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Set environment variables
         run: |
-          ROOTFS_NEW=$(docker inspect --format='{{.RootFS}}' $IMAGEID:$BUILDDATE)
-          PUSH_IMAGES="${IMAGEID}"
-          if [ ! -z "${DOCKERHUB_ORG}" ]; then
-            PUSH_IMAGES="${PUSH_IMAGES}, ${DOCKERHUB_ORG}/${IMAGENAME}"
+          IMAGENAME="neurodesktop"
+          BUILDDATE=`date +%Y-%m-%d`
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
+
+          echo "BUILDDATE=$BUILDDATE" >> $GITHUB_ENV
+          echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
+          echo "IMAGENAME=$IMAGENAME" >> $GITHUB_ENV
+      - name: Check if image exists
+        if: github.event_name == 'schedule'
+        id: check_image
+        run: |
+          if docker manifest inspect $IMAGEID:$BUILDDATE > /dev/null 2>&1; then
+            echo "Image $IMAGEID:$BUILDDATE already exists."
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Image $IMAGEID:$BUILDDATE does not exist."
+            echo "exists=false" >> $GITHUB_OUTPUT
           fi
-          echo "PUSH_IMAGES=$PUSH_IMAGES"
-          echo "ROOTFS_NEW=$ROOTFS_NEW" >> $GITHUB_ENV
-          echo "PUSH_IMAGES=$PUSH_IMAGES" >> $GITHUB_ENV
-      - name: Login to DockerHub (if changes found)
-        if: ${{ env.DOCKERHUB_ORG != '' && (env.ROOTFS_NEW != env.ROOTFS_CACHE || github.event.inputs.force_push == 'true') && steps.check_image.outputs.exists != 'true' }}
+      - name: Set up Docker Buildx
+        if: steps.check_image.outputs.exists != 'true'
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2
+      - name: Login to GHCR
+        if: steps.check_image.outputs.exists != 'true'
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to DockerHub
+        if: ${{ env.DOCKERHUB_ORG != '' && steps.check_image.outputs.exists != 'true' }}
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
-      - name: Get new image metadata (if changes found)
-        if: ${{ (env.ROOTFS_NEW != env.ROOTFS_CACHE || github.event.inputs.force_push == 'true') && steps.check_image.outputs.exists != 'true' }}
-        id: meta
-        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804
-        with:
-          images: ${{ env.PUSH_IMAGES }}
-          tags: |
-            ${{ env.BUILDDATE }}
-            latest
-          labels: |
-            org.opencontainers.image.description=Neurodesktop
-      - name: Push new image (if changes found)
-        if: ${{ (env.ROOTFS_NEW != env.ROOTFS_CACHE || github.event.inputs.force_push == 'true') && steps.check_image.outputs.exists != 'true' }}
-        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4
-        with:
-          context: .
-          # platforms: linux/amd64
-          platforms: linux/amd64,linux/arm64
-          provenance: false # fixes unknown/unknown arch builds
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            NEURODESKTOP_VERSION=${{ env.BUILDDATE }}
-          cache-from: type=registry,ref=${{ env.IMAGEID }}:latest
-          cache-to: type=inline
-      - name: Create github tag (if changes found)
-        if: ${{ (env.ROOTFS_NEW != env.ROOTFS_CACHE || github.event.inputs.force_push == 'true') && steps.check_image.outputs.exists != 'true' }}
+      - name: Create and push multi-arch manifest to GHCR
+        if: steps.check_image.outputs.exists != 'true'
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.IMAGEID }}:${{ env.BUILDDATE }} \
+            -t ${{ env.IMAGEID }}:latest \
+            ${{ env.IMAGEID }}:amd64 \
+            ${{ env.IMAGEID }}:arm64
+      - name: Push multi-arch manifest to DockerHub
+        if: ${{ env.DOCKERHUB_ORG != '' && steps.check_image.outputs.exists != 'true' }}
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:${{ env.BUILDDATE }} \
+            -t ${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:latest \
+            ${{ env.IMAGEID }}:amd64 \
+            ${{ env.IMAGEID }}:arm64
+      - name: Create github tag
+        if: steps.check_image.outputs.exists != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -172,6 +210,7 @@ jobs:
           filename: .github/job_failure_issue_template.md
           update_existing: true
           search_existing: open
+
   test-image:
     needs: build-image
     runs-on: ubuntu-22.04
@@ -214,7 +253,7 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull container image
-        run: docker pull $IMAGEID:latest
+        run: docker pull $IMAGEID:amd64
       - name: Initialize CVMFS
         if: matrix.needs_cvmfs
         uses: cvmfs-contrib/github-action-cvmfs@v3
@@ -241,7 +280,7 @@ jobs:
             -e GRANT_SUDO=${{ matrix.grant_sudo }} \
             -e NEURODESKTOP_CVMFS_STARTUP_MODE=eager \
             -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
-            $IMAGEID:latest
+            $IMAGEID:amd64
           echo "Waiting for container startup..."
           for i in $(seq 1 60); do
             if docker exec neurodesktop-test curl -sf http://localhost:8888/api/status >/dev/null 2>&1; then
@@ -252,9 +291,14 @@ jobs:
           done
           docker exec -u jovyan neurodesktop-test pytest /opt/tests/ -v
           docker rm -f neurodesktop-test
+
   scan-image:
     needs: build-image
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
     steps:
       - name: Set environment variables
         run: |
@@ -274,11 +318,11 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull container image
-        run: docker pull $IMAGEID:latest
-      - name: Container image scan
+        run: docker pull $IMAGEID:${{ matrix.arch }}
+      - name: Container image scan (${{ matrix.arch }})
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
-          image-ref: ${{ env.IMAGEID }}:latest
+          image-ref: ${{ env.IMAGEID }}:${{ matrix.arch }}
           format: table
           exit-code: "1"
           severity: CRITICAL
