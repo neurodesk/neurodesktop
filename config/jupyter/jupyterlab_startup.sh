@@ -96,6 +96,16 @@ ensure_jupyterlab_page_config
 mkdir -p "${HOME}/.ssh"
 chmod 700 "${HOME}/.ssh"
 
+# Fix jupyter-sshd-proxy host key permissions (generated on first use without explicit chmod)
+if [ -f "${HOME}/.ssh/jupyter_sshd_hostkey" ]; then
+    chmod 600 "${HOME}/.ssh/jupyter_sshd_hostkey"
+fi
+if [ -f "${HOME}/.ssh/jupyter_sshd_hostkey.pub" ]; then
+    chmod 644 "${HOME}/.ssh/jupyter_sshd_hostkey.pub"
+fi
+# Default ACLs ensure future keys created in .ssh get owner-only permissions
+setfacl -dRm u::rw,g::0,o::0 "${HOME}/.ssh" 2>/dev/null || true
+
 # Create a symlink in home if /data is mounted
 if mountpoint -q /data; then
     if [ ! -L "${HOME}/data" ]; then
