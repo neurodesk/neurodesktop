@@ -178,11 +178,22 @@ jobs:
       - name: Push multi-arch manifest to DockerHub
         if: ${{ env.DOCKERHUB_ORG != '' && steps.check_image.outputs.exists != 'true' }}
         run: |
-          docker buildx imagetools create \
-            -t ${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:${{ env.BUILDDATE }} \
-            -t ${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:latest \
-            ${{ env.IMAGEID }}:amd64 \
-            ${{ env.IMAGEID }}:arm64
+          # Tag and push per-arch images to DockerHub (retry up to 5 times)
+          for attempt in 1 2 3 4 5; do
+            echo "Attempt $attempt of 5..."
+            if docker buildx imagetools create \
+              -t ${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:${{ env.BUILDDATE }} \
+              -t ${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:latest \
+              ${{ env.IMAGEID }}:amd64 \
+              ${{ env.IMAGEID }}:arm64; then
+              echo "Push succeeded on attempt $attempt"
+              exit 0
+            fi
+            echo "Attempt $attempt failed, waiting 30 seconds before retry..."
+            sleep 30
+          done
+          echo "All 5 attempts failed"
+          exit 1
       - name: Create github tag
         if: steps.check_image.outputs.exists != 'true'
         env:
