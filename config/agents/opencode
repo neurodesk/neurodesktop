@@ -9,7 +9,9 @@ OPENCODE_DEFAULT_CONFIG_FILE="/opt/jovyan_defaults/.config/opencode/opencode.jso
 
 JETSTREAM_BASE_URL="https://llm.jetstream-cloud.org/v1"
 JETSTREAM_MODEL_ID="gpt-oss-120b"
-NEURODESK_BASE_URL="https://llm.neurodesk.org/openai/v1"
+NEURODESK_BASE_URL="https://llm.neurodesk.org/openai"
+NEURODESK_BASE_URL="${NEURODESK_BASE_URL%/}"
+NEURODESK_DEFAULT_MODEL_ID="gpt-oss"
 BRAIN_RESEARCHER_MCP_URL="https://brain-researcher.com/mcp"
 BRAIN_RESEARCHER_SIGNUP_URL="https://brain-researcher.com/settings"
 
@@ -489,6 +491,22 @@ PY
         return 0
     fi
 
+    if [ "${http_code}" = "404" ]; then
+        NEURODESK_RUNNING=1
+        NEURODESK_MODELS=("${NEURODESK_DEFAULT_MODEL_ID}")
+
+        if [ -n "${NEURODESK_API_KEY:-}" ]; then
+            NEURODESK_REQUIRES_KEY=0
+            NEURODESK_STATUS="running, but model listing is hidden at ${endpoint} (HTTP ${http_code}); using ${NEURODESK_DEFAULT_MODEL_ID}"
+        else
+            NEURODESK_REQUIRES_KEY=1
+            NEURODESK_STATUS="running, API key required or model list is hidden at ${endpoint} (HTTP ${http_code})"
+        fi
+
+        rm -f "${response_file}"
+        return 0
+    fi
+
     if [ "${http_code}" = "401" ] || [ "${http_code}" = "403" ]; then
         NEURODESK_RUNNING=1
         NEURODESK_REQUIRES_KEY=1
@@ -505,9 +523,9 @@ PY
     fi
 
     if [ -n "${http_code}" ] && [ "${http_code}" != "000" ]; then
-        NEURODESK_STATUS="unavailable (HTTP ${http_code})"
+        NEURODESK_STATUS="OpenAI-compatible API unavailable at ${endpoint} (HTTP ${http_code}); the web UI may still be reachable"
     else
-        NEURODESK_STATUS="unreachable"
+        NEURODESK_STATUS="OpenAI-compatible API unreachable at ${endpoint}"
     fi
 
     rm -f "${response_file}"
@@ -623,7 +641,7 @@ ollama_model_contexts = load_json_env("OLLAMA_MODEL_CONTEXTS_JSON", {})
 neurodesk_models = load_json_env("NEURODESK_MODELS_JSON", [])
 ollama_base_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1")
 jetstream_base_url = os.environ.get("JETSTREAM_BASE_URL", "https://llm.jetstream-cloud.org/v1")
-neurodesk_base_url = os.environ.get("NEURODESK_BASE_URL", "https://llm.neurodesk.org/openai/v1")
+neurodesk_base_url = os.environ.get("NEURODESK_BASE_URL", "https://llm.neurodesk.org/openai")
 ollama_default_context_limit = os.environ.get("OLLAMA_DEFAULT_CONTEXT_LIMIT", "16384")
 ollama_default_output_limit = os.environ.get("OLLAMA_DEFAULT_OUTPUT_LIMIT", "8192")
 
@@ -1142,7 +1160,7 @@ ensure_opencode_model_selection() {
     echo "Checking local Ollama at ${OLLAMA_HOST_CLEAN}..."
     check_local_ollama_models
 
-    echo "Checking llm.neurodesk.org..."
+    echo "Checking llm.neurodesk.org API at ${NEURODESK_BASE_URL}/models..."
     check_neurodesk_server
 
     echo "Jetstream: ${JETSTREAM_STATUS}"

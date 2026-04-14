@@ -4,18 +4,18 @@
   "instructions": [
     "/opt/AGENTS.md"
   ],
-  "model": "neurodesk/devstral-small-2",
+  "model": "neurodesk/gpt-oss",
   "provider": {
     "neurodesk": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "Neurodesk LiteLLM",
       "options": {
-        "baseURL": "https://llm.neurodesk.org/openai/v1",
+        "baseURL": "https://llm.neurodesk.org/openai",
         "apiKey": "{env:NEURODESK_API_KEY}"
       },
       "models": {
-        "devstral-small-2": {
-          "name": "Devstral Small 2 24B",
+        "gpt-oss": {
+          "name": "gpt-oss",
           "limit": {
             "context": 131000,
             "output": 8192

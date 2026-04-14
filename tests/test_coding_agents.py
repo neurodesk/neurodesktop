@@ -109,18 +109,18 @@ def make_opencode_litellm_wrapper(tmp_path):
         json.dumps(
             {
                 "$schema": "https://opencode.ai/config.json",
-                "model": "neurodesk/devstral-small-2",
+                "model": "neurodesk/gpt-oss",
                 "provider": {
                     "neurodesk": {
                         "npm": "@ai-sdk/openai-compatible",
                         "name": "Neurodesk vLLM",
                         "options": {
-                            "baseURL": "https://llm.neurodesk.org/openai/v1",
+                            "baseURL": "https://llm.neurodesk.org/openai",
                             "apiKey": "{env:NEURODESK_API_KEY}",
                         },
                         "models": {
-                            "devstral-small-2": {
-                                "name": "Devstral Small 2 24B",
+                            "gpt-oss": {
+                                "name": "gpt-oss",
                                 "limit": {"context": 131000, "output": 8192},
                             }
                         },
@@ -165,7 +165,12 @@ if [ -z "$outfile" ]; then
 fi
 
 case "$url" in
-    https://llm.neurodesk.org/openai/v1/models)
+    https://llm.neurodesk.org/openai/models)
+        if [ "${FAKE_NEURODESK_MODELS_HTTP:-}" = "404" ] && [ -z "$auth" ]; then
+            printf '%s' '{"detail":"Not Found"}' > "$outfile"
+            printf '404'
+            exit 0
+        fi
         case "$auth" in
             "Authorization: Bearer neurodesk-test-key"|"Authorization: Bearer new-neurodesk-key")
                 printf '%s' '{"data":[{"id":"model-alpha"},{"id":"openai/gpt-4.1-mini"}]}' > "$outfile"
@@ -266,6 +271,10 @@ def test_opencode_shows_litellm_models_after_api_key_creation(tmp_path):
     )
 
     assert returncode == 0, output
+    assert (
+        "Checking llm.neurodesk.org API at https://llm.neurodesk.org/openai/models..."
+        in output
+    )
     assert "Open https://llm.neurodesk.org and create an account" in output
     assert "Click your user avatar -> Settings -> Account." in output
     assert (
@@ -290,9 +299,43 @@ def test_opencode_shows_litellm_models_after_api_key_creation(tmp_path):
     assert neurodesk_provider["name"] == "Neurodesk LiteLLM"
     assert (
         neurodesk_provider["options"]["baseURL"]
-        == "https://llm.neurodesk.org/openai/v1"
+        == "https://llm.neurodesk.org/openai"
     )
     assert list(neurodesk_provider["models"]) == ["model-alpha", "openai/gpt-4.1-mini"]
+
+def test_opencode_neurodesk_404_models_response_still_prompts_for_key(tmp_path):
+    """Verify unauthenticated Neurodesk API 404 still allows key setup."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    env["FAKE_NEURODESK_MODELS_HTTP"] = "404"
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)],
+        "neurodesk-test-key\n1\nn\n",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert returncode == 0, output
+    assert (
+        "Checking llm.neurodesk.org API at https://llm.neurodesk.org/openai/models..."
+        in output
+    )
+    assert (
+        "llm.neurodesk.org: running, API key required or model list is hidden at "
+        "https://llm.neurodesk.org/openai/models (HTTP 404)"
+        in output
+    )
+    assert "OpenAI-compatible API unavailable" not in output
+    assert "Paste Neurodesk API key (input hidden, press Enter when done):" in output
+    assert "Available llm.neurodesk.org LiteLLM models:" in output
+    assert "OpenCode default model set to neurodesk/model-alpha." in output
+
+    user_config = json.loads(
+        (home_dir / ".config" / "opencode" / "opencode.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert user_config["model"] == "neurodesk/model-alpha"
 
 def test_opencode_rejected_neurodesk_key_points_to_litellm_site(tmp_path):
     """Verify rejected Neurodesk keys ask users to generate a replacement via LiteLLM."""
@@ -322,7 +365,7 @@ def test_opencode_rejected_neurodesk_key_points_to_litellm_site(tmp_path):
     assert "Working models detected:" in output
     assert "1) llm.neurodesk.org / model-alpha" in output
     assert "2) llm.neurodesk.org / openai/gpt-4.1-mini" in output
-    assert "llm.neurodesk.org / devstral-small-2 (requires a valid API key)" not in output
+    assert "llm.neurodesk.org / gpt-oss (requires a valid API key)" not in output
     assert "OpenCode default model set to neurodesk/model-alpha." in output
 
     bashrc = (home_dir / ".bashrc").read_text(encoding="utf-8")
@@ -337,7 +380,7 @@ def test_opencode_rejected_neurodesk_key_points_to_litellm_site(tmp_path):
     assert user_config["model"] == "neurodesk/model-alpha"
     assert (
         user_config["provider"]["neurodesk"]["options"]["baseURL"]
-        == "https://llm.neurodesk.org/openai/v1"
+        == "https://llm.neurodesk.org/openai"
     )
 
 def test_opencode_rejected_neurodesk_key_refreshes_before_mixed_model_picker(tmp_path):
@@ -365,7 +408,7 @@ def test_opencode_rejected_neurodesk_key_refreshes_before_mixed_model_picker(tmp
     assert "1) Local Ollama / local-model:latest" in output
     assert "2) llm.neurodesk.org / model-alpha" in output
     assert "3) llm.neurodesk.org / openai/gpt-4.1-mini" in output
-    assert "llm.neurodesk.org / devstral-small-2 (requires a valid API key)" not in output
+    assert "llm.neurodesk.org / gpt-oss (requires a valid API key)" not in output
     assert "OpenCode default model set to neurodesk/openai/gpt-4.1-mini." in output
 
     user_config = json.loads(
@@ -377,7 +420,7 @@ def test_opencode_rejected_neurodesk_key_refreshes_before_mixed_model_picker(tmp
     assert user_config["model"] == "neurodesk/openai/gpt-4.1-mini"
     assert (
         neurodesk_provider["options"]["baseURL"]
-        == "https://llm.neurodesk.org/openai/v1"
+        == "https://llm.neurodesk.org/openai"
     )
     assert list(neurodesk_provider["models"]) == ["model-alpha", "openai/gpt-4.1-mini"]
 
