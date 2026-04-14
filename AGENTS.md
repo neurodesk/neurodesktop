@@ -1,18 +1,17 @@
 # AGENTS.md
 
-This file provides guidance to Agents when working with code in this repository.
+## Important Guidelines
 
-## Project Overview
+- when fixing a bug always test if the fix worked before reporting that the problem is fixed
+- when implementing a new feature, always create a test for the new feature and make sure that the AGENTS.md file is up-to-date.
 
-Neurodesktop is a plug-and-play, browser-accessible, containerised data analysis environment for neuroimaging research. It provides a complete desktop environment with neuroimaging tools accessible through JupyterLab and Apache Guacamole.
+## Tests
 
-## Build and Development Commands
-
-### Tests
 when making changes to the project, make sure you add tests for new functionality, build the container and run the tests inside the container under /opt/tests/ to ensure that your changes do not break existing functionality.
-```
+
+```bash
 pytest /opt/tests/
-``` 
+```
 
 ### Building the Container
 
@@ -25,36 +24,6 @@ docker build . -t neurodesktop:latest
 ```
 
 The [build_and_run.sh](build_and_run.sh) script builds the image and runs it with recommended settings (persistent home, CVMFS enabled, port 8888).
-
-### Running the Container
-
-```bash
-# Standard run with persistent home directory
-docker volume create neurodesk-home
-docker run --shm-size=1gb -it --privileged --user=root \
-    --name neurodesktop -v ~/neurodesktop-storage:/neurodesktop-storage \
-    --mount source=neurodesk-home,target=/home/jovyan \
-    -e CVMFS_DISABLE=false \
-    -p 8888:8888 \
-    -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
-    neurodesktop:latest
-
-# Offline mode (CVMFS disabled)
-docker run --shm-size=1gb -it --privileged --user=root \
-    --name neurodesktop \
-    -v ~/neurodesktop-storage:/neurodesktop-storage \
-    --mount source=neurodesk-home,target=/home/jovyan \
-    -e CVMFS_DISABLE=true \
-    -p 8888:8888 \
-    -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
-    neurodesktop:latest
-```
-
-### Cleanup
-
-```bash
-./stop_and_clean.sh
-```
 
 ## High-Level Architecture
 
@@ -114,13 +83,6 @@ The startup sequence follows this order:
   - `test-cvmfs.yml`: CVMFS server health checks
   - Multi-architecture builds (amd64, arm64)
 
-### Storage Layout
-
-- `/neurodesktop-storage`: User-writable persistent storage (mounted from host)
-- `/cvmfs/neurodesk.ardc.edu.au`: Read-only CVMFS mount for software containers
-- `/home/jovyan`: User home directory (can be persistent via Docker volume)
-- `/neurocommand`: Neurocommand installation
-- `/data`: Optional mount point for additional data
 
 ### Important Build-Time Behaviors
 
@@ -139,14 +101,3 @@ CVMFS configuration files exist for different regions and modes (direct/CDN). Th
 - `NB_UID`, `NB_GID`: User/group IDs for permission matching
 - `START_LOCAL_LLMS`: Set to `1` to enable Ollama with neurodesk model
 - `NEURODESKTOP_VERSION`: Version tag (set by CI)
-
-## CI/CD and Release Process
-
-- Daily builds at 17:00 UTC via GitHub Actions
-- Images pushed to:
-  - GitHub Container Registry: `ghcr.io/neurodesk/neurodesktop/neurodesktop`
-  - Docker Hub: `vnmd/neurodesktop`
-- Build only pushes if RootFS changes detected (unless `force_push=true`)
-- Tags created with build date (e.g., `2024-12-06`)
-- Security scanning via Trivy on built images
-- Issues auto-created on workflow failures
