@@ -175,25 +175,25 @@ jobs:
             -t ${{ env.IMAGEID }}:latest \
             ${{ env.IMAGEID }}:amd64 \
             ${{ env.IMAGEID }}:arm64
-      - name: Push multi-arch manifest to DockerHub
+      - name: Install crane
         if: ${{ env.DOCKERHUB_ORG != '' && steps.check_image.outputs.exists != 'true' }}
         run: |
-          # Tag and push per-arch images to DockerHub (retry up to 5 times)
-          for attempt in 1 2 3 4 5; do
-            echo "Attempt $attempt of 5..."
-            if docker buildx imagetools create \
-              -t ${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:${{ env.BUILDDATE }} \
-              -t ${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:latest \
-              ${{ env.IMAGEID }}:amd64 \
-              ${{ env.IMAGEID }}:arm64; then
-              echo "Push succeeded on attempt $attempt"
-              exit 0
-            fi
-            echo "Attempt $attempt failed, waiting 30 seconds before retry..."
-            sleep 30
-          done
-          echo "All 5 attempts failed"
-          exit 1
+          curl -sL https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_x86_64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin crane
+          crane version
+      - name: Copy multi-arch manifest to DockerHub
+        if: ${{ env.DOCKERHUB_ORG != '' && steps.check_image.outputs.exists != 'true' }}
+        run: |
+          # Copy the already-assembled multi-arch manifest from GHCR to DockerHub
+          # using crane, which uses a different blob upload path than
+          # `docker buildx imagetools create` and avoids the 400 Bad Request
+          # error we were seeing from DockerHub's registry on large blobs.
+          crane copy \
+            ${{ env.IMAGEID }}:${{ env.BUILDDATE }} \
+            ${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:${{ env.BUILDDATE }}
+          crane copy \
+            ${{ env.IMAGEID }}:latest \
+            ${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:latest
       - name: Create github tag
         if: steps.check_image.outputs.exists != 'true'
         env:
