@@ -115,7 +115,7 @@ def make_opencode_litellm_wrapper(tmp_path):
                         "npm": "@ai-sdk/openai-compatible",
                         "name": "Neurodesk vLLM",
                         "options": {
-                            "baseURL": "https://llm.neurodesk.org/v1",
+                            "baseURL": "https://llm.neurodesk.org/openai/v1",
                             "apiKey": "{env:NEURODESK_API_KEY}",
                         },
                         "models": {
@@ -165,7 +165,7 @@ if [ -z "$outfile" ]; then
 fi
 
 case "$url" in
-    *llm.neurodesk.org*/models)
+    https://llm.neurodesk.org/openai/v1/models)
         case "$auth" in
             "Authorization: Bearer neurodesk-test-key"|"Authorization: Bearer new-neurodesk-key")
                 printf '%s' '{"data":[{"id":"model-alpha"},{"id":"openai/gpt-4.1-mini"}]}' > "$outfile"
@@ -176,6 +176,10 @@ case "$url" in
                 printf '401'
                 ;;
         esac
+        ;;
+    *llm.neurodesk.org*)
+        printf '%s' '{"error":{"message":"unexpected Neurodesk URL"}}' > "$outfile"
+        printf '302'
         ;;
     *llm.jetstream-cloud.org*)
         printf '%s' '{"error":"unavailable"}' > "$outfile"
@@ -262,7 +266,12 @@ def test_opencode_shows_litellm_models_after_api_key_creation(tmp_path):
     )
 
     assert returncode == 0, output
-    assert "Open https://llm.neurodesk.org/ui/ and create an account" in output
+    assert "Open https://llm.neurodesk.org and create an account" in output
+    assert "Click your user avatar -> Settings -> Account." in output
+    assert (
+        'Scroll to the "API Keys" section, then click "Create new secret key" / "Show"'
+        in output
+    )
     assert "Paste Neurodesk API key (input hidden, press Enter when done):" in output
     assert "API key received (input hidden)." in output
     assert "Available llm.neurodesk.org LiteLLM models:" in output
@@ -279,10 +288,14 @@ def test_opencode_shows_litellm_models_after_api_key_creation(tmp_path):
     neurodesk_provider = user_config["provider"]["neurodesk"]
     assert user_config["model"] == "neurodesk/openai/gpt-4.1-mini"
     assert neurodesk_provider["name"] == "Neurodesk LiteLLM"
+    assert (
+        neurodesk_provider["options"]["baseURL"]
+        == "https://llm.neurodesk.org/openai/v1"
+    )
     assert list(neurodesk_provider["models"]) == ["model-alpha", "openai/gpt-4.1-mini"]
 
-def test_opencode_rejected_neurodesk_key_points_to_litellm_ui(tmp_path):
-    """Verify rejected Neurodesk keys ask users to generate a replacement via LiteLLM UI."""
+def test_opencode_rejected_neurodesk_key_points_to_litellm_site(tmp_path):
+    """Verify rejected Neurodesk keys ask users to generate a replacement via LiteLLM."""
     test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
     env["NEURODESK_API_KEY"] = "expired-neurodesk-key"
 
@@ -299,9 +312,10 @@ def test_opencode_rejected_neurodesk_key_points_to_litellm_ui(tmp_path):
         in output
     )
     assert (
-        "Please generate a new API key at https://llm.neurodesk.org/ui/ and paste it below."
+        "Please generate a new API key at https://llm.neurodesk.org and paste it below."
         in output
     )
+    assert "Click your user avatar -> Settings -> Account." in output
     assert "Paste Neurodesk API key (input hidden, press Enter when done):" in output
     assert "API key received (input hidden)." in output
     assert "Rechecking llm.neurodesk.org with the new API key..." in output
@@ -321,6 +335,10 @@ def test_opencode_rejected_neurodesk_key_points_to_litellm_ui(tmp_path):
         )
     )
     assert user_config["model"] == "neurodesk/model-alpha"
+    assert (
+        user_config["provider"]["neurodesk"]["options"]["baseURL"]
+        == "https://llm.neurodesk.org/openai/v1"
+    )
 
 def test_opencode_rejected_neurodesk_key_refreshes_before_mixed_model_picker(tmp_path):
     """Verify a rejected Neurodesk key is refreshed before showing mixed providers."""
@@ -339,7 +357,7 @@ def test_opencode_rejected_neurodesk_key_refreshes_before_mixed_model_picker(tmp
     assert returncode == 0, output
     assert (
         output.index(
-            "Please generate a new API key at https://llm.neurodesk.org/ui/ and paste it below."
+            "Please generate a new API key at https://llm.neurodesk.org and paste it below."
         )
         < output.index("Working models detected:")
     )
@@ -357,6 +375,10 @@ def test_opencode_rejected_neurodesk_key_refreshes_before_mixed_model_picker(tmp
     )
     neurodesk_provider = user_config["provider"]["neurodesk"]
     assert user_config["model"] == "neurodesk/openai/gpt-4.1-mini"
+    assert (
+        neurodesk_provider["options"]["baseURL"]
+        == "https://llm.neurodesk.org/openai/v1"
+    )
     assert list(neurodesk_provider["models"]) == ["model-alpha", "openai/gpt-4.1-mini"]
 
 def test_codex_yolo_no_full_auto(tmp_path):

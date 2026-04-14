@@ -9,8 +9,7 @@ OPENCODE_DEFAULT_CONFIG_FILE="/opt/jovyan_defaults/.config/opencode/opencode.jso
 
 JETSTREAM_BASE_URL="https://llm.jetstream-cloud.org/v1"
 JETSTREAM_MODEL_ID="gpt-oss-120b"
-NEURODESK_BASE_URL="https://llm.neurodesk.org/v1"
-NEURODESK_DEFAULT_MODEL_ID="devstral-small-2"
+NEURODESK_BASE_URL="https://llm.neurodesk.org/openai/v1"
 BRAIN_RESEARCHER_MCP_URL="https://brain-researcher.com/mcp"
 BRAIN_RESEARCHER_SIGNUP_URL="https://brain-researcher.com/settings"
 
@@ -624,7 +623,7 @@ ollama_model_contexts = load_json_env("OLLAMA_MODEL_CONTEXTS_JSON", {})
 neurodesk_models = load_json_env("NEURODESK_MODELS_JSON", [])
 ollama_base_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1")
 jetstream_base_url = os.environ.get("JETSTREAM_BASE_URL", "https://llm.jetstream-cloud.org/v1")
-neurodesk_base_url = os.environ.get("NEURODESK_BASE_URL", "https://llm.neurodesk.org/v1")
+neurodesk_base_url = os.environ.get("NEURODESK_BASE_URL", "https://llm.neurodesk.org/openai/v1")
 ollama_default_context_limit = os.environ.get("OLLAMA_DEFAULT_CONTEXT_LIMIT", "16384")
 ollama_default_output_limit = os.environ.get("OLLAMA_DEFAULT_OUTPUT_LIMIT", "8192")
 
@@ -954,7 +953,8 @@ ensure_neurodesk_api_key_for_selection() {
     if [ ! -t 0 ]; then
         if [ -n "${NEURODESK_API_KEY:-}" ] && [ "${NEURODESK_REQUIRES_KEY}" -eq 1 ]; then
             echo "Selected ${SELECTED_MODEL}, but the current NEURODESK_API_KEY was rejected by llm.neurodesk.org." >&2
-            echo "Generate a new API key at https://llm.neurodesk.org/ui/ and export it as NEURODESK_API_KEY." >&2
+            echo "Generate a new API key at https://llm.neurodesk.org and export it as NEURODESK_API_KEY." >&2
+            echo 'In the web app, click your user avatar -> Settings -> Account, then scroll to the "API Keys" section and use "Create new secret key" / "Show".' >&2
             return 1
         fi
         echo "Selected ${SELECTED_MODEL}, but NEURODESK_API_KEY is not set and no interactive prompt is possible." >&2
@@ -963,13 +963,14 @@ ensure_neurodesk_api_key_for_selection() {
 
     if [ -n "${NEURODESK_API_KEY:-}" ] && [ "${NEURODESK_REQUIRES_KEY}" -eq 1 ]; then
         echo "The existing NEURODESK_API_KEY was rejected by llm.neurodesk.org."
-        echo "Please generate a new API key at https://llm.neurodesk.org/ui/ and paste it below."
+        echo "Please generate a new API key at https://llm.neurodesk.org and paste it below."
     fi
 
     echo "Configuring llm.neurodesk.org."
-    echo "1) Open https://llm.neurodesk.org/ui/ and create an account (if needed)."
-    echo "2) Generate an API key in the Neurodesk LiteLLM web app."
-    echo "3) Paste the key below; input is hidden and this wrapper will save it to ~/.bashrc."
+    echo "1) Open https://llm.neurodesk.org and create an account (if needed)."
+    echo "2) Click your user avatar -> Settings -> Account."
+    echo '3) Scroll to the "API Keys" section, then click "Create new secret key" / "Show" to reveal or generate a key.'
+    echo "4) Paste the key below; input is hidden and this wrapper will save it to ~/.bashrc."
 
     while [ -z "${entered_key}" ]; do
         read -r -s -p "Paste Neurodesk API key (input hidden, press Enter when done): " entered_key

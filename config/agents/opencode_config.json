@@ -10,7 +10,7 @@
       "npm": "@ai-sdk/openai-compatible",
       "name": "Neurodesk LiteLLM",
       "options": {
-        "baseURL": "https://llm.neurodesk.org/v1",
+        "baseURL": "https://llm.neurodesk.org/openai/v1",
         "apiKey": "{env:NEURODESK_API_KEY}"
       },
       "models": {
