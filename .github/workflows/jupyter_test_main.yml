@@ -4,6 +4,10 @@ on:
     - cron: '0 0 * * *'  # Run every 24 hours at midnight UTC
   workflow_dispatch: # Allow manual trigger
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   test-jupyterhub:
     runs-on: ubuntu-latest
