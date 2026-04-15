@@ -16,38 +16,38 @@ jobs:
       matrix:
         include:
           - server_name: "Neuro-Test CI VM"
-            user_token: ${{ secrets.JUPYTER_CI_TEST_TOKEN }}
+            token_secret: "JUPYTER_CI_TEST_TOKEN"
             url_var: "JUPYTER_API_URL_CI_TEST"
             default_url: "https://neuro-test.ssdsorg.cloud.edu.au"
             user_var: "JUPYTER_TEST_USER"
             default_user: "akshitbeniwal"
           - server_name: "play-eu"
-            user_token: ${{ secrets.JUPYTER_PLAY_EU_TOKEN }}
+            token_secret: "JUPYTER_PLAY_EU_TOKEN"
             url_var: "JUPYTER_API_URL_PLAY_EU"
             default_url: "https://play-europe.neurodesk.org"
             user_var: "JUPYTER_TEST_USER"
             default_user: "akshitbeniwal"
           - server_name: "play-america"
-            user_token: ${{ secrets.JUPYTER_PLAY_AMERICA_TOKEN }}
+            token_secret: "JUPYTER_PLAY_AMERICA_TOKEN"
             url_var: "JUPYTER_API_URL_PLAY_AMERICA"
             default_url: "https://play-america.neurodesk.org"
             user_var: "JUPYTER_TEST_USER"
             default_user: "akshitbeniwal"
           - server_name: "play-aus"
-            user_token: ${{ secrets.JUPYTER_PLAY_AUS_TOKEN }}
+            token_secret: "JUPYTER_PLAY_AUS_TOKEN"
             url_var: "JUPYTER_API_URL_PLAY_AUS"
             default_url: "https://play.neurodesk.cloud.edu.au"
             user_var: "JUPYTER_TEST_USER_AUS"
             default_user: "aaf_ttacrdwkv3giggp5janknefwxscf9_dmbvilqynah0e"
           - server_name: "edu-neurodesk"
-            user_token: ${{ secrets.JUPYTER_EDU_NEURODESK_TOKEN }}
+            token_secret: "JUPYTER_EDU_NEURODESK_TOKEN"
             url_var: "JUPYTER_API_URL_EDU_NEURODESK"
             default_url: "https://edu.neurodesk.org"
             user_var: "JUPYTER_TEST_USER"
             default_user: "akshitbeniwal"
     
     env:
-      USER_TOKEN: ${{ matrix.user_token }}
+      USER_TOKEN: ${{ secrets[matrix.token_secret] }}
       USER: ${{ vars[matrix.user_var] || matrix.default_user }}
       API_URL: ${{ vars[matrix.url_var] || matrix.default_url }}
       NOTEBOOK_NAME: "FSL_course_bet_test.ipynb"
