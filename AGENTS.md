@@ -9,6 +9,10 @@
 
 when making changes to the project, make sure you add tests for new functionality, build the container and run the tests inside the container under /opt/tests/ to ensure that your changes do not break existing functionality.
 
+### Negative Test Convention
+
+When adding tests for pipeline or module-loading workflows, always include a **negative test** alongside the positive (happy-path) test. The negative test should use `module load funny-name-tool` (a non-existent module) and assert that the workflow **fails** (non-zero exit code) and does **not** produce output. This guards against silent failures caused by `set +euo pipefail` and `|| true` patterns in workflow scripts.
+
 ```bash
 pytest /opt/tests/
 ```

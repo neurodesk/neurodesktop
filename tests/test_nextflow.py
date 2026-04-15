@@ -103,3 +103,43 @@ workflow {
 
     assert code == 0, f"Nextflow FSLMaths workflow failed: {output}"
     assert (tmp_path / "results" / "output.nii.gz").exists(), "Nextflow did not produce expected output"
+
+
+def test_nextflow_nonexistent_module_fails(tmp_path):
+    """Verify nextflow workflow fails when loading a non-existent module."""
+    cvmfs_disable = os.environ.get("CVMFS_DISABLE", "false").lower()
+    if cvmfs_disable in ["true", "1"]:
+        pytest.skip("CVMFS is disabled (CVMFS_DISABLE=true)")
+    if not os.path.isdir("/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules"):
+        pytest.fail("CVMFS is enabled but neurodesk-modules not mounted")
+
+    workflow = """
+process RUN_FSLMATHS {
+    publishDir 'results', mode: 'copy'
+    output:
+    path 'output.nii.gz'
+    script:
+    '''
+    source /opt/neurodesktop/environment_variables.sh 2>/dev/null
+    source /usr/share/lmod/lmod/init/bash 2>/dev/null
+    module load funny-name-tool
+    touch output.nii.gz
+    '''
+}
+
+workflow {
+    RUN_FSLMATHS()
+}
+"""
+    workflow_file = tmp_path / "main.nf"
+    workflow_file.write_text(workflow)
+
+    cmd = f"cd {tmp_path} && nextflow run main.nf -ansi-log false"
+    code, output = run_cmd(cmd)
+
+    assert code != 0, (
+        f"Workflow should have failed with non-existent module but succeeded: {output}"
+    )
+    assert not (tmp_path / "results" / "output.nii.gz").exists(), (
+        "Output should not exist when module load fails"
+    )
