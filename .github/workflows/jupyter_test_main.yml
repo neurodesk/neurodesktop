@@ -9,6 +9,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # In each matrix.include entry, replace:
+      #   token_secret: <SECRET_NAME>
+      # with:
+      #   admin_token: ${{ secrets.<SECRET_NAME> }}
       matrix:
         include:
           - server_name: "Neuro-Test CI VM"
@@ -43,7 +47,7 @@ jobs:
             default_user: "akshitbeniwal"
     
     env:
-      ADMIN_TOKEN: ${{ secrets[matrix.token_secret] }}
+      ADMIN_TOKEN: ${{ matrix.admin_token }}
       USER: ${{ vars[matrix.user_var] || matrix.default_user }}
       API_URL: ${{ vars[matrix.url_var] || matrix.default_url }}
     
@@ -68,7 +72,7 @@ jobs:
     - name: Start JupyterHub Server
       run: |
         # Configuration
-        ADMIN_TOKEN="${{ secrets[matrix.token_secret] }}"
+        ADMIN_TOKEN="${{ matrix.admin_token }}"
         USER="${{ vars[matrix.user_var] || matrix.default_user }}"
         API_URL="${{ vars[matrix.url_var] || matrix.default_url }}"
         
