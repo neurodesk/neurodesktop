@@ -101,3 +101,5 @@ CVMFS configuration files exist for different regions and modes (direct/CDN). Th
 - `NB_UID`, `NB_GID`: User/group IDs for permission matching
 - `START_LOCAL_LLMS`: Set to `1` to enable Ollama with neurodesk model
 - `NEURODESKTOP_VERSION`: Version tag (set by CI)
+- `OPENCODE_MODEL_PROFILE`: Set to `ollama`, `neurodesk`, `jetstream`, or `provider/model` to skip the interactive OpenCode model picker
+- `OPENCODE_STARTUP_VERBOSE`: Set to `1` to show detailed OpenCode provider probe output during startup

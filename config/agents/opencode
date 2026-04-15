@@ -14,6 +14,11 @@ NEURODESK_BASE_URL="${NEURODESK_BASE_URL%/}"
 NEURODESK_DEFAULT_MODEL_ID="gpt-oss"
 BRAIN_RESEARCHER_MCP_URL="https://brain-researcher.com/mcp"
 BRAIN_RESEARCHER_SIGNUP_URL="https://brain-researcher.com/settings"
+OPENCODE_STARTUP_VERBOSE="${OPENCODE_STARTUP_VERBOSE:-0}"
+OPENCODE_COLOR_ENABLED=0
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
+    OPENCODE_COLOR_ENABLED=1
+fi
 
 OLLAMA_HOST_CLEAN="${OLLAMA_HOST:-http://127.0.0.1:11434}"
 OLLAMA_HOST_CLEAN="${OLLAMA_HOST_CLEAN%/}"
@@ -70,6 +75,260 @@ import sys
 
 print(json.dumps(sys.argv[1:]))
 PY
+}
+
+opencode_flag_enabled() {
+    case "${1:-}" in
+        1|true|TRUE|True|yes|YES|Yes|on|ON|On)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+opencode_startup_verbose_enabled() {
+    opencode_flag_enabled "${OPENCODE_STARTUP_VERBOSE}"
+}
+
+opencode_color_enabled() {
+    [ "${OPENCODE_COLOR_ENABLED:-0}" = "1" ]
+}
+
+colorize_status() {
+    local style="$1"
+    local text="$2"
+    local code=""
+
+    case "${style}" in
+        available)
+            code="32"
+            ;;
+        warning)
+            code="33"
+            ;;
+        unavailable)
+            code="31"
+            ;;
+    esac
+
+    if [ -n "${code}" ] && opencode_color_enabled; then
+        printf "\033[%sm%s\033[0m" "${code}" "${text}"
+    else
+        printf "%s" "${text}"
+    fi
+}
+
+model_count_label() {
+    local count="$1"
+
+    if [ "${count}" -eq 1 ]; then
+        printf "1 model"
+    else
+        printf "%d models" "${count}"
+    fi
+}
+
+http_status_detail() {
+    local status="$1"
+
+    if [[ "${status}" =~ HTTP[[:space:]]+([0-9]+) ]]; then
+        printf "HTTP %s" "${BASH_REMATCH[1]}"
+        return 0
+    fi
+
+    return 1
+}
+
+print_provider_status_row() {
+    local provider="$1"
+    local style="$2"
+    local summary="$3"
+    local detail="${4:-}"
+    local status_text
+
+    status_text=$(colorize_status "${style}" "${summary}")
+    if [ -n "${detail}" ]; then
+        status_text="${status_text}: ${detail}"
+    fi
+
+    printf "  %-18s %s\n" "${provider}" "${status_text}"
+}
+
+print_jetstream_status_row() {
+    local detail
+
+    if [ "${#JETSTREAM_MODELS[@]}" -gt 0 ]; then
+        print_provider_status_row "Jetstream" "available" "available" "$(model_count_label "${#JETSTREAM_MODELS[@]}")"
+        return 0
+    fi
+
+    if [[ "${JETSTREAM_STATUS}" == *"permission denied"* ]]; then
+        detail="permission denied for ${JETSTREAM_MODEL_ID}"
+    elif detail=$(http_status_detail "${JETSTREAM_STATUS}"); then
+        :
+    else
+        detail="${JETSTREAM_STATUS}"
+    fi
+
+    print_provider_status_row "Jetstream" "unavailable" "unavailable" "${detail}"
+}
+
+print_ollama_status_row() {
+    local detail
+
+    if [ "${OLLAMA_RUNNING}" -eq 1 ] && [ "${#OLLAMA_MODELS[@]}" -gt 0 ]; then
+        print_provider_status_row "Local Ollama" "available" "available" "$(model_count_label "${#OLLAMA_MODELS[@]}")"
+        return 0
+    fi
+
+    if [ "${OLLAMA_RUNNING}" -eq 1 ]; then
+        print_provider_status_row "Local Ollama" "unavailable" "unavailable" "no local models"
+        return 0
+    fi
+
+    if detail=$(http_status_detail "${OLLAMA_STATUS}"); then
+        detail="not running or unreachable (${detail})"
+    elif [ "${OLLAMA_STATUS}" = "curl not found" ]; then
+        detail="curl not found"
+    else
+        detail="not running or unreachable"
+    fi
+
+    print_provider_status_row "Local Ollama" "unavailable" "unavailable" "${detail}"
+}
+
+print_neurodesk_status_row() {
+    local detail
+    local model_count="${#NEURODESK_MODELS[@]}"
+
+    if [ "${NEURODESK_RUNNING}" -eq 1 ]; then
+        if [ "${NEURODESK_REQUIRES_KEY}" -eq 1 ] && [ -n "${NEURODESK_API_KEY:-}" ]; then
+            print_provider_status_row "llm.neurodesk.org" "warning" "needs API key" "current key rejected"
+            return 0
+        fi
+
+        if [ "${NEURODESK_REQUIRES_KEY}" -eq 1 ]; then
+            print_provider_status_row "llm.neurodesk.org" "warning" "needs API key"
+            return 0
+        fi
+
+        if [ "${model_count}" -gt 0 ]; then
+            if [ "${NEURODESK_MODELS_FROM_SERVER}" -eq 1 ]; then
+                detail="$(model_count_label "${model_count}")"
+            else
+                detail="using ${NEURODESK_MODELS[0]}"
+            fi
+            print_provider_status_row "llm.neurodesk.org" "available" "available" "${detail}"
+            return 0
+        fi
+    fi
+
+    if detail=$(http_status_detail "${NEURODESK_STATUS}"); then
+        :
+    elif [[ "${NEURODESK_STATUS}" == *"unreachable"* ]]; then
+        detail="unreachable"
+    else
+        detail="${NEURODESK_STATUS}"
+    fi
+
+    print_provider_status_row "llm.neurodesk.org" "unavailable" "unavailable" "${detail}"
+}
+
+print_provider_status_table() {
+    echo
+    echo "Provider status"
+    printf "  %-18s %s\n" "Provider" "Status"
+    printf "  %-18s %s\n" "--------" "------"
+    print_jetstream_status_row
+    print_ollama_status_row
+    print_neurodesk_status_row
+    echo
+
+    if ! opencode_startup_verbose_enabled; then
+        echo "Set OPENCODE_STARTUP_VERBOSE=1 to show endpoint probe details."
+    fi
+}
+
+print_provider_probe_details() {
+    echo
+    echo "Provider probe details"
+    printf "  %-18s %s\n" "Jetstream" "${JETSTREAM_STATUS}"
+    printf "  %-18s %s\n" "Local Ollama" "${OLLAMA_STATUS}"
+    printf "  %-18s %s\n" "llm.neurodesk.org" "${NEURODESK_STATUS}"
+}
+
+model_choice_suffix() {
+    local full_label="$1"
+
+    case "${full_label}" in
+        *" (requires API key setup)")
+            printf " (requires API key setup)"
+            ;;
+        *" (requires a valid API key)")
+            printf " (requires a valid API key)"
+            ;;
+    esac
+}
+
+model_choice_name() {
+    local model_ref="$1"
+
+    case "${model_ref}" in
+        jetstream/*)
+            printf "%s" "${model_ref#jetstream/}"
+            ;;
+        ollama/*)
+            printf "%s" "${model_ref#ollama/}"
+            ;;
+        neurodesk/*)
+            printf "%s" "${model_ref#neurodesk/}"
+            ;;
+        *)
+            printf "%s" "${model_ref}"
+            ;;
+    esac
+}
+
+print_model_choice_group() {
+    local provider_key="$1"
+    local provider_label="$2"
+    local idx
+    local model_label
+    local model_ref
+    local printed=0
+
+    for idx in "${!WORKING_MODELS[@]}"; do
+        model_ref="${WORKING_MODELS[$idx]}"
+        case "${model_ref}" in
+            "${provider_key}"/*)
+                ;;
+            *)
+                continue
+                ;;
+        esac
+
+        if [ "${printed}" -eq 0 ]; then
+            echo
+            echo "${provider_label}"
+            printed=1
+        fi
+
+        model_label="$(model_choice_name "${model_ref}")$(model_choice_suffix "${WORKING_MODEL_LABELS[$idx]}")"
+        printf "  %2d) %s\n" "$((idx + 1))" "${model_label}"
+    done
+}
+
+print_grouped_model_choices() {
+    echo
+    echo "Choose a default OpenCode model."
+    print_model_choice_group "jetstream" "Jetstream"
+    print_model_choice_group "ollama" "Local Ollama"
+    print_model_choice_group "neurodesk" "llm.neurodesk.org"
+    echo
+    echo "Tip: set OPENCODE_MODEL_PROFILE=ollama, neurodesk, jetstream, or provider/model to skip this prompt."
+    echo
 }
 
 sanitize_neurodesk_api_key() {
@@ -868,13 +1127,10 @@ choose_default_model() {
         return 0
     fi
 
-    echo "Working models detected:"
-    for idx in "${!WORKING_MODELS[@]}"; do
-        printf "%d) %s\n" "$((idx + 1))" "${WORKING_MODEL_LABELS[$idx]}"
-    done
+    print_grouped_model_choices
 
     while true; do
-        read -r -p "Choose the default model [1-${#WORKING_MODELS[@]}]: " choice
+        read -r -p "Enter model number [1-${#WORKING_MODELS[@]}]: " choice
         case "${choice}" in
             ''|*[!0-9]*)
                 echo "Invalid choice. Enter a number."
@@ -930,11 +1186,7 @@ choose_neurodesk_llm_model() {
     fi
 
     while true; do
-        read -r -p "Choose the default model [${default_idx}]: " choice
-        if [ -z "${choice}" ]; then
-            choice="${default_idx}"
-        fi
-
+        read -r -p "Enter model number [1-${#NEURODESK_MODELS[@]}]: " choice
         case "${choice}" in
             ''|*[!0-9]*)
                 echo "Invalid choice. Enter a number."
@@ -1154,25 +1406,38 @@ ensure_opencode_model_selection() {
 
     load_neurodesk_api_key_from_bashrc
 
-    echo "Checking Jetstream model API (${JETSTREAM_MODEL_ID})..."
+    echo "OpenCode model setup"
+    if opencode_startup_verbose_enabled; then
+        echo "Checking Jetstream model API (${JETSTREAM_MODEL_ID})..."
+    else
+        echo "Checking model providers..."
+    fi
     check_jetstream_model_api
 
-    echo "Checking local Ollama at ${OLLAMA_HOST_CLEAN}..."
+    if opencode_startup_verbose_enabled; then
+        echo "Checking local Ollama at ${OLLAMA_HOST_CLEAN}..."
+    fi
     check_local_ollama_models
 
-    echo "Checking llm.neurodesk.org API at ${NEURODESK_BASE_URL}/models..."
+    if opencode_startup_verbose_enabled; then
+        echo "Checking llm.neurodesk.org API at ${NEURODESK_BASE_URL}/models..."
+    fi
     check_neurodesk_server
 
-    echo "Jetstream: ${JETSTREAM_STATUS}"
-    echo "Ollama: ${OLLAMA_STATUS}"
-    echo "llm.neurodesk.org: ${NEURODESK_STATUS}"
+    print_provider_status_table
+    if opencode_startup_verbose_enabled; then
+        print_provider_probe_details
+    fi
 
     if [ "${NEURODESK_REQUIRES_KEY}" -eq 1 ] && [ -n "${NEURODESK_API_KEY:-}" ]; then
         SELECTED_MODEL="neurodesk/${NEURODESK_DEFAULT_MODEL_ID}"
         if ensure_neurodesk_api_key_for_selection; then
             echo "Rechecking llm.neurodesk.org with the new API key..."
             check_neurodesk_server
-            echo "llm.neurodesk.org: ${NEURODESK_STATUS}"
+            print_neurodesk_status_row
+            if opencode_startup_verbose_enabled; then
+                printf "  %-18s %s\n" "llm.neurodesk.org detail" "${NEURODESK_STATUS}"
+            fi
         else
             echo "Neurodesk API key refresh was not completed. Continuing with other available models." >&2
         fi

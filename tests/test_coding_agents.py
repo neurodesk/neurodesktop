@@ -13,6 +13,12 @@ def run_cmd(cmd):
     )
     return process.returncode, process.stdout.strip()
 
+def opencode_wrapper_path():
+    """Return the installed OpenCode wrapper path, or a test override."""
+    return Path(
+        os.environ.get("NEURODESKTOP_TEST_OPENCODE_WRAPPER", "/usr/local/sbin/opencode")
+    )
+
 def test_coding_agent_claude():
     """Verify Claude agent wrapper is available."""
     code, output = run_cmd("command -v claude")
@@ -25,6 +31,15 @@ def test_coding_agent_codex():
 
 def test_coding_agent_opencode():
     """Verify OpenCode agent wrapper is available."""
+    wrapper_override = os.environ.get("NEURODESKTOP_TEST_OPENCODE_WRAPPER")
+    if wrapper_override:
+        wrapper_path = Path(wrapper_override)
+        assert wrapper_path.exists(), f"OpenCode wrapper missing: {wrapper_path}"
+        assert os.access(wrapper_path, os.X_OK), (
+            f"OpenCode wrapper not executable: {wrapper_path}"
+        )
+        return
+
     code, output = run_cmd("command -v opencode")
     assert code == 0, f"OpenCode agent command missing: {output}"
 
@@ -95,7 +110,7 @@ def run_pty_command(args, input_text, cwd, env, timeout=15):
 
 def make_opencode_litellm_wrapper(tmp_path):
     """Create a testable OpenCode wrapper with fake LiteLLM responses."""
-    wrapper_path = Path("/usr/local/sbin/opencode")
+    wrapper_path = opencode_wrapper_path()
     if not wrapper_path.exists():
         pytest.skip("OpenCode wrapper not installed in this environment")
 
@@ -251,6 +266,7 @@ esac
         **os.environ,
         "HOME": str(home_dir),
         "PATH": f"{fake_bin_dir}:{os.environ['PATH']}",
+        "NO_COLOR": "1",
         "TERM": "xterm",
     }
     env.pop("NEURODESK_API_KEY", None)
@@ -271,8 +287,12 @@ def test_opencode_shows_litellm_models_after_api_key_creation(tmp_path):
     )
 
     assert returncode == 0, output
+    assert "OpenCode model setup" in output
+    assert "Provider status" in output
+    assert "llm.neurodesk.org  needs API key" in output
+    assert "Checking llm.neurodesk.org API" not in output
     assert (
-        "Checking llm.neurodesk.org API at https://llm.neurodesk.org/openai/models..."
+        "Set OPENCODE_STARTUP_VERBOSE=1 to show endpoint probe details."
         in output
     )
     assert "Open https://llm.neurodesk.org and create an account" in output
@@ -283,9 +303,11 @@ def test_opencode_shows_litellm_models_after_api_key_creation(tmp_path):
     )
     assert "Paste Neurodesk API key (input hidden, press Enter when done):" in output
     assert "API key received (input hidden)." in output
-    assert "Available llm.neurodesk.org LiteLLM models:" in output
+    assert "Available llm.neurodesk.org models:" in output
     assert "1) model-alpha" in output
     assert "2) openai/gpt-4.1-mini" in output
+    assert "Enter model number [1-2]:" in output
+    assert "Choose the default model [" not in output
     assert "OpenCode default model set to neurodesk/openai/gpt-4.1-mini." in output
     assert "Brain Researcher MCP server setup" in output
 
@@ -296,7 +318,7 @@ def test_opencode_shows_litellm_models_after_api_key_creation(tmp_path):
     )
     neurodesk_provider = user_config["provider"]["neurodesk"]
     assert user_config["model"] == "neurodesk/openai/gpt-4.1-mini"
-    assert neurodesk_provider["name"] == "Neurodesk LiteLLM"
+    assert neurodesk_provider["name"] == "Neurodesk LLMs"
     assert (
         neurodesk_provider["options"]["baseURL"]
         == "https://llm.neurodesk.org/openai"
@@ -316,18 +338,14 @@ def test_opencode_neurodesk_404_models_response_still_prompts_for_key(tmp_path):
     )
 
     assert returncode == 0, output
-    assert (
-        "Checking llm.neurodesk.org API at https://llm.neurodesk.org/openai/models..."
-        in output
-    )
-    assert (
-        "llm.neurodesk.org: running, API key required or model list is hidden at "
-        "https://llm.neurodesk.org/openai/models (HTTP 404)"
-        in output
-    )
+    assert "OpenCode model setup" in output
+    assert "Provider status" in output
+    assert "llm.neurodesk.org  needs API key" in output
+    assert "Checking llm.neurodesk.org API" not in output
     assert "OpenAI-compatible API unavailable" not in output
     assert "Paste Neurodesk API key (input hidden, press Enter when done):" in output
-    assert "Available llm.neurodesk.org LiteLLM models:" in output
+    assert "Available llm.neurodesk.org models:" in output
+    assert "Enter model number [1-2]:" in output
     assert "OpenCode default model set to neurodesk/model-alpha." in output
 
     user_config = json.loads(
@@ -336,6 +354,28 @@ def test_opencode_neurodesk_404_models_response_still_prompts_for_key(tmp_path):
         )
     )
     assert user_config["model"] == "neurodesk/model-alpha"
+
+def test_opencode_startup_verbose_shows_probe_details(tmp_path):
+    """Verify verbose startup keeps detailed provider probe output available."""
+    test_wrapper, _home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    env["OPENCODE_STARTUP_VERBOSE"] = "1"
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)],
+        "neurodesk-test-key\n1\nn\n",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert returncode == 0, output
+    assert "Checking Jetstream model API (gpt-oss-120b)..." in output
+    assert (
+        "Checking llm.neurodesk.org API at https://llm.neurodesk.org/openai/models..."
+        in output
+    )
+    assert "Provider probe details" in output
+    assert "llm.neurodesk.org  running, API key required (HTTP 401)" in output
+    assert "Set OPENCODE_STARTUP_VERBOSE=1" not in output
 
 def test_opencode_rejected_neurodesk_key_points_to_litellm_site(tmp_path):
     """Verify rejected Neurodesk keys ask users to generate a replacement via LiteLLM."""
@@ -350,10 +390,7 @@ def test_opencode_rejected_neurodesk_key_points_to_litellm_site(tmp_path):
     )
 
     assert returncode == 0, output
-    assert (
-        "llm.neurodesk.org: running, but the current NEURODESK_API_KEY is rejected (HTTP 401)"
-        in output
-    )
+    assert "llm.neurodesk.org  needs API key: current key rejected" in output
     assert (
         "Please generate a new API key at https://llm.neurodesk.org and paste it below."
         in output
@@ -362,9 +399,13 @@ def test_opencode_rejected_neurodesk_key_points_to_litellm_site(tmp_path):
     assert "Paste Neurodesk API key (input hidden, press Enter when done):" in output
     assert "API key received (input hidden)." in output
     assert "Rechecking llm.neurodesk.org with the new API key..." in output
-    assert "Working models detected:" in output
-    assert "1) llm.neurodesk.org / model-alpha" in output
-    assert "2) llm.neurodesk.org / openai/gpt-4.1-mini" in output
+    assert "llm.neurodesk.org  available: 2 models" in output
+    assert "Choose a default OpenCode model." in output
+    assert "Working models detected:" not in output
+    assert "llm.neurodesk.org" in output
+    assert "1) model-alpha" in output
+    assert "2) openai/gpt-4.1-mini" in output
+    assert "Enter model number [1-2]:" in output
     assert "llm.neurodesk.org / gpt-oss (requires a valid API key)" not in output
     assert "OpenCode default model set to neurodesk/model-alpha." in output
 
@@ -402,12 +443,21 @@ def test_opencode_rejected_neurodesk_key_refreshes_before_mixed_model_picker(tmp
         output.index(
             "Please generate a new API key at https://llm.neurodesk.org and paste it below."
         )
-        < output.index("Working models detected:")
+        < output.index("Choose a default OpenCode model.")
     )
     assert "API key received (input hidden)." in output
-    assert "1) Local Ollama / local-model:latest" in output
-    assert "2) llm.neurodesk.org / model-alpha" in output
-    assert "3) llm.neurodesk.org / openai/gpt-4.1-mini" in output
+    assert "Local Ollama" in output
+    assert "llm.neurodesk.org" in output
+    assert "1) local-model:latest" in output
+    assert "2) model-alpha" in output
+    assert "3) openai/gpt-4.1-mini" in output
+    assert "Local Ollama / local-model:latest" not in output
+    assert (
+        "Tip: set OPENCODE_MODEL_PROFILE=ollama, neurodesk, jetstream, or provider/model"
+        in output
+    )
+    assert "Enter model number [1-3]:" in output
+    assert "Choose the default model [" not in output
     assert "llm.neurodesk.org / gpt-oss (requires a valid API key)" not in output
     assert "OpenCode default model set to neurodesk/openai/gpt-4.1-mini." in output
 
