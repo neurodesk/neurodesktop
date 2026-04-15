@@ -80,3 +80,18 @@ def test_nipype_fslmaths(tmp_path):
     assert "fslmaths" in cmdline, f"FSLMaths command not generated properly: {cmdline}"
     assert "dummy.nii.gz" in cmdline, f"Input file not in command line: {cmdline}"
     assert "-add 0" in cmdline, f"Math operation not in command line: {cmdline}"
+
+
+def test_nipype_nonexistent_module_fails():
+    """Verify that loading a non-existent module fails."""
+    cvmfs_disable = os.environ.get("CVMFS_DISABLE", "false").lower()
+    if cvmfs_disable in ["true", "1"]:
+        pytest.skip("CVMFS is disabled")
+
+    code, output = run_cmd(
+        _ENV_PREAMBLE + 'module load funny-name-tool',
+        timeout=60,
+    )
+    assert code != 0, (
+        f"Loading non-existent module should have failed: {output}"
+    )

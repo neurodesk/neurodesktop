@@ -162,6 +162,31 @@ class TestFslMaths:
         output_size = os.path.getsize(output_image)
         assert output_size > 0, "Output image is empty"
 
+    def test_nonexistent_module_fails(self):
+        """Loading a non-existent module should fail with non-zero exit code."""
+        _skip_if_cvmfs_disabled()
+
+        code, output = run_neuro_cmd("module load funny-name-tool")
+        assert code != 0, (
+            f"Loading non-existent module should have failed but exited 0: {output}"
+        )
+
+    def test_failed_load_doesnt_break_env(self):
+        """Loading a bogus module should not prevent loading a valid one afterwards."""
+        _skip_if_cvmfs_disabled()
+        if not _fsl_available():
+            pytest.skip("FSL module could not be loaded")
+
+        code, output = run_neuro_cmd(
+            "module load funny-name-tool 2>/dev/null || true; "
+            "module load fsl 2>/dev/null; "
+            "command -v fslmaths"
+        )
+        assert code == 0, (
+            f"fslmaths should be available after loading fsl, even after a prior "
+            f"bogus module load: {output}"
+        )
+
     def test_fslmaths_arithmetic(self, tmp_path):
         """fslmaths should correctly perform arithmetic operations."""
         _skip_if_cvmfs_disabled()
