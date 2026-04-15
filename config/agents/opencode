@@ -483,9 +483,9 @@ PY
         fi
 
         if [ "${model_count}" -gt 0 ]; then
-            NEURODESK_STATUS="running with ${model_count} LiteLLM model(s)"
+            NEURODESK_STATUS="running with ${model_count} model(s)"
         else
-            NEURODESK_STATUS="running, but no LiteLLM models were returned; using ${NEURODESK_DEFAULT_MODEL_ID}"
+            NEURODESK_STATUS="running, but no models were returned; using ${NEURODESK_DEFAULT_MODEL_ID}"
         fi
         rm -f "${response_file}"
         return 0
@@ -661,7 +661,7 @@ OLLAMA_DEFAULT_OUTPUT_LIMIT = positive_int(ollama_default_output_limit) or 8192
 fallbacks = {
     "neurodesk": {
         "npm": "@ai-sdk/openai-compatible",
-        "name": "Neurodesk LiteLLM",
+        "name": "Neurodesk LLMs",
         "options": {
             "baseURL": neurodesk_base_url,
             "apiKey": "{env:NEURODESK_API_KEY}",
@@ -711,7 +711,7 @@ def apply_models(provider_key: str, model_ids):
     elif provider_key == "jetstream":
         options["baseURL"] = jetstream_base_url
     elif provider_key == "neurodesk":
-        provider_cfg["name"] = "Neurodesk LiteLLM"
+        provider_cfg["name"] = "Neurodesk LLMs"
         options["baseURL"] = neurodesk_base_url
         options.setdefault("apiKey", "{env:NEURODESK_API_KEY}")
 
@@ -890,8 +890,8 @@ choose_default_model() {
     done
 }
 
-# Show LiteLLM models and let first-time key setup choose a real model.
-choose_neurodesk_litellm_model() {
+# Show Neurodesk LLMs and let first-time key setup choose a real model.
+choose_neurodesk_llm_model() {
     local idx
     local choice
     local default_idx=1
@@ -911,7 +911,7 @@ choose_neurodesk_litellm_model() {
             ;;
     esac
 
-    echo "Available llm.neurodesk.org LiteLLM models:"
+    echo "Available llm.neurodesk.org models:"
     for idx in "${!NEURODESK_MODELS[@]}"; do
         printf "%d) %s\n" "$((idx + 1))" "${NEURODESK_MODELS[$idx]}"
         if [ "${NEURODESK_MODELS[$idx]}" = "${selected_neurodesk_model}" ]; then
@@ -930,7 +930,7 @@ choose_neurodesk_litellm_model() {
     fi
 
     while true; do
-        read -r -p "Choose the default LiteLLM model [${default_idx}]: " choice
+        read -r -p "Choose the default model [${default_idx}]: " choice
         if [ -z "${choice}" ]; then
             choice="${default_idx}"
         fi
@@ -1204,8 +1204,8 @@ ensure_opencode_model_selection() {
         selected_neurodesk_model="${SELECTED_MODEL#neurodesk/}"
         check_neurodesk_server
         if [ "${NEURODESK_API_KEY_WAS_PROMPTED}" -eq 1 ]; then
-            if ! choose_neurodesk_litellm_model; then
-                echo "No LiteLLM models were returned for this key. Keeping ${SELECTED_MODEL}." >&2
+            if ! choose_neurodesk_llm_model; then
+                echo "No Neurodesk LLMs were returned for this key. Keeping ${SELECTED_MODEL}." >&2
             fi
             selected_neurodesk_model="${SELECTED_MODEL#neurodesk/}"
         fi
