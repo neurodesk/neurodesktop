@@ -383,7 +383,7 @@ persist_neurodesk_api_key_to_bashrc() {
     touch "${bashrc_file}"
     tmp_bashrc=$(mktemp) || return 1
 
-    grep -v '^[[:space:]]*export[[:space:]]\+NEURODESK_API_KEY=' "${bashrc_file}" > "${tmp_bashrc}" || true
+    grep -vE '^[[:space:]]*export[[:space:]]+NEURODESK_API_KEY=|^[[:space:]]*#[[:space:]]*Neurodesk API key for OpenCode[[:space:]]*$' "${bashrc_file}" > "${tmp_bashrc}" || true
     {
         echo ""
         echo "# Neurodesk API key for OpenCode"
@@ -453,7 +453,7 @@ persist_br_mcp_token_to_bashrc() {
     touch "${bashrc_file}"
     tmp_bashrc=$(mktemp) || return 1
 
-    grep -vE '^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN=|^[[:space:]]*#[[:space:]]*BR_MCP_DECLINED[[:space:]]*$' "${bashrc_file}" > "${tmp_bashrc}" || true
+    grep -vE '^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN=|^[[:space:]]*#[[:space:]]*BR_MCP_DECLINED[[:space:]]*$|^[[:space:]]*#[[:space:]]*Brain Researcher MCP token[[:space:]]*$' "${bashrc_file}" > "${tmp_bashrc}" || true
     {
         echo ""
         echo "# Brain Researcher MCP token"
