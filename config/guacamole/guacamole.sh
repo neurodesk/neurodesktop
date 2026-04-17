@@ -221,19 +221,72 @@ fi
 # user-mapping.xml is final when the Guacamole webapp reads the file.
 # --------------------------------------------------------------------------
 
+# Strip any <connection> block whose <protocol> matches $1 from user-mapping.xml.
+# Used when the corresponding backend could not be brought up, so Guacamole does
+# not advertise a connection that would return "500 Internal Server Error" when
+# clicked.
+remove_mapping_connection() {
+    local protocol="$1"
+    local tmp_mapping
+
+    if [ ! -f "${GUACAMOLE_MAPPING_FILE}" ]; then
+        return 0
+    fi
+
+    tmp_mapping="$(mktemp /tmp/guacamole-user-mapping.XXXXXX)" || return 1
+    awk -v proto="${protocol}" '
+        BEGIN { buf=""; in_connection=0; is_match=0 }
+        {
+            if ($0 ~ /<connection[[:space:]>]/) {
+                in_connection=1
+                is_match=0
+                buf=$0 ORS
+                next
+            }
+            if (in_connection) {
+                buf=buf $0 ORS
+                if ($0 ~ ("<protocol>[[:space:]]*" proto "[[:space:]]*</protocol>")) {
+                    is_match=1
+                }
+                if ($0 ~ /<\/connection>/) {
+                    if (!is_match) {
+                        printf "%s", buf
+                    }
+                    buf=""; in_connection=0; is_match=0
+                }
+                next
+            }
+            print
+        }
+    ' "${GUACAMOLE_MAPPING_FILE}" > "${tmp_mapping}"
+    cat "${tmp_mapping}" > "${GUACAMOLE_MAPPING_FILE}"
+    rm -f "${tmp_mapping}"
+}
+
 # RDP. ensure_rdp_backend.sh writes the chosen port to runtime/rdp_port.
+_rdp_backend_ok=0
 if [ -x /opt/neurodesktop/ensure_rdp_backend.sh ]; then
-    /opt/neurodesktop/ensure_rdp_backend.sh || \
+    if /opt/neurodesktop/ensure_rdp_backend.sh; then
+        _rdp_backend_ok=1
+    else
         echo "[WARN] Failed to initialize RDP backend for Guacamole."
+    fi
 else
     echo "[WARN] /opt/neurodesktop/ensure_rdp_backend.sh not found."
 fi
-if [ -f "${NEURODESKTOP_RUNTIME_DIR}/rdp_port" ]; then
+if [ "${_rdp_backend_ok}" -eq 1 ] && [ -f "${NEURODESKTOP_RUNTIME_DIR}/rdp_port" ]; then
     NEURODESKTOP_RDP_PORT="$(cat "${NEURODESKTOP_RUNTIME_DIR}/rdp_port" 2>/dev/null || true)"
 fi
-if [ -n "${NEURODESKTOP_RDP_PORT:-}" ]; then
+if [ "${_rdp_backend_ok}" -eq 1 ] && [ -n "${NEURODESKTOP_RDP_PORT:-}" ]; then
     update_mapping_param "rdp" "port" "${NEURODESKTOP_RDP_PORT}" || \
         echo "[WARN] Could not stamp RDP port ${NEURODESKTOP_RDP_PORT} into mapping."
+else
+    # No working xrdp (e.g. unprivileged container on HPC) - drop the RDP
+    # connection from the mapping so the Guacamole UI does not list a dead
+    # desktop that errors out when a user clicks it.
+    remove_mapping_connection "rdp" || \
+        echo "[WARN] Could not remove RDP connection from ${GUACAMOLE_MAPPING_FILE}."
+    unset NEURODESKTOP_RDP_PORT
 fi
 
 # SSH/SFTP.
