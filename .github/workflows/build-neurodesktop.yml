@@ -337,7 +337,7 @@ jobs:
           for i in $(seq 1 60); do
             code=$(docker exec neurodesktop-test curl -so /dev/null -w '%{http_code}' \
                      --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
-            if [ "$code" != "000" ] && [ -n "$code" ]; then
+            if echo "$code" | grep -Eq '^[0-9]{3}$' && [ "$code" != "000" ]; then
               echo "Container ready after ~$((i*2))s (HTTP ${code})"
               break
             fi
@@ -404,7 +404,7 @@ jobs:
             fi
             code=$(docker exec neurodesktop-test curl -so /dev/null -w '%{http_code}' \
                      --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
-            if [ "$code" != "000" ] && [ -n "$code" ]; then
+            if echo "$code" | grep -Eq '^[0-9]{3}$' && [ "$code" != "000" ]; then
               echo "Container ready after ~$((i*2))s (HTTP ${code})"
               ready=1
               break

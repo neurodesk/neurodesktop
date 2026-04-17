@@ -48,9 +48,12 @@ run_single_test() {
     for i in $(seq 1 60); do
         # Accept any HTTP status - newer jupyter-server gates /api/status
         # behind the auth token, so `curl -sf` (2xx-only) hangs on 403.
+        # Only accept a clean three-digit non-000 status so a refused
+        # connection (which prints "000" AND exits non-zero) does not get
+        # concatenated with the "000" fallback to form a false-ready "000000".
         code=$(docker exec "$name" curl -so /dev/null -w '%{http_code}' \
                  --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
-        if [ "$code" != "000" ] && [ -n "$code" ]; then
+        if echo "$code" | grep -Eq '^[0-9]{3}$' && [ "$code" != "000" ]; then
             echo "Container ready after ~$((i*2))s (HTTP ${code})"
             break
         fi
@@ -174,14 +177,18 @@ hpc_wait_for_ready() {
             return 1
         fi
         # Any HTTP status (including 403 "Forbidden") proves Jupyter is
-        # listening. Newer jupyter-server releases gate /api/status behind the
-        # auth token, so `curl -sf` (which only treats 2xx as success) reports
-        # "not ready" forever. `curl -so /dev/null -w %{http_code}` just
-        # needs the TCP layer + TLS-less HTTP response to return 000 or any
-        # non-empty 3-digit code.
+        # listening. Newer jupyter-server releases gate /api/status behind
+        # the auth token, so `curl -sf` (2xx-only) reports "not ready" on a
+        # 403 forever. Use `-w '%{http_code}'` to capture the status.
+        #
+        # Gotchas this guards against:
+        #   - When curl fails to connect it still prints `000` to stdout
+        #     from `%{http_code}`, AND exits non-zero; the `|| echo 000`
+        #     fallback then concatenates a second `000` giving `000000`.
+        #   - So accept only a clean, three-digit, non-000 status.
         code=$(docker exec "$name" curl -so /dev/null -w '%{http_code}' \
                  --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
-        if [ "$code" != "000" ] && [ -n "$code" ]; then
+        if echo "$code" | grep -Eq '^[0-9]{3}$' && [ "$code" != "000" ]; then
             echo "Container ready after ~$((i*2))s (jupyter responded HTTP ${code})"
             return 0
         fi
@@ -260,6 +267,9 @@ if [ "${1:-}" = "hpctest" ]; then
         neurodesktop:latest >/dev/null
 
     if ! hpc_wait_for_ready "$name"; then
+        # Tear down the dead/stuck container and temp state before bailing.
+        docker rm -f "$name" >/dev/null 2>&1 || true
+        rm -rf "$HPC_HOME_DIR" "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
         exit 1
     fi
 
@@ -267,16 +277,19 @@ if [ "${1:-}" = "hpctest" ]; then
     echo "============================================================"
     echo "Running tests as ${HPC_USER} (UID ${HPC_UID}) inside the container"
     echo "============================================================"
+    # Disable `set -e` for the test step so a non-zero pytest exit code does
+    # not skip the tear-down below.
+    set +e
     docker exec "$name" pytest /opt/tests/ -v
     result=$?
+    set -e
 
     echo ""
-    echo "Container left running for manual inspection:"
-    echo "  docker exec -it ${name} bash"
-    echo ""
-    echo "Cleanup when done:"
-    echo "  docker rm -f ${name}"
-    echo "  rm -rf ${HPC_HOME_DIR} ${HPC_PASSWD_FILE} ${HPC_GROUP_FILE}"
+    echo "============================================================"
+    echo "Cleaning up HPC test container + temp files..."
+    echo "============================================================"
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    rm -rf "$HPC_HOME_DIR" "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
     exit $result
 fi
 
@@ -377,7 +390,7 @@ if [ "${1:-}" = "fulltest" ]; then
                 fi
                 code=$(docker exec "$name" curl -so /dev/null -w '%{http_code}' \
                          --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
-                if [ "$code" != "000" ] && [ -n "$code" ]; then
+                if echo "$code" | grep -Eq '^[0-9]{3}$' && [ "$code" != "000" ]; then
                     break
                 fi
                 sleep 2
