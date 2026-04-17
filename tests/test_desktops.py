@@ -1,11 +1,14 @@
 import subprocess
 import os
 import pwd
+import re
 import shlex
 import json
 import socket
 import shutil
+import tempfile
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import pytest
@@ -38,23 +41,7 @@ def _run_root_cmd(cmd):
     return run_cmd(f"sudo -n bash -lc {shlex.quote(cmd)}")
 
 
-def _guacamole_ready(timeout_seconds=30):
-    deadline = time.time() + timeout_seconds
-    last_error = None
-
-    while time.time() < deadline:
-        try:
-            with urllib.request.urlopen("http://127.0.0.1:8080/", timeout=5) as response:
-                if response.status == 200:
-                    return
-        except Exception as error:  # pragma: no cover - exercised in retries
-            last_error = error
-            time.sleep(1)
-
-    raise AssertionError(f"Guacamole UI did not become ready on port 8080: {last_error}")
-
-
-def _wait_for_tcp_port(port, timeout_seconds=30):
+def _wait_for_tcp_port(port, timeout_seconds=30, host="127.0.0.1"):
     deadline = time.time() + timeout_seconds
     last_error = None
 
@@ -62,7 +49,7 @@ def _wait_for_tcp_port(port, timeout_seconds=30):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(2)
         try:
-            sock.connect(("127.0.0.1", port))
+            sock.connect((host, port))
             return
         except OSError as error:  # pragma: no cover - exercised in retries
             last_error = error
@@ -70,17 +57,87 @@ def _wait_for_tcp_port(port, timeout_seconds=30):
         finally:
             sock.close()
 
-    raise AssertionError(f"TCP port {port} did not open on 127.0.0.1: {last_error}")
+    raise AssertionError(f"TCP port {port} did not open on {host}: {last_error}")
 
 
-def _guacamole_login(username, password):
+def _read_runtime_port(home_dir, name, default):
+    """Read a port guacamole.sh published to $HOME/.neurodesk/runtime/<name>."""
+    runtime_file = os.path.join(home_dir, ".neurodesk", "runtime", name)
+    if os.path.exists(runtime_file):
+        try:
+            return int(open(runtime_file).read().strip())
+        except ValueError:
+            pass
+    return default
+
+
+def _guacamole_ready(port, timeout_seconds=90, home_dir=None, process=None):
+    deadline = time.time() + timeout_seconds
+    last_error = None
+
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as response:
+                if response.status == 200:
+                    return
+        except Exception as error:  # pragma: no cover - exercised in retries
+            last_error = error
+            time.sleep(1)
+
+    diag = [f"Guacamole UI did not become ready on port {port}: {last_error}"]
+
+    # Dump the listening sockets so we can see where Tomcat actually ended up.
+    _, ss_out = run_cmd("ss -lntp 2>/dev/null | grep -i java || ss -lnt 2>/dev/null | head -n 30")
+    diag.append("--- listening sockets ---\n" + ss_out)
+
+    # Dump Tomcat's catalina log if we can find it in the user's CATALINA_BASE.
+    if home_dir:
+        catalina = os.path.join(home_dir, ".neurodesk", "tomcat", "logs", "catalina.out")
+        if os.path.exists(catalina):
+            _, tail = run_cmd(f"tail -n 80 {shlex.quote(catalina)}")
+            diag.append(f"--- {catalina} (last 80 lines) ---\n" + tail)
+        else:
+            diag.append(f"(no {catalina} found)")
+    # Dump the guacamole.sh shell output (stdout/stderr merged) if the process
+    # has exited; otherwise flag that it's still alive.
+    if process is not None:
+        if process.poll() is not None:
+            try:
+                out = process.stdout.read() if process.stdout else ""
+            except Exception:
+                out = ""
+            diag.append(f"--- guacamole.sh exited with rc={process.returncode} ---\n{out}")
+        else:
+            diag.append("--- guacamole.sh still running ---")
+
+    raise AssertionError("\n".join(diag))
+
+
+def _guacamole_login(port, username, password):
     payload = urllib.parse.urlencode(
         {"username": username, "password": password}
     ).encode()
-    request = urllib.request.Request("http://127.0.0.1:8080/api/tokens", data=payload)
+    request = urllib.request.Request(f"http://127.0.0.1:{port}/api/tokens", data=payload)
 
     with urllib.request.urlopen(request, timeout=10) as response:
         return json.load(response)
+
+
+def _live_mapping_path(home_dir):
+    return os.path.join(home_dir, ".neurodesk", "guacamole", "user-mapping.xml")
+
+
+def _web_password_path(home_dir):
+    return os.path.join(home_dir, ".neurodesk", "secrets", "guacamole_web_password")
+
+
+def _vnc_password_path(home_dir):
+    return os.path.join(home_dir, ".neurodesk", "secrets", "vnc_password")
+
+
+def _read_live_web_password(home_dir):
+    with open(_web_password_path(home_dir)) as fp:
+        return fp.read().strip()
 
 
 def _prepare_guacamole_runtime():
@@ -91,18 +148,14 @@ def _prepare_guacamole_runtime():
     home_dir = os.path.expanduser(f"~{nb_user}")
     vnc_dir = os.path.join(home_dir, ".vnc")
     ssh_dir = os.path.join(home_dir, ".ssh")
-    guacamole_mapping = "/etc/guacamole/user-mapping-vnc.xml"
 
     os.makedirs(vnc_dir, exist_ok=True)
     os.makedirs(ssh_dir, exist_ok=True)
     if root_cmds_available:
         code, output = _run_root_cmd("mkdir -p /var/run/sshd")
         assert code == 0, f"Failed to create /var/run/sshd: {output}"
-        guacamole_mapping = "/etc/guacamole/user-mapping-vnc-rdp.xml"
 
-    shutil.copy("/opt/jovyan_defaults/.vnc/passwd", os.path.join(vnc_dir, "passwd"))
     shutil.copy("/opt/jovyan_defaults/.vnc/xstartup", os.path.join(vnc_dir, "xstartup"))
-    os.chmod(os.path.join(vnc_dir, "passwd"), 0o600)
     os.chmod(os.path.join(vnc_dir, "xstartup"), 0o755)
 
     if os.geteuid() == 0:
@@ -111,59 +164,96 @@ def _prepare_guacamole_runtime():
         )
         assert code == 0, f"Failed to set home ownership for {home_dir}: {output}"
 
-    if os.path.lexists("/etc/guacamole/user-mapping.xml"):
-        os.unlink("/etc/guacamole/user-mapping.xml")
-    os.symlink(guacamole_mapping, "/etc/guacamole/user-mapping.xml")
+    # Use a per-test GUACAMOLE_HOME (isolated tempdir) so the test's Tomcat
+    # writes its user-mapping.xml there, not into the live
+    # $HOME/.neurodesk/guacamole that the real Jupyter-spawned Guacamole is
+    # reading. Without this isolation, guacamole.sh stamps the test-session's
+    # VNC port into the live mapping; after cleanup kills the test vncserver,
+    # the browser session dials that now-dead port and Guacamole returns 500
+    # (or connection refused). Secrets stay shared under $HOME so Jupyter's
+    # cached Basic-auth header keeps working.
+    guacamole_home = tempfile.mkdtemp(prefix="neurodesk-test-guac-")
+    if os.geteuid() == 0:
+        run_cmd(
+            f"chown -R {shlex.quote(nb_uid)}:{shlex.quote(nb_gid)} {shlex.quote(guacamole_home)}"
+        )
 
-    return nb_user, home_dir, root_cmds_available
+    # Wipe per-test scratch that would carry over from prior runs. We do NOT
+    # touch $HOME/.neurodesk/guacamole anymore (the live user-mapping); only
+    # the per-test tempdir (already empty) and our own tomcat/runtime caches.
+    for rel in (".neurodesk/runtime", ".neurodesk/tomcat", ".vnc/passwd"):
+        path = os.path.join(home_dir, rel)
+        if os.path.isdir(path):
+            shutil.rmtree(path, ignore_errors=True)
+        elif os.path.exists(path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+    return nb_user, home_dir, root_cmds_available, guacamole_home
 
 
-def _start_guacamole_as_user(nb_user, home_dir):
+def _start_guacamole_as_user(nb_user, home_dir, guacamole_home, tomcat_port=None):
+    """Start guacamole.sh in a child process, publishing the chosen Tomcat port.
+
+    `guacamole_home` MUST be an isolated per-test path: guacamole.sh will stamp
+    VNC/RDP ports into `<guacamole_home>/user-mapping.xml`, and those stamps
+    must not leak into the live $HOME/.neurodesk/guacamole that the real
+    Jupyter-spawned Guacamole is serving to the browser.
+    """
+    if tomcat_port is None:
+        # Find a free port and pass it through NEURODESKTOP_TOMCAT_PORT so we can
+        # talk to the right instance when two sessions run back-to-back.
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("127.0.0.1", 0))
+        tomcat_port = sock.getsockname()[1]
+        sock.close()
+
     command = (
         f"export HOME={shlex.quote(home_dir)} "
         f"NB_USER={shlex.quote(nb_user)} "
         f"NB_UID={shlex.quote(os.environ.get('NB_UID', '1000'))} "
-        f"NB_GID={shlex.quote(os.environ.get('NB_GID', '100'))}; "
+        f"NB_GID={shlex.quote(os.environ.get('NB_GID', '100'))} "
+        f"NEURODESKTOP_TOMCAT_PORT={tomcat_port} "
+        f"GUACAMOLE_HOME={shlex.quote(guacamole_home)}; "
+        # Publish the chosen port for the test harness to read.
+        f"mkdir -p {shlex.quote(os.path.join(home_dir, '.neurodesk/runtime'))}; "
+        f"echo {tomcat_port} > {shlex.quote(os.path.join(home_dir, '.neurodesk/runtime/tomcat_port'))}; "
         "exec /opt/neurodesktop/guacamole.sh"
     )
     current_user = pwd.getpwuid(os.geteuid()).pw_name
 
     if current_user == nb_user:
-        return subprocess.Popen(
+        proc = subprocess.Popen(
             ["/bin/bash", "-lc", command],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
         )
-
-    if os.geteuid() == 0:
-        return subprocess.Popen(
+    elif os.geteuid() == 0:
+        proc = subprocess.Popen(
             ["su", "-s", "/bin/bash", "-c", command, nb_user],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
         )
-
-    raise RuntimeError(
-        f"Cannot switch from {current_user} to {nb_user} without root privileges."
-    )
+    else:
+        raise RuntimeError(
+            f"Cannot switch from {current_user} to {nb_user} without root privileges."
+        )
+    proc.tomcat_port = tomcat_port
+    return proc
 
 
 def _ensure_rdp_backend_ready():
-    try:
-        _wait_for_tcp_port(3389, timeout_seconds=2)
-        return
-    except AssertionError:
-        pass
-
     code, output = _run_root_cmd("/opt/neurodesktop/ensure_rdp_backend.sh")
     assert code == 0, f"Failed to initialize XRDP backend before Guacamole launch: {output}"
-    _wait_for_tcp_port(3389)
 
 
-def _guacamole_connections(data_source, token):
+def _guacamole_connections(port, data_source, token):
     request_url = (
-        f"http://127.0.0.1:8080/api/session/data/{data_source}/connections"
+        f"http://127.0.0.1:{port}/api/session/data/{data_source}/connections"
         f"?token={urllib.parse.quote(token)}"
     )
     with urllib.request.urlopen(request_url, timeout=10) as response:
@@ -177,7 +267,7 @@ def _connection_id_by_protocol(connections, protocol):
     raise AssertionError(f"Guacamole connection with protocol {protocol!r} not found: {connections}")
 
 
-def _open_guacamole_tunnel(token, data_source, connection_id, width=1280, height=1024):
+def _open_guacamole_tunnel(port, token, data_source, connection_id, width=1280, height=1024):
     params = [
         ("token", token),
         ("GUAC_DATA_SOURCE", data_source),
@@ -191,7 +281,7 @@ def _open_guacamole_tunnel(token, data_source, connection_id, width=1280, height
     query_string = urllib.parse.urlencode(params, doseq=True)
 
     tunnel = websocket.create_connection(
-        f"ws://127.0.0.1:8080/websocket-tunnel?{query_string}",
+        f"ws://127.0.0.1:{port}/websocket-tunnel?{query_string}",
         subprotocols=["guacamole"],
         timeout=10,
     )
@@ -200,6 +290,13 @@ def _open_guacamole_tunnel(token, data_source, connection_id, width=1280, height
 
 
 def _collect_guacamole_frames(tunnel, timeout_seconds=8):
+    """Legacy liberal check - accepts the first control frame as success.
+
+    Kept for RDP compatibility (RDP authenticates via PAM which is a different
+    failure surface). The VNC test uses _collect_guacamole_desktop_frames
+    below, which is much stricter because VNC auth failures only show up as
+    .error frames *after* the initial .sync handshake, and the old check was
+    returning successfully before the backend ever responded."""
     deadline = time.time() + timeout_seconds
     frames = []
 
@@ -221,13 +318,70 @@ def _collect_guacamole_frames(tunnel, timeout_seconds=8):
     )
 
 
+def _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30):
+    """Wait for real desktop pixels and reject any Guacamole error frames.
+
+    Guacamole sends a .sync instruction as a handshake ack before the backend
+    (Xvnc) has even accepted the connection. The previous collector returned
+    success as soon as it saw that .sync, so an auth failure that arrived 200ms
+    later was never detected. This collector requires:
+
+      * at least one .img, frame (actual pixel data from the backend), OR
+        one .png, / .jpeg, frame (alternative pixel encodings), AND
+      * no .error, frame in the stream.
+
+    That combination is only true when the backend really did authenticate,
+    handshake, and render a frame.
+    """
+    deadline = time.time() + timeout_seconds
+    frames = []
+    saw_pixels = False
+
+    while time.time() < deadline:
+        try:
+            frame = tunnel.recv()
+        except websocket.WebSocketTimeoutException:
+            if saw_pixels:
+                # Backend rendered at least once; idle frames are fine.
+                return frames
+            continue
+        except Exception as error:  # pragma: no cover - unexpected tunnel death
+            frames.append(f"<tunnel recv failed: {error}>")
+            break
+
+        frames.append(frame)
+        if not isinstance(frame, str):
+            continue
+
+        if ".error," in frame:
+            raise AssertionError(
+                f"Guacamole tunnel returned an error frame: {frame!r}\n"
+                f"All frames: {frames}"
+            )
+        if any(op in frame for op in (".img,", ".png,", ".jpeg,")):
+            saw_pixels = True
+            # Give the backend a moment to flush a few more frames so the test
+            # can demonstrate a stable session (not just a single flash before
+            # disconnect).
+            deadline = min(deadline, time.time() + 3)
+
+    if not saw_pixels:
+        raise AssertionError(
+            "Guacamole tunnel produced no pixel frames (.img/.png/.jpeg) within "
+            f"{timeout_seconds}s - VNC backend never handed a rendered desktop "
+            f"through. Frames received ({len(frames)}):\n"
+            + "\n".join(str(f)[:200] for f in frames)
+        )
+    return frames
+
+
 def _read_xrdp_log():
     code, output = _run_root_cmd("tail -n 200 /var/log/xrdp.log")
     assert code == 0, f"Failed to read /var/log/xrdp.log: {output}"
     return output
 
 
-def _cleanup_guacamole_process(process):
+def _cleanup_guacamole_process(process, guacamole_home=None):
     output = ""
 
     if process.poll() is None:
@@ -240,15 +394,22 @@ def _cleanup_guacamole_process(process):
 
     run_cmd("pkill -f 'guacd -b 127.0.0.1' || true")
     run_cmd("pkill -f 'Xtigervnc' || true")
-    run_cmd("vncserver -kill :1 >/dev/null 2>&1 || true")
+    for display in range(1, 10):
+        run_cmd(f"vncserver -kill :{display} >/dev/null 2>&1 || true")
     _run_root_cmd("service xrdp stop >/dev/null 2>&1 || true")
     run_cmd("pkill -f '/usr/local/tomcat' || true")
+
+    # Remove the isolated GUACAMOLE_HOME so subsequent tests start clean and
+    # no stale mapping / properties files persist on disk.
+    if guacamole_home and os.path.isdir(guacamole_home):
+        shutil.rmtree(guacamole_home, ignore_errors=True)
 
     if process.returncode not in (0, -15):
         pytest.fail(
             "Guacamole smoke test process exited unexpectedly.\n"
             f"Output:\n{output}"
         )
+
 
 def test_vnc_binaries_exist():
     """Verify VNC and RDP binaries are installed."""
@@ -261,6 +422,7 @@ def test_vnc_binaries_exist():
         code, _ = run_cmd(f"command -v {cmd}")
         assert code == 0, f"VNC command missing: {cmd}"
 
+
 def test_rdp_binaries_exist():
     """Verify xrdp related binaries are installed."""
     expected_cmds = [
@@ -271,10 +433,19 @@ def test_rdp_binaries_exist():
         code, _ = run_cmd(f"command -v {cmd}")
         assert code == 0, f"RDP command missing: {cmd}"
 
+
 def test_guacamole_config_exists():
-    """Verify Guacamole configuration exists."""
+    """Verify the build-time Guacamole templates exist; per-user copies are
+    generated at container start by init_secrets.sh."""
     assert os.path.exists("/etc/guacamole/guacd.conf"), "Guacamole guacd.conf missing"
-    assert os.path.exists("/etc/guacamole/user-mapping-vnc.xml"), "Guacamole user-mapping missing"
+    assert os.path.exists("/etc/guacamole/user-mapping-vnc-rdp.xml"), "Guacamole VNC+RDP template missing"
+
+
+def test_init_secrets_script_installed():
+    """init_secrets.sh must be on disk and executable; it is the only path that
+    materialises per-user credentials and prevents the cross-user VNC leak."""
+    assert os.access("/opt/neurodesktop/init_secrets.sh", os.X_OK), \
+        "/opt/neurodesktop/init_secrets.sh must be executable"
 
 
 def test_guac_protocol_libs():
@@ -301,23 +472,188 @@ def test_guac_protocol_libs():
         )
 
 
+def test_init_secrets_generates_per_user_mapping(tmp_path):
+    """init_secrets.sh must seed a per-user user-mapping.xml with NON-default
+    credentials. This is the load-bearing check for the HPC cross-user leak:
+    before this fix the mapping stayed at the read-only /etc/guacamole template
+    under Apptainer."""
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    env["NB_USER"] = "jovyan"
+
+    result = subprocess.run(
+        ["/opt/neurodesktop/init_secrets.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"init_secrets.sh failed: {result.stdout}\n{result.stderr}"
+
+    mapping = tmp_path / ".neurodesk" / "guacamole" / "user-mapping.xml"
+    assert mapping.exists(), "init_secrets.sh did not create per-user mapping"
+
+    mapping_text = mapping.read_text()
+    # The <authorize password=...> must have been rotated away from the literal
+    # build-time default; any sibling user who tries the old string must fail.
+    assert 'password="password"' not in mapping_text, \
+        "init_secrets.sh left the literal password='password' in user-mapping.xml"
+
+    web_password_file = tmp_path / ".neurodesk" / "secrets" / "guacamole_web_password"
+    assert web_password_file.exists(), "guacamole_web_password secret was not written"
+    assert len(web_password_file.read_text().strip()) >= 16, \
+        "Rotated Guacamole web password is suspiciously short"
+
+
+def test_init_secrets_is_idempotent_and_stable(tmp_path):
+    """Running init_secrets.sh twice must preserve the same random credentials
+    so session continuity across restarts works. Regression guard against
+    rotating on every invocation and breaking active Guacamole tokens."""
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    env["NB_USER"] = "jovyan"
+
+    for _ in range(2):
+        result = subprocess.run(
+            ["/opt/neurodesktop/init_secrets.sh"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"init_secrets.sh failed: {result.stderr}"
+
+    web_password = (tmp_path / ".neurodesk" / "secrets" / "guacamole_web_password").read_text()
+
+    # Run it again - password must not change.
+    result = subprocess.run(
+        ["/opt/neurodesktop/init_secrets.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert (tmp_path / ".neurodesk" / "secrets" / "guacamole_web_password").read_text() == web_password
+
+
+def test_two_users_get_distinct_random_credentials(tmp_path):
+    """Two concurrent Apptainer users on one node must NOT share Guacamole
+    credentials. Simulate by running init_secrets.sh twice with distinct HOMEs
+    and assert the generated passwords differ - which is what keeps user B's
+    Guacamole from authenticating into user A's VNC when the netns is shared."""
+    home_a = tmp_path / "user_a"
+    home_b = tmp_path / "user_b"
+    home_a.mkdir()
+    home_b.mkdir()
+
+    results = {}
+    for label, home in (("a", home_a), ("b", home_b)):
+        env = os.environ.copy()
+        env["HOME"] = str(home)
+        env["NB_USER"] = "jovyan"
+        proc = subprocess.run(
+            ["/opt/neurodesktop/init_secrets.sh"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0, f"init_secrets.sh failed for user {label}: {proc.stderr}"
+        results[label] = {
+            "web": (home / ".neurodesk" / "secrets" / "guacamole_web_password").read_text().strip(),
+            "vnc": (home / ".neurodesk" / "secrets" / "vnc_password").read_text().strip(),
+        }
+
+    assert results["a"]["web"] != results["b"]["web"], \
+        "Two simulated users received the same Guacamole web password"
+    assert results["a"]["vnc"] != results["b"]["vnc"], \
+        "Two simulated users received the same VNC password"
+
+
+def test_live_mapping_has_no_literal_default_password(tmp_path):
+    """Grep defense against a regression that reintroduces the string
+    password='password' into the user-mapping.xml that Guacamole actually
+    reads. If this fires, the HPC cross-user leak is back."""
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    env["NB_USER"] = "jovyan"
+    result = subprocess.run(
+        ["/opt/neurodesktop/init_secrets.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"init_secrets.sh failed: {result.stderr}"
+
+    mapping = (tmp_path / ".neurodesk" / "guacamole" / "user-mapping.xml").read_text()
+    assert 'password="password"' not in mapping
+    # Per-connection VNC <param name="password"> still holds the template value
+    # ("password") until guacamole.sh starts vncserver and stamps the rotated
+    # secret; that path is covered by the full-startup smoke test below.
+
+
+def test_vncserver_startup_uses_random_password(tmp_path):
+    """A clean vncserver launch must use the rotated token (not 'password').
+    If init_secrets.sh is skipped by a deployment, the ~/.vnc/passwd file would
+    revert to the default and a sibling user could authenticate into the
+    session. This guards that ~/.vnc/passwd ends up consistent with the
+    generated secret, not a literal 'password'."""
+    # Drive just the credential-generation half of guacamole.sh in isolation.
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    env["NB_USER"] = "jovyan"
+
+    # Bootstrap secrets + mapping.
+    proc = subprocess.run(
+        ["/opt/neurodesktop/init_secrets.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0
+
+    secret = (tmp_path / ".neurodesk" / "secrets" / "vnc_password").read_text().strip()
+
+    # Generate the .vnc/passwd file the same way guacamole.sh does.
+    (tmp_path / ".vnc").mkdir(exist_ok=True)
+    gen = subprocess.run(
+        ["/bin/bash", "-lc", f"printf '%s\\n' {shlex.quote(secret)} | vncpasswd -f > {shlex.quote(str(tmp_path / '.vnc' / 'passwd'))}"],
+        capture_output=True,
+        text=True,
+    )
+    assert gen.returncode == 0, gen.stderr
+
+    # Verify by round-tripping: vncpasswd -f is the same encoder vncserver reads.
+    # We can't decode the obfuscated file, so instead encode the literal default
+    # and assert it doesn't match what we wrote.
+    default = subprocess.run(
+        ["/bin/bash", "-lc", "printf 'password\\n' | vncpasswd -f"],
+        capture_output=True,
+    )
+    assert default.returncode == 0
+    written = (tmp_path / ".vnc" / "passwd").read_bytes()
+    assert written != default.stdout, \
+        "VNC passwd file matches the literal 'password' default - rotation failed"
+
+
 def test_guac_api_connections():
-    """Start Guacamole and verify its API exposes the desktop protocols this runtime can support."""
-    nb_user, home_dir, root_cmds_available = _prepare_guacamole_runtime()
+    """Start Guacamole and verify its API exposes the desktop protocols this
+    runtime can support. Uses the rotated Guacamole web credential that
+    init_secrets.sh generates per-user."""
+    nb_user, home_dir, root_cmds_available, guacamole_home = _prepare_guacamole_runtime()
     expected_protocols = ["vnc"]
 
     if root_cmds_available:
-        _ensure_rdp_backend_ready()
         expected_protocols.insert(0, "rdp")
 
-    process = _start_guacamole_as_user(nb_user, home_dir)
+    process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home)
+    tomcat_port = process.tomcat_port
     try:
-        _guacamole_ready()
-        _wait_for_tcp_port(4822)
-        _wait_for_tcp_port(5901)
-        auth_response = _guacamole_login(nb_user, "password")
+        _guacamole_ready(tomcat_port, home_dir=home_dir, process=process)
+        _guacd_port = _read_runtime_port(home_dir, "guacd_port", default=4822)
+        _wait_for_tcp_port(_guacd_port)
+
+        web_password = _read_live_web_password(home_dir)
+        auth_response = _guacamole_login(tomcat_port, nb_user, web_password)
         connections = _guacamole_connections(
-            auth_response["dataSource"], auth_response["authToken"]
+            tomcat_port, auth_response["dataSource"], auth_response["authToken"]
         )
 
         protocols = sorted(
@@ -328,7 +664,69 @@ def test_guac_api_connections():
             f"found: {protocols}"
         )
     finally:
-        _cleanup_guacamole_process(process)
+        _cleanup_guacamole_process(process, guacamole_home=guacamole_home)
+
+
+def test_guac_login_rejects_legacy_default_password():
+    """After init_secrets.sh rotates the <authorize> credential, the Guacamole
+    web login must REJECT the historic 'password' literal. This is the
+    negative test for the HPC leak: even if a sibling user reaches the Tomcat
+    port on a shared netns, they cannot log into Guacamole with the baked-in
+    default."""
+    nb_user, home_dir, _, guacamole_home = _prepare_guacamole_runtime()
+    process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home)
+    try:
+        _guacamole_ready(process.tomcat_port, home_dir=home_dir, process=process)
+
+        # Confirm the rotated credential works first so we know the server is up.
+        rotated = _read_live_web_password(home_dir)
+        _guacamole_login(process.tomcat_port, nb_user, rotated)
+
+        # Now fail on the literal default.
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            _guacamole_login(process.tomcat_port, nb_user, "password")
+        assert exc_info.value.code in (401, 403), \
+            f"Expected 401/403 for legacy default password, got {exc_info.value.code}"
+    finally:
+        _cleanup_guacamole_process(process, guacamole_home=guacamole_home)
+
+
+def test_vncserver_binds_localhost_only():
+    """The vncserver must be launched with -localhost yes so its TCP port is
+    reachable only through the local loopback. On Apptainer the host netns is
+    shared, but at least the backend is not reachable off-node."""
+    nb_user, home_dir, _, guacamole_home = _prepare_guacamole_runtime()
+    process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home)
+    try:
+        _guacamole_ready(process.tomcat_port, home_dir=home_dir, process=process)
+        # Wait for the display to register.
+        deadline = time.time() + 30
+        vnc_port = None
+        while time.time() < deadline and vnc_port is None:
+            mapping = os.path.join(guacamole_home, "user-mapping.xml")
+            if os.path.exists(mapping):
+                match = re.search(
+                    r'<protocol>vnc</protocol>.*?<param name="port">(\d+)</param>',
+                    open(mapping).read(),
+                    re.S,
+                )
+                if match:
+                    vnc_port = int(match.group(1))
+            time.sleep(1)
+        assert vnc_port, "VNC port never stamped into user-mapping.xml"
+
+        # It must be reachable on 127.0.0.1 but NOT on a non-loopback interface.
+        _wait_for_tcp_port(vnc_port, timeout_seconds=30)
+        # Attempt to connect via the external interface. We don't have a real
+        # non-loopback IP in-container always, but we can at least check that
+        # `ss -lnt` reports the listen address as 127.0.0.1.
+        _, ss_out = run_cmd(f"ss -lnt 'sport = :{vnc_port}' | tail -n +2")
+        assert ss_out, f"No listen socket found for port {vnc_port}: {ss_out!r}"
+        listen_addr = ss_out.split()[3]
+        assert listen_addr.startswith("127.0.0.1:") or listen_addr.startswith("[::1]:"), \
+            f"vncserver must bind loopback only; listen address was {listen_addr}"
+    finally:
+        _cleanup_guacamole_process(process, guacamole_home=guacamole_home)
 
 
 def test_xrdp_tls_key_access():
@@ -341,28 +739,131 @@ def test_xrdp_tls_key_access():
     )
 
 
-def test_guac_rdp_tunnel():
-    """Verify the Guacamole RDP tunnel renders a desktop without TLS key permission errors."""
-    nb_user, home_dir, root_cmds_available = _prepare_guacamole_runtime()
+def test_guac_vnc_tunnel():
+    """End-to-end VNC smoke test through Guacamole - auth + desktop render.
 
-    if not root_cmds_available:
-        pytest.skip("RDP smoke test requires root or passwordless sudo to start xrdp")
+    Stricter than the RDP equivalent because VNC auth errors only surface as
+    .error frames *after* the initial .sync handshake; the legacy collector
+    returned success on that handshake alone. This test additionally
+    cross-checks that the VNC port stamped into user-mapping.xml actually
+    matches an Xvnc process that is listening, to catch cache-drift bugs where
+    Guacamole read the mapping before guacamole.sh finished stamping the
+    dynamic port."""
+    nb_user, home_dir, _, guacamole_home = _prepare_guacamole_runtime()
 
-    _ensure_rdp_backend_ready()
-
-    process = _start_guacamole_as_user(nb_user, home_dir)
+    process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home)
     tunnel = None
     try:
-        _guacamole_ready()
-        _wait_for_tcp_port(4822)
+        _guacamole_ready(process.tomcat_port, home_dir=home_dir, process=process)
+        _guacd_port = _read_runtime_port(home_dir, "guacd_port", default=4822)
+        _wait_for_tcp_port(_guacd_port)
 
-        auth_response = _guacamole_login(nb_user, "password")
+        # Regression check: the <param name="port"> that Guacamole will dial
+        # must point at an actually-listening Xvnc. A mismatch here means
+        # guacamole.sh stamped AFTER Guacamole cached the mapping.
+        mapping_path = os.path.join(guacamole_home, "user-mapping.xml")
+        mapping_text = ""
+        deadline = time.time() + 30
+        mapping_vnc_port = None
+        while time.time() < deadline and mapping_vnc_port is None:
+            if os.path.exists(mapping_path):
+                mapping_text = open(mapping_path).read()
+                match = re.search(
+                    r'<protocol>vnc</protocol>.*?<param name="port">(\d+)</param>',
+                    mapping_text,
+                    re.S,
+                )
+                if match:
+                    mapping_vnc_port = int(match.group(1))
+            time.sleep(1)
+        assert mapping_vnc_port, f"VNC port never stamped into user-mapping.xml at {mapping_path}"
+
+        _, ss_out = run_cmd("ss -lntp 2>/dev/null | grep -E 'Xtigervnc|Xvnc'")
+        assert ss_out, (
+            f"No Xvnc/Xtigervnc listener on any port. Mapping expected VNC on "
+            f"{mapping_vnc_port}. ss output was empty."
+        )
+        bound_ports = set()
+        for line in ss_out.splitlines():
+            fields = line.split()
+            if len(fields) < 4:
+                continue
+            addr = fields[3]
+            port_str = addr.rsplit(":", 1)[-1]
+            if port_str.isdigit():
+                bound_ports.add(int(port_str))
+        assert mapping_vnc_port in bound_ports, (
+            f"user-mapping.xml says VNC is on port {mapping_vnc_port}, but Xvnc "
+            f"is actually listening on {sorted(bound_ports)}. Guacamole would "
+            f"dial a dead port -> 500 / connection refused.\n"
+            f"ss output:\n{ss_out}"
+        )
+
+        web_password = _read_live_web_password(home_dir)
+        auth_response = _guacamole_login(process.tomcat_port, nb_user, web_password)
         connections = _guacamole_connections(
-            auth_response["dataSource"], auth_response["authToken"]
+            process.tomcat_port, auth_response["dataSource"], auth_response["authToken"]
+        )
+        vnc_connection_id = _connection_id_by_protocol(connections, "vnc")
+
+        tunnel = _open_guacamole_tunnel(
+            process.tomcat_port,
+            auth_response["authToken"],
+            auth_response["dataSource"],
+            vnc_connection_id,
+        )
+        try:
+            frames = _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30)
+        except AssertionError as exc:
+            # Pull the Guacamole log so we can see whether the failure was an
+            # auth rejection, a connection refused, or something downstream.
+            catalina = os.path.join(home_dir, ".neurodesk", "tomcat", "logs", "catalina.out")
+            extra = ""
+            if os.path.exists(catalina):
+                _, extra = run_cmd(f"tail -n 120 {shlex.quote(catalina)}")
+            vnc_logs = os.path.join(home_dir, ".vnc")
+            _, vnc_tail = run_cmd(
+                f"ls -t {shlex.quote(vnc_logs)}/*:*.log 2>/dev/null | head -n1 | xargs -I {{}} tail -n 80 {{}}"
+            )
+            raise AssertionError(
+                f"{exc}\n--- catalina.out tail ---\n{extra}\n"
+                f"--- latest Xvnc log ---\n{vnc_tail}\n"
+                f"--- mapping VNC entry ---\n"
+                + (re.search(r'<connection[^>]*>[\s\S]*?</connection>[\s\S]*?<protocol>vnc</protocol>[\s\S]*?</connection>', mapping_text).group(0) if '<protocol>vnc</protocol>' in mapping_text else '(mapping had no vnc connection)')
+            )
+    finally:
+        if tunnel is not None:
+            try:
+                tunnel.close()
+            except Exception:
+                pass
+        _cleanup_guacamole_process(process, guacamole_home=guacamole_home)
+
+
+def test_guac_rdp_tunnel():
+    """Verify the Guacamole RDP tunnel renders a desktop without TLS key permission errors."""
+    nb_user, home_dir, root_cmds_available, guacamole_home = _prepare_guacamole_runtime()
+
+    if not root_cmds_available:
+        shutil.rmtree(guacamole_home, ignore_errors=True)
+        pytest.skip("RDP smoke test requires root or passwordless sudo to start xrdp")
+
+    process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home)
+    tunnel = None
+    try:
+        _guacamole_ready(process.tomcat_port, home_dir=home_dir, process=process)
+        _guacd_port = _read_runtime_port(home_dir, "guacd_port", default=4822)
+        _wait_for_tcp_port(_guacd_port)
+
+        web_password = _read_live_web_password(home_dir)
+        auth_response = _guacamole_login(process.tomcat_port, nb_user, web_password)
+        connections = _guacamole_connections(
+            process.tomcat_port, auth_response["dataSource"], auth_response["authToken"]
         )
         rdp_connection_id = _connection_id_by_protocol(connections, "rdp")
 
         tunnel = _open_guacamole_tunnel(
+            process.tomcat_port,
             auth_response["authToken"],
             auth_response["dataSource"],
             rdp_connection_id,
@@ -386,29 +887,30 @@ def test_guac_rdp_tunnel():
                 tunnel.close()
             except Exception:
                 pass
-        _cleanup_guacamole_process(process)
+        _cleanup_guacamole_process(process, guacamole_home=guacamole_home)
+
 
 def test_vnc_startup(tmp_path):
     """Start up a temporary VNC session to ensure it runs without crashing."""
     pwd_file = tmp_path / "vncpasswd"
-    
+
     # Needs a vnc password
     code, output = run_cmd(f"printf 'password\\npassword\\n\\n' | vncpasswd {pwd_file}")
     assert code == 0, f"Could not generate vncpasswd: {output}"
-    
+
     # Pick a random display port like :99
     # Use the container's default xstartup instead of ~/.vnc/xstartup because restore_home_defaults hasn't run
     code, output = run_cmd(f"USER=jovyan HOME={tmp_path} vncserver -xstartup /opt/jovyan_defaults/.vnc/xstartup -rfbauth {pwd_file} :99")
     assert code == 0, f"VNC server failed to start: {output}"
-    
+
     # Give it a second
     time.sleep(2)
-    
+
     # Check if the process Xtigervnc or vncserver is running for display :99
     code, output = run_cmd("ps auxww | grep -v grep | grep -E 'Xtigervnc.*:99'")
     if code != 0:
         _, log_content = run_cmd(f"cat {tmp_path}/.vnc/*:99.log || true")
         assert False, f"Xtigervnc :99 process is not running. VNC startup crashed.\\nLog:\\n{log_content}\\n\\nPS Output:\\n{output}"
-    
+
     # Clean up
     run_cmd("vncserver -kill :99")

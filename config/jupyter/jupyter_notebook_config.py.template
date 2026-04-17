@@ -1,22 +1,49 @@
+import base64
 import os
 
 home_dir = os.environ.get('HOME', '/home/jovyan')
 
+# Per-user Guacamole web credentials. guacamole.sh writes these files on container
+# start with mode 0600. If they aren't present yet (first start, or direct Tomcat
+# dev) we fall back to the legacy jovyan/password so local dev isn't broken, but
+# guacamole.sh will always create them before Tomcat serves its first request on
+# the shared HPC path.
+_guac_user_file = os.path.join(home_dir, '.neurodesk', 'secrets', 'guacamole_web_user')
+_guac_pass_file = os.path.join(home_dir, '.neurodesk', 'secrets', 'guacamole_web_password')
+_guac_user = 'jovyan'
+_guac_pass = 'password'
+try:
+    if os.path.exists(_guac_user_file):
+        with open(_guac_user_file, 'r') as _f:
+            _guac_user = _f.read().strip() or _guac_user
+    if os.path.exists(_guac_pass_file):
+        with open(_guac_pass_file, 'r') as _f:
+            _guac_pass = _f.read().strip() or _guac_pass
+except OSError:
+    pass
+_guac_basic = base64.b64encode(f'{_guac_user}:{_guac_pass}'.encode()).decode()
+
 c.ServerProxy.servers = {
   'neurodesktop': {
-    'command': ['/opt/neurodesktop/guacamole.sh'],
-    'port': 8080,
+    # No fixed 'port' - Jupyter Server Proxy picks a free port and substitutes
+    # {port} into the command. guacamole.sh reads NEURODESKTOP_TOMCAT_PORT and
+    # starts Tomcat on exactly that port (server.xml uses ${port.http}).
+    # This gives each user on a shared HPC node a unique Tomcat port.
+    'command': [
+      '/bin/bash', '-lc',
+      'NEURODESKTOP_TOMCAT_PORT="{port}" exec /opt/neurodesktop/guacamole.sh',
+    ],
     'timeout': 60,
-      'request_headers_override': {
-          'Authorization': 'Basic am92eWFuOnBhc3N3b3Jk',
-      },
-      'launcher_entry': {
-        'path_info' : 'neurodesktop',
-        'title': 'Neurodesktop',
-        'icon_path': '/opt/neurodesk_brain_logo.svg',
-        'category': 'Neurodesk'
-      }
+    'request_headers_override': {
+        'Authorization': f'Basic {_guac_basic}',
     },
+    'launcher_entry': {
+      'path_info': 'neurodesktop',
+      'title': 'Neurodesktop',
+      'icon_path': '/opt/neurodesk_brain_logo.svg',
+      'category': 'Neurodesk'
+    }
+  },
   'vscode': {
     'command': [
       '/usr/local/bin/code-server',
