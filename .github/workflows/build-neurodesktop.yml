@@ -271,6 +271,16 @@ jobs:
             cvmfs_disable: "true"
             grant_sudo: "yes"
             needs_cvmfs: false
+          # HPC Apptainer simulation: no --privileged, no --user=root, no sudo,
+          # a non-jovyan user (sciget/5000/5000) whose HOME is bind-mounted over
+          # /home/jovyan, and APPTAINER_CONTAINER=1 so is_apptainer_runtime()
+          # branches activate. Guards against HPC-only regressions that would
+          # otherwise only surface on Sherlock et al.
+          - test_profile: "HPC Apptainer simulation"
+            cvmfs_disable: "true"
+            grant_sudo: "no"
+            needs_cvmfs: false
+            hpc_mode: true
     steps:
       - name: Set environment variables
         run: |
@@ -308,6 +318,7 @@ jobs:
           sudo cvmfs_config setup
           sudo ls /cvmfs/neurodesk.ardc.edu.au
       - name: Test container (CVMFS=${{ matrix.cvmfs_disable == 'false' && 'on' || 'off' }}, SUDO=${{ matrix.grant_sudo }})
+        if: ${{ ! matrix.hpc_mode }}
         run: |
           CVMFS_MOUNT=""
           if [ "${{ matrix.needs_cvmfs }}" = "true" ]; then
@@ -324,14 +335,93 @@ jobs:
             $IMAGEID:amd64
           echo "Waiting for container startup..."
           for i in $(seq 1 60); do
-            if docker exec neurodesktop-test curl -sf http://localhost:8888/api/status >/dev/null 2>&1; then
-              echo "Container ready after ~$((i*2))s"
+            code=$(docker exec neurodesktop-test curl -so /dev/null -w '%{http_code}' \
+                     --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
+            if [ "$code" != "000" ] && [ -n "$code" ]; then
+              echo "Container ready after ~$((i*2))s (HTTP ${code})"
               break
             fi
             sleep 2
           done
           docker exec -u jovyan neurodesktop-test pytest /opt/tests/ -v
           docker rm -f neurodesktop-test
+
+      - name: Test container (HPC Apptainer simulation)
+        if: ${{ matrix.hpc_mode }}
+        run: |
+          # Mirror the `hpctest` mode of build_and_run.sh: non-root, non-jovyan
+          # user with a synthetic /etc/passwd + /etc/group bind-mount, HOME on a
+          # host-owned tempdir over /home/jovyan, APPTAINER_CONTAINER=1.
+          HPC_USER=sciget
+          HPC_UID=5000
+          HPC_GID=5000
+          HPC_HOME_DIR="$(mktemp -d)"
+          HPC_PASSWD_FILE="$(mktemp)"
+          HPC_GROUP_FILE="$(mktemp)"
+
+          cat > "$HPC_PASSWD_FILE" <<EOF
+          root:x:0:0:root:/root:/bin/bash
+          jovyan:x:1000:100:jovyan:/home/jovyan:/bin/bash
+          ${HPC_USER}:x:${HPC_UID}:${HPC_GID}:${HPC_USER} (HPC simulated):/home/jovyan:/bin/bash
+          nobody:x:65534:65534:nobody:/:/usr/sbin/nologin
+          EOF
+          cat > "$HPC_GROUP_FILE" <<EOF
+          root:x:0:
+          users:x:100:jovyan,${HPC_USER}
+          ${HPC_USER}:x:${HPC_GID}:
+          nogroup:x:65534:
+          EOF
+          chmod 0777 "$HPC_HOME_DIR"
+          chmod 0644 "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
+
+          docker rm -f neurodesktop-test 2>/dev/null || true
+          docker run -d --shm-size=1gb \
+            --user "${HPC_UID}:${HPC_GID}" \
+            --name neurodesktop-test \
+            -v "${HPC_HOME_DIR}:/home/jovyan" \
+            -v "${HPC_PASSWD_FILE}:/etc/passwd:ro" \
+            -v "${HPC_GROUP_FILE}:/etc/group:ro" \
+            -e CVMFS_DISABLE=true \
+            -e NB_USER=${HPC_USER} \
+            -e NB_UID=${HPC_UID} \
+            -e NB_GID=${HPC_GID} \
+            -e HOME=/home/jovyan \
+            -e USER=${HPC_USER} \
+            -e LOGNAME=${HPC_USER} \
+            -e APPTAINER_CONTAINER=1 \
+            -e APPTAINER_NAME=neurodesktop-test-hpc \
+            -e NEURODESKTOP_CVMFS_STARTUP_MODE=lazy \
+            -e NEURODESKTOP_SLURM_ENABLE=0 \
+            -e NEURODESKTOP_SLURM_STARTUP_MODE=eager \
+            $IMAGEID:amd64
+          echo "Waiting for container startup..."
+          ready=0
+          for i in $(seq 1 90); do
+            if ! docker inspect -f '{{.State.Running}}' neurodesktop-test 2>/dev/null | grep -q true; then
+              echo "::error::Container exited during startup (HPC mode)."
+              docker logs --tail 120 neurodesktop-test || true
+              exit 1
+            fi
+            code=$(docker exec neurodesktop-test curl -so /dev/null -w '%{http_code}' \
+                     --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
+            if [ "$code" != "000" ] && [ -n "$code" ]; then
+              echo "Container ready after ~$((i*2))s (HTTP ${code})"
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::Container did not reach /api/status in 180s (HPC mode)."
+            docker logs --tail 120 neurodesktop-test || true
+            exit 1
+          fi
+          # Exec as the current container user (no -u jovyan: we are sciget here).
+          docker exec neurodesktop-test pytest /opt/tests/ -v
+          test_rc=$?
+          docker rm -f neurodesktop-test
+          rm -rf "$HPC_HOME_DIR" "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
+          exit $test_rc
 
   scan-image:
     needs: build-image

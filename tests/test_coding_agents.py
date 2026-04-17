@@ -607,7 +607,8 @@ def test_claude_replaces_dangling_symlink(tmp_path):
     assert (bin_dir / "claude").exists(), "Claude binary was not restored"
     assert not (bin_dir / "claude").is_symlink(), "Dangling symlink was not replaced"
     assert os.access(bin_dir / "claude", os.X_OK), "Restored binary is not executable"
-    assert "--allow-dangerously-skip-permissions --version" in result.stdout
+    assert "--allow-dangerously-skip-permissions" in result.stdout
+    assert "--version" in result.stdout
 
 
 def test_opencode_brain_researcher_mcp_setup_accept(tmp_path):

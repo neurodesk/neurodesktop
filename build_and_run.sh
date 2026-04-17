@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-if [ "${1:-}" != "test" ] && [ "${1:-}" != "fulltest" ]; then
+if [ "${1:-}" != "test" ] && [ "${1:-}" != "fulltest" ] && [ "${1:-}" != "hpctest" ] && [ "${1:-}" != "hpc" ]; then
     if docker ps --all | grep -w neurodesktop; then
         if docker ps --all | grep neurodeskapp; then
             echo "detected a Neurodeskapp container and ignoring it!"
@@ -46,8 +46,12 @@ run_single_test() {
 
     echo "Waiting for container startup..."
     for i in $(seq 1 60); do
-        if docker exec "$name" curl -sf http://localhost:8888/api/status >/dev/null 2>&1; then
-            echo "Container ready after ~$((i*2))s"
+        # Accept any HTTP status - newer jupyter-server gates /api/status
+        # behind the auth token, so `curl -sf` (2xx-only) hangs on 403.
+        code=$(docker exec "$name" curl -so /dev/null -w '%{http_code}' \
+                 --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
+        if [ "$code" != "000" ] && [ -n "$code" ]; then
+            echo "Container ready after ~$((i*2))s (HTTP ${code})"
             break
         fi
         sleep 2
@@ -67,47 +71,313 @@ if [ "${1:-}" = "test" ]; then
     exit $?
 fi
 
+# ---------------------------------------------------------------------------
+# HPC simulation helpers (shared by `hpc`, `hpctest`, and the `fulltest` HPC
+# configuration). Mirrors Apptainer on Sherlock:
+#   - no root / --privileged / sudo
+#   - container user is NOT jovyan (default: "sciget")
+#   - user UID/GID are NOT 1000/100
+#   - HOME is a host-owned bind-mount over /home/jovyan
+#   - APPTAINER_CONTAINER set so is_apptainer_runtime() branches trigger
+# ---------------------------------------------------------------------------
+
+# Prepare an isolated passwd/group/home triplet for an HPC-style container.
+# Sets the following globals (bash 3.2 on macOS has no namerefs, and the older
+# `mapfile` builtin is not available, so we communicate via globals):
+#   HPC_HOME_DIR, HPC_PASSWD_FILE, HPC_GROUP_FILE
+#
+# Args: USERNAME UID GID
+hpc_prepare_mounts() {
+    local hpc_user="$1"
+    local hpc_uid="$2"
+    local hpc_gid="$3"
+
+    HPC_HOME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/neurodesktop-hpc-home.XXXXXX")"
+    HPC_PASSWD_FILE="$(mktemp "${TMPDIR:-/tmp}/neurodesktop-hpc-passwd.XXXXXX")"
+    HPC_GROUP_FILE="$(mktemp "${TMPDIR:-/tmp}/neurodesktop-hpc-group.XXXXXX")"
+
+    # Build an /etc/passwd + /etc/group that mirrors Apptainer adding the host
+    # user to the in-container NSS. Keep jovyan so any code that looks it up
+    # still works.
+    cat > "$HPC_PASSWD_FILE" <<EOF
+root:x:0:0:root:/root:/bin/bash
+jovyan:x:1000:100:jovyan:/home/jovyan:/bin/bash
+${hpc_user}:x:${hpc_uid}:${hpc_gid}:${hpc_user} (HPC simulated):/home/jovyan:/bin/bash
+nobody:x:65534:65534:nobody:/:/usr/sbin/nologin
+EOF
+
+    cat > "$HPC_GROUP_FILE" <<EOF
+root:x:0:
+users:x:100:jovyan,${hpc_user}
+${hpc_user}:x:${hpc_gid}:
+nogroup:x:65534:
+EOF
+
+    # Do NOT sudo-chown on the host. On macOS Docker Desktop, bind mounts do
+    # UID translation; host chown would prompt for a password without changing
+    # in-container behaviour. chmod 0777 is enough for the non-root container
+    # user to populate $HOME.
+    chmod 0777 "$HPC_HOME_DIR"
+    chmod 0644 "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
+}
+
+# Assemble the docker-run argv for an HPC-style launch and expose it in the
+# global array HPC_DOCKER_ARGS. Does NOT include the `docker run` prefix, any
+# `-d`/`-it` mode flag, port mappings, or the trailing image/command.
+#
+# Args: NAME USER UID GID HOME_DIR PASSWD_FILE GROUP_FILE
+hpc_docker_args() {
+    local name="$1" hpc_user="$2" hpc_uid="$3" hpc_gid="$4"
+    local home_dir="$5" passwd_file="$6" group_file="$7"
+
+    # NOTE: no --privileged, no --user=root. --user=<uid>:<gid> mimics
+    # Apptainer's UID mapping. APPTAINER_CONTAINER makes is_apptainer_runtime()
+    # return true, which switches guacamole.sh / ensure_rdp_backend.sh etc.
+    # onto their unprivileged-HPC code paths.
+    HPC_DOCKER_ARGS=(
+        --shm-size=1gb
+        --user "${hpc_uid}:${hpc_gid}"
+        --name "$name"
+        -v "${home_dir}:/home/jovyan"
+        -v "${passwd_file}:/etc/passwd:ro"
+        -v "${group_file}:/etc/group:ro"
+        -v "${HOME}/neurodesktop-storage:/neurodesktop-storage"
+        -e CVMFS_DISABLE=true
+        -e "NB_USER=${hpc_user}"
+        -e "NB_UID=${hpc_uid}"
+        -e "NB_GID=${hpc_gid}"
+        -e HOME=/home/jovyan
+        -e "USER=${hpc_user}"
+        -e "LOGNAME=${hpc_user}"
+        -e APPTAINER_CONTAINER=1
+        -e "APPTAINER_NAME=${name}"
+        -e NEURODESKTOP_CVMFS_STARTUP_MODE=lazy
+        # Real HPC Apptainer sets NEURODESKTOP_SLURM_MODE=host and talks to the
+        # cluster's live slurmctld. Our docker simulation has no host Slurm, so
+        # disable it entirely - the Slurm tests cleanly skip on SLURM_ENABLE=0.
+        -e NEURODESKTOP_SLURM_ENABLE=0
+        -e NEURODESKTOP_SLURM_STARTUP_MODE=eager
+    )
+}
+
+# Wait for Jupyter to bind :8888 inside the named container. Prints docker
+# logs and returns non-zero if the container exits or times out.
+hpc_wait_for_ready() {
+    local name="$1"
+    local max_iters="${2:-90}"
+
+    echo "Waiting for container startup (up to $((max_iters*2))s)..."
+    for i in $(seq 1 "$max_iters"); do
+        if ! docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null | grep -q true; then
+            echo "[ERROR] Container exited during startup. Last 120 log lines:"
+            docker logs --tail 120 "$name" || true
+            return 1
+        fi
+        # Any HTTP status (including 403 "Forbidden") proves Jupyter is
+        # listening. Newer jupyter-server releases gate /api/status behind the
+        # auth token, so `curl -sf` (which only treats 2xx as success) reports
+        # "not ready" forever. `curl -so /dev/null -w %{http_code}` just
+        # needs the TCP layer + TLS-less HTTP response to return 000 or any
+        # non-empty 3-digit code.
+        code=$(docker exec "$name" curl -so /dev/null -w '%{http_code}' \
+                 --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
+        if [ "$code" != "000" ] && [ -n "$code" ]; then
+            echo "Container ready after ~$((i*2))s (jupyter responded HTTP ${code})"
+            return 0
+        fi
+        sleep 2
+    done
+
+    echo "[ERROR] Container did not reach /api/status in $((max_iters*2))s. Last 120 log lines:"
+    docker logs --tail 120 "$name" || true
+    echo ""
+    echo "Container is still running; inspect with: docker exec -it ${name} bash"
+    return 1
+}
+
+# Interactive HPC session: starts the container attached to the terminal, just
+# like the default bottom-of-script `docker run -it` path, but under the HPC
+# simulation envelope. Ctrl-C stops the container. Cleanup is manual so the
+# user can inspect afterwards.
+#
+# Usage: build_and_run.sh hpc [USERNAME] [UID] [GID]
+if [ "${1:-}" = "hpc" ]; then
+    HPC_USER="${2:-sciget}"
+    HPC_UID="${3:-5000}"
+    HPC_GID="${4:-5000}"
+    name="neurodesktop-hpc"
+
+    # Sets HPC_HOME_DIR / HPC_PASSWD_FILE / HPC_GROUP_FILE.
+    hpc_prepare_mounts "$HPC_USER" "$HPC_UID" "$HPC_GID"
+
+    echo "============================================================"
+    echo "HPC simulation (interactive): user=${HPC_USER} uid=${HPC_UID} gid=${HPC_GID}"
+    echo "  home:    ${HPC_HOME_DIR}"
+    echo "  passwd:  ${HPC_PASSWD_FILE}"
+    echo "  group:   ${HPC_GROUP_FILE}"
+    echo "  no --privileged, no --user=root, no sudo"
+    echo "  Jupyter: http://127.0.0.1:8888/"
+    echo "  Cleanup: docker rm -f ${name} && rm -rf ${HPC_HOME_DIR} ${HPC_PASSWD_FILE} ${HPC_GROUP_FILE}"
+    echo "============================================================"
+
+    docker rm -f "$name" 2>/dev/null || true
+
+    # Populates HPC_DOCKER_ARGS; bash 3.2-compatible replacement for mapfile.
+    hpc_docker_args "$name" "$HPC_USER" "$HPC_UID" "$HPC_GID" \
+        "$HPC_HOME_DIR" "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
+    docker run -it "${HPC_DOCKER_ARGS[@]}" \
+        -p 127.0.0.1:8888:8888 \
+        neurodesktop:latest
+    exit $?
+fi
+
+# Detached HPC session + run pytest inside. Container is left running so the
+# user can `docker exec -it neurodesktop-hpctest bash` for further inspection.
+#
+# Usage: build_and_run.sh hpctest [USERNAME] [UID] [GID]
+if [ "${1:-}" = "hpctest" ]; then
+    HPC_USER="${2:-sciget}"
+    HPC_UID="${3:-5000}"
+    HPC_GID="${4:-5000}"
+    name="neurodesktop-hpctest"
+
+    hpc_prepare_mounts "$HPC_USER" "$HPC_UID" "$HPC_GID"
+
+    echo "============================================================"
+    echo "HPC simulation (tests): user=${HPC_USER} uid=${HPC_UID} gid=${HPC_GID}"
+    echo "  home:    ${HPC_HOME_DIR}"
+    echo "  passwd:  ${HPC_PASSWD_FILE}"
+    echo "  group:   ${HPC_GROUP_FILE}"
+    echo "  no --privileged, no --user=root, no sudo"
+    echo "============================================================"
+
+    docker rm -f "$name" 2>/dev/null || true
+
+    hpc_docker_args "$name" "$HPC_USER" "$HPC_UID" "$HPC_GID" \
+        "$HPC_HOME_DIR" "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
+    docker run -d "${HPC_DOCKER_ARGS[@]}" \
+        -p 127.0.0.1:8888:8888 \
+        neurodesktop:latest >/dev/null
+
+    if ! hpc_wait_for_ready "$name"; then
+        exit 1
+    fi
+
+    echo ""
+    echo "============================================================"
+    echo "Running tests as ${HPC_USER} (UID ${HPC_UID}) inside the container"
+    echo "============================================================"
+    docker exec "$name" pytest /opt/tests/ -v
+    result=$?
+
+    echo ""
+    echo "Container left running for manual inspection:"
+    echo "  docker exec -it ${name} bash"
+    echo ""
+    echo "Cleanup when done:"
+    echo "  docker rm -f ${name}"
+    echo "  rm -rf ${HPC_HOME_DIR} ${HPC_PASSWD_FILE} ${HPC_GROUP_FILE}"
+    exit $result
+fi
+
 if [ "${1:-}" = "fulltest" ]; then
     echo "============================================================"
     echo "Running tests across all configurations (parallel)"
     echo "============================================================"
 
-    # Define configurations: "cvmfs_disable:grant_sudo"
-    CONFIGS=("false:no" "false:yes" "true:no" "true:yes")
+    # Configuration format: "kind:arg1:arg2"
+    #   kind=std  -> classic docker: cvmfs_disable:grant_sudo
+    #   kind=hpc  -> apptainer-style: non-root, non-jovyan, no privileged
+    CONFIGS=(
+        "std:false:no"
+        "std:false:yes"
+        "std:true:no"
+        "std:true:yes"
+        "hpc:sciget:5000:5000"
+    )
     PIDS=()
+    NAMES=()
+    LABELS=()
+    KINDS=()
+    # Per-config cleanup paths for HPC entries.
+    HPC_HOMES=()
+    HPC_PASSWDS=()
+    HPC_GROUPS=()
     LOGDIR=$(mktemp -d)
 
     # Start all containers in parallel
     for i in "${!CONFIGS[@]}"; do
-        IFS=':' read -r cvmfs_disable grant_sudo <<< "${CONFIGS[$i]}"
+        IFS=':' read -r kind a b c <<< "${CONFIGS[$i]}"
         name="neurodesktop-test-${i}"
-        label="CVMFS_DISABLE=${cvmfs_disable}, GRANT_SUDO=${grant_sudo}"
 
         docker rm -f "$name" 2>/dev/null || true
-        docker volume create "${name}-home" 2>/dev/null || true
 
-        echo "Starting: ${label} (${name})"
-        docker run -d --shm-size=1gb --privileged --user=root \
-            --name "$name" \
-            --mount "source=${name}-home,target=/home/jovyan" \
-            -v ~/neurodesktop-storage:/neurodesktop-storage \
-            -e CVMFS_DISABLE="${cvmfs_disable}" \
-            -e GRANT_SUDO="${grant_sudo}" \
-            -e NEURODESKTOP_CVMFS_STARTUP_MODE=eager \
-            -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
-            neurodesktop:latest >/dev/null
+        case "$kind" in
+            std)
+                cvmfs_disable="$a"
+                grant_sudo="$b"
+                label="std CVMFS_DISABLE=${cvmfs_disable} GRANT_SUDO=${grant_sudo}"
+                docker volume create "${name}-home" 2>/dev/null || true
+                echo "Starting: ${label} (${name})"
+                docker run -d --shm-size=1gb --privileged --user=root \
+                    --name "$name" \
+                    --mount "source=${name}-home,target=/home/jovyan" \
+                    -v ~/neurodesktop-storage:/neurodesktop-storage \
+                    -e CVMFS_DISABLE="${cvmfs_disable}" \
+                    -e GRANT_SUDO="${grant_sudo}" \
+                    -e NEURODESKTOP_CVMFS_STARTUP_MODE=eager \
+                    -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
+                    neurodesktop:latest >/dev/null
+                HPC_HOMES+=("")
+                HPC_PASSWDS+=("")
+                HPC_GROUPS+=("")
+                ;;
+            hpc)
+                hpc_user="$a"
+                hpc_uid="$b"
+                hpc_gid="$c"
+                label="hpc user=${hpc_user} uid=${hpc_uid} (no root, no privileged, no sudo)"
+                echo "Starting: ${label} (${name})"
+                hpc_prepare_mounts "$hpc_user" "$hpc_uid" "$hpc_gid"
+                HPC_HOMES+=("$HPC_HOME_DIR")
+                HPC_PASSWDS+=("$HPC_PASSWD_FILE")
+                HPC_GROUPS+=("$HPC_GROUP_FILE")
+                hpc_docker_args "$name" "$hpc_user" "$hpc_uid" "$hpc_gid" \
+                    "$HPC_HOME_DIR" "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
+                docker run -d "${HPC_DOCKER_ARGS[@]}" neurodesktop:latest >/dev/null
+                ;;
+        esac
+
+        NAMES+=("$name")
+        LABELS+=("$label")
+        KINDS+=("$kind")
     done
 
     # Wait for all containers to be ready, then run tests in parallel
     for i in "${!CONFIGS[@]}"; do
-        IFS=':' read -r cvmfs_disable grant_sudo <<< "${CONFIGS[$i]}"
-        name="neurodesktop-test-${i}"
-        label="CVMFS_DISABLE=${cvmfs_disable}, GRANT_SUDO=${grant_sudo}"
+        name="${NAMES[$i]}"
+        label="${LABELS[$i]}"
+        kind="${KINDS[$i]}"
         logfile="${LOGDIR}/${name}.log"
 
+        # HPC containers must be exec'd as the non-jovyan user (the one they
+        # actually run as); std containers get the legacy `-u jovyan` switch.
+        if [ "$kind" = "hpc" ]; then
+            pytest_exec=(docker exec "$name" pytest /opt/tests/ -v)
+        else
+            pytest_exec=(docker exec -u jovyan "$name" pytest /opt/tests/ -v)
+        fi
+
         (
-            for attempt in $(seq 1 60); do
-                if docker exec "$name" curl -sf http://localhost:8888/api/status >/dev/null 2>&1; then
+            for attempt in $(seq 1 90); do
+                if ! docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null | grep -q true; then
+                    echo "[ERROR] Container exited before reaching readiness."
+                    docker logs --tail 120 "$name" || true
+                    exit 1
+                fi
+                code=$(docker exec "$name" curl -so /dev/null -w '%{http_code}' \
+                         --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
+                if [ "$code" != "000" ] && [ -n "$code" ]; then
                     break
                 fi
                 sleep 2
@@ -116,7 +386,7 @@ if [ "${1:-}" = "fulltest" ]; then
             echo "============================================================"
             echo "Config: ${label}"
             echo "============================================================"
-            docker exec -u jovyan "$name" pytest /opt/tests/ -v
+            "${pytest_exec[@]}"
         ) > "$logfile" 2>&1 &
         PIDS+=($!)
     done
@@ -125,9 +395,9 @@ if [ "${1:-}" = "fulltest" ]; then
 
     FAILED=0
     for i in "${!CONFIGS[@]}"; do
-        IFS=':' read -r cvmfs_disable grant_sudo <<< "${CONFIGS[$i]}"
-        name="neurodesktop-test-${i}"
-        label="CVMFS_DISABLE=${cvmfs_disable}, GRANT_SUDO=${grant_sudo}"
+        name="${NAMES[$i]}"
+        label="${LABELS[$i]}"
+        kind="${KINDS[$i]}"
         logfile="${LOGDIR}/${name}.log"
 
         wait "${PIDS[$i]}" && status="PASSED" || { status="FAILED"; FAILED=1; }
@@ -139,7 +409,11 @@ if [ "${1:-}" = "fulltest" ]; then
         cat "$logfile"
 
         docker rm -f "$name" 2>/dev/null || true
-        docker volume rm "${name}-home" 2>/dev/null || true
+        if [ "$kind" = "std" ]; then
+            docker volume rm "${name}-home" 2>/dev/null || true
+        else
+            rm -rf "${HPC_HOMES[$i]}" "${HPC_PASSWDS[$i]}" "${HPC_GROUPS[$i]}" 2>/dev/null || true
+        fi
     done
 
     rm -rf "$LOGDIR"

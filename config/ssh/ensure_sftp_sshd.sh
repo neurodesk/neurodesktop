@@ -43,9 +43,14 @@ if [ -z "${SFTP_SSH_PORT:-}" ]; then
 fi
 export NEURODESKTOP_SFTP_PORT="${SFTP_SSH_PORT}"
 
+# Runtime dir where we will publish the chosen port IFF sshd actually binds it.
+# Do NOT publish eagerly: if the start fails later, guacamole.sh would otherwise
+# stamp a dead port into user-mapping.xml and Guacamole would abort the VNC
+# tunnel with CLIENT_UNAUTHORIZED (0x0301) at connect time when it tries to
+# initialise the SFTP side-channel.
 NEURODESKTOP_RUNTIME_DIR="${NEURODESKTOP_RUNTIME_DIR:-${HOME}/.neurodesk/runtime}"
 mkdir -p "${NEURODESKTOP_RUNTIME_DIR}" 2>/dev/null || true
-printf '%s\n' "${SFTP_SSH_PORT}" > "${NEURODESKTOP_RUNTIME_DIR}/sftp_port" 2>/dev/null || true
+rm -f "${NEURODESKTOP_RUNTIME_DIR}/sftp_port" 2>/dev/null || true
 
 SFTP_SSH_PID_FILE="/tmp/sshd_${SFTP_SSH_PORT}_${UID:-$(id -u)}.pid"
 
@@ -222,12 +227,32 @@ start_sshd() {
         fi
     fi
 
+    # Forcefully override key options at the command line so the unprivileged
+    # (non-root sshd) path works regardless of which config file happened to
+    # load:
+    #   UsePAM=no      - a non-root sshd cannot validate via PAM (no access
+    #                    to /etc/shadow), so pam_unix account-phase fails and
+    #                    Guacamole's SFTP side-channel aborts the whole VNC
+    #                    tunnel with CLIENT_UNAUTHORIZED (0x0301). Only the
+    #                    fallback config set this; the primary sshd_config
+    #                    inherited from the image default leaves UsePAM=yes.
+    #   StrictModes=no - the simulated HPC HOME (bind-mounted host tempdir
+    #                    or the real /home/jovyan with unusual ownership) is
+    #                    not guaranteed to satisfy sshd's default 0700/0750
+    #                    ownership checks, and sshd rejects pubkey auth on
+    #                    failure. We are only ever accepting a key that we
+    #                    wrote ourselves; no weaker security posture.
     if ! "${sshd_prefix[@]}" /usr/sbin/sshd \
         -f "${ssh_config_to_use}" \
         -p "${SFTP_SSH_PORT}" \
         -h "${SSH_HOST_ED25519_KEY}" \
         -h "${SSH_HOST_RSA_KEY}" \
-        -o "PidFile=${SFTP_SSH_PID_FILE}" >"${startup_log}" 2>&1; then
+        -o "PidFile=${SFTP_SSH_PID_FILE}" \
+        -o "UsePAM=no" \
+        -o "StrictModes=no" \
+        -o "KbdInteractiveAuthentication=no" \
+        -o "PasswordAuthentication=no" \
+        -o "PubkeyAuthentication=yes" >"${startup_log}" 2>&1; then
         warn "Failed to start sshd on port ${SFTP_SSH_PORT}."
         emit_sshd_log_preview "${startup_log}"
         rm -f "${validation_log}" "${startup_log}"
@@ -244,7 +269,19 @@ main() {
     fi
     ensure_host_keys
     ensure_authorized_sftp_key || true
-    start_sshd
+    if ! start_sshd; then
+        return 1
+    fi
+    # Confirm the port really is listening before advertising it to
+    # guacamole.sh. start_sshd can exit 0 yet still lose the race against
+    # another process that just bound the same port.
+    if ! port_is_listening; then
+        warn "sshd returned success but nothing is listening on ${SFTP_SSH_PORT}."
+        return 1
+    fi
+    printf '%s\n' "${SFTP_SSH_PORT}" \
+        > "${NEURODESKTOP_RUNTIME_DIR}/sftp_port" 2>/dev/null || true
+    return 0
 }
 
 main "$@"

@@ -506,7 +506,15 @@ RUN mkdir -p /etc/guacamole \
     && echo -e "user-mapping: /etc/guacamole/user-mapping.xml\nguacd-hostname: 127.0.0.1" > /etc/guacamole/guacamole.properties \
     && echo -e "[server]\nbind_host = 127.0.0.1\nbind_port = 4822" > /etc/guacamole/guacd.conf \
     && chown -R ${NB_UID}:${NB_GID} /etc/guacamole \
-    && chown -R ${NB_UID}:${NB_GID} /usr/local/tomcat
+    && chown -R ${NB_UID}:${NB_GID} /usr/local/tomcat \
+    # Apache Tomcat ships `conf/` as 0750 and a few script/dir modes that deny
+    # world read/traverse. On Apptainer/HPC the container runs as an arbitrary
+    # host UID with no membership in group `users`, so the chown above alone
+    # is not enough - `cp -rfT /usr/local/tomcat/conf …` silently fails and
+    # guacamole.sh cannot launch Tomcat. Grant world read + traverse so any
+    # NB_UID can bootstrap its per-user CATALINA_BASE. Write access stays
+    # restricted to the owner.
+    && chmod -R a+rX /usr/local/tomcat /etc/guacamole
 COPY --chown=${NB_UID}:${NB_GID} config/guacamole/user-mapping-vnc.xml /etc/guacamole/user-mapping-vnc.xml
 COPY --chown=${NB_UID}:${NB_GID} config/guacamole/user-mapping-vnc-rdp.xml /etc/guacamole/user-mapping-vnc-rdp.xml
 RUN ln -sf /etc/guacamole/user-mapping-vnc.xml /etc/guacamole/user-mapping.xml

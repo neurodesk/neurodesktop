@@ -289,7 +289,12 @@ else
     unset NEURODESKTOP_RDP_PORT
 fi
 
-# SSH/SFTP.
+# SSH/SFTP. ensure_sftp_sshd.sh now only publishes runtime/sftp_port if sshd
+# actually bound the port - an unconditional read on failure would leave us
+# stamping a dead port into user-mapping.xml, which Guacamole then tries to
+# dial as an SFTP side-channel at VNC connect time and aborts the whole tunnel
+# with CLIENT_UNAUTHORIZED (0x0301).
+NEURODESKTOP_SFTP_PORT=""
 if [ -x /opt/neurodesktop/ensure_sftp_sshd.sh ]; then
     /opt/neurodesktop/ensure_sftp_sshd.sh || \
         echo "[WARN] Failed to initialize SSH/SFTP service for Guacamole."
@@ -302,6 +307,25 @@ fi
 if [ -n "${NEURODESKTOP_SFTP_PORT:-}" ]; then
     update_mapping_param "vnc" "sftp-port" "${NEURODESKTOP_SFTP_PORT}" || \
         echo "[WARN] Could not stamp SFTP port ${NEURODESKTOP_SFTP_PORT} into mapping."
+    # The SFTP side-channel authenticates with pubkey against the running sshd.
+    # That sshd runs as the current process user (sciget on HPC, jovyan on
+    # classic docker) and cannot switch identity without root. If the mapping
+    # still says `sftp-username=jovyan` while sshd is running as sciget,
+    # Guacamole's SFTP auth fails and the WHOLE VNC/RDP tunnel aborts with
+    # CLIENT_UNAUTHORIZED (0x0301) - even though the VNC password is correct
+    # and VNC auth itself succeeded. Stamp the live user into the mapping.
+    _sftp_user="${NB_USER:-$(id -un 2>/dev/null || echo jovyan)}"
+    update_mapping_param "vnc" "sftp-username" "${_sftp_user}" || \
+        echo "[WARN] Could not stamp SFTP username ${_sftp_user} into mapping."
+    update_mapping_param "rdp" "sftp-username" "${_sftp_user}" || true
+    unset _sftp_user
+else
+    # Disable SFTP entirely so Guacamole does not attempt the side-channel.
+    # enable-sftp=false is the idiomatic way to turn off the feature in the
+    # libguac-client-vnc / libguac-client-rdp connection params.
+    echo "[WARN] SFTP backend unavailable; disabling enable-sftp in mapping."
+    update_mapping_param "vnc" "enable-sftp" "false" || true
+    update_mapping_param "rdp" "enable-sftp" "false" || true
 fi
 
 # VNC.
@@ -314,17 +338,36 @@ echo "[DEBUG] Contents of ${HOME}/.vnc:"
 ls -la "${HOME}/.vnc/" 2>&1 || echo "[DEBUG] .vnc directory does not exist!"
 
 mkdir -p "${HOME}/.vnc"
-if [ -n "${NEURODESKTOP_VNC_PASSWORD:-}" ]; then
-    if vncpasswd -f < /dev/null >/dev/null 2>&1; then
-        /usr/bin/printf '%s\n' "${NEURODESKTOP_VNC_PASSWORD}" | vncpasswd -f > "${HOME}/.vnc/passwd"
-    else
-        /usr/bin/printf '%s\n%s\n%s\n' "${NEURODESKTOP_VNC_PASSWORD}" "${NEURODESKTOP_VNC_PASSWORD}" 'n' | vncpasswd
-    fi
-    chmod 600 "${HOME}/.vnc/passwd" 2>/dev/null || true
-else
+if [ -z "${NEURODESKTOP_VNC_PASSWORD:-}" ]; then
     echo "[ERROR] NEURODESKTOP_VNC_PASSWORD is empty - init_secrets.sh did not run?" >&2
     exit 1
 fi
+
+# Stamp ${HOME}/.vnc/passwd with the rotated secret. `vncpasswd -f` reads the
+# plaintext from stdin and writes the DES-obfuscated 8-byte file Xvnc expects.
+#
+# Do NOT "feature-check" `-f` with `vncpasswd -f < /dev/null` - an empty
+# stdin returns non-zero even when -f is supported, pushing us into the
+# interactive fallback. That fallback CANNOT WORK: vncpasswd reads via
+# getpass() which reads from /dev/tty, not stdin, so piping produces a
+# garbage hash. The symptom is CLIENT_UNAUTHORIZED (Guacamole status 0x0301
+# / error code 769) because the garbage hash does not match the plaintext
+# stamped into user-mapping.xml. Just try -f with real input and check the
+# output size.
+_vnc_passwd_tmp="${HOME}/.vnc/passwd.tmp.$$"
+umask 077
+if /usr/bin/printf '%s\n' "${NEURODESKTOP_VNC_PASSWORD}" | vncpasswd -f > "${_vnc_passwd_tmp}" 2>/dev/null \
+    && [ -s "${_vnc_passwd_tmp}" ]; then
+    mv -f "${_vnc_passwd_tmp}" "${HOME}/.vnc/passwd"
+else
+    rm -f "${_vnc_passwd_tmp}" 2>/dev/null || true
+    echo "[ERROR] vncpasswd -f failed; Xvnc will reject Guacamole connections." >&2
+    echo "[ERROR] TigerVNC's interactive vncpasswd uses getpass() from /dev/tty and" >&2
+    echo "[ERROR] cannot be fed via a pipe, so we refuse to fall back to it here." >&2
+    exit 1
+fi
+chmod 600 "${HOME}/.vnc/passwd" 2>/dev/null || true
+unset _vnc_passwd_tmp
 
 if [ ! -f "${HOME}/.vnc/xstartup" ]; then
     echo "[ERROR] VNC xstartup not found at ${HOME}/.vnc/xstartup"

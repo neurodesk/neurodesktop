@@ -214,8 +214,14 @@ mkdir -p ${HOME}/.config/opencode
 # Best-effort: install a small set of useful code-server extensions.
 ensure_codeserver_extension() {
     local ext_name="$1"
-    local ext_pattern="$2"
-    shift 2
+    shift
+    local ext_pattern="${1:-${ext_name}-*}"
+    if [ "$#" -gt 0 ]; then
+        shift
+    fi
+    if [ "$#" -eq 0 ]; then
+        set -- "${ext_name}"
+    fi
 
     local ext_dir="${HOME}/.local/share/code-server/extensions"
     local log_file="/tmp/code-server-${ext_name,,}-extension-install.log"

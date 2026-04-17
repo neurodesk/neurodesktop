@@ -210,7 +210,10 @@ can_chown_path_with_runner() {
 }
 
 fix_home_ownership_if_needed() {
-    local home_dir="/home/${NB_USER}"
+    # Use $HOME, not /home/$NB_USER. Under Apptainer on HPC the container user
+    # (e.g. `sciget`) has HOME=/home/jovyan bind-mounted; /home/$NB_USER does
+    # not exist and a literal touch against it aborts startup.
+    local home_dir="${HOME:-/home/${NB_USER}}"
     local current_uid current_gid
     local -a chown_runner
 
@@ -251,7 +254,7 @@ fix_home_ownership_if_needed() {
 
 link_data_dir_if_present() {
     local source_dir="/data"
-    local home_dir="/home/${NB_USER}"
+    local home_dir="${HOME:-/home/${NB_USER}}"
     local target_link="${home_dir}/data"
 
     if [ ! -d "$source_dir" ] || [ ! -d "$home_dir" ]; then
@@ -616,7 +619,7 @@ if [ "$EUID" -eq 0 ]; then
 fi
 
 # Source custom scripts in .bashrc if they are not already there
-BASHRC_FILE="/home/${NB_USER}/.bashrc"
+BASHRC_FILE="${HOME:-/home/${NB_USER}}/.bashrc"
 INIT_MODULES="if [ -f '/usr/share/module.sh' ]; then source /usr/share/module.sh; fi"
 PERSISTENT_HISTORY_MARKER="# Neurodesk persistent bash history"
 
@@ -891,9 +894,11 @@ if [ "$CVMFS_STARTUP_MODE" = "lazy" ] || [ "$SLURM_STARTUP_MODE" = "lazy" ]; the
 fi
 
 # Ensure the VNC password file has the correct permissions
-if [ -f "/home/${NB_USER}/.vnc/passwd" ] && [ "$(stat -c %a /home/${NB_USER}/.vnc/passwd)" != "600" ]; then
-    chmod 600 "/home/${NB_USER}/.vnc/passwd"
+_vnc_passwd_path="${HOME:-/home/${NB_USER}}/.vnc/passwd"
+if [ -f "${_vnc_passwd_path}" ] && [ "$(stat -c %a "${_vnc_passwd_path}")" != "600" ]; then
+    chmod 600 "${_vnc_passwd_path}"
 fi
+unset _vnc_passwd_path
 
 apply_chown_if_needed() {
     local dir="$1"

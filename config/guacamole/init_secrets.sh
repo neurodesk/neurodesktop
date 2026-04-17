@@ -13,9 +13,20 @@
 #   source /opt/neurodesktop/init_secrets.sh   # exported vars visible to caller
 #   /opt/neurodesktop/init_secrets.sh           # standalone (tests)
 
-set -u
+# NOTE: we do NOT `set -u` at the top level. When this script is sourced from
+# jupyterlab_startup.sh the option leaks into the caller and trips on unrelated
+# unbound references further down the startup chain (the `$2` crash in the
+# backgrounded ensure_codeserver_extensions subshell was an instance of this).
+# The critical section below runs inside its own subshell where `set -u` is
+# scoped and cannot escape.
 
 _neurodesk_init_secrets() {
+    # Intentionally no `set -u` here. Shell options are global, not function-
+    # scoped, so enabling nounset persists into the sourcing shell and has
+    # crashed jupyterlab_startup.sh on unrelated unbound references (the
+    # `line 217: $2: unbound variable` symptom on HPC). All references in this
+    # function use `${VAR:-default}` defensive expansion and every failure path
+    # returns non-zero explicitly, so nounset was not load-bearing.
     local HOME_DIR="${HOME:-/home/jovyan}"
     local GUACAMOLE_HOME_LOCAL="${GUACAMOLE_HOME:-${HOME_DIR}/.neurodesk/guacamole}"
     local SECRETS_DIR="${HOME_DIR}/.neurodesk/secrets"
@@ -138,6 +149,33 @@ _neurodesk_init_secrets() {
     if ! _neurodesk_update_authorize "${web_user}" "${web_password}"; then
         echo "[ERROR] Failed to update Guacamole <authorize> in ${MAPPING_FILE}" >&2
         return 1
+    fi
+
+    # Stamp ${HOME}/.vnc/passwd from the rotated token immediately, not lazily
+    # at first Neurodesktop click. restore_home_defaults.sh migrates the build-
+    # time .vnc/passwd (hash of literal "password") into $HOME on every start
+    # whenever the image default is newer, which creates a cross-user auth
+    # window on shared HPC nodes between container boot and the user opening
+    # the desktop. Keeping .vnc/passwd in sync with the rotated secret from
+    # the first second of the session closes that window.
+    local vnc_passwd_file="${HOME_DIR}/.vnc/passwd"
+    mkdir -p "${HOME_DIR}/.vnc" 2>/dev/null || true
+    if command -v vncpasswd >/dev/null 2>&1; then
+        # `vncpasswd -f` reads plaintext on stdin and writes the DES-obfuscated
+        # form Xvnc expects. We do NOT have an interactive fallback here on
+        # purpose: plain `vncpasswd` (without -f) reads via getpass() from
+        # /dev/tty and cannot be fed via a pipe, so piping would silently
+        # write a garbage hash and break VNC auth with CLIENT_UNAUTHORIZED.
+        umask 077
+        local tmp_passwd="${vnc_passwd_file}.tmp.$$"
+        if printf '%s\n' "${vnc_password}" | vncpasswd -f > "${tmp_passwd}" 2>/dev/null \
+            && [ -s "${tmp_passwd}" ]; then
+            mv -f "${tmp_passwd}" "${vnc_passwd_file}"
+            chmod 600 "${vnc_passwd_file}" 2>/dev/null || true
+        else
+            rm -f "${tmp_passwd}" 2>/dev/null || true
+            echo "[WARN] vncpasswd -f failed; guacamole.sh will retry at click time." >&2
+        fi
     fi
 
     export GUACAMOLE_HOME="${GUACAMOLE_HOME_LOCAL}"
