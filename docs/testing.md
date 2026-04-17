@@ -54,13 +54,22 @@ argument:
   locally.
 - `./build_and_run.sh hpctest [user] [uid] [gid]` — Same HPC simulation
   envelope as `hpc`, but runs detached and executes `pytest /opt/tests/`
-  inside. The container is left running so you can
-  `docker exec -it neurodesktop-hpctest bash` for follow-up inspection.
+  inside. Tears down the container and removes the temp `/etc/passwd` /
+  `/etc/group` / home files on exit.
 - `./build_and_run.sh fulltest` — Runs the test suite across **five
-  configurations in parallel** and prints each container's log when they
-  finish: the four `std` configs (`CVMFS_DISABLE ∈ {false, true}` ×
-  `GRANT_SUDO ∈ {no, yes}`) plus the `hpc` Apptainer simulation (`sciget`,
-  UID `5000`, no root). Exits non-zero if any configuration fails.
+  configurations in parallel** and dumps each container's captured log once
+  they have *all* finished: the four `std` configs (`CVMFS_DISABLE ∈ {false,
+  true}` × `GRANT_SUDO ∈ {no, yes}`) plus the `hpc` Apptainer simulation
+  (`sciget`, UID `5000`, no root). Fastest wall-clock path — roughly one
+  container-start's worth of time regardless of how many configs you add —
+  but you get no live progress, only the final summary + per-config logs.
+  Exits non-zero if any configuration fails.
+- `./build_and_run.sh fulltest_verbose` — Same set of five configurations,
+  but runs them **sequentially** and streams each container's pytest output
+  to your terminal live. Much slower (≈5× the `fulltest` wall-clock) but you
+  can watch per-test progress, see failures in real time, and abort early
+  with Ctrl-C. Each config is torn down before the next one starts. A
+  summary table is printed at the end listing PASS/FAIL for each config.
 
 ### HPC simulation details
 

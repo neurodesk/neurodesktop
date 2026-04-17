@@ -634,7 +634,13 @@ USER root
 RUN mkdir -p /etc/cvmfs/keys/ardc.edu.au \
     && mkdir -p /data /neurodesktop-storage \
     && chown ${NB_UID}:${NB_GID} /neurodesktop-storage \
-    && chmod 770 /neurodesktop-storage
+    # Mode 0770 (owner jovyan:users) denied write access to HPC-style
+    # unprivileged users whose UID is NOT 1000 and GID is NOT 100 - and on
+    # real HPC Apptainer the directory is usually bind-mounted from a
+    # per-user scratch dir anyway, so world-write is the realistic default.
+    # Was breaking test_crud's /neurodesktop-storage parametrisation in the
+    # HPC simulation CI job (UID 5000 could neither read nor write).
+    && chmod 0777 /neurodesktop-storage
 COPY config/cvmfs/neurodesk.ardc.edu.au.pub /etc/cvmfs/keys/ardc.edu.au/neurodesk.ardc.edu.au.pub
 COPY config/cvmfs/neurodesk.ardc.edu.au.conf* /etc/cvmfs/config.d/
 COPY config/cvmfs/default.local /etc/cvmfs/default.local

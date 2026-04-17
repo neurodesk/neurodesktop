@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-if [ "${1:-}" != "test" ] && [ "${1:-}" != "fulltest" ] && [ "${1:-}" != "hpctest" ] && [ "${1:-}" != "hpc" ]; then
+if [ "${1:-}" != "test" ] && [ "${1:-}" != "fulltest" ] && [ "${1:-}" != "fulltest_verbose" ] && [ "${1:-}" != "hpctest" ] && [ "${1:-}" != "hpc" ]; then
     if docker ps --all | grep -w neurodesktop; then
         if docker ps --all | grep neurodeskapp; then
             echo "detected a Neurodeskapp container and ignoring it!"
@@ -296,6 +296,7 @@ fi
 if [ "${1:-}" = "fulltest" ]; then
     echo "============================================================"
     echo "Running tests across all configurations (parallel)"
+    echo "  (use './build_and_run.sh fulltest_verbose' to stream output)"
     echo "============================================================"
 
     # Configuration format: "kind:arg1:arg2"
@@ -366,15 +367,16 @@ if [ "${1:-}" = "fulltest" ]; then
         KINDS+=("$kind")
     done
 
-    # Wait for all containers to be ready, then run tests in parallel
+    # Wait for all containers to be ready, then run tests in parallel. Output
+    # is captured per-config to a log file and dumped at the end - this hides
+    # live progress but finishes roughly 5x faster than the sequential path.
+    # If you want to see progress in real time, use `fulltest_verbose` below.
     for i in "${!CONFIGS[@]}"; do
         name="${NAMES[$i]}"
         label="${LABELS[$i]}"
         kind="${KINDS[$i]}"
         logfile="${LOGDIR}/${name}.log"
 
-        # HPC containers must be exec'd as the non-jovyan user (the one they
-        # actually run as); std containers get the legacy `-u jovyan` switch.
         if [ "$kind" = "hpc" ]; then
             pytest_exec=(docker exec "$name" pytest /opt/tests/ -v)
         else
@@ -404,7 +406,7 @@ if [ "${1:-}" = "fulltest" ]; then
         PIDS+=($!)
     done
 
-    echo "Waiting for all test runs to complete..."
+    echo "Waiting for all test runs to complete (running in parallel)..."
 
     FAILED=0
     for i in "${!CONFIGS[@]}"; do
@@ -432,6 +434,147 @@ if [ "${1:-}" = "fulltest" ]; then
     rm -rf "$LOGDIR"
 
     echo ""
+    echo "============================================================"
+    if [ $FAILED -eq 0 ]; then
+        echo "ALL CONFIGURATIONS PASSED"
+    else
+        echo "SOME CONFIGURATIONS FAILED"
+    fi
+    echo "============================================================"
+    exit $FAILED
+fi
+
+if [ "${1:-}" = "fulltest_verbose" ]; then
+    echo "============================================================"
+    echo "Running tests across all configurations (sequential, live output)"
+    echo "============================================================"
+
+    # Configuration format: "kind:arg1:arg2"
+    #   kind=std  -> classic docker: cvmfs_disable:grant_sudo
+    #   kind=hpc  -> apptainer-style: non-root, non-jovyan, no privileged
+    CONFIGS=(
+        "std:false:no"
+        "std:false:yes"
+        "std:true:no"
+        "std:true:yes"
+        "hpc:sciget:5000:5000"
+    )
+
+    FAILED=0
+    RESULTS=()
+
+    # Run each configuration one after the other so output streams live to the
+    # terminal. Previously all five ran in parallel with output captured to
+    # per-config log files and dumped only at the end, which felt like the
+    # script was hanging. Parallelism is not worth the opacity here.
+    for i in "${!CONFIGS[@]}"; do
+        IFS=':' read -r kind a b c <<< "${CONFIGS[$i]}"
+        name="neurodesktop-test-${i}"
+        docker rm -f "$name" 2>/dev/null || true
+
+        config_hpc_home=""
+        config_hpc_passwd=""
+        config_hpc_group=""
+
+        case "$kind" in
+            std)
+                cvmfs_disable="$a"
+                grant_sudo="$b"
+                label="std CVMFS_DISABLE=${cvmfs_disable} GRANT_SUDO=${grant_sudo}"
+                echo ""
+                echo "============================================================"
+                echo "[$((i+1))/${#CONFIGS[@]}] Starting: ${label}"
+                echo "============================================================"
+                docker volume create "${name}-home" 2>/dev/null || true
+                docker run -d --shm-size=1gb --privileged --user=root \
+                    --name "$name" \
+                    --mount "source=${name}-home,target=/home/jovyan" \
+                    -v ~/neurodesktop-storage:/neurodesktop-storage \
+                    -e CVMFS_DISABLE="${cvmfs_disable}" \
+                    -e GRANT_SUDO="${grant_sudo}" \
+                    -e NEURODESKTOP_CVMFS_STARTUP_MODE=eager \
+                    -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
+                    neurodesktop:latest >/dev/null
+                pytest_exec=(docker exec -u jovyan "$name" pytest /opt/tests/ -v)
+                ;;
+            hpc)
+                hpc_user="$a"
+                hpc_uid="$b"
+                hpc_gid="$c"
+                label="hpc user=${hpc_user} uid=${hpc_uid} (no root, no privileged, no sudo)"
+                echo ""
+                echo "============================================================"
+                echo "[$((i+1))/${#CONFIGS[@]}] Starting: ${label}"
+                echo "============================================================"
+                hpc_prepare_mounts "$hpc_user" "$hpc_uid" "$hpc_gid"
+                config_hpc_home="$HPC_HOME_DIR"
+                config_hpc_passwd="$HPC_PASSWD_FILE"
+                config_hpc_group="$HPC_GROUP_FILE"
+                hpc_docker_args "$name" "$hpc_user" "$hpc_uid" "$hpc_gid" \
+                    "$HPC_HOME_DIR" "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
+                docker run -d "${HPC_DOCKER_ARGS[@]}" neurodesktop:latest >/dev/null
+                pytest_exec=(docker exec "$name" pytest /opt/tests/ -v)
+                ;;
+        esac
+
+        echo "Waiting for container startup..."
+        ready=0
+        for attempt in $(seq 1 90); do
+            if ! docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null | grep -q true; then
+                echo "[ERROR] Container exited before reaching readiness:"
+                docker logs --tail 120 "$name" || true
+                break
+            fi
+            code=$(docker exec "$name" curl -so /dev/null -w '%{http_code}' \
+                     --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
+            if echo "$code" | grep -Eq '^[0-9]{3}$' && [ "$code" != "000" ]; then
+                ready=1
+                echo "Container ready after ~$((attempt*2))s (HTTP ${code})"
+                break
+            fi
+            sleep 2
+        done
+
+        # Run pytest with live output. Disable `set -e` around it so failure
+        # proceeds to teardown rather than aborting the whole script.
+        if [ "$ready" -eq 1 ]; then
+            set +e
+            "${pytest_exec[@]}"
+            rc=$?
+            set -e
+        else
+            rc=1
+        fi
+
+        if [ $rc -eq 0 ]; then
+            status="PASSED"
+        else
+            status="FAILED"
+            FAILED=1
+        fi
+        RESULTS+=("${status}: ${label}")
+
+        echo ""
+        echo "------------------------------------------------------------"
+        echo "${status} (rc=${rc}): ${label}"
+        echo "------------------------------------------------------------"
+
+        # Teardown this config before moving to the next.
+        docker rm -f "$name" >/dev/null 2>&1 || true
+        if [ "$kind" = "std" ]; then
+            docker volume rm "${name}-home" >/dev/null 2>&1 || true
+        else
+            rm -rf "$config_hpc_home" "$config_hpc_passwd" "$config_hpc_group" 2>/dev/null || true
+        fi
+    done
+
+    echo ""
+    echo "============================================================"
+    echo "SUMMARY"
+    echo "============================================================"
+    for line in "${RESULTS[@]}"; do
+        echo "  ${line}"
+    done
     echo "============================================================"
     if [ $FAILED -eq 0 ]; then
         echo "ALL CONFIGURATIONS PASSED"
