@@ -148,6 +148,13 @@ RUN wget -q https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v${TOMCA
         sed -i '/<Connector port="8080" protocol="HTTP\/1\.1"/,/^[[:space:]]*\/>/ s|^[[:space:]]*\/>$|               maxHttpRequestHeaderSize="65536"\
                />|' /usr/local/tomcat/conf/server.xml; \
     fi \
+    # Make the Connector port settable per-user via CATALINA_OPTS=-Dport.http=NNNN.
+    # Needed under Apptainer where multiple users share the host netns and cannot
+    # all bind 8080. catalina.properties supplies 8080 as the fallback so running
+    # Tomcat without setenv.sh (dev / tests) still works.
+    && sed -i 's|<Connector port="8080"|<Connector port="${port.http}"|' /usr/local/tomcat/conf/server.xml \
+    && grep -q 'port.http' /usr/local/tomcat/conf/server.xml \
+    && echo "port.http=8080" >> /usr/local/tomcat/conf/catalina.properties \
     # Prevent cookie accumulation (Safari "Request header too large" fix):
     # 1. Set sessionCookiePath="/" so all cookies share one path (no duplicates per sub-path)
     # 2. Add Rfc6265CookieProcessor with SameSite=Lax (Strict breaks proxied access in Safari)
@@ -457,6 +464,7 @@ COPY config/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/
 COPY --chown=root:users config/jupyter/jupyterlab_startup.sh /opt/neurodesktop/jupyterlab_startup.sh
 COPY --chown=root:users config/jupyter/deferred_startup.sh /opt/neurodesktop/deferred_startup.sh
 COPY --chown=root:users config/guacamole/guacamole.sh /opt/neurodesktop/guacamole.sh
+COPY --chown=root:users config/guacamole/init_secrets.sh /opt/neurodesktop/init_secrets.sh
 COPY --chown=root:users config/guacamole/ensure_rdp_backend.sh /opt/neurodesktop/ensure_rdp_backend.sh
 COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
 COPY --chown=root:users config/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh
@@ -482,6 +490,7 @@ RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/jupyterlab_startup.sh \
     /opt/neurodesktop/deferred_startup.sh \
     /opt/neurodesktop/guacamole.sh \
+    /opt/neurodesktop/init_secrets.sh \
     /opt/neurodesktop/ensure_rdp_backend.sh \
     /opt/neurodesktop/environment_variables.sh \
     /opt/neurodesktop/ensure_sftp_sshd.sh \

@@ -24,6 +24,17 @@ trap cleanup_startup_lock EXIT
 # Each file is copied if missing, or migrated when image defaults are newer.
 source /opt/neurodesktop/restore_home_defaults.sh
 
+# Initialize per-user Guacamole config and random credentials BEFORE Jupyter
+# reads jupyter_notebook_config.py - the config's Basic-auth header for the
+# /neurodesktop proxy is derived from ${HOME}/.neurodesk/secrets files written
+# by this script. Skipping this step would cause Jupyter to send stale
+# jovyan/password credentials and result in a 401 from the rotated Guacamole.
+if [ -x /opt/neurodesktop/init_secrets.sh ]; then
+    # shellcheck disable=SC1091
+    source /opt/neurodesktop/init_secrets.sh || \
+        echo "[WARN] init_secrets.sh failed; Guacamole web auth may fall back to the static default."
+fi
+
 is_apptainer_runtime() {
     [ -n "${SINGULARITY_NAME:-}" ] || \
     [ -n "${APPTAINER_NAME:-}" ] || \

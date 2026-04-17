@@ -7,9 +7,47 @@ HOSTKEY_DIR="${SSH_DIR}/hostkeys"
 SSH_HOST_ED25519_KEY="${HOSTKEY_DIR}/ssh_host_ed25519_key"
 SSH_HOST_RSA_KEY="${HOSTKEY_DIR}/ssh_host_rsa_key"
 AUTHORIZED_KEYS_FILE="${SSH_DIR}/authorized_keys"
-GUACAMOLE_MAPPING_FILE="/etc/guacamole/user-mapping.xml"
-SFTP_SSH_PORT="${SFTP_SSH_PORT:-2222}"
-SFTP_SSH_PID_FILE="/tmp/sshd_2222.pid"
+GUACAMOLE_HOME="${GUACAMOLE_HOME:-${HOME}/.neurodesk/guacamole}"
+GUACAMOLE_MAPPING_FILE="${GUACAMOLE_HOME}/user-mapping.xml"
+if [ ! -f "${GUACAMOLE_MAPPING_FILE}" ]; then
+    # Fall back to the build-time template (read-only) if the per-user copy
+    # hasn't been seeded yet - just for key extraction below.
+    GUACAMOLE_MAPPING_FILE="/etc/guacamole/user-mapping-vnc-rdp.xml"
+fi
+
+find_free_tcp_port_for_sftp() {
+    local start_port="$1"
+    local max_attempts="${2:-20}"
+    local port="${start_port}"
+    local attempts=0
+    if ! command -v ss >/dev/null 2>&1; then
+        printf '%s' "${start_port}"
+        return 0
+    fi
+    while [ "${attempts}" -lt "${max_attempts}" ]; do
+        if ! ss -lnt 2>/dev/null | awk 'NR>1 {print $4}' | grep -Eq "(^|:)${port}$"; then
+            printf '%s' "${port}"
+            return 0
+        fi
+        port=$((port + 1))
+        attempts=$((attempts + 1))
+    done
+    printf '%s' "${port}"
+    return 1
+}
+
+# Pick a unique SFTP/SSH port on shared Apptainer HPC nodes. 2222 may be taken
+# by another user's sibling container, so probe from 2222 upwards.
+if [ -z "${SFTP_SSH_PORT:-}" ]; then
+    SFTP_SSH_PORT="$(find_free_tcp_port_for_sftp 2222 20 || true)"
+fi
+export NEURODESKTOP_SFTP_PORT="${SFTP_SSH_PORT}"
+
+NEURODESKTOP_RUNTIME_DIR="${NEURODESKTOP_RUNTIME_DIR:-${HOME}/.neurodesk/runtime}"
+mkdir -p "${NEURODESKTOP_RUNTIME_DIR}" 2>/dev/null || true
+printf '%s\n' "${SFTP_SSH_PORT}" > "${NEURODESKTOP_RUNTIME_DIR}/sftp_port" 2>/dev/null || true
+
+SFTP_SSH_PID_FILE="/tmp/sshd_${SFTP_SSH_PORT}_${UID:-$(id -u)}.pid"
 
 warn() {
     echo "[WARN] $1"
