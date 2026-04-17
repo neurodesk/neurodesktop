@@ -163,6 +163,26 @@ hpc_docker_args() {
     )
 }
 
+# Remove an HPC simulation bind-mount home plus the passwd/group temp files.
+# The container ran as UID 5000 (non-root, non-jovyan) and populated the
+# bind-mounted HOME with files owned by that UID. On Linux (and in CI) the
+# host user cannot `rm` those files because they are not the owner. We use
+# the already-pulled neurodesktop image itself as root to chown the tree
+# back to the host user first, then delete normally.
+#
+# Args: IMAGE HOME_DIR PASSWD_FILE GROUP_FILE
+hpc_cleanup_mounts() {
+    local image="$1" home_dir="$2" passwd_file="$3" group_file="$4"
+
+    if [ -n "$home_dir" ] && [ -d "$home_dir" ]; then
+        docker run --rm --user 0:0 --entrypoint chown \
+            -v "$home_dir":/cleanup "$image" \
+            -R "$(id -u):$(id -g)" /cleanup >/dev/null 2>&1 || true
+        rm -rf "$home_dir" 2>/dev/null || true
+    fi
+    rm -f "$passwd_file" "$group_file" 2>/dev/null || true
+}
+
 # Wait for Jupyter to bind :8888 inside the named container. Prints docker
 # logs and returns non-zero if the container exits or times out.
 hpc_wait_for_ready() {
@@ -269,7 +289,8 @@ if [ "${1:-}" = "hpctest" ]; then
     if ! hpc_wait_for_ready "$name"; then
         # Tear down the dead/stuck container and temp state before bailing.
         docker rm -f "$name" >/dev/null 2>&1 || true
-        rm -rf "$HPC_HOME_DIR" "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
+        hpc_cleanup_mounts neurodesktop:latest \
+            "$HPC_HOME_DIR" "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
         exit 1
     fi
 
@@ -289,7 +310,8 @@ if [ "${1:-}" = "hpctest" ]; then
     echo "Cleaning up HPC test container + temp files..."
     echo "============================================================"
     docker rm -f "$name" >/dev/null 2>&1 || true
-    rm -rf "$HPC_HOME_DIR" "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
+    hpc_cleanup_mounts neurodesktop:latest \
+        "$HPC_HOME_DIR" "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
     exit $result
 fi
 
@@ -427,7 +449,8 @@ if [ "${1:-}" = "fulltest" ]; then
         if [ "$kind" = "std" ]; then
             docker volume rm "${name}-home" 2>/dev/null || true
         else
-            rm -rf "${HPC_HOMES[$i]}" "${HPC_PASSWDS[$i]}" "${HPC_GROUPS[$i]}" 2>/dev/null || true
+            hpc_cleanup_mounts neurodesktop:latest \
+                "${HPC_HOMES[$i]}" "${HPC_PASSWDS[$i]}" "${HPC_GROUPS[$i]}"
         fi
     done
 
@@ -564,7 +587,8 @@ if [ "${1:-}" = "fulltest_verbose" ]; then
         if [ "$kind" = "std" ]; then
             docker volume rm "${name}-home" >/dev/null 2>&1 || true
         else
-            rm -rf "$config_hpc_home" "$config_hpc_passwd" "$config_hpc_group" 2>/dev/null || true
+            hpc_cleanup_mounts neurodesktop:latest \
+                "$config_hpc_home" "$config_hpc_passwd" "$config_hpc_group"
         fi
     done
 

@@ -420,6 +420,12 @@ jobs:
           docker exec neurodesktop-test pytest /opt/tests/ -v
           test_rc=$?
           docker rm -f neurodesktop-test
+          # The container populated $HPC_HOME_DIR as UID 5000; the runner
+          # cannot `rm` those files directly. Use the already-pulled image
+          # as root to chown the tree back to the runner first.
+          docker run --rm --user 0:0 --entrypoint chown \
+            -v "$HPC_HOME_DIR":/cleanup "$IMAGEID:amd64" \
+            -R "$(id -u):$(id -g)" /cleanup >/dev/null 2>&1 || true
           rm -rf "$HPC_HOME_DIR" "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
           exit $test_rc
 
