@@ -124,23 +124,55 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=${{ env.IMAGEID }}:latest
           cache-to: type=inline
+      - name: Write image publish summary
+        run: |
+          if [ "${{ env.ROOTFS_NEW != env.ROOTFS_CACHE || github.event.inputs.force_push == 'true' }}" = "true" ]; then
+            if [ "${{ env.DOCKERHUB_ORG }}" = "" ]; then
+              RESULT="Built and pushed to GHCR."
+            else
+              RESULT="Built and pushed to GHCR and DockerHub."
+            fi
+          else
+            RESULT="Image contents did not change; registry push was skipped."
+          fi
+
+          {
+            echo "## Image publish summary"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Result | ${RESULT} |"
+            echo "| Version | \`${{ env.BUILDDATE }}\` |"
+            echo "| Source commit | \`${GITHUB_SHA}\` |"
+            echo "| GHCR image | \`${{ env.IMAGEID }}:${{ env.BUILDDATE }}\`, \`${{ env.IMAGEID }}:latest\` |"
+            if [ "${{ env.DOCKERHUB_ORG }}" != "" ]; then
+              echo "| DockerHub image | \`${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:${{ env.BUILDDATE }}\`, \`${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:latest\` |"
+            else
+              echo "| DockerHub image | Not configured; \`DOCKERHUB_ORG\` is empty. |"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
   test-image:
+    name: test-image (${{ matrix.test_profile }})
     needs: build-image
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
         include:
-          - cvmfs_disable: "false"
+          - test_profile: "CVMFS enabled, sudo disabled"
+            cvmfs_disable: "false"
             grant_sudo: "no"
             needs_cvmfs: true
-          - cvmfs_disable: "false"
+          - test_profile: "CVMFS enabled, sudo enabled"
+            cvmfs_disable: "false"
             grant_sudo: "yes"
             needs_cvmfs: true
-          - cvmfs_disable: "true"
+          - test_profile: "CVMFS disabled, sudo disabled"
+            cvmfs_disable: "true"
             grant_sudo: "no"
             needs_cvmfs: false
-          - cvmfs_disable: "true"
+          - test_profile: "CVMFS disabled, sudo enabled"
+            cvmfs_disable: "true"
             grant_sudo: "yes"
             needs_cvmfs: false
     steps:
