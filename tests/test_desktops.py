@@ -330,11 +330,12 @@ def _start_guacamole_as_user(nb_user, home_dir, guacamole_home, tomcat_port=None
         tomcat_port = sock.getsockname()[1]
         sock.close()
 
+    # Mirror the real jupyter-server-proxy invocation (only NEURODESKTOP_TOMCAT_PORT
+    # is exported; NB_USER/NB_UID/NB_GID flow through from the inherited shell
+    # env). Forcing NB_USER here historically masked the HPC bug where the
+    # inherited NB_USER=jovyan clashed with a process running as a different UID.
     command = (
         f"export HOME={shlex.quote(home_dir)} "
-        f"NB_USER={shlex.quote(nb_user)} "
-        f"NB_UID={shlex.quote(os.environ.get('NB_UID', '1000'))} "
-        f"NB_GID={shlex.quote(os.environ.get('NB_GID', '100'))} "
         f"NEURODESKTOP_TOMCAT_PORT={tomcat_port} "
         f"GUACAMOLE_HOME={shlex.quote(guacamole_home)}; "
         # Publish the chosen port for the test harness to read.

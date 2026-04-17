@@ -304,29 +304,42 @@ fi
 if [ -f "${NEURODESKTOP_RUNTIME_DIR}/sftp_port" ]; then
     NEURODESKTOP_SFTP_PORT="$(cat "${NEURODESKTOP_RUNTIME_DIR}/sftp_port" 2>/dev/null || true)"
 fi
-if [ -n "${NEURODESKTOP_SFTP_PORT:-}" ]; then
+
+# Decide whether the SFTP side-channel can actually authenticate. libguac
+# aborts the WHOLE VNC/RDP tunnel (upstream error 0x0203 / 515) when its
+# SFTP pubkey auth fails, even if VNC auth itself succeeded. The three
+# failure modes we must gate on:
+#   1. sshd never bound a port (NEURODESKTOP_SFTP_PORT empty).
+#   2. NB_USER is not resolvable via NSS (Apptainer on HPC: NB_USER=jovyan
+#      is inherited from the image, but the host UID has no /etc/passwd
+#      entry). sshd cannot pubkey-auth a user it cannot look up.
+#   3. Current process UID != NB_USER's UID. sshd runs as the process UID
+#      and cannot accept a different login name without root.
+_sftp_nb_user="${NB_USER:-jovyan}"
+_sftp_ok=0
+if [ -n "${NEURODESKTOP_SFTP_PORT:-}" ] \
+    && id -u "${_sftp_nb_user}" >/dev/null 2>&1 \
+    && [ "$(id -u)" = "$(id -u "${_sftp_nb_user}" 2>/dev/null)" ]; then
+    _sftp_ok=1
+fi
+
+if [ "${_sftp_ok}" -eq 1 ]; then
     update_mapping_param "vnc" "sftp-port" "${NEURODESKTOP_SFTP_PORT}" || \
         echo "[WARN] Could not stamp SFTP port ${NEURODESKTOP_SFTP_PORT} into mapping."
-    # The SFTP side-channel authenticates with pubkey against the running sshd.
-    # That sshd runs as the current process user (sciget on HPC, jovyan on
-    # classic docker) and cannot switch identity without root. If the mapping
-    # still says `sftp-username=jovyan` while sshd is running as sciget,
-    # Guacamole's SFTP auth fails and the WHOLE VNC/RDP tunnel aborts with
-    # CLIENT_UNAUTHORIZED (0x0301) - even though the VNC password is correct
-    # and VNC auth itself succeeded. Stamp the live user into the mapping.
-    _sftp_user="${NB_USER:-$(id -un 2>/dev/null || echo jovyan)}"
-    update_mapping_param "vnc" "sftp-username" "${_sftp_user}" || \
-        echo "[WARN] Could not stamp SFTP username ${_sftp_user} into mapping."
-    update_mapping_param "rdp" "sftp-username" "${_sftp_user}" || true
-    unset _sftp_user
+    update_mapping_param "vnc" "sftp-username" "${_sftp_nb_user}" || \
+        echo "[WARN] Could not stamp SFTP username ${_sftp_nb_user} into mapping."
+    update_mapping_param "rdp" "sftp-username" "${_sftp_nb_user}" || true
 else
     # Disable SFTP entirely so Guacamole does not attempt the side-channel.
     # enable-sftp=false is the idiomatic way to turn off the feature in the
     # libguac-client-vnc / libguac-client-rdp connection params.
-    echo "[WARN] SFTP backend unavailable; disabling enable-sftp in mapping."
+    echo "[WARN] SFTP side-channel unavailable (port=${NEURODESKTOP_SFTP_PORT:-unset}," \
+         "nb_user=${_sftp_nb_user}, resolvable=$(id -u "${_sftp_nb_user}" 2>/dev/null || echo no)," \
+         "cur_uid=$(id -u)); disabling enable-sftp in mapping."
     update_mapping_param "vnc" "enable-sftp" "false" || true
     update_mapping_param "rdp" "enable-sftp" "false" || true
 fi
+unset _sftp_nb_user _sftp_ok
 
 # VNC.
 DISPLAY_NUM=1

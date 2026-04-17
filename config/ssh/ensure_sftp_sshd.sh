@@ -264,6 +264,19 @@ start_sshd() {
 }
 
 main() {
+    # Bail out early on HPC/Apptainer when the current UID has no passwd
+    # entry. sshd's privilege-separation refuses to service logins it cannot
+    # resolve via NSS, so even if the daemon binds it will reject every
+    # connection. Leaving NEURODESKTOP_SFTP_PORT unset here is the contract
+    # guacamole.sh relies on to disable the SFTP side-channel, which would
+    # otherwise abort the whole VNC tunnel with upstream error 515.
+    local _current_uid
+    _current_uid="$(id -u 2>/dev/null || echo)"
+    if [ -z "${_current_uid}" ] || ! getent passwd "${_current_uid}" >/dev/null 2>&1; then
+        warn "Current UID (${_current_uid:-unknown}) has no /etc/passwd entry; sshd cannot accept logins. Skipping SFTP side-channel."
+        return 1
+    fi
+
     if ! ensure_sshd_config; then
         return 1
     fi

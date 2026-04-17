@@ -101,7 +101,9 @@ hpc_prepare_mounts() {
 
     # Build an /etc/passwd + /etc/group that mirrors Apptainer adding the host
     # user to the in-container NSS. Keep jovyan so any code that looks it up
-    # still works.
+    # still works. The host user is a distinct entry with a distinct UID (not
+    # 1000) — that separation from jovyan is what exercises the HPC cross-user
+    # mismatch in guacamole.sh's SFTP stamping.
     cat > "$HPC_PASSWD_FILE" <<EOF
 root:x:0:0:root:/root:/bin/bash
 jovyan:x:1000:100:jovyan:/home/jovyan:/bin/bash
@@ -146,9 +148,15 @@ hpc_docker_args() {
         -v "${group_file}:/etc/group:ro"
         -v "${HOME}/neurodesktop-storage:/neurodesktop-storage"
         -e CVMFS_DISABLE=true
-        -e "NB_USER=${hpc_user}"
-        -e "NB_UID=${hpc_uid}"
-        -e "NB_GID=${hpc_gid}"
+        # Real Apptainer sessions inherit NB_USER=jovyan from the image ENV
+        # while the running UID is a nameless host user. Do NOT force
+        # NB_USER=${hpc_user} here: that accidentally masks the production
+        # HPC bug where guacamole.sh stamps sftp-username=jovyan into the
+        # mapping while sshd is running as the host UID, aborting the VNC
+        # tunnel with upstream error 515.
+        -e NB_USER=jovyan
+        -e NB_UID=1000
+        -e NB_GID=100
         -e HOME=/home/jovyan
         -e "USER=${hpc_user}"
         -e "LOGNAME=${hpc_user}"
