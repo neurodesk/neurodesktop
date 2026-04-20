@@ -302,7 +302,7 @@ def test_opencode_shows_litellm_models_after_api_key_creation(tmp_path):
         in output
     )
     assert "Paste Neurodesk API key (input hidden, press Enter when done):" in output
-    assert "API key received (input hidden)." in output
+    assert "API key verified with llm.neurodesk.org." in output
     assert "Available llm.neurodesk.org models:" in output
     assert "1) model-alpha" in output
     assert "2) openai/gpt-4.1-mini" in output
@@ -344,6 +344,7 @@ def test_opencode_neurodesk_404_models_response_still_prompts_for_key(tmp_path):
     assert "Checking llm.neurodesk.org API" not in output
     assert "OpenAI-compatible API unavailable" not in output
     assert "Paste Neurodesk API key (input hidden, press Enter when done):" in output
+    assert "API key verified with llm.neurodesk.org." in output
     assert "Available llm.neurodesk.org models:" in output
     assert "Enter model number [1-2]:" in output
     assert "OpenCode default model set to neurodesk/model-alpha." in output
@@ -397,7 +398,7 @@ def test_opencode_rejected_neurodesk_key_points_to_litellm_site(tmp_path):
     )
     assert "Click your user avatar -> Settings -> Account." in output
     assert "Paste Neurodesk API key (input hidden, press Enter when done):" in output
-    assert "API key received (input hidden)." in output
+    assert "API key verified with llm.neurodesk.org." in output
     assert "Rechecking llm.neurodesk.org with the new API key..." in output
     assert "llm.neurodesk.org  available: 2 models" in output
     assert "Choose a default OpenCode model." in output
@@ -445,7 +446,7 @@ def test_opencode_rejected_neurodesk_key_refreshes_before_mixed_model_picker(tmp
         )
         < output.index("Choose a default OpenCode model.")
     )
-    assert "API key received (input hidden)." in output
+    assert "API key verified with llm.neurodesk.org." in output
     assert "Local Ollama" in output
     assert "llm.neurodesk.org" in output
     assert "1) local-model:latest" in output
@@ -473,6 +474,33 @@ def test_opencode_rejected_neurodesk_key_refreshes_before_mixed_model_picker(tmp
         == "https://llm.neurodesk.org/openai"
     )
     assert list(neurodesk_provider["models"]) == ["model-alpha", "openai/gpt-4.1-mini"]
+
+def test_opencode_reprompts_when_pasted_neurodesk_key_is_rejected(tmp_path):
+    """Verify first-time Neurodesk setup retries until a pasted key is accepted."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)],
+        "wrong-neurodesk-key\nneurodesk-test-key\n2\nn\n",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert returncode == 0, output
+    assert (
+        "That API key was rejected by llm.neurodesk.org. Please paste a correct key."
+        in output
+    )
+    assert output.count(
+        "Paste Neurodesk API key (input hidden, press Enter when done):"
+    ) == 2
+    assert "API key verified with llm.neurodesk.org." in output
+    assert "Available llm.neurodesk.org models:" in output
+    assert "OpenCode default model set to neurodesk/openai/gpt-4.1-mini." in output
+
+    bashrc = (home_dir / ".bashrc").read_text(encoding="utf-8")
+    assert "neurodesk-test-key" in bashrc
+    assert "wrong-neurodesk-key" not in bashrc
 
 def test_codex_yolo_no_full_auto(tmp_path):
     """Verify Codex wrapper does not combine --yolo with --full-auto."""

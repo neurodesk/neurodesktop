@@ -791,6 +791,31 @@ PY
     return 1
 }
 
+validate_neurodesk_api_key_candidate() {
+    local candidate_key="$1"
+    local previous_key=""
+    local had_previous_key=0
+
+    if [ -n "${NEURODESK_API_KEY:-}" ]; then
+        previous_key="${NEURODESK_API_KEY}"
+        had_previous_key=1
+    fi
+
+    export NEURODESK_API_KEY="${candidate_key}"
+    check_neurodesk_server
+
+    if [ "${NEURODESK_RUNNING}" -eq 1 ] && [ "${NEURODESK_REQUIRES_KEY}" -eq 1 ]; then
+        if [ "${had_previous_key}" -eq 1 ]; then
+            export NEURODESK_API_KEY="${previous_key}"
+        else
+            unset NEURODESK_API_KEY
+        fi
+        return 1
+    fi
+
+    return 0
+}
+
 build_working_model_choices() {
     local model_name
     local neurodesk_suffix=""
@@ -1242,15 +1267,27 @@ ensure_neurodesk_api_key_for_selection() {
     echo '3) Scroll to the "API Keys" section, then click "Create new secret key" / "Show" to reveal or generate a key.'
     echo "4) Paste the key below; input is hidden and this wrapper will save it to ~/.bashrc."
 
-    while [ -z "${entered_key}" ]; do
+    while true; do
         read -r -s -p "Paste Neurodesk API key (input hidden, press Enter when done): " entered_key
         echo
         entered_key=$(sanitize_neurodesk_api_key "${entered_key}")
         if [ -z "${entered_key}" ]; then
             echo "API key cannot be empty. Please try again."
-        else
-            echo "API key received (input hidden)."
+            continue
         fi
+
+        if ! validate_neurodesk_api_key_candidate "${entered_key}"; then
+            echo "That API key was rejected by llm.neurodesk.org. Please paste a correct key."
+            entered_key=""
+            continue
+        fi
+
+        if [ "${NEURODESK_RUNNING}" -eq 1 ]; then
+            echo "API key verified with llm.neurodesk.org."
+        else
+            echo "API key received, but llm.neurodesk.org could not be reached to verify it right now."
+        fi
+        break
     done
 
     export NEURODESK_API_KEY="${entered_key}"
