@@ -1,0 +1,22 @@
+{
+  "chat_model": {
+    "provider": "openai-compatible",
+    "model": "openai-compatible-chat-model",
+    "properties": [
+      {"id": "api_key", "value": ""},
+      {"id": "model_id", "value": "kimi-k2.5"},
+      {"id": "base_url", "value": "https://llm.neurodesk.org/openai"},
+      {"id": "context_window", "value": "131000"}
+    ]
+  },
+  "inline_completion_model": {
+    "provider": "openai-compatible",
+    "model": "openai-compatible-inline-completion-model",
+    "properties": [
+      {"id": "api_key", "value": ""},
+      {"id": "model_id", "value": "kimi-k2.5"},
+      {"id": "base_url", "value": "https://llm.neurodesk.org/openai"},
+      {"id": "context_window", "value": "131000"}
+    ]
+  }
+}
