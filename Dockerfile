@@ -1,7 +1,7 @@
 ###############################################################################
 # Stage 1: Builder — compile Guacamole server, patch code-server, install codex
 ###############################################################################
-FROM quay.io/jupyter/base-notebook:2026-03-23 AS builder
+FROM quay.io/jupyter/base-notebook:2026-04-20 AS builder
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
 
 USER root
