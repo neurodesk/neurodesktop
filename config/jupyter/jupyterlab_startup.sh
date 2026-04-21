@@ -48,6 +48,41 @@ is_apptainer_runtime() {
 
 # Home ownership is handled by before_notebook.sh (fix_home_ownership_if_needed).
 
+# Wrap any user-installed Jupyter kernel specs with kernel_wrapper.sh so they
+# re-source environment_variables.sh at kernel spawn time. Docker-stacks
+# kernels under /opt/conda are wrapped at image build time; this catches
+# kernels installed into HOME after the image is built (e.g. via
+# `python -m ipykernel install --user --name myenv`).
+python3 - <<'PY' 2>/dev/null || true
+import json, os
+from pathlib import Path
+
+WRAPPER = "/opt/neurodesktop/kernel_wrapper.sh"
+home = Path(os.path.expanduser("~"))
+candidate_roots = [
+    home / ".local/share/jupyter/kernels",
+    Path(os.environ.get("JUPYTER_DATA_DIR", "")) / "kernels" if os.environ.get("JUPYTER_DATA_DIR") else None,
+]
+
+for root in candidate_roots:
+    if root is None or not root.is_dir():
+        continue
+    for spec_file in root.glob("*/kernel.json"):
+        try:
+            spec = json.loads(spec_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        argv = spec.get("argv")
+        if not isinstance(argv, list) or not argv or argv[0] == WRAPPER:
+            continue
+        spec["argv"] = [WRAPPER] + argv
+        try:
+            spec_file.write_text(json.dumps(spec, indent=1))
+            print(f"[INFO] Wrapped user kernel spec: {spec_file}")
+        except OSError:
+            pass
+PY
+
 sanitize_jupyterlab_workspaces() {
     local workspace_dir="${HOME}/.jupyter/lab/workspaces"
     local workspace_file

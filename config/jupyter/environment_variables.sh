@@ -19,27 +19,30 @@ fi
 export NEURODESKTOP_LOCAL_CONTAINERS="${NEURODESKTOP_LOCAL_CONTAINERS:-/neurodesktop-storage/containers}"
 export OFFLINE_MODULES=${NEURODESKTOP_LOCAL_CONTAINERS}/modules/
 export CVMFS_MODULES=/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/
-export MODULEPATH=${OFFLINE_MODULES}:${CVMFS_MODULES}
 
-# If the module system is installed and CVMFS is already visible, expand the
-# per-tool subdirectories (transparent-singularity layout) and prepend the
-# local modules so they take priority over CVMFS.
-if [ -f '/usr/share/module.sh' ]; then
-        if [ ! -d "$CVMFS_MODULES" ]; then
-                # Keep CVMFS_MODULES on MODULEPATH anyway: autofs may mount it
-                # lazily on first access, and Lmod will then discover modules
-                # without requiring a kernel/shell restart.
-                export CVMFS_DISABLE=true
+# Nudge autofs so a lazily-mounted CVMFS becomes visible to the `-d` check
+# below. Without this, the check can return false on a fresh shell even when
+# the path is mountable - in which case MODULEPATH would collapse to the
+# local modules only and users would lose access to the CVMFS catalogue.
+ls "$CVMFS_MODULES" >/dev/null 2>&1 || true
+
+# MODULEPATH is built to match the transparent-singularity module layout:
+# each `<category>` subdirectory of CVMFS_MODULES becomes its own MODULEPATH
+# entry so Lmod presents modules as `<tool>/<version>` rather than
+# `<category>/<tool>/<version>`.
+if [ -d "$CVMFS_MODULES" ]; then
+        cvmfs_expanded=`echo ${CVMFS_MODULES}* | sed 's/ /:/g'`
+        if [ -d "$OFFLINE_MODULES" ]; then
+                export MODULEPATH=${OFFLINE_MODULES}:${cvmfs_expanded}
         else
-                cvmfs_expanded=`echo ${CVMFS_MODULES}* | sed 's/ /:/g'`
-                if [ -d "$OFFLINE_MODULES" ]; then
-                        export MODULEPATH=${OFFLINE_MODULES}:${cvmfs_expanded}
-                else
-                        export MODULEPATH=${cvmfs_expanded}
-                fi
-                export CVMFS_DISABLE=false
-                unset cvmfs_expanded
+                export MODULEPATH=${cvmfs_expanded}
         fi
+        export CVMFS_DISABLE=false
+        unset cvmfs_expanded
+else
+        # CVMFS genuinely unavailable (offline install / disabled).
+        export MODULEPATH=${OFFLINE_MODULES}
+        export CVMFS_DISABLE=true
 fi
 
 # Show informational messages in interactive terminals (outside the NEURODESKTOP_ENV_SOURCED guard so they show on each new terminal)

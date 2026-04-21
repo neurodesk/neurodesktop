@@ -467,6 +467,7 @@ COPY --chown=root:users config/guacamole/guacamole.sh /opt/neurodesktop/guacamol
 COPY --chown=root:users config/guacamole/init_secrets.sh /opt/neurodesktop/init_secrets.sh
 COPY --chown=root:users config/guacamole/ensure_rdp_backend.sh /opt/neurodesktop/ensure_rdp_backend.sh
 COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
+COPY --chown=root:users config/jupyter/kernel_wrapper.sh /opt/neurodesktop/kernel_wrapper.sh
 COPY --chown=root:users config/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh
 COPY --chown=root:users config/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh
 COPY --chown=root:users tests /opt/tests
@@ -493,6 +494,7 @@ RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/init_secrets.sh \
     /opt/neurodesktop/ensure_rdp_backend.sh \
     /opt/neurodesktop/environment_variables.sh \
+    /opt/neurodesktop/kernel_wrapper.sh \
     /opt/neurodesktop/ensure_sftp_sshd.sh \
     /opt/neurodesktop/setup_and_start_slurm.sh \
     /opt/neurodesktop/webapp_launcher.sh \
@@ -524,6 +526,42 @@ RUN /usr/bin/printf '%s\n%s\n' 'password' 'password' | passwd ${NB_USER} \
     && usermod --shell /bin/bash ${NB_USER} \
     && sed -i 's/c.FileContentsManager.delete_to_trash = False/c.FileContentsManager.always_delete_dir = True/g' /etc/jupyter/jupyter_server_config.py \
     && printf '\n# Detect dead WebSocket clients quickly (tab closed/network gone)\nc.ServerApp.websocket_ping_interval = 30\nc.ServerApp.websocket_ping_timeout = 60\n' >> /etc/jupyter/jupyter_server_config.py
+
+# Patch every installed kernel spec so each kernel spawn re-sources
+# /opt/neurodesktop/environment_variables.sh. This is how notebook kernels
+# pick up the correct MODULEPATH (including lazily-mounted CVMFS) even though
+# the parent Jupyter server was launched before CVMFS was ready. Covers
+# python3, bash, R, Julia, etc. - any kernelspec with a kernel.json on disk.
+# Idempotent: re-running leaves already-wrapped argv untouched.
+RUN python3 <<'PY'
+import json
+from pathlib import Path
+
+WRAPPER = "/opt/neurodesktop/kernel_wrapper.sh"
+search_roots = [
+    Path("/opt/conda/share/jupyter/kernels"),
+    Path("/usr/local/share/jupyter/kernels"),
+    Path("/usr/share/jupyter/kernels"),
+]
+
+for root in search_roots:
+    if not root.is_dir():
+        continue
+    for spec_file in root.glob("*/kernel.json"):
+        try:
+            spec = json.loads(spec_file.read_text())
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"[WARN] Skipping {spec_file}: {exc}")
+            continue
+        argv = spec.get("argv")
+        if not isinstance(argv, list) or not argv:
+            continue
+        if argv[0] == WRAPPER:
+            continue
+        spec["argv"] = [WRAPPER] + argv
+        spec_file.write_text(json.dumps(spec, indent=1))
+        print(f"[INFO] Wrapped kernel spec: {spec_file}")
+PY
 
 # Source environment variables in global bashrc for Apptainer/Singularity (which mounts host home)
 # Also configure durable shell history globally so JupyterHub terminals get it even when

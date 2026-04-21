@@ -883,6 +883,10 @@ _phase_end "critical-startup"
 
 # Launch deferred startup worker for lazy CVMFS and/or Slurm.
 # Pass the original CVMFS_DISABLE so the worker ignores the auto-set value.
+# MODULEPATH in the Jupyter server's env will be local-only in lazy mode,
+# but kernels re-source environment_variables.sh on spawn via the patched
+# kernel.json (see Dockerfile), so they pick up the CVMFS MODULEPATH once
+# the deferred worker has mounted CVMFS.
 CVMFS_STARTUP_MODE="${NEURODESKTOP_CVMFS_STARTUP_MODE:-lazy}"
 if [ "$CVMFS_STARTUP_MODE" = "lazy" ] || [ "$SLURM_STARTUP_MODE" = "lazy" ]; then
     if [ -x /opt/neurodesktop/deferred_startup.sh ]; then
