@@ -594,7 +594,7 @@ COPY config/agents/opencode_config.json /opt/jovyan_defaults/.config/opencode/op
 COPY config/agents/codex_config.toml /opt/jovyan_defaults/.codex/config.toml
 COPY config/ssh/sshd_config /opt/jovyan_defaults/.ssh/sshd_config
 COPY config/jupyter/page_config.json /opt/jovyan_defaults/.jupyter/labconfig/page_config.json
-COPY config/agents/AGENTS.md /opt/jovyan_defaults/.jupyter/nbi/rules/neurodesk.md
+COPY config/agents/AGENTS_nbi.md /opt/jovyan_defaults/.jupyter/nbi/rules/neurodesk.md
 COPY config/agents/nbi_config.json /opt/jovyan_defaults/.jupyter/nbi/config.json
 COPY --chown=root:users config/agents/nbi_setup.sh /opt/neurodesktop/nbi_setup.sh
 RUN chmod +rx /opt/neurodesktop/nbi_setup.sh

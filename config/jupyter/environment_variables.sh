@@ -17,25 +17,28 @@ fi
 # MODULEPATH and CVMFS detection run on every source so that new shells
 # pick up CVMFS after a deferred (lazy) mount completes.
 export NEURODESKTOP_LOCAL_CONTAINERS="${NEURODESKTOP_LOCAL_CONTAINERS:-/neurodesktop-storage/containers}"
-export MODULEPATH=${NEURODESKTOP_LOCAL_CONTAINERS}/modules/:/cvmfs/neurodesk.ardc.edu.au/containers/modules/
+export OFFLINE_MODULES=${NEURODESKTOP_LOCAL_CONTAINERS}/modules/
+export CVMFS_MODULES=/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/
+export MODULEPATH=${OFFLINE_MODULES}:${CVMFS_MODULES}
 
-# Only setup MODULEPATH if a module system is installed
+# If the module system is installed and CVMFS is already visible, expand the
+# per-tool subdirectories (transparent-singularity layout) and prepend the
+# local modules so they take priority over CVMFS.
 if [ -f '/usr/share/module.sh' ]; then
-        export OFFLINE_MODULES=${NEURODESKTOP_LOCAL_CONTAINERS}/modules/
-        export CVMFS_MODULES=/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/
-
-        if [ ! -d $CVMFS_MODULES ]; then
-                MODULEPATH=${OFFLINE_MODULES}
+        if [ ! -d "$CVMFS_MODULES" ]; then
+                # Keep CVMFS_MODULES on MODULEPATH anyway: autofs may mount it
+                # lazily on first access, and Lmod will then discover modules
+                # without requiring a kernel/shell restart.
                 export CVMFS_DISABLE=true
         else
-                MODULEPATH=${CVMFS_MODULES}*
-                export MODULEPATH=`echo $MODULEPATH | sed 's/ /:/g'`
-                export CVMFS_DISABLE=false
-
-                # if the offline modules directory exists, we can use it and will prefer it over cvmfs
-                if [ -d ${OFFLINE_MODULES} ]; then
-                        export MODULEPATH=${OFFLINE_MODULES}:$MODULEPATH
+                cvmfs_expanded=`echo ${CVMFS_MODULES}* | sed 's/ /:/g'`
+                if [ -d "$OFFLINE_MODULES" ]; then
+                        export MODULEPATH=${OFFLINE_MODULES}:${cvmfs_expanded}
+                else
+                        export MODULEPATH=${cvmfs_expanded}
                 fi
+                export CVMFS_DISABLE=false
+                unset cvmfs_expanded
         fi
 fi
 
@@ -53,13 +56,18 @@ if [ -z "$NEURODESKTOP_MSG_SHOWN" ] && [ -f '/usr/share/module.sh' ]; then
 
                 # check if $CVMFS_DISABLE is set to true
                 if [[ "$CVMFS_DISABLE" == "true" ]]; then
-                        echo "CVMFS is disabled. Using local containers stored in $MODULEPATH"
-                        if [ ! -d $MODULEPATH ]; then
+                        echo "CVMFS not yet available. Using local containers stored in ${OFFLINE_MODULES} (CVMFS will be picked up automatically once mounted)."
+                        if [ ! -d "${OFFLINE_MODULES}" ]; then
                                 echo 'Neurodesk tools not yet downloaded. Choose tools to install from the Neurodesktop Application menu.'
                         fi
                 fi
         fi
 fi
+
+# Ensure non-interactive bash subshells (notebook %%bash cells, scripts invoked
+# from Python kernels, etc.) re-source this file on startup so MODULEPATH/CVMFS
+# state is refreshed after a deferred mount without needing a kernel restart.
+export BASH_ENV=/opt/neurodesktop/environment_variables.sh
 
 # This also needs to be set in the Dockerfile, so it is available in a jupyter notebook
 export APPTAINER_BINDPATH=/data,/mnt,/neurodesktop-storage,/tmp,/cvmfs
