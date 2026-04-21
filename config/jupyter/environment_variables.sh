@@ -64,11 +64,6 @@ if [ -z "$NEURODESKTOP_MSG_SHOWN" ] && [ -f '/usr/share/module.sh' ]; then
         fi
 fi
 
-# Ensure non-interactive bash subshells (notebook %%bash cells, scripts invoked
-# from Python kernels, etc.) re-source this file on startup so MODULEPATH/CVMFS
-# state is refreshed after a deferred mount without needing a kernel restart.
-export BASH_ENV=/opt/neurodesktop/environment_variables.sh
-
 # This also needs to be set in the Dockerfile, so it is available in a jupyter notebook
 export APPTAINER_BINDPATH=/data,/mnt,/neurodesktop-storage,/tmp,/cvmfs
 # This also needs to be set in the Dockerfile, so it is available in a jupyter notebook
