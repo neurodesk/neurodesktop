@@ -114,11 +114,14 @@ if [ "${1:-}" = "login" ]; then
     exec /usr/bin/codex login --device-auth "$@"
 fi
 
-# `--yolo` maps to dangerous bypass flags and conflicts with `--full-auto`.
-# Keep default full-auto behavior unless caller already requested yolo/bypass
-# (or explicitly set --full-auto).
+# Default to no approval prompts and no Codex-managed sandbox. Neurodesktop
+# already runs Codex inside the container boundary, and Linux sandbox startup
+# can emit bubblewrap prerequisite warnings in environments without bwrap on
+# PATH. Respect explicit approval or sandbox flags from the caller.
 has_yolo_or_bypass=0
 has_full_auto=0
+has_approval_policy=0
+has_sandbox_mode=0
 for arg in "$@"; do
     case "$arg" in
         --yolo|--dangerously-bypass-approvals-and-sandbox)
@@ -126,6 +129,12 @@ for arg in "$@"; do
             ;;
         --full-auto)
             has_full_auto=1
+            ;;
+        -a|-a=*|--ask-for-approval|--ask-for-approval=*)
+            has_approval_policy=1
+            ;;
+        -s|-s=*|--sandbox|--sandbox=*)
+            has_sandbox_mode=1
             ;;
     esac
 done
@@ -135,4 +144,12 @@ if [ "${has_yolo_or_bypass}" -eq 1 ] || [ "${has_full_auto}" -eq 1 ]; then
     exec /usr/bin/codex "$@"
 fi
 
-exec /usr/bin/codex --full-auto "$@"
+codex_args=()
+if [ "${has_approval_policy}" -eq 0 ]; then
+    codex_args+=(--ask-for-approval never)
+fi
+if [ "${has_sandbox_mode}" -eq 0 ]; then
+    codex_args+=(--sandbox danger-full-access)
+fi
+
+exec /usr/bin/codex "${codex_args[@]}" "$@"

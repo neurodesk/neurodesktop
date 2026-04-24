@@ -579,8 +579,9 @@ def test_codex_yolo_no_full_auto(tmp_path):
     assert "ARG:--yolo" in result.stdout
     assert "ARG:--full-auto" not in result.stdout
 
-def test_codex_default_full_auto(tmp_path):
-    """Verify Codex wrapper keeps full-auto default when no yolo/bypass flag is passed."""
+
+def test_codex_default_no_approval_prompts_without_managed_sandbox(tmp_path):
+    """Verify Codex wrapper defaults to no approval prompts and no managed sandbox."""
     wrapper_path = Path("/usr/local/sbin/codex")
     if not wrapper_path.exists():
         pytest.skip("Codex wrapper not installed in this environment")
@@ -619,8 +620,59 @@ def test_codex_default_full_auto(tmp_path):
     )
 
     assert result.returncode == 0, f"Wrapper execution failed: {result.stdout}"
-    assert "ARG:--full-auto" in result.stdout
+    assert "ARG:--ask-for-approval" in result.stdout
+    assert "ARG:never" in result.stdout
+    assert "ARG:--sandbox" in result.stdout
+    assert "ARG:danger-full-access" in result.stdout
+    assert "ARG:--full-auto" not in result.stdout
     assert "ARG:--version" in result.stdout
+
+
+def test_codex_respects_explicit_approval_and_sandbox_flags(tmp_path):
+    """Verify Codex wrapper does not override explicit approval/sandbox flags."""
+    wrapper_path = Path("/usr/local/sbin/codex")
+    if not wrapper_path.exists():
+        pytest.skip("Codex wrapper not installed in this environment")
+
+    fake_codex = tmp_path / "fake-codex"
+    fake_codex.write_text(
+        "#!/bin/sh\n"
+        "for arg in \"$@\"; do\n"
+        "  echo \"ARG:${arg}\"\n"
+        "done\n",
+        encoding="utf-8",
+    )
+    fake_codex.chmod(0o755)
+
+    test_wrapper = tmp_path / "codex-wrapper-test"
+    wrapper_contents = wrapper_path.read_text(encoding="utf-8")
+    wrapper_contents = wrapper_contents.replace("/usr/bin/codex", str(fake_codex))
+    test_wrapper.write_text(wrapper_contents, encoding="utf-8")
+    test_wrapper.chmod(0o755)
+
+    (tmp_path / "AGENTS.md").write_text("test", encoding="utf-8")
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+
+    env = {**os.environ, "HOME": str(home_dir)}
+    env.pop("BR_MCP_TOKEN", None)
+
+    result = subprocess.run(
+        [str(test_wrapper), "--ask-for-approval", "on-request", "--sandbox=read-only"],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, f"Wrapper execution failed: {result.stdout}"
+    assert result.stdout.count("ARG:--ask-for-approval") == 1
+    assert "ARG:on-request" in result.stdout
+    assert "ARG:--sandbox=read-only" in result.stdout
+    assert "ARG:never" not in result.stdout
+    assert "ARG:danger-full-access" not in result.stdout
 
 def test_claude_replaces_dangling_symlink(tmp_path):
     """Verify Claude wrapper restores binary when ~/.local/bin/claude is a dangling symlink."""
