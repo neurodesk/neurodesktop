@@ -325,6 +325,40 @@ def test_opencode_shows_litellm_models_after_api_key_creation(tmp_path):
     )
     assert list(neurodesk_provider["models"]) == ["model-alpha", "openai/gpt-4.1-mini"]
 
+def test_opencode_neurodesk_setup_choice_does_not_claim_known_model(tmp_path):
+    """Verify unauthenticated Neurodesk is shown as key setup, not a known model."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    env["FAKE_OLLAMA_MODELS"] = "1"
+    env["OLLAMA_HOST"] = "http://127.0.0.1:9"
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)],
+        "2\nneurodesk-test-key\n2\nn\n",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert returncode == 0, output
+    assert "Provider status" in output
+    assert "Local Ollama       available: 1 model" in output
+    assert "llm.neurodesk.org  needs API key" in output
+    assert "Choose a default OpenCode model." in output
+    assert "Local Ollama" in output
+    assert "1) local-model:latest" in output
+    assert "llm.neurodesk.org" in output
+    assert "2) Set up API key to list models" in output
+    assert "2) gpt-oss (requires API key setup)" not in output
+    assert "API key verified with llm.neurodesk.org." in output
+    assert "Available llm.neurodesk.org models:" in output
+    assert "OpenCode default model set to neurodesk/openai/gpt-4.1-mini." in output
+
+    user_config = json.loads(
+        (home_dir / ".config" / "opencode" / "opencode.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert user_config["model"] == "neurodesk/openai/gpt-4.1-mini"
+
 def test_opencode_neurodesk_404_models_response_still_prompts_for_key(tmp_path):
     """Verify unauthenticated Neurodesk API 404 still allows key setup."""
     test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)

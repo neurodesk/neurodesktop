@@ -291,6 +291,25 @@ model_choice_name() {
     esac
 }
 
+model_choice_label() {
+    local model_ref="$1"
+    local full_label="$2"
+    local provider_key="${model_ref%%/*}"
+
+    if [ "${provider_key}" = "neurodesk" ] \
+        && [ "${NEURODESK_REQUIRES_KEY}" -eq 1 ] \
+        && [ "${NEURODESK_MODELS_FROM_SERVER}" -ne 1 ]; then
+        if [ -n "${NEURODESK_API_KEY:-}" ]; then
+            printf "Set up a valid API key to list models"
+        else
+            printf "Set up API key to list models"
+        fi
+        return 0
+    fi
+
+    printf "%s%s" "$(model_choice_name "${model_ref}")" "$(model_choice_suffix "${full_label}")"
+}
+
 print_model_choice_group() {
     local provider_key="$1"
     local provider_label="$2"
@@ -315,7 +334,7 @@ print_model_choice_group() {
             printed=1
         fi
 
-        model_label="$(model_choice_name "${model_ref}")$(model_choice_suffix "${WORKING_MODEL_LABELS[$idx]}")"
+        model_label="$(model_choice_label "${model_ref}" "${WORKING_MODEL_LABELS[$idx]}")"
         printf "  %2d) %s\n" "$((idx + 1))" "${model_label}"
     done
 }
