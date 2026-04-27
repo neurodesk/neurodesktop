@@ -10,7 +10,10 @@ The startup sequence follows this order:
    mounts CVMFS, selects the fastest regional server, and configures the
    environment.
 3. `jupyter_notebook_config.py` is generated and defines JupyterLab server
-   proxies for webapps.
+   proxies for webapps. It also installs
+   [`config/jupyter/jupyterlmod_modulepath.py`](../config/jupyter/jupyterlmod_modulepath.py)
+   so the jupyter-lmod side panel refreshes the Jupyter server process
+   `MODULEPATH` after lazy CVMFS startup.
 4. [`config/jupyter/jupyterlab_startup.sh`](../config/jupyter/jupyterlab_startup.sh)
    starts JupyterLab and associated services.
 

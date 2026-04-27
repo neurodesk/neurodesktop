@@ -1,7 +1,15 @@
 import base64
 import os
+import sys
 
 home_dir = os.environ.get('HOME', '/home/jovyan')
+
+sys.path.insert(0, '/opt/neurodesktop')
+try:
+    from jupyterlmod_modulepath import install as _install_jupyterlmod_modulepath_refresh
+    _install_jupyterlmod_modulepath_refresh()
+except Exception as _jupyterlmod_modulepath_error:
+    print(f'[WARN] Failed to install jupyter-lmod MODULEPATH refresh: {_jupyterlmod_modulepath_error}')
 
 # Per-user Guacamole web credentials. guacamole.sh writes these files on container
 # start with mode 0600. If they aren't present yet (first start, or direct Tomcat

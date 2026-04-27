@@ -468,6 +468,7 @@ COPY --chown=root:users config/guacamole/init_secrets.sh /opt/neurodesktop/init_
 COPY --chown=root:users config/guacamole/ensure_rdp_backend.sh /opt/neurodesktop/ensure_rdp_backend.sh
 COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
 COPY --chown=root:users config/jupyter/kernel_wrapper.sh /opt/neurodesktop/kernel_wrapper.sh
+COPY --chown=root:users config/jupyter/jupyterlmod_modulepath.py /opt/neurodesktop/jupyterlmod_modulepath.py
 COPY --chown=root:users config/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh
 COPY --chown=root:users config/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh
 COPY --chown=root:users tests /opt/tests
@@ -495,6 +496,7 @@ RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/ensure_rdp_backend.sh \
     /opt/neurodesktop/environment_variables.sh \
     /opt/neurodesktop/kernel_wrapper.sh \
+    /opt/neurodesktop/jupyterlmod_modulepath.py \
     /opt/neurodesktop/ensure_sftp_sshd.sh \
     /opt/neurodesktop/setup_and_start_slurm.sh \
     /opt/neurodesktop/webapp_launcher.sh \

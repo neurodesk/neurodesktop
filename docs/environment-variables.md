@@ -1,6 +1,12 @@
 # Environment Variables
 
 - `CVMFS_DISABLE`: set to `true` to disable CVMFS mounting
+- `CVMFS_MODULES`: CVMFS module catalogue path used when refreshing
+  `MODULEPATH`; defaults to `/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/`
+- `NEURODESKTOP_LOCAL_CONTAINERS`: local container root used to derive
+  `OFFLINE_MODULES`; defaults to `/neurodesktop-storage/containers`
+- `OFFLINE_MODULES`: local Lmod module path derived from
+  `NEURODESKTOP_LOCAL_CONTAINERS`
 - `NB_UID`, `NB_GID`: user and group IDs for permission matching
 - `START_LOCAL_LLMS`: set to `1` to enable Ollama with the Neurodesk model
 - `NEURODESKTOP_VERSION`: version tag set by CI
