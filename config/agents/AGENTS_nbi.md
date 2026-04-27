@@ -25,13 +25,19 @@ available = await module.avail()
 print(available)  
 ```
 
-1. Always make sure you visualize the steps you are doing:
+2. Always make sure you visualize the steps you are doing:
 
 ```python
 from ipyniivue import NiiVue
 nv = NiiVue()
 nv.load_volumes([{"url": "file.nii.gz"}])
 nv
+```
+
+3. Use Datalad (already installed, no need to module load) for downloading files from openneuro:
+
+```python
+!datalad install https://github.com/OpenNeuroDatasets/ds007671.git
 ```
 
 ## Workflow Standards

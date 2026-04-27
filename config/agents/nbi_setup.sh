@@ -36,6 +36,37 @@ if [ -z "${NEURODESK_API_KEY_VALUE}" ] && [ -f "${HOME}/.bashrc" ]; then
         "${HOME}/.bashrc" | tail -n 1)
 fi
 
+sync_claude_md() {
+    # NBI's Claude provider has its own system-prompt code path and does not
+    # consult ~/.jupyter/nbi/rules/, so the neurodesk rules are ignored in
+    # Claude mode. Mirror them as $HOME/CLAUDE.md so Claude Code (which NBI's
+    # Claude mode drives) picks them up via its own loader.
+    local marker='<!-- neurodesktop:nbi-rules (managed - do not edit) -->'
+    local source_file="/opt/jovyan_defaults/.jupyter/nbi/rules/neurodesk.md"
+    local target_file="${HOME}/CLAUDE.md"
+
+    if [ ! -f "${source_file}" ]; then
+        source_file="/opt/AGENTS.md"
+    fi
+    if [ ! -f "${source_file}" ]; then
+        return 0
+    fi
+
+    if [ -e "${target_file}" ] && ! head -n 1 "${target_file}" 2>/dev/null | grep -qF "${marker}"; then
+        echo "nbi_setup.sh: leaving user-authored ${target_file} untouched (no neurodesktop marker)" >&2
+        return 0
+    fi
+
+    local tmp="${target_file}.tmp.$$"
+    {
+        printf '%s\n' "${marker}"
+        cat "${source_file}"
+    } > "${tmp}" 2>/dev/null || { rm -f "${tmp}"; return 0; }
+    mv -f "${tmp}" "${target_file}" 2>/dev/null || rm -f "${tmp}"
+}
+
+sync_claude_md
+
 if [ -z "${NEURODESK_API_KEY_VALUE}" ]; then
     # No key yet; NBI will boot with an empty key. The user can run opencode
     # once to set it up, or paste it into the NBI Settings dialog.
