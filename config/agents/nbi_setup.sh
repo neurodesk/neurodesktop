@@ -13,6 +13,8 @@ set -u
 
 NBI_CONFIG_FILE="${HOME}/.jupyter/nbi/config.json"
 NBI_DEFAULT_CONFIG="/opt/jovyan_defaults/.jupyter/nbi/config.json"
+NBI_MCP_FILE="${HOME}/.jupyter/nbi/mcp.json"
+NBI_DEFAULT_MCP="/opt/jovyan_defaults/.jupyter/nbi/mcp.json"
 
 mkdir -p "$(dirname "${NBI_CONFIG_FILE}")" 2>/dev/null || true
 
@@ -26,14 +28,27 @@ if [ ! -f "${NBI_CONFIG_FILE}" ]; then
     exit 0
 fi
 
+# Read an exported VAR=value from ~/.bashrc (handles single, double, unquoted).
+read_export_from_bashrc() {
+    local var_name="$1"
+    [ -f "${HOME}/.bashrc" ] || { printf ''; return; }
+    sed -nE \
+        -e "s/^[[:space:]]*export[[:space:]]+${var_name}='([^']+)'[[:space:]]*\$/\1/p" \
+        -e "s/^[[:space:]]*export[[:space:]]+${var_name}=\"([^\"]+)\"[[:space:]]*\$/\1/p" \
+        -e "s/^[[:space:]]*export[[:space:]]+${var_name}=([^[:space:]#]+)[[:space:]]*\$/\1/p" \
+        "${HOME}/.bashrc" | tail -n 1
+}
+
 # Source the NEURODESK_API_KEY from ~/.bashrc (opencode writes it there).
 NEURODESK_API_KEY_VALUE="${NEURODESK_API_KEY:-}"
-if [ -z "${NEURODESK_API_KEY_VALUE}" ] && [ -f "${HOME}/.bashrc" ]; then
-    NEURODESK_API_KEY_VALUE=$(sed -nE \
-        -e "s/^[[:space:]]*export[[:space:]]+NEURODESK_API_KEY='([^']+)'[[:space:]]*$/\1/p" \
-        -e 's/^[[:space:]]*export[[:space:]]+NEURODESK_API_KEY="([^"]+)"[[:space:]]*$/\1/p' \
-        -e 's/^[[:space:]]*export[[:space:]]+NEURODESK_API_KEY=([^[:space:]#]+)[[:space:]]*$/\1/p' \
-        "${HOME}/.bashrc" | tail -n 1)
+if [ -z "${NEURODESK_API_KEY_VALUE}" ]; then
+    NEURODESK_API_KEY_VALUE=$(read_export_from_bashrc NEURODESK_API_KEY)
+fi
+
+# Source BR_MCP_TOKEN the same way (opencode writes it on first run).
+BR_MCP_TOKEN_VALUE="${BR_MCP_TOKEN:-}"
+if [ -z "${BR_MCP_TOKEN_VALUE}" ]; then
+    BR_MCP_TOKEN_VALUE=$(read_export_from_bashrc BR_MCP_TOKEN)
 fi
 
 sync_claude_md() {
@@ -66,6 +81,68 @@ sync_claude_md() {
 }
 
 sync_claude_md
+
+sync_mcp_brain_researcher() {
+    # Manage the brain-researcher MCP entry in ~/.jupyter/nbi/mcp.json.
+    # NBI does NOT expand ${env:VAR} or ${VAR} placeholders in MCP headers
+    # (mcp_manager.py:621 passes headers through verbatim), so we must inject
+    # the literal BR_MCP_TOKEN value here. If the token is unset, remove any
+    # existing brain-researcher entry to avoid 401s on every NBI startup.
+    if ! command -v python3 >/dev/null 2>&1; then
+        return 0
+    fi
+    mkdir -p "$(dirname "${NBI_MCP_FILE}")" 2>/dev/null || true
+    if [ ! -f "${NBI_MCP_FILE}" ] && [ -f "${NBI_DEFAULT_MCP}" ]; then
+        cp "${NBI_DEFAULT_MCP}" "${NBI_MCP_FILE}" 2>/dev/null || true
+    fi
+
+    NBI_MCP_FILE="${NBI_MCP_FILE}" \
+    BR_MCP_TOKEN_VALUE="${BR_MCP_TOKEN_VALUE}" \
+    python3 - <<'PY'
+import json, os, sys
+path = os.environ["NBI_MCP_FILE"]
+token = os.environ.get("BR_MCP_TOKEN_VALUE", "")
+
+if os.path.exists(path):
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        cfg = {}
+else:
+    cfg = {}
+if not isinstance(cfg, dict):
+    cfg = {}
+servers = cfg.get("mcpServers")
+if not isinstance(servers, dict):
+    servers = {}
+    cfg["mcpServers"] = servers
+
+original = json.dumps(cfg, sort_keys=True)
+
+if token:
+    servers["brain-researcher"] = {
+        "url": "https://brain-researcher.com/mcp",
+        "headers": {"Authorization": f"Bearer {token}"},
+    }
+else:
+    servers.pop("brain-researcher", None)
+
+if json.dumps(cfg, sort_keys=True) == original:
+    sys.exit(0)
+
+# If we'd end up with an empty file, write an empty mcpServers object
+# rather than removing the file entirely (NBI tolerates either, but keeping
+# the file makes the next run idempotent).
+tmp = f"{path}.tmp"
+with open(tmp, "w", encoding="utf-8") as fh:
+    json.dump(cfg, fh, indent=2)
+    fh.write("\n")
+os.replace(tmp, path)
+PY
+}
+
+sync_mcp_brain_researcher
 
 # Repair NBI config if the upstream Settings UI bug has wiped the
 # openai-compatible endpoint settings. When the user switches the chat
