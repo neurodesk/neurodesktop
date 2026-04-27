@@ -67,6 +67,93 @@ sync_claude_md() {
 
 sync_claude_md
 
+# Repair NBI config if the upstream Settings UI bug has wiped the
+# openai-compatible endpoint settings. When the user switches the chat
+# provider in the UI to e.g. Claude and back to openai-compatible, NBI's
+# settings panel resets the property values (base_url / model_id) to the
+# provider's blank defaults instead of merging the previously-saved values,
+# and on Save persists those blanks. We detect that fingerprint here and
+# restore the section from the seeded default.
+if command -v python3 >/dev/null 2>&1 && [ -f "${NBI_DEFAULT_CONFIG}" ]; then
+    NBI_CONFIG_FILE="${NBI_CONFIG_FILE}" NBI_DEFAULT_CONFIG="${NBI_DEFAULT_CONFIG}" \
+    python3 - <<'PY'
+import json
+import os
+import sys
+
+cfg_path = os.environ["NBI_CONFIG_FILE"]
+default_path = os.environ["NBI_DEFAULT_CONFIG"]
+
+try:
+    with open(cfg_path, "r", encoding="utf-8") as fh:
+        cfg = json.load(fh)
+except (OSError, json.JSONDecodeError):
+    sys.exit(0)
+
+try:
+    with open(default_path, "r", encoding="utf-8") as fh:
+        defaults = json.load(fh)
+except (OSError, json.JSONDecodeError):
+    sys.exit(0)
+
+def get_prop(props, prop_id):
+    if not isinstance(props, list):
+        return ""
+    for prop in props:
+        if isinstance(prop, dict) and prop.get("id") == prop_id:
+            return str(prop.get("value") or "")
+    return ""
+
+changed = False
+for section in ("chat_model", "inline_completion_model"):
+    default_section = defaults.get(section)
+    if not isinstance(default_section, dict):
+        continue
+    user_section = cfg.get(section)
+
+    # Missing entirely -> restore from default.
+    if not isinstance(user_section, dict):
+        cfg[section] = json.loads(json.dumps(default_section))
+        changed = True
+        continue
+
+    provider = user_section.get("provider")
+    # Different provider on purpose (claude / ollama / etc.) -> hands off.
+    if provider != "openai-compatible":
+        continue
+
+    base_url = get_prop(user_section.get("properties"), "base_url")
+    # Custom OpenAI-compatible endpoint (e.g. Jetstream) -> hands off.
+    if base_url and "llm.neurodesk.org" not in base_url:
+        continue
+
+    # provider == openai-compatible AND (base_url empty OR points at
+    # llm.neurodesk.org but other fields may be wiped). Restore from default.
+    default_base_url = get_prop(default_section.get("properties"), "base_url")
+    default_model_id = get_prop(default_section.get("properties"), "model_id")
+    user_model_id = get_prop(user_section.get("properties"), "model_id")
+
+    if not base_url or not user_model_id:
+        # Preserve the user's existing api_key value if non-empty.
+        existing_api_key = get_prop(user_section.get("properties"), "api_key")
+        cfg[section] = json.loads(json.dumps(default_section))
+        if existing_api_key:
+            for prop in cfg[section].get("properties", []):
+                if isinstance(prop, dict) and prop.get("id") == "api_key":
+                    prop["value"] = existing_api_key
+                    break
+        changed = True
+
+if changed:
+    tmp = f"{cfg_path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(cfg, fh, indent=2)
+        fh.write("\n")
+    os.replace(tmp, cfg_path)
+    print("nbi_setup.sh: repaired openai-compatible chat/inline-completion config from default", file=sys.stderr)
+PY
+fi
+
 if [ -z "${NEURODESK_API_KEY_VALUE}" ]; then
     # No key yet; NBI will boot with an empty key. The user can run opencode
     # once to set it up, or paste it into the NBI Settings dialog.
