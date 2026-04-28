@@ -76,6 +76,7 @@ def test_install_refreshes_before_jupyterlmod_api_calls(tmp_path, monkeypatch):
     (cvmfs_modules / "mri").mkdir(parents=True)
 
     monkeypatch.setenv("CVMFS_MODULES", str(cvmfs_modules))
+    monkeypatch.setenv("CVMFS_DISABLE", "true")
     monkeypatch.delenv("MODULEPATH", raising=False)
 
     class FakeModuleAPI:
