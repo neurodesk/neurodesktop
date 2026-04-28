@@ -299,6 +299,10 @@ ensure_codeserver_extensions() {
     # GitHub auth and PR integration
     ensure_codeserver_extension "github.vscode-pull-request-github"
 
+    # Python and Jupyter notebook support
+    ensure_codeserver_extension "ms-python.python"
+    ensure_codeserver_extension "ms-toolsai.jupyter"
+
     # NIfTI/medical image viewer
     ensure_codeserver_extension "korbinianeckstein.niivue"
     

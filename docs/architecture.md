@@ -54,6 +54,8 @@ provides browser-based remote desktop access. Configuration lives in
 ### Services
 
 - JupyterLab: main interface on port 8888
+- code-server: VS Code in JupyterLab, with default extensions installed from
+  [`config/jupyter/jupyterlab_startup.sh`](../config/jupyter/jupyterlab_startup.sh)
 - Apache Tomcat: serves the Guacamole web application
 - VNC: desktop access through Guacamole
 - SSH: optional SSH server proxy
