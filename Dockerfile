@@ -105,17 +105,19 @@ RUN apt-get update --yes \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy Guacamole server binaries and libraries from builder.
-# Use tar round-trip to preserve symlinks (COPY dereferences them, tripling
+# Use tar round-trip to preserve symlinks (cp/COPY dereference them, tripling
 # disk usage and producing ldconfig warnings).
-COPY --from=builder /usr/local/sbin/guacd /usr/local/sbin/guacd
-COPY --from=builder /etc/init.d/guacd /etc/init.d/guacd
-RUN --mount=type=bind,from=builder,source=/usr/local/lib,target=/tmp/builder-lib \
-    cd /tmp/builder-lib && tar cf - libguac* | tar xf - -C /usr/local/lib/ \
+RUN --mount=type=bind,from=builder,source=/,target=/tmp/builder-root,ro \
+    cp /tmp/builder-root/usr/local/sbin/guacd /usr/local/sbin/guacd \
+    && cp /tmp/builder-root/etc/init.d/guacd /etc/init.d/guacd \
+    && cd /tmp/builder-root/usr/local/lib \
+    && tar cf - libguac* | tar xf - -C /usr/local/lib/ \
     && ldconfig
 
 # Copy code-server from builder (already patched)
-COPY --from=builder /opt/code-server /opt/code-server
-RUN ln -sf /opt/code-server/bin/code-server /usr/local/bin/code-server
+RUN --mount=type=bind,from=builder,source=/opt/code-server,target=/tmp/code-server,ro \
+    cp -a /tmp/code-server /opt/code-server \
+    && ln -sf /opt/code-server/bin/code-server /usr/local/bin/code-server
 
 # add a static strace executable to /opt which we can copy to containers for debugging:
 RUN mkdir -p /opt/strace \
@@ -357,8 +359,9 @@ RUN add-apt-repository ppa:mozillateam/ppa \
     --target-release 'o=LP-PPA-mozillateam' firefox \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
-COPY config/firefox/mozillateamppa /etc/apt/preferences.d/mozillateamppa
-COPY config/firefox/syspref.js /etc/firefox/syspref.js
+RUN --mount=type=bind,source=config,target=/tmp/config,ro \
+    install -m 0644 /tmp/config/firefox/mozillateamppa /etc/apt/preferences.d/mozillateamppa \
+    && install -m 0644 /tmp/config/firefox/syspref.js /etc/firefox/syspref.js
 
 #========================================#
 # Software (as notebook user)
@@ -369,8 +372,8 @@ USER ${NB_USER}
 # Install conda packages
 RUN conda install -c conda-forge nb_conda_kernels \
     && conda clean --all -f -y \
+    && conda config --system --prepend envs_dirs '~/conda-environments' \
     && rm -rf /home/${NB_USER}/.cache
-RUN conda config --system --prepend envs_dirs '~/conda-environments'
 
 # Install Python packages and JupyterLab extensions
 ARG BUST_CACHE_PIP=2
@@ -414,10 +417,9 @@ RUN /opt/conda/bin/pip install \
     && rm -rf /home/${NB_USER}/.cache
 
 # Build and install neurodesk-launcher JupyterLab extension
-COPY --chown=${NB_USER}:users extensions/neurodesk-launcher /tmp/neurodesk-launcher
-RUN cd /tmp/neurodesk-launcher \
+RUN --mount=type=bind,source=extensions/neurodesk-launcher,target=/tmp/neurodesk-launcher,rw \
+    cd /tmp/neurodesk-launcher \
     && /opt/conda/bin/pip install . \
-    && rm -rf /tmp/neurodesk-launcher \
     && /opt/conda/bin/jupyter labextension disable @jupyterhub/jupyter-server-proxy \
     && rm -rf /home/${NB_USER}/.cache
 
@@ -434,81 +436,59 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove \
     libgpgme-dev libossp-uuid-dev build-essential \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# # Customise logo, wallpaper, terminal
-COPY config/jupyter/neurodesk_brain_logo.svg /opt/neurodesk_brain_logo.svg
-COPY config/jupyter/neurodesk_brain_icon.svg /opt/neurodesk_brain_icon.svg
-COPY config/jupyter/vscode_logo.svg /opt/vscode_logo.svg
-
-COPY config/lxde/background.png /usr/share/lxde/wallpapers/desktop_wallpaper.png
-COPY config/lxde/pcmanfm.conf /etc/xdg/pcmanfm/LXDE/pcmanfm.conf
-COPY config/lxde/lxterminal.conf /usr/share/lxterminal/lxterminal.conf
-COPY config/lmod/module.sh /usr/share/
-
-# Configure tiling of windows SHIFT-ALT-CTR-{Left,right,top,Bottom} and other openbox desktop mods
-COPY ./config/lxde/rc.xml /etc/xdg/openbox
-
-# Allow root user to access sshfs mount, fix "No session for pid prompt", enable rootless mounts
-RUN sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf \
-    && rm /usr/bin/lxpolkit \
-    && chmod +x /usr/bin/fusermount
-
-# Add notebook startup scripts
-# https://jupyter-docker-stacks.readthedocs.io/en/latest/using/common.html
-RUN mkdir -p /usr/local/bin/start-notebook.d/ \
-    && mkdir -p /usr/local/bin/before-notebook.d/
-COPY config/jupyter/start_notebook.sh /usr/local/bin/start-notebook.d/
-COPY config/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/
-
-# Add jupyter notebook and startup scripts for system-wide configuration
-# Note: jupyter_notebook_config.py is generated from template + webapps.json below
-COPY --chown=root:users config/jupyter/jupyterlab_startup.sh /opt/neurodesktop/jupyterlab_startup.sh
-COPY --chown=root:users config/jupyter/deferred_startup.sh /opt/neurodesktop/deferred_startup.sh
-COPY --chown=root:users config/guacamole/guacamole.sh /opt/neurodesktop/guacamole.sh
-COPY --chown=root:users config/guacamole/init_secrets.sh /opt/neurodesktop/init_secrets.sh
-COPY --chown=root:users config/guacamole/ensure_rdp_backend.sh /opt/neurodesktop/ensure_rdp_backend.sh
-COPY --chown=root:users config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh
-COPY --chown=root:users config/jupyter/kernel_wrapper.sh /opt/neurodesktop/kernel_wrapper.sh
-COPY --chown=root:users config/jupyter/jupyterlmod_modulepath.py /opt/neurodesktop/jupyterlmod_modulepath.py
-COPY --chown=root:users config/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh
-COPY --chown=root:users config/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh
-COPY --chown=root:users tests /opt/tests
-# COPY --chown=root:users config/guacamole/user-mapping.xml /etc/guacamole/user-mapping.xml
-
-# Generic webapp infrastructure
-COPY --chown=root:users scripts/generate_jupyter_config.py /opt/neurodesktop/scripts/generate_jupyter_config.py
-COPY --chown=root:users config/jupyter/webapp_wrapper /opt/neurodesktop/webapp_wrapper
-COPY --chown=root:users config/jupyter/webapp_launcher.sh /opt/neurodesktop/webapp_launcher.sh
-COPY --chown=root:users config/jupyter/jupyter_notebook_config.py.template /opt/neurodesktop/jupyter_notebook_config.py.template
-
-# Fetch webapps.json from neurocommand and generate jupyter config
-RUN curl -fsSL https://raw.githubusercontent.com/neurodesk/neurocommand/main/neurodesk/webapps.json \
+# Install local configuration files without emitting one layer per small file.
+RUN --mount=type=bind,source=config,target=/tmp/config,ro \
+    --mount=type=bind,source=scripts,target=/tmp/scripts,ro \
+    --mount=type=bind,source=tests,target=/tmp/tests,ro \
+    install -D -m 0644 /tmp/config/jupyter/neurodesk_brain_logo.svg /opt/neurodesk_brain_logo.svg \
+    && install -D -m 0644 /tmp/config/jupyter/neurodesk_brain_icon.svg /opt/neurodesk_brain_icon.svg \
+    && install -D -m 0644 /tmp/config/jupyter/vscode_logo.svg /opt/vscode_logo.svg \
+    && install -D -m 0644 /tmp/config/lxde/background.png /usr/share/lxde/wallpapers/desktop_wallpaper.png \
+    && install -D -m 0644 /tmp/config/lxde/pcmanfm.conf /etc/xdg/pcmanfm/LXDE/pcmanfm.conf \
+    && install -D -m 0644 /tmp/config/lxde/lxterminal.conf /usr/share/lxterminal/lxterminal.conf \
+    && install -D -m 0644 /tmp/config/lmod/module.sh /usr/share/module.sh \
+    && install -D -m 0644 /tmp/config/lxde/rc.xml /etc/xdg/openbox/rc.xml \
+    && sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf \
+    && rm -f /usr/bin/lxpolkit \
+    && chmod +x /usr/bin/fusermount \
+    && mkdir -p /usr/local/bin/start-notebook.d /usr/local/bin/before-notebook.d /opt/neurodesktop/scripts /opt/neurodesktop/webapp_wrapper \
+    && install -m 0755 /tmp/config/jupyter/start_notebook.sh /usr/local/bin/start-notebook.d/start_notebook.sh \
+    && install -m 0755 /tmp/config/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/before_notebook.sh \
+    && install -m 0755 /tmp/config/jupyter/jupyterlab_startup.sh /opt/neurodesktop/jupyterlab_startup.sh \
+    && install -m 0755 /tmp/config/jupyter/deferred_startup.sh /opt/neurodesktop/deferred_startup.sh \
+    && install -m 0755 /tmp/config/guacamole/guacamole.sh /opt/neurodesktop/guacamole.sh \
+    && install -m 0755 /tmp/config/guacamole/init_secrets.sh /opt/neurodesktop/init_secrets.sh \
+    && install -m 0755 /tmp/config/guacamole/ensure_rdp_backend.sh /opt/neurodesktop/ensure_rdp_backend.sh \
+    && install -m 0755 /tmp/config/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh \
+    && install -m 0755 /tmp/config/jupyter/kernel_wrapper.sh /opt/neurodesktop/kernel_wrapper.sh \
+    && install -m 0755 /tmp/config/jupyter/jupyterlmod_modulepath.py /opt/neurodesktop/jupyterlmod_modulepath.py \
+    && install -m 0755 /tmp/config/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh \
+    && install -m 0755 /tmp/config/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh \
+    && cp -a /tmp/tests /opt/tests \
+    && install -m 0755 /tmp/scripts/generate_jupyter_config.py /opt/neurodesktop/scripts/generate_jupyter_config.py \
+    && cp -a /tmp/config/jupyter/webapp_wrapper/. /opt/neurodesktop/webapp_wrapper/ \
+    && install -m 0755 /tmp/config/jupyter/webapp_launcher.sh /opt/neurodesktop/webapp_launcher.sh \
+    && install -m 0644 /tmp/config/jupyter/jupyter_notebook_config.py.template /opt/neurodesktop/jupyter_notebook_config.py.template \
+    && curl -fsSL https://raw.githubusercontent.com/neurodesk/neurocommand/main/neurodesk/webapps.json \
     -o /opt/neurodesktop/webapps.json \
     && python3 /opt/neurodesktop/scripts/generate_jupyter_config.py \
     /opt/neurodesktop/webapps.json \
     /opt/neurodesktop/jupyter_notebook_config.py.template \
-    /etc/jupyter/jupyter_notebook_config.py
-
-RUN chmod +rx /etc/jupyter/jupyter_notebook_config.py \
-    /opt/neurodesktop/jupyterlab_startup.sh \
-    /opt/neurodesktop/deferred_startup.sh \
-    /opt/neurodesktop/guacamole.sh \
-    /opt/neurodesktop/init_secrets.sh \
-    /opt/neurodesktop/ensure_rdp_backend.sh \
-    /opt/neurodesktop/environment_variables.sh \
-    /opt/neurodesktop/kernel_wrapper.sh \
-    /opt/neurodesktop/jupyterlmod_modulepath.py \
-    /opt/neurodesktop/ensure_sftp_sshd.sh \
-    /opt/neurodesktop/setup_and_start_slurm.sh \
-    /opt/neurodesktop/webapp_launcher.sh \
+    /etc/jupyter/jupyter_notebook_config.py \
+    && chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/webapp_wrapper/webapp_wrapper.py \
-    /opt/neurodesktop/scripts/generate_jupyter_config.py \
     && chmod +r /opt/neurodesktop/webapp_wrapper/splash_template.html \
-    /opt/neurodesktop/webapps.json
+    /opt/neurodesktop/webapps.json \
+    && chown -R root:users /opt/neurodesktop /opt/tests
 
 # Create Guacamole configurations (user-mapping.xml gets filled in the startup.sh script)
-RUN mkdir -p /etc/guacamole \
+RUN --mount=type=bind,source=config,target=/tmp/config,ro \
+    mkdir -p /etc/guacamole \
     && echo -e "user-mapping: /etc/guacamole/user-mapping.xml\nguacd-hostname: 127.0.0.1" > /etc/guacamole/guacamole.properties \
     && echo -e "[server]\nbind_host = 127.0.0.1\nbind_port = 4822" > /etc/guacamole/guacd.conf \
+    && install -m 0644 -o ${NB_UID} -g ${NB_GID} /tmp/config/guacamole/user-mapping-vnc.xml /etc/guacamole/user-mapping-vnc.xml \
+    && install -m 0644 -o ${NB_UID} -g ${NB_GID} /tmp/config/guacamole/user-mapping-vnc-rdp.xml /etc/guacamole/user-mapping-vnc-rdp.xml \
+    && ln -sf /etc/guacamole/user-mapping-vnc.xml /etc/guacamole/user-mapping.xml \
     && chown -R ${NB_UID}:${NB_GID} /etc/guacamole \
     && chown -R ${NB_UID}:${NB_GID} /usr/local/tomcat \
     # Apache Tomcat ships `conf/` as 0750 and a few script/dir modes that deny
@@ -519,9 +499,6 @@ RUN mkdir -p /etc/guacamole \
     # NB_UID can bootstrap its per-user CATALINA_BASE. Write access stays
     # restricted to the owner.
     && chmod -R a+rX /usr/local/tomcat /etc/guacamole
-COPY --chown=${NB_UID}:${NB_GID} config/guacamole/user-mapping-vnc.xml /etc/guacamole/user-mapping-vnc.xml
-COPY --chown=${NB_UID}:${NB_GID} config/guacamole/user-mapping-vnc-rdp.xml /etc/guacamole/user-mapping-vnc-rdp.xml
-RUN ln -sf /etc/guacamole/user-mapping-vnc.xml /etc/guacamole/user-mapping.xml
 
 # Configure NB_USER account defaults and JupyterLab settings
 RUN /usr/bin/printf '%s\n%s\n' 'password' 'password' | passwd ${NB_USER} \
@@ -606,8 +583,9 @@ EOF
 ENV DONT_PROMPT_WSL_INSTALL=1
 ENV LMOD_CMD=/usr/share/lmod/lmod/libexec/lmod
 
-# Create defaults directory structure
-RUN mkdir -p /opt/jovyan_defaults/.itksnap.org/ITK-SNAP \
+# Create defaults directory structure and copy default home files.
+RUN --mount=type=bind,source=config,target=/tmp/config,ro \
+    mkdir -p /opt/jovyan_defaults/.itksnap.org/ITK-SNAP \
     && mkdir -p /opt/jovyan_defaults/.config/lxpanel/LXDE/panels \
     && mkdir -p /opt/jovyan_defaults/.local/share/code-server/User \
     && mkdir -p /opt/jovyan_defaults/.config/libfm \
@@ -618,54 +596,37 @@ RUN mkdir -p /opt/jovyan_defaults/.itksnap.org/ITK-SNAP \
     && mkdir -p /opt/jovyan_defaults/.codex \
     && mkdir -p /opt/jovyan_defaults/.ssh \
     && mkdir -p /opt/jovyan_defaults/.jupyter/labconfig \
-    && mkdir -p /opt/jovyan_defaults/.jupyter/nbi/rules
-
-# Copy configuration files to defaults directory
-COPY config/itksnap/UserPreferences.xml /opt/jovyan_defaults/.itksnap.org/ITK-SNAP/UserPreferences.xml
-COPY config/lxde/mimeapps.list /opt/jovyan_defaults/.config/mimeapps.list
-COPY config/lxde/panel /opt/jovyan_defaults/.config/lxpanel/LXDE/panels/panel
-COPY config/vscode/settings.json /opt/jovyan_defaults/.local/share/code-server/User/settings.json
-COPY config/lxde/libfm.conf /opt/jovyan_defaults/.config/libfm/libfm.conf
-COPY config/lxde/xstartup /opt/jovyan_defaults/.vnc/xstartup
-COPY config/conda/conda-readme.md /opt/jovyan_defaults/conda-readme.md
-COPY config/agents/claude_settings.local.json /opt/jovyan_defaults/.claude/settings.local.json
-COPY config/agents/claude_mcp_config.json /opt/jovyan_defaults/.claude/mcp_config.json
-COPY config/agents/opencode_config.json /opt/jovyan_defaults/.config/opencode/opencode.json
-COPY config/agents/codex_config.toml /opt/jovyan_defaults/.codex/config.toml
-COPY config/ssh/sshd_config /opt/jovyan_defaults/.ssh/sshd_config
-COPY config/jupyter/page_config.json /opt/jovyan_defaults/.jupyter/labconfig/page_config.json
-COPY config/agents/AGENTS_nbi.md /opt/jovyan_defaults/.jupyter/nbi/rules/neurodesk.md
-COPY config/agents/nbi_config.json /opt/jovyan_defaults/.jupyter/nbi/config.json
-COPY config/agents/nbi_mcp.json /opt/jovyan_defaults/.jupyter/nbi/mcp.json
-COPY --chown=root:users config/agents/nbi_setup.sh /opt/neurodesktop/nbi_setup.sh
-RUN chmod +rx /opt/neurodesktop/nbi_setup.sh
-
-# Special: bashrc content to append (not replace)
-COPY config/lxde/.bashrc /opt/jovyan_defaults/.bashrc_append
-
-# Generate VNC password at build time and store in defaults
-RUN /usr/bin/printf '%s\n%s\n%s\n' 'password' 'password' 'n' | vncpasswd /opt/jovyan_defaults/.vnc/passwd
-
-# Create marker files and set permissions
-# Note: Don't chmod 700 .ssh here - it prevents access during restore
-# The restore script sets proper permissions on the destination
-RUN chmod +x /opt/jovyan_defaults/.vnc/xstartup \
+    && mkdir -p /opt/jovyan_defaults/.jupyter/nbi/rules \
+    && install -m 0644 /tmp/config/itksnap/UserPreferences.xml /opt/jovyan_defaults/.itksnap.org/ITK-SNAP/UserPreferences.xml \
+    && install -m 0644 /tmp/config/lxde/mimeapps.list /opt/jovyan_defaults/.config/mimeapps.list \
+    && install -m 0644 /tmp/config/lxde/panel /opt/jovyan_defaults/.config/lxpanel/LXDE/panels/panel \
+    && install -m 0644 /tmp/config/vscode/settings.json /opt/jovyan_defaults/.local/share/code-server/User/settings.json \
+    && install -m 0644 /tmp/config/lxde/libfm.conf /opt/jovyan_defaults/.config/libfm/libfm.conf \
+    && install -m 0755 /tmp/config/lxde/xstartup /opt/jovyan_defaults/.vnc/xstartup \
+    && install -m 0644 /tmp/config/conda/conda-readme.md /opt/jovyan_defaults/conda-readme.md \
+    && install -m 0644 /tmp/config/agents/claude_settings.local.json /opt/jovyan_defaults/.claude/settings.local.json \
+    && install -m 0644 /tmp/config/agents/claude_mcp_config.json /opt/jovyan_defaults/.claude/mcp_config.json \
+    && install -m 0644 /tmp/config/agents/opencode_config.json /opt/jovyan_defaults/.config/opencode/opencode.json \
+    && install -m 0644 /tmp/config/agents/codex_config.toml /opt/jovyan_defaults/.codex/config.toml \
+    && install -m 0644 /tmp/config/ssh/sshd_config /opt/jovyan_defaults/.ssh/sshd_config \
+    && install -m 0644 /tmp/config/jupyter/page_config.json /opt/jovyan_defaults/.jupyter/labconfig/page_config.json \
+    && install -m 0644 /tmp/config/agents/AGENTS_nbi.md /opt/jovyan_defaults/.jupyter/nbi/rules/neurodesk.md \
+    && install -m 0644 /tmp/config/agents/nbi_config.json /opt/jovyan_defaults/.jupyter/nbi/config.json \
+    && install -m 0644 /tmp/config/agents/nbi_mcp.json /opt/jovyan_defaults/.jupyter/nbi/mcp.json \
+    && install -m 0755 /tmp/config/agents/nbi_setup.sh /opt/neurodesktop/nbi_setup.sh \
+    && install -m 0644 /tmp/config/lxde/.bashrc /opt/jovyan_defaults/.bashrc_append \
+    && /usr/bin/printf '%s\n%s\n%s\n' 'password' 'password' 'n' | vncpasswd /opt/jovyan_defaults/.vnc/passwd \
     && chown root:users /opt/jovyan_defaults/.vnc/passwd \
     && chmod 640 /opt/jovyan_defaults/.vnc/passwd
 
-# Copy restore script
-COPY --chown=root:users config/jupyter/restore_home_defaults.sh /opt/neurodesktop/restore_home_defaults.sh
-COPY --chown=root:users config/jupyter/update_page_config.py /opt/neurodesktop/update_page_config.py
-RUN chmod +rx /opt/neurodesktop/restore_home_defaults.sh /opt/neurodesktop/update_page_config.py
-
-# Add AGENTS.md to /opt for reference
-COPY config/agents/AGENTS.md /opt/AGENTS.md
-
-# Add AI agent wrapper scripts to /usr/local/sbin/
-COPY --chown=root:root config/agents/claude /usr/local/sbin/claude
-COPY --chown=root:root config/agents/opencode /usr/local/sbin/opencode
-COPY --chown=root:root config/agents/codex /usr/local/sbin/codex
-RUN chmod +x /usr/local/sbin/claude /usr/local/sbin/opencode /usr/local/sbin/codex
+# Copy restore scripts, agent metadata, and wrapper scripts.
+RUN --mount=type=bind,source=config,target=/tmp/config,ro \
+    install -m 0755 -o root -g users /tmp/config/jupyter/restore_home_defaults.sh /opt/neurodesktop/restore_home_defaults.sh \
+    && install -m 0755 -o root -g users /tmp/config/jupyter/update_page_config.py /opt/neurodesktop/update_page_config.py \
+    && install -D -m 0644 /tmp/config/agents/AGENTS.md /opt/AGENTS.md \
+    && install -m 0755 -o root -g root /tmp/config/agents/claude /usr/local/sbin/claude \
+    && install -m 0755 -o root -g root /tmp/config/agents/opencode /usr/local/sbin/opencode \
+    && install -m 0755 -o root -g root /tmp/config/agents/codex /usr/local/sbin/codex
 
 #========================================#
 # Finalise build
@@ -675,7 +636,8 @@ RUN chmod +x /usr/local/sbin/claude /usr/local/sbin/opencode /usr/local/sbin/cod
 USER root
 
 # Create cvmfs keys and data directories
-RUN mkdir -p /etc/cvmfs/keys/ardc.edu.au \
+RUN --mount=type=bind,source=config,target=/tmp/config,ro \
+    mkdir -p /etc/cvmfs/keys/ardc.edu.au \
     && mkdir -p /data /neurodesktop-storage \
     && chown ${NB_UID}:${NB_GID} /neurodesktop-storage \
     # Mode 0770 (owner jovyan:users) denied write access to HPC-style
@@ -684,10 +646,11 @@ RUN mkdir -p /etc/cvmfs/keys/ardc.edu.au \
     # per-user scratch dir anyway, so world-write is the realistic default.
     # Was breaking test_crud's /neurodesktop-storage parametrisation in the
     # HPC simulation CI job (UID 5000 could neither read nor write).
-    && chmod 0777 /neurodesktop-storage
-COPY config/cvmfs/neurodesk.ardc.edu.au.pub /etc/cvmfs/keys/ardc.edu.au/neurodesk.ardc.edu.au.pub
-COPY config/cvmfs/neurodesk.ardc.edu.au.conf* /etc/cvmfs/config.d/
-COPY config/cvmfs/default.local /etc/cvmfs/default.local
+    && chmod 0777 /neurodesktop-storage \
+    && install -m 0644 /tmp/config/cvmfs/neurodesk.ardc.edu.au.pub /etc/cvmfs/keys/ardc.edu.au/neurodesk.ardc.edu.au.pub \
+    && cp /tmp/config/cvmfs/neurodesk.ardc.edu.au.conf* /etc/cvmfs/config.d/ \
+    && chmod 0644 /etc/cvmfs/config.d/neurodesk.ardc.edu.au.conf* \
+    && install -m 0644 /tmp/config/cvmfs/default.local /etc/cvmfs/default.local
 
 # Install neurocommand
 ADD "https://api.github.com/repos/neurodesk/neurocommand/git/refs/heads/main" /tmp/skipcache
