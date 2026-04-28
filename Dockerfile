@@ -1,7 +1,7 @@
 ###############################################################################
 # Stage 1: Builder — compile Guacamole server, patch code-server, install codex
 ###############################################################################
-FROM quay.io/jupyter/base-notebook:2026-04-20 AS builder
+FROM quay.io/jupyter/base-notebook:2026-04-27 AS builder
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
 
 USER root
@@ -66,7 +66,7 @@ RUN set -eux; \
 ###############################################################################
 # Stage 2: Final runtime image
 ###############################################################################
-FROM quay.io/jupyter/base-notebook:2026-03-23
+FROM quay.io/jupyter/base-notebook:2026-04-27
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
 
 LABEL maintainer="Neurodesk Project <www.neurodesk.org>"
@@ -417,11 +417,14 @@ RUN /opt/conda/bin/pip install \
     && rm -rf /home/${NB_USER}/.cache
 
 # Build and install neurodesk-launcher JupyterLab extension
-RUN --mount=type=bind,source=extensions/neurodesk-launcher,target=/tmp/neurodesk-launcher,rw \
-    cd /tmp/neurodesk-launcher \
+RUN --mount=type=bind,source=extensions/neurodesk-launcher,target=/tmp/neurodesk-launcher-src,ro \
+    rm -rf /tmp/neurodesk-launcher \
+    && mkdir -p /tmp/neurodesk-launcher \
+    && cp -R /tmp/neurodesk-launcher-src/. /tmp/neurodesk-launcher/ \
+    && cd /tmp/neurodesk-launcher \
     && /opt/conda/bin/pip install . \
     && /opt/conda/bin/jupyter labextension disable @jupyterhub/jupyter-server-proxy \
-    && rm -rf /home/${NB_USER}/.cache
+    && rm -rf /tmp/neurodesk-launcher /home/${NB_USER}/.cache
 
 #========================================#
 # Configuration (as root user)
