@@ -6,5 +6,7 @@
     "julia.symbolCacheDownload": true,
     "julia.executablePath": "/opt/julia-latest/bin/julia",
     "julia.enableTelemetry": false,
-    "update.mode": "none"
+    "update.mode": "none",
+    "remote.autoForwardPorts": false,
+    "remote.restoreForwardedPorts": false
 }
