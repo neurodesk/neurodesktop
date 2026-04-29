@@ -11,8 +11,8 @@
     "style/**/*.css"
   ],
   "scripts": {
-    "build": "tsc && jupyter labextension build .",
-    "build:prod": "tsc && jupyter labextension build .",
+    "build": "tsc && build-labextension --core-path $(python3 -c \"import importlib.util, pathlib; print(pathlib.Path(next(iter(importlib.util.find_spec('jupyterlab').submodule_search_locations))) / 'staging')\") .",
+    "build:prod": "tsc && build-labextension --core-path $(python3 -c \"import importlib.util, pathlib; print(pathlib.Path(next(iter(importlib.util.find_spec('jupyterlab').submodule_search_locations))) / 'staging')\") .",
     "clean": "rimraf lib tsconfig.tsbuildinfo"
   },
   "dependencies": {
