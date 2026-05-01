@@ -3,6 +3,9 @@
 # Pin to a specific jupyter/base-notebook date for reproducibility.
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
 ARG BASE_IMAGE_TAG=2026-04-27
+ARG APPTAINER_VERSION=1.4.5
+
+FROM ghcr.io/apptainer/apptainer:${APPTAINER_VERSION} AS apptainer
 
 ###############################################################################
 # Stage 1: Builder — compile Guacamole server, patch code-server, install codex
@@ -133,29 +136,16 @@ RUN mkdir -p /opt/strace \
 ARG TOMCAT_REL="9"
 ARG TOMCAT_VERSION="9.0.116"
 ARG GUACAMOLE_VERSION="1.6.0"
-ARG APPTAINER_VERSION=1.4.5
-
 ENV LANG=""
 ENV LANGUAGE=""
 ENV LC_ALL=""
 
-# Apptainer install with PPA-first, GitHub-release-fallback (amd64 only).
-RUN set -e; \
-    arch="$(dpkg --print-architecture)"; \
-    apt-get update --yes; \
-    if timeout 90 sh -c 'add-apt-repository -y ppa:apptainer/ppa && apt-get update --yes && DEBIAN_FRONTEND=noninteractive apt-get install --yes apptainer'; then \
-        echo "[apptainer] installed from PPA"; \
-    elif [ "$arch" = "amd64" ]; then \
-        echo "[apptainer] PPA unavailable, falling back to GitHub release"; \
-        wget --tries=3 --timeout=20 -q "https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VERSION}/apptainer_${APPTAINER_VERSION}_amd64.deb" -O /tmp/apptainer.deb; \
-        DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends /tmp/apptainer.deb; \
-        rm /tmp/apptainer.deb; \
-        echo "[apptainer] installed from GitHub release v${APPTAINER_VERSION}"; \
-    else \
-        echo "[apptainer] PPA unavailable and no GitHub release for $arch"; \
-        exit 1; \
-    fi; \
-    apt-get clean && rm -rf /var/lib/apt/lists/* /root/.cache /home/${NB_USER}/.cache
+# Install apptainer from its official multi-arch image. This avoids the
+# Launchpad API and PPA apt fetches, which have been flaky in scheduled builds.
+COPY --from=apptainer /opt/apptainer /opt/apptainer
+RUN ln -sf /opt/apptainer/bin/apptainer /usr/local/bin/apptainer \
+    && ln -sf /opt/apptainer/bin/singularity /usr/local/bin/singularity \
+    && rm -rf /root/.cache && rm -rf /home/${NB_USER}/.cache
 
 # Install Apache Tomcat
 RUN wget -q https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v${TOMCAT_VERSION}/bin/apache-tomcat-${TOMCAT_VERSION}.tar.gz -P /tmp \
@@ -372,15 +362,25 @@ RUN curl -fsSL https://opencode.ai/install | bash \
     && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 
-# Install firefox
-RUN add-apt-repository ppa:mozillateam/ppa \
-    && apt-get update --yes \
-    && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
-    --target-release 'o=LP-PPA-mozillateam' firefox \
+# Install Firefox from Mozilla's official apt repository. This avoids both the
+# Launchpad API and Ubuntu's snap-backed firefox package.
+RUN --mount=type=bind,source=config,target=/tmp/config,ro \
+    install -d -m 0755 /etc/apt/keyrings \
+    && curl -fsSL https://packages.mozilla.org/apt/repo-signing-key.gpg \
+    -o /etc/apt/keyrings/packages.mozilla.org.asc \
+    && install -d -m 0700 /tmp/mozilla-gnupg \
+    && GNUPGHOME=/tmp/mozilla-gnupg gpg -n -q --import --import-options import-show /etc/apt/keyrings/packages.mozilla.org.asc \
+    | awk '/pub/{getline; gsub(/^ +| +$/, ""); if ($0 != "35BAA0B33E9EB396F59CA838C0BA5CE6DC6315A3") exit 1}' \
+    && rm -rf /tmp/mozilla-gnupg \
+    && printf '%s\n' 'deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main' \
+    > /etc/apt/sources.list.d/mozilla.list \
+    && install -m 0644 /tmp/config/firefox/mozilla /etc/apt/preferences.d/mozilla \
+    && apt-get update -o APT::Update::Error-Mode=any --yes \
+    && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends firefox \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 RUN --mount=type=bind,source=config,target=/tmp/config,ro \
-    install -m 0644 /tmp/config/firefox/mozillateamppa /etc/apt/preferences.d/mozillateamppa \
+    install -d -m 0755 /etc/firefox \
     && install -m 0644 /tmp/config/firefox/syspref.js /etc/firefox/syspref.js
 
 #========================================#
