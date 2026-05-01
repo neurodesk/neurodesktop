@@ -1,8 +1,13 @@
+# syntax=docker/dockerfile:1.7
+
+# Pin to a specific jupyter/base-notebook date for reproducibility.
+# https://quay.io/repository/jupyter/base-notebook?tab=tags
+ARG BASE_IMAGE_TAG=2026-04-27
+
 ###############################################################################
 # Stage 1: Builder — compile Guacamole server, patch code-server, install codex
 ###############################################################################
-FROM quay.io/jupyter/base-notebook:2026-04-27 AS builder
-# https://quay.io/repository/jupyter/base-notebook?tab=tags
+FROM quay.io/jupyter/base-notebook:${BASE_IMAGE_TAG} AS builder
 
 USER root
 
@@ -68,8 +73,7 @@ RUN set -eux; \
 ###############################################################################
 # Stage 2: Final runtime image
 ###############################################################################
-FROM quay.io/jupyter/base-notebook:2026-04-27
-# https://quay.io/repository/jupyter/base-notebook?tab=tags
+FROM quay.io/jupyter/base-notebook:${BASE_IMAGE_TAG}
 
 LABEL maintainer="Neurodesk Project <www.neurodesk.org>"
 
@@ -675,9 +679,22 @@ RUN rm /tmp/skipcache \
 # the privileges needed to bootstrap local Slurm/CVMFS, then drops to NB_USER.
 USER root
 
-# Bake the version into the image (CI passes the build date; local builds get "development").
-# Placed at the end so earlier layers remain cacheable when only the version changes.
-ARG NEURODESKTOP_VERSION="development"
-ENV NEURODESKTOP_VERSION=${NEURODESKTOP_VERSION}
-
 WORKDIR "/home/${NB_USER}"
+
+# Image metadata
+ARG BASE_IMAGE_TAG
+ARG NEURODESKTOP_VERSION="development"
+ARG BUILD_DATE="unknown"
+ARG VCS_REF="unknown"
+ENV NEURODESKTOP_VERSION=${NEURODESKTOP_VERSION}
+LABEL org.opencontainers.image.title="neurodesktop" \
+      org.opencontainers.image.description="Complete virtual desktop environment with GUI applications, ready to use in your browser or locally." \
+      org.opencontainers.image.vendor="Neurodesk" \
+      org.opencontainers.image.url="https://www.neurodesk.org" \
+      org.opencontainers.image.documentation="https://www.neurodesk.org" \
+      org.opencontainers.image.source="https://github.com/neurodesk/neurodesktop" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${NEURODESKTOP_VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.base.name="quay.io/jupyter/base-notebook:${BASE_IMAGE_TAG}"
