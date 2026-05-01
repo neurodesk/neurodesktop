@@ -133,17 +133,29 @@ RUN mkdir -p /opt/strace \
 ARG TOMCAT_REL="9"
 ARG TOMCAT_VERSION="9.0.116"
 ARG GUACAMOLE_VERSION="1.6.0"
+ARG APPTAINER_VERSION=1.4.5
 
 ENV LANG=""
 ENV LANGUAGE=""
 ENV LC_ALL=""
 
-# Install apptainer
-RUN add-apt-repository -y ppa:apptainer/ppa \
-    && apt-get update --yes \
-    && DEBIAN_FRONTEND=noninteractive apt-get install --yes apptainer \
-    && apt-get clean && rm -rf /var/lib/apt/lists/* \
-    && rm -rf /root/.cache && rm -rf /home/${NB_USER}/.cache
+# Apptainer install with PPA-first, GitHub-release-fallback (amd64 only).
+RUN set -e; \
+    arch="$(dpkg --print-architecture)"; \
+    apt-get update --yes; \
+    if timeout 90 sh -c 'add-apt-repository -y ppa:apptainer/ppa && apt-get update --yes && DEBIAN_FRONTEND=noninteractive apt-get install --yes apptainer'; then \
+        echo "[apptainer] installed from PPA"; \
+    elif [ "$arch" = "amd64" ]; then \
+        echo "[apptainer] PPA unavailable, falling back to GitHub release"; \
+        wget --tries=3 --timeout=20 -q "https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VERSION}/apptainer_${APPTAINER_VERSION}_amd64.deb" -O /tmp/apptainer.deb; \
+        DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends /tmp/apptainer.deb; \
+        rm /tmp/apptainer.deb; \
+        echo "[apptainer] installed from GitHub release v${APPTAINER_VERSION}"; \
+    else \
+        echo "[apptainer] PPA unavailable and no GitHub release for $arch"; \
+        exit 1; \
+    fi; \
+    apt-get clean && rm -rf /var/lib/apt/lists/* /root/.cache /home/${NB_USER}/.cache
 
 # Install Apache Tomcat
 RUN wget -q https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v${TOMCAT_VERSION}/bin/apache-tomcat-${TOMCAT_VERSION}.tar.gz -P /tmp \
