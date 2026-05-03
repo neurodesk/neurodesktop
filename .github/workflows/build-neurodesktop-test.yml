@@ -98,19 +98,12 @@ jobs:
           no-cache: true
           push: true
           tags: ${{ env.IMAGEID }}:${{ matrix.platform.arch }}
-      - name: Generate issue on job failure
+      - name: Report job failure
         if: always() && failure()
-        uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_WORKFLOW: ${{ env.GITHUB_WORKFLOW }}
-          GITHUB_SERVER_URL: ${{ env.GITHUB_SERVER_URL }}
-          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
-          GITHUB_RUN_ID: ${{ env.GITHUB_RUN_ID }}
+        uses: ./.github/actions/report-job-failure
         with:
-          filename: .github/job_failure_issue_template.md
-          update_existing: true
-          search_existing: open
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          details: ${{ matrix.platform.arch || matrix.arch || matrix.cvmfs-servers || '' }}
 
   merge-manifests:
     needs: build-image
@@ -201,19 +194,12 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.ref }}
-      - name: Generate issue on job failure
+      - name: Report job failure
         if: always() && failure()
-        uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_WORKFLOW: ${{ env.GITHUB_WORKFLOW }}
-          GITHUB_SERVER_URL: ${{ env.GITHUB_SERVER_URL }}
-          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
-          GITHUB_RUN_ID: ${{ env.GITHUB_RUN_ID }}
+        uses: ./.github/actions/report-job-failure
         with:
-          filename: .github/job_failure_issue_template.md
-          update_existing: true
-          search_existing: open
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          details: ${{ matrix.platform.arch || matrix.arch || matrix.cvmfs-servers || '' }}
 
   test-image:
     name: test-image (${{ matrix.test_profile }})
@@ -433,16 +419,9 @@ jobs:
           severity: CRITICAL
           timeout: 25m0s
           skip-files: /opt/rclone-v1.60.1-linux-amd64/README.txt,/opt/rclone-v1.60.1-linux-amd64/README.html,/opt/rclone-v1.60.1-linux-amd64/rclone.1,/opt/code-server/lib/vscode/package.json,/opt/code-server/lib/vscode/extensions/handlebars/package.json
-      - name: Generate issue on job failure
+      - name: Report job failure
         if: always() && failure()
-        uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_WORKFLOW: ${{ env.GITHUB_WORKFLOW }}
-          GITHUB_SERVER_URL: ${{ env.GITHUB_SERVER_URL }}
-          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
-          GITHUB_RUN_ID: ${{ env.GITHUB_RUN_ID }}
+        uses: ./.github/actions/report-job-failure
         with:
-          filename: .github/job_failure_issue_template.md
-          update_existing: true
-          search_existing: open
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          details: ${{ matrix.platform.arch || matrix.arch || matrix.cvmfs-servers || '' }}

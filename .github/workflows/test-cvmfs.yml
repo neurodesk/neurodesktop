@@ -20,19 +20,12 @@ jobs:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
     - name: check if cvmfs setup with multiple entries works
       run: /bin/bash .github/workflows/test_cvmfs_1_2_3.sh
-    - name: Generate issue on job failure
+    - name: Report job failure
       if: always() && failure()
-      uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
-      env: 
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GITHUB_WORKFLOW: ${{ env.GITHUB_WORKFLOW }}
-        GITHUB_SERVER_URL: ${{ env.GITHUB_SERVER_URL }}
-        GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
-        GITHUB_RUN_ID: ${{ env.GITHUB_RUN_ID }}
+      uses: ./.github/actions/report-job-failure
       with:
-        filename: .github/job_failure_issue_template.md
-        update_existing: true
-        search_existing: open
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        details: ${{ matrix.platform.arch || matrix.arch || matrix.cvmfs-servers || '' }}
   test_cvmfs:
     runs-on: ubuntu-24.04
     strategy:
@@ -59,16 +52,9 @@ jobs:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
     - name: check if ${{ matrix.cvmfs-servers }} is online and up-to-date
       run: /bin/bash .github/workflows/test_cvmfs.sh  ${{ matrix.cvmfs-servers }}
-    - name: Generate issue on job failure
+    - name: Report job failure
       if: always() && failure()
-      uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
-      env: 
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GITHUB_WORKFLOW: ${{ env.GITHUB_WORKFLOW }}
-        GITHUB_SERVER_URL: ${{ env.GITHUB_SERVER_URL }}
-        GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
-        GITHUB_RUN_ID: ${{ env.GITHUB_RUN_ID }}
+      uses: ./.github/actions/report-job-failure
       with:
-        filename: .github/job_failure_issue_template.md
-        update_existing: true
-        search_existing: open
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        details: ${{ matrix.platform.arch || matrix.arch || matrix.cvmfs-servers || '' }}

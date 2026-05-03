@@ -112,19 +112,12 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.ref }}
-      - name: Generate issue on job failure
+      - name: Report job failure
         if: always() && failure()
-        uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_WORKFLOW: ${{ github.workflow }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
+        uses: ./.github/actions/report-job-failure
         with:
-          filename: .github/job_failure_issue_template.md
-          update_existing: true
-          search_existing: open
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          details: ${{ matrix.platform.arch || matrix.arch || matrix.cvmfs-servers || '' }}
 
   merge-manifests:
     needs: build-image
@@ -233,19 +226,12 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.ref }}
-      - name: Generate issue on job failure
+      - name: Report job failure
         if: always() && failure()
-        uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_WORKFLOW: ${{ github.workflow }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
+        uses: ./.github/actions/report-job-failure
         with:
-          filename: .github/job_failure_issue_template.md
-          update_existing: true
-          search_existing: open
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          details: ${{ matrix.platform.arch || matrix.arch || matrix.cvmfs-servers || '' }}
 
   test-image:
     name: test-image (${{ matrix.test_profile }})
@@ -470,16 +456,9 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.ref }}
-      - name: Generate issue on job failure
+      - name: Report job failure
         if: always() && failure()
-        uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_WORKFLOW: ${{ github.workflow }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
+        uses: ./.github/actions/report-job-failure
         with:
-          filename: .github/job_failure_issue_template.md
-          update_existing: true
-          search_existing: open
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          details: ${{ matrix.platform.arch || matrix.arch || matrix.cvmfs-servers || '' }}
