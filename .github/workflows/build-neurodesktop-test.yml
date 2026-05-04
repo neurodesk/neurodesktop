@@ -419,6 +419,11 @@ jobs:
           severity: CRITICAL
           timeout: 25m0s
           skip-files: /opt/rclone-v1.60.1-linux-amd64/README.txt,/opt/rclone-v1.60.1-linux-amd64/README.html,/opt/rclone-v1.60.1-linux-amd64/rclone.1,/opt/code-server/lib/vscode/package.json,/opt/code-server/lib/vscode/extensions/handlebars/package.json
+      - name: Checkout repository for failure issue template
+        if: always() && failure()
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.ref }}
       - name: Report job failure
         if: always() && failure()
         uses: ./.github/actions/report-job-failure
