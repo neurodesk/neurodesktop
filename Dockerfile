@@ -146,6 +146,7 @@ COPY --from=apptainer /opt/apptainer /opt/apptainer
 RUN ln -sf /opt/apptainer/bin/apptainer /usr/local/bin/apptainer \
     && ln -sf /opt/apptainer/bin/singularity /usr/local/bin/singularity \
     && rm -rf /opt/apptainer/libexec/apptainer/cni \
+    && sed -i 's/^allow setuid = yes/allow setuid = no/' /opt/apptainer/etc/apptainer/apptainer.conf \
     && rm -rf /root/.cache && rm -rf /home/${NB_USER}/.cache
 
 # Install Apache Tomcat
