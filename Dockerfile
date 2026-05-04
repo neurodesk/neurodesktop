@@ -147,7 +147,7 @@ RUN ln -sf /opt/apptainer/bin/apptainer /usr/local/bin/apptainer \
     && ln -sf /opt/apptainer/bin/singularity /usr/local/bin/singularity \
     && rm -rf /opt/apptainer/libexec/apptainer/cni \
     && sed -i 's/^allow setuid = yes/allow setuid = no/' /opt/apptainer/etc/apptainer/apptainer.conf \
-    && apt-get update --yes \
+    && apt-get update -o APT::Update::Error-Mode=any -o Acquire::Retries=5 --yes \
     && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends fuse-overlayfs squashfuse \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && rm -rf /root/.cache && rm -rf /home/${NB_USER}/.cache
