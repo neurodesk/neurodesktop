@@ -10,9 +10,15 @@ def _startup_script_path():
     return repo_root / "config/jupyter/jupyterlab_startup.sh"
 
 
-def test_default_codeserver_extensions_include_python_and_jupyter():
-    """Verify the startup script installs Python and Jupyter VS Code support."""
+def test_default_codeserver_extensions_include_expected_tools():
+    """Verify the startup script installs the expected default code-server tools."""
     script = _startup_script_path().read_text(encoding="utf-8")
 
-    assert 'ensure_codeserver_extension "ms-python.python"' in script
-    assert 'ensure_codeserver_extension "ms-toolsai.jupyter"' in script
+    expected_extensions = [
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        "ReprEng.csv",
+    ]
+
+    for extension_id in expected_extensions:
+        assert f'ensure_codeserver_extension "{extension_id}"' in script

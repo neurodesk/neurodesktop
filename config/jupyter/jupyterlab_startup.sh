@@ -303,6 +303,9 @@ ensure_codeserver_extensions() {
     ensure_codeserver_extension "ms-python.python"
     ensure_codeserver_extension "ms-toolsai.jupyter"
 
+    # CSV table viewer/editor
+    ensure_codeserver_extension "ReprEng.csv"
+
     # NIfTI/medical image viewer
     ensure_codeserver_extension "korbinianeckstein.niivue"
     
