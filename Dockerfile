@@ -147,6 +147,9 @@ RUN ln -sf /opt/apptainer/bin/apptainer /usr/local/bin/apptainer \
     && ln -sf /opt/apptainer/bin/singularity /usr/local/bin/singularity \
     && rm -rf /opt/apptainer/libexec/apptainer/cni \
     && sed -i 's/^allow setuid = yes/allow setuid = no/' /opt/apptainer/etc/apptainer/apptainer.conf \
+    && apt-get update --yes \
+    && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends fuse-overlayfs squashfuse \
+    && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && rm -rf /root/.cache && rm -rf /home/${NB_USER}/.cache
 
 # Install Apache Tomcat
