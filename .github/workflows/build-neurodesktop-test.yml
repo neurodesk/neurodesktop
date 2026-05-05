@@ -42,15 +42,16 @@ jobs:
             tag: amd64
             runs_on:
               group: arc-base
-          - arch: arm64
-            docker_platform: linux/arm64
-            tag: arm64
-            runs_on:
-              group: arc-base
-          - arch: arm64
-            docker_platform: linux/arm64
-            tag: arm64-gh
-            runs_on: ubuntu-24.04-arm
+          # arm64 entries temporarily disabled to retest amd64-only
+          # - arch: arm64
+          #   docker_platform: linux/arm64
+          #   tag: arm64
+          #   runs_on:
+          #     group: arc-base
+          # - arch: arm64
+          #   docker_platform: linux/arm64
+          #   tag: arm64-gh
+          #   runs_on: ubuntu-24.04-arm
     steps:
       - name: Fetch github api rate limit
         run: |
@@ -154,8 +155,8 @@ jobs:
           docker buildx imagetools create \
             -t ${{ env.IMAGEID }}:${{ env.BUILDDATE }} \
             -t ${{ env.IMAGEID }}:latest \
-            ${{ env.IMAGEID }}:amd64 \
-            ${{ env.IMAGEID }}:arm64
+            ${{ env.IMAGEID }}:amd64
+            # ${{ env.IMAGEID }}:arm64  # temporarily disabled while retesting amd64-only
       - name: Install crane
         if: ${{ env.DOCKERHUB_ORG != '' }}
         run: |
@@ -398,7 +399,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [amd64, arm64]
+        arch: [amd64]  # arm64 temporarily disabled while retesting amd64-only
     steps:
       - name: Set environment variables
         run: |
