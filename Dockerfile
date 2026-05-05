@@ -3,9 +3,63 @@
 # Pin to a specific jupyter/base-notebook date for reproducibility.
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
 ARG BASE_IMAGE_TAG=2026-04-27
-ARG APPTAINER_VERSION=1.4.5
+ARG APPTAINER_VERSION=1.5.0-rc.2
+ARG APPTAINER_GO_VERSION=1.25.7
+ARG APPTAINER_GRPC_VERSION=1.79.3
 
-FROM ghcr.io/apptainer/apptainer:${APPTAINER_VERSION} AS apptainer
+FROM golang:${APPTAINER_GO_VERSION}-bookworm AS apptainer
+
+ARG APPTAINER_VERSION
+ARG APPTAINER_GRPC_VERSION
+
+RUN apt-get update --yes \
+    && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+    autoconf \
+    automake \
+    build-essential \
+    ca-certificates \
+    cryptsetup \
+    curl \
+    fakeroot \
+    git \
+    libattr1-dev \
+    libfuse3-dev \
+    liblzo2-dev \
+    liblz4-dev \
+    liblzma-dev \
+    libprotobuf-c-dev \
+    libseccomp-dev \
+    libsubid-dev \
+    libtalloc-dev \
+    libtool \
+    libzstd-dev \
+    pkg-config \
+    tzdata \
+    uidmap \
+    wget \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    git clone --depth 1 --branch "v${APPTAINER_VERSION}" https://github.com/apptainer/apptainer.git /tmp/apptainer \
+    && cd /tmp/apptainer \
+    && for i in 1 2 3; do \
+        go get "google.golang.org/grpc@v${APPTAINER_GRPC_VERSION}" \
+        && go mod tidy \
+        && go mod download \
+        && break \
+        || { if [ "$i" -eq 3 ]; then exit 1; fi; sleep 5; }; \
+    done \
+    && ./scripts/download-dependencies \
+    && ./scripts/compile-dependencies \
+    && printf '%s\n' "${APPTAINER_VERSION}" > VERSION \
+    && ./mconfig --prefix=/opt/apptainer --with-suid \
+    && make -C builddir \
+    && make -C builddir install \
+    && ./scripts/install-dependencies \
+    && /opt/apptainer/bin/apptainer --version \
+    && rm -rf /tmp/apptainer
 
 ###############################################################################
 # Stage 1: Builder — compile Guacamole server, patch code-server, install codex
@@ -140,8 +194,9 @@ ENV LANG=""
 ENV LANGUAGE=""
 ENV LC_ALL=""
 
-# Install apptainer from its official multi-arch image. This avoids the
-# Launchpad API and PPA apt fetches, which have been flaky in scheduled builds.
+# Install the source-built Apptainer tree from the build stage. This avoids the
+# Launchpad API/PPA path and lets us pin scanner-fixed Go module/toolchain levels
+# before upstream publishes a matching multi-arch runtime image.
 COPY --from=apptainer /opt/apptainer /opt/apptainer
 RUN ln -sf /opt/apptainer/bin/apptainer /usr/local/bin/apptainer \
     && ln -sf /opt/apptainer/bin/singularity /usr/local/bin/singularity \
@@ -468,6 +523,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove \
 RUN --mount=type=bind,source=config,target=/tmp/config,ro \
     --mount=type=bind,source=scripts,target=/tmp/scripts,ro \
     --mount=type=bind,source=tests,target=/tmp/tests,ro \
+    --mount=type=bind,source=Dockerfile,target=/tmp/Dockerfile,ro \
     install -D -m 0644 /tmp/config/jupyter/neurodesk_brain_logo.svg /opt/neurodesk_brain_logo.svg \
     && install -D -m 0644 /tmp/config/jupyter/neurodesk_brain_icon.svg /opt/neurodesk_brain_icon.svg \
     && install -D -m 0644 /tmp/config/jupyter/vscode_logo.svg /opt/vscode_logo.svg \
@@ -493,6 +549,7 @@ RUN --mount=type=bind,source=config,target=/tmp/config,ro \
     && install -m 0755 /tmp/config/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh \
     && install -m 0755 /tmp/config/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh \
     && cp -a /tmp/tests /opt/tests \
+    && install -m 0644 /tmp/Dockerfile /opt/tests/Dockerfile \
     && install -m 0755 /tmp/scripts/generate_jupyter_config.py /opt/neurodesktop/scripts/generate_jupyter_config.py \
     && cp -a /tmp/config/jupyter/webapp_wrapper/. /opt/neurodesktop/webapp_wrapper/ \
     && install -m 0755 /tmp/config/jupyter/webapp_launcher.sh /opt/neurodesktop/webapp_launcher.sh \

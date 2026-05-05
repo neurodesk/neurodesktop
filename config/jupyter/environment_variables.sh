@@ -288,9 +288,14 @@ case "${NEURODESKTOP_SLURM_MODE}" in
                 ;;
 esac
 
-# This is needed to make containers writable as a workaround for macos with Apple Silicon. We need to do it here for the desktop
-# and in the dockerfile for the jupyter notebook
-export neurodesk_singularity_opts=" --overlay /tmp/apptainer_overlay "
+# This is needed to make containers writable as a workaround for macos with Apple Silicon.
+# Directory overlays are only usable from root-managed Docker sessions. On HPC
+# Apptainer runs as the calling user, so use a writable tmpfs session instead.
+if is_apptainer_runtime && [ "${EUID}" -ne 0 ]; then
+        export neurodesk_singularity_opts=" --writable-tmpfs "
+else
+        export neurodesk_singularity_opts=" --overlay /tmp/apptainer_overlay "
+fi
 # export neurodesk_singularity_opts=" -w " THIS DOES NOT WORK FOR SIMG FILES IN OFFLINE MODE
 # There is a small delay in using --overlay in comparison to -w - maybe it would be faster to use a fixed size overlay file instead?
 

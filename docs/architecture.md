@@ -90,6 +90,18 @@ The Dockerfile fetches `webapps.json` from the neurocommand repository and
 generates `jupyter_notebook_config.py` using a template system. To add new
 webapps, update the source `webapps.json`.
 
+### Apptainer
+
+The Dockerfile builds Apptainer from upstream source in a dedicated build stage
+and copies `/opt/apptainer` into the runtime image. The build is controlled by
+`APPTAINER_VERSION`, `APPTAINER_GO_VERSION`, and `APPTAINER_GRPC_VERSION` so the
+image can move to scanner-fixed Go toolchain and module versions before a
+matching upstream multi-arch runtime image is published.
+
+Docker/root sessions use `--overlay /tmp/apptainer_overlay` for writable
+container sessions. Non-root Apptainer/HPC sessions use `--writable-tmpfs`
+because setuid Apptainer cannot use a directory overlay as an unprivileged user.
+
 ### User Permissions
 
 The container runs as the `jovyan` user from the base Jupyter image. The
