@@ -32,16 +32,25 @@ jobs:
   build-image:
     # runs-on: [self-hosted, linux, arc-base]
     # runs-on: ubuntu-24.04
-    runs-on:
-      group: arc-base
+    runs-on: ${{ matrix.platform.runs_on }}
     strategy:
       fail-fast: false
       matrix:
         platform:
           - arch: amd64
             docker_platform: linux/amd64
+            tag: amd64
+            runs_on:
+              group: arc-base
           - arch: arm64
             docker_platform: linux/arm64
+            tag: arm64
+            runs_on:
+              group: arc-base
+          - arch: arm64
+            docker_platform: linux/arm64
+            tag: arm64-gh
+            runs_on: ubuntu-24.04-arm
     steps:
       - name: Fetch github api rate limit
         run: |
@@ -97,7 +106,7 @@ jobs:
           provenance: false
           no-cache: true
           push: true
-          tags: ${{ env.IMAGEID }}:${{ matrix.platform.arch }}
+          tags: ${{ env.IMAGEID }}:${{ matrix.platform.tag }}
       - name: Report job failure
         if: always() && failure()
         uses: ./.github/actions/report-job-failure
