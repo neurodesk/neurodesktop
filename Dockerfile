@@ -491,8 +491,10 @@ RUN /opt/conda/bin/pip install \
     nbgitpuller \
     xnat \
     pytest \
+    bash_kernel \
     "requests>=2.32.3" \
     "chardet<6" \
+    && /opt/conda/bin/python -m bash_kernel.install --sys-prefix \
     && /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
     && rm -rf /home/${NB_USER}/.cache
 
