@@ -475,6 +475,7 @@ RUN /opt/conda/bin/pip install \
     jupyterlmod \
     jupyterlab-git \
     notebook_intelligence \
+    "litellm>=1.83.7" \
     jupyterlab_rise \
     jupyterlab-niivue==0.2.5 \
     jupyterlab_myst \
