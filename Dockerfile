@@ -475,7 +475,6 @@ RUN /opt/conda/bin/pip install \
     jupyterlmod \
     jupyterlab-git \
     notebook_intelligence \
-    "litellm>=1.83.7" \
     jupyterlab_rise \
     jupyterlab-niivue==0.2.5 \
     jupyterlab_myst \
@@ -495,6 +494,7 @@ RUN /opt/conda/bin/pip install \
     bash_kernel \
     "requests>=2.32.3" \
     "chardet<6" \
+    && /opt/conda/bin/pip install --upgrade "litellm>=1.83.7" \
     && /opt/conda/bin/python -m bash_kernel.install --sys-prefix \
     && /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
     && rm -rf /home/${NB_USER}/.cache
