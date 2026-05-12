@@ -60,4 +60,15 @@ def test_non_root_apptainer_runtime_uses_writable_tmpfs():
 
     assert 'is_apptainer_runtime && [ "${EUID}" -ne 0 ]' in environment
     assert 'neurodesk_singularity_opts=" --writable-tmpfs "' in environment
+
+
+def test_overlay_runtime_option_is_macos_only():
+    environment = _read_environment_variables()
+
+    assert "is_macos_host_runtime()" in environment
+    assert "linuxkit" in environment
+    assert "/proc/self/mountinfo" in environment
+    assert 'elif is_macos_host_runtime; then' in environment
     assert 'neurodesk_singularity_opts=" --overlay /tmp/apptainer_overlay "' in environment
+    assert 'neurodesk_singularity_opts=""' in environment
+    assert "NEURODESKTOP_HOST_OS" not in environment

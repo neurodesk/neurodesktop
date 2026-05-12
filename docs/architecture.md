@@ -98,9 +98,12 @@ and copies `/opt/apptainer` into the runtime image. The build is controlled by
 image can move to scanner-fixed Go toolchain and module versions before a
 matching upstream multi-arch runtime image is published.
 
-Docker/root sessions use `--overlay /tmp/apptainer_overlay` for writable
-container sessions. Non-root Apptainer/HPC sessions use `--writable-tmpfs`
-because setuid Apptainer cannot use a directory overlay as an unprivileged user.
+macOS Docker/root sessions use `--overlay /tmp/apptainer_overlay` for writable
+container sessions. This works around the "FATAL:   image targets 'amd64',
+cannot run on 'arm64'" bug on macOS. Other non-Apptainer sessions leave
+`neurodesk_singularity_opts` empty because it interferes with VS Code and
+Matlab. Non-root Apptainer/HPC sessions use `--writable-tmpfs` because setuid
+Apptainer cannot use a directory overlay as an unprivileged user.
 
 ### User Permissions
 

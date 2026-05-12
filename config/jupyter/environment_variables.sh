@@ -115,6 +115,12 @@ is_apptainer_runtime() {
         [ -d "/.singularity.d" ]
 }
 
+is_macos_host_runtime() {
+        [ "$(uname -s 2>/dev/null)" = "Darwin" ] && return 0
+        [ -r /proc/self/mountinfo ] && grep -Eq '(/host_mnt|/run/desktop/mnt/host)/(Users|private|Volumes)(/|[[:space:]])' /proc/self/mountinfo && return 0
+        [ -r /proc/sys/kernel/osrelease ] && grep -qi 'linuxkit' /proc/sys/kernel/osrelease && [ "$(uname -m 2>/dev/null)" = "aarch64" ]
+}
+
 slurm_conf_is_local_neurodesktop() {
         local conf_file="$1"
         [ -r "${conf_file}" ] && grep -Eq '^ClusterName=neurodesktop([[:space:]]|$)' "${conf_file}" 2>/dev/null
@@ -289,12 +295,14 @@ case "${NEURODESKTOP_SLURM_MODE}" in
 esac
 
 # This is needed to make containers writable as a workaround for macos with Apple Silicon.
-# Directory overlays are only usable from root-managed Docker sessions. On HPC
+# Directory overlays are only used for macOS root-managed Docker sessions. On HPC
 # Apptainer runs as the calling user, so use a writable tmpfs session instead.
 if is_apptainer_runtime && [ "${EUID}" -ne 0 ]; then
         export neurodesk_singularity_opts=" --writable-tmpfs "
-else
+elif is_macos_host_runtime; then
         export neurodesk_singularity_opts=" --overlay /tmp/apptainer_overlay "
+else
+        export neurodesk_singularity_opts=""
 fi
 # export neurodesk_singularity_opts=" -w " THIS DOES NOT WORK FOR SIMG FILES IN OFFLINE MODE
 # There is a small delay in using --overlay in comparison to -w - maybe it would be faster to use a fixed size overlay file instead?
