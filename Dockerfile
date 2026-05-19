@@ -328,7 +328,8 @@ RUN apt-get update --yes \
 # in the larger Debian TeX Live package set.
 RUN HOME=/root /bin/bash -lc 'set -euo pipefail; \
     mkdir -p /root/.local/bin; \
-    curl -fsSL https://yihui.org/tinytex/install-bin-unix.sh | sh; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
+    https://yihui.org/tinytex/install-bin-unix.sh | sh; \
     mv /root/.TinyTeX /opt/TinyTeX; \
     tlmgr_path="$(echo /opt/TinyTeX/bin/*/tlmgr)"; \
     "${tlmgr_path}" option sys_bin /usr/local/bin >/dev/null; \
