@@ -18,6 +18,7 @@ interface ILauncherEntry {
   title: string;
   path_info: string;
   category: string;
+  url?: string;
 }
 
 interface IServerProcess {
@@ -307,7 +308,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
       const title = entry.title || name;
       const category = entry.category || 'Other';
       const pathInfo = entry.path_info || name;
-      const url = URLExt.join(settings.baseUrl, pathInfo) + '/';
+      const url = entry.url || URLExt.join(settings.baseUrl, pathInfo) + '/';
 
       // Fetch SVG icon via the server-proxy icon endpoint.
       // Construct URL directly (like infoUrl) to avoid base-path issues on JupyterHub.

@@ -1,0 +1,35 @@
+{
+  "webapps": {
+    "calmar": {
+      "title": "CALMaR",
+      "description": "Hosted CALMaR web application",
+      "direct_url": "https://calmar.neurodesk.org/"
+    },
+    "dicompare": {
+      "direct_url": "https://dicompare.neurodesk.org/"
+    },
+    "musclemap": {
+      "title": "MuscleMap",
+      "description": "Hosted MuscleMap web application",
+      "direct_url": "https://musclemap.neurodesk.org/"
+    },
+    "qsmbly": {
+      "direct_url": "https://qsmbly.neurodesk.org/"
+    },
+    "sct": {
+      "title": "SCT",
+      "description": "Hosted Spinal Cord Toolbox web application",
+      "direct_url": "https://sct.neurodesk.org/"
+    },
+    "seedseg": {
+      "title": "SeedSeg",
+      "description": "Hosted SeedSeg web application",
+      "direct_url": "https://seedseg.neurodesk.org/"
+    },
+    "vesselboost": {
+      "title": "VesselBoost",
+      "description": "Hosted VesselBoost web application",
+      "direct_url": "https://vesselboost.neurodesk.org/"
+    }
+  }
+}

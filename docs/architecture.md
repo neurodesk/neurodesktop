@@ -38,12 +38,15 @@ for module management, and stores containers in
 
 ### Webapp System
 
-Webapps are defined in `webapps.json`, which is fetched from the neurocommand
-repository. [`scripts/generate_jupyter_config.py`](../scripts/generate_jupyter_config.py)
-generates Jupyter Server Proxy entries. Each webapp launches through
-[`config/jupyter/webapp_launcher.sh`](../config/jupyter/webapp_launcher.sh) and
-uses Unix sockets such as `/tmp/neurodesk_webapp_{name}.sock` to avoid port
-conflicts.
+Container-backed webapps are defined in `webapps.json`, which is fetched from
+the neurocommand repository. Hosted webapp links and local overrides are defined
+in [`config/jupyter/webapp_links.json`](../config/jupyter/webapp_links.json) and
+applied by [`scripts/generate_jupyter_config.py`](../scripts/generate_jupyter_config.py)
+when generating Jupyter Server Proxy entries. Container-backed webapps launch
+through [`config/jupyter/webapp_launcher.sh`](../config/jupyter/webapp_launcher.sh)
+and use Unix sockets such as `/tmp/neurodesk_webapp_{name}.sock` to avoid port
+conflicts. Entries with `direct_url` open the hosted application directly from
+the Neurodesk launcher.
 
 ### Desktop Environment
 
@@ -90,9 +93,14 @@ timeouts into false cache misses.
 
 ### Config Generation
 
-The Dockerfile fetches `webapps.json` from the neurocommand repository and
+The Dockerfile clones neurocommand, copies its `neurodesk/webapps.json`, applies
+[`config/jupyter/webapp_links.json`](../config/jupyter/webapp_links.json), and
 generates `jupyter_notebook_config.py` using a template system. To add new
-webapps, update the source `webapps.json`.
+container-backed webapps, update the source `webapps.json`. To add hosted links
+or make an existing launcher tile open a hosted app directly, update
+`webapp_links.json`. This config generation runs after the neurocommand install
+layer so local launcher-link edits do not invalidate the earlier runtime setup
+layers.
 
 ### Apptainer
 

@@ -10,6 +10,7 @@ import json
 import sys
 import urllib.request
 import urllib.error
+from copy import deepcopy
 from pathlib import Path
 from typing import Dict, Any
 
@@ -58,11 +59,6 @@ def generate_server_proxy_entries(webapps: Dict[str, Any]) -> str:
     entries = []
 
     for name, config in sorted(webapps.items()):
-        # Use Unix socket - path is deterministic from app name (no port conflicts!)
-        socket_path = f"/tmp/neurodesk_webapp_{name}.sock"
-
-        # Main webapp entry
-        # Note: icon_path only works when category is "Notebook" or "Console" (JupyterLab limitation)
         category = config.get('category', 'Webapps')
         icon_config = config.get('icon', '/opt/neurodesk_brain_icon.svg')
 
@@ -73,6 +69,33 @@ def generate_server_proxy_entries(webapps: Dict[str, Any]) -> str:
             icon_path = icon_config
 
         startup_timeout = config.get('startup_timeout', 120)
+        direct_url = config.get('direct_url')
+
+        if direct_url:
+            if not direct_url.startswith(('http://', 'https://')):
+                raise ValueError(f"direct_url for {name} must be an HTTP(S) URL")
+
+            entry = f"""  '{name}': {{
+    'command': ['python3', '/opt/neurodesktop/external_webapp_redirect.py', '--url', '{direct_url}', '--port', '{{port}}'],
+    'timeout': 10,
+    'absolute_url': True,
+    'new_browser_tab': True,
+    'launcher_entry': {{
+      'path_info': '{name}',
+      'title': '{config.get('title', name)}',
+      'icon_path': '{icon_path}',
+      'category': '{category}',
+      'url': '{direct_url}'
+    }}
+  }}"""
+            entries.append(entry)
+            continue
+
+        # Use Unix socket - path is deterministic from app name (no port conflicts!)
+        socket_path = f"/tmp/neurodesk_webapp_{name}.sock"
+
+        # Main webapp entry
+        # Note: icon_path only works when category is "Notebook" or "Console" (JupyterLab limitation)
         entry = f"""  '{name}': {{
     'command': ['/opt/neurodesktop/webapp_launcher.sh', '{name}'],
     'unix_socket': '{socket_path}',
@@ -109,7 +132,52 @@ def generate_server_proxy_entries(webapps: Dict[str, Any]) -> str:
     return ",\n".join(entries)
 
 
-def generate_config(webapps_json_path: Path, template_path: Path, output_path: Path):
+def merge_webapp_configs(base_config: Dict[str, Any], overlay_config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Merge a local webapp overlay into the fetched webapps config.
+
+    Existing webapp entries are updated key-by-key. New overlay entries are
+    appended. This lets Neurodesktop override launcher-only behavior without
+    replacing the neurocommand-owned container app definitions.
+    """
+    merged = deepcopy(base_config)
+    merged_webapps = merged.setdefault("webapps", {})
+
+    for name, overlay_webapp in overlay_config.get("webapps", {}).items():
+        if not isinstance(overlay_webapp, dict):
+            raise ValueError(f"Overlay webapp {name} must be an object")
+
+        existing_webapp = merged_webapps.get(name, {})
+        if existing_webapp and not isinstance(existing_webapp, dict):
+            raise ValueError(f"Base webapp {name} must be an object")
+
+        updated_webapp = dict(existing_webapp)
+        updated_webapp.update(overlay_webapp)
+        merged_webapps[name] = updated_webapp
+
+    return merged
+
+
+def load_webapps_config(webapps_json_path: Path, overlay_paths: list[Path] | None = None) -> Dict[str, Any]:
+    print(f"Loading webapps from: {webapps_json_path}")
+    with open(webapps_json_path, 'r') as f:
+        data = json.load(f)
+
+    for overlay_path in overlay_paths or []:
+        print(f"Applying webapp overlay: {overlay_path}")
+        with open(overlay_path, 'r') as f:
+            overlay_data = json.load(f)
+        data = merge_webapp_configs(data, overlay_data)
+
+    return data
+
+
+def generate_config(
+    webapps_json_path: Path,
+    template_path: Path,
+    output_path: Path,
+    overlay_paths: list[Path] | None = None,
+):
     """
     Generate jupyter_notebook_config.py from template and webapps.json.
 
@@ -117,11 +185,9 @@ def generate_config(webapps_json_path: Path, template_path: Path, output_path: P
         webapps_json_path: Path to webapps.json
         template_path: Path to jupyter_notebook_config.py.template
         output_path: Path to write generated config
+        overlay_paths: Optional local webapp overlay JSON files
     """
-    # Load webapps.json
-    print(f"Loading webapps from: {webapps_json_path}")
-    with open(webapps_json_path, 'r') as f:
-        data = json.load(f)
+    data = load_webapps_config(webapps_json_path, overlay_paths)
 
     webapps = data.get("webapps", {})
     print(f"  Found {len(webapps)} webapp(s)")
@@ -150,22 +216,27 @@ def generate_config(webapps_json_path: Path, template_path: Path, output_path: P
 
     print("Done!")
     for name, config in webapps.items():
-        print(f"  - {name}: {config.get('title')} (socket: /tmp/neurodesk_webapp_{name}.sock)")
+        if config.get('direct_url'):
+            print(f"  - {name}: {config.get('title')} (direct: {config.get('direct_url')})")
+        else:
+            print(f"  - {name}: {config.get('title')} (socket: /tmp/neurodesk_webapp_{name}.sock)")
 
 
 def main():
-    if len(sys.argv) != 4:
-        print("Usage: generate_jupyter_config.py <webapps.json> <template.py> <output.py>")
+    if len(sys.argv) < 4:
+        print("Usage: generate_jupyter_config.py <webapps.json> <template.py> <output.py> [overlay.json ...]")
         print()
         print("Arguments:")
         print("  webapps.json  Path to webapp configurations JSON file")
         print("  template.py   Path to jupyter_notebook_config.py.template")
         print("  output.py     Path to write generated jupyter_notebook_config.py")
+        print("  overlay.json  Optional local webapp overlay JSON file(s)")
         sys.exit(1)
 
     webapps_json_path = Path(sys.argv[1])
     template_path = Path(sys.argv[2])
     output_path = Path(sys.argv[3])
+    overlay_paths = [Path(arg) for arg in sys.argv[4:]]
 
     if not webapps_json_path.exists():
         print(f"Error: webapps.json not found: {webapps_json_path}")
@@ -175,7 +246,12 @@ def main():
         print(f"Error: template not found: {template_path}")
         sys.exit(1)
 
-    generate_config(webapps_json_path, template_path, output_path)
+    for overlay_path in overlay_paths:
+        if not overlay_path.exists():
+            print(f"Error: overlay not found: {overlay_path}")
+            sys.exit(1)
+
+    generate_config(webapps_json_path, template_path, output_path, overlay_paths)
 
 
 if __name__ == "__main__":
