@@ -12,10 +12,9 @@ The image packages a copy of the build `Dockerfile` as `/opt/tests/Dockerfile`
 so source-shape regression tests under `/opt/tests/` can run in the same
 container-only layout as CI.
 
-For focused Apptainer build/runtime checks:
+For focused Apptainer build checks:
 
 ```bash
-pytest /opt/tests/test_apptainer_runtime.py
 docker buildx build --check .
 docker buildx build --target apptainer --progress=plain .
 ```

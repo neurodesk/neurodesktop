@@ -1,11 +1,11 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.24
 
 # Pin to a specific jupyter/base-notebook date for reproducibility.
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
-ARG BASE_IMAGE_TAG=2026-04-27
-ARG APPTAINER_VERSION=1.5.0-rc.2
-ARG APPTAINER_GO_VERSION=1.25.7
-ARG APPTAINER_GRPC_VERSION=1.79.3
+ARG BASE_IMAGE_TAG=2026-05-11
+ARG APPTAINER_VERSION=1.5.0
+ARG APPTAINER_GO_VERSION=1.26.3
+ARG APPTAINER_GRPC_VERSION=1.81.1
 
 FROM golang:${APPTAINER_GO_VERSION}-bookworm AS apptainer
 
@@ -70,7 +70,7 @@ USER root
 
 ARG BUILD_ONLY_APT_PACKAGES="build-essential libcairo2-dev libjpeg-turbo8-dev libpng-dev libtool-bin freerdp2-dev libvncserver-dev libssl-dev libwebp-dev libssh2-1-dev libpango1.0-dev"
 ARG GUACAMOLE_VERSION="1.6.0"
-ARG CODE_SERVER_VERSION="4.104.2"
+ARG CODE_SERVER_VERSION="4.118.0"
 
 # Install build dependencies + nodejs for npm operations
 RUN apt-get update --yes \
@@ -78,7 +78,7 @@ RUN apt-get update --yes \
     ${BUILD_ONLY_APT_PACKAGES} \
     wget \
     curl \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install --yes --no-install-recommends nodejs yarn \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -187,8 +187,9 @@ RUN mkdir -p /opt/strace \
     && wget -qO- https://github.com/JuliaBinaryWrappers/strace_jll.jl/releases/download/strace-v6.7.0%2B1/strace.v6.7.0.x86_64-linux-gnu.tar.gz | tar xz -C /opt/strace --strip-components=1 \
     && chmod +x /opt/strace
 
-ARG TOMCAT_REL="9"
-ARG TOMCAT_VERSION="9.0.116"
+ARG TOMCAT_REL="11"
+ARG TOMCAT_VERSION="11.0.22"
+ARG TOMCAT_MIGRATION_VERSION="1.0.10"
 ARG GUACAMOLE_VERSION="1.6.0"
 ENV LANG=""
 ENV LANGUAGE=""
@@ -234,10 +235,18 @@ RUN wget -q https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v${TOMCA
     && sed -i '/<session-config>/,/<\/session-config>/c\    <session-config>\n        <session-timeout>30</session-timeout>\n        <cookie-config>\n            <max-age>86400</max-age>\n            <http-only>true</http-only>\n        </cookie-config>\n    </session-config>' /usr/local/tomcat/conf/web.xml \
     && chmod +x /usr/local/tomcat/bin/*.sh
 
-# Install Apache Guacamole WAR
+# Install Apache Guacamole WAR and convert its Java EE servlet APIs for Tomcat 11.
 RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
     "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/binary/guacamole-${GUACAMOLE_VERSION}.war" \
-    -o /usr/local/tomcat/webapps/ROOT.war
+    -o /tmp/guacamole-${GUACAMOLE_VERSION}.war \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
+    "https://archive.apache.org/dist/tomcat/jakartaee-migration/v${TOMCAT_MIGRATION_VERSION}/binaries/jakartaee-migration-${TOMCAT_MIGRATION_VERSION}-shaded.jar" \
+    -o /tmp/jakartaee-migration-${TOMCAT_MIGRATION_VERSION}-shaded.jar \
+    && java -jar /tmp/jakartaee-migration-${TOMCAT_MIGRATION_VERSION}-shaded.jar \
+    /tmp/guacamole-${GUACAMOLE_VERSION}.war \
+    /usr/local/tomcat/webapps/ROOT.war \
+    && rm -f /tmp/guacamole-${GUACAMOLE_VERSION}.war \
+    /tmp/jakartaee-migration-${TOMCAT_MIGRATION_VERSION}-shaded.jar
 
 # #========================================#
 # # Software (as root user)
@@ -400,7 +409,7 @@ RUN mkdir -p "${NF_TEST_HOME}" \
 # jupyterlab-slurm, neurodesk-launcher). build-essential provides gcc for pip
 # packages with C extensions (e.g. psutil, traits). build-essential is removed
 # after extensions are built (see purge step below); nodejs stays for codex.
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install --yes --no-install-recommends nodejs build-essential \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -464,7 +473,7 @@ RUN /opt/conda/bin/pip install \
     nbdev \
     nf-core \
     snakemake \
-    pydra==1.0a7 \
+    pydra==1.0a9 \
     nipoppy \
     matplotlib \
     datalad-container \
@@ -477,7 +486,7 @@ RUN /opt/conda/bin/pip install \
     jupyterlab-git \
     notebook_intelligence \
     jupyterlab_rise \
-    jupyterlab-niivue==0.2.5 \
+    jupyterlab-niivue==0.2.7 \
     jupyterlab_myst \
     jupyter-sshd-proxy \
     papermill \
@@ -486,16 +495,16 @@ RUN /opt/conda/bin/pip install \
     jupyter_scheduler \
     jupyterlab-slurm@git+https://github.com/NERSC/jupyterlab-slurm.git@main \
     httpx \
-    ipywidgets==7.8.5 \
+    ipywidgets==8.1.8 \
     ipyvolume \
     jupyterlab_widgets \
     nbgitpuller \
     xnat \
     pytest \
     bash_kernel \
-    "requests>=2.32.3" \
-    "chardet<6" \
-    && /opt/conda/bin/pip install --upgrade "litellm>=1.83.7" \
+    "requests>=2.34.2" \
+    "chardet<8" \
+    && /opt/conda/bin/pip install --upgrade "litellm>=1.85.0" \
     && /opt/conda/bin/python -m bash_kernel.install --sys-prefix \
     && /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
     && rm -rf /home/${NB_USER}/.cache
