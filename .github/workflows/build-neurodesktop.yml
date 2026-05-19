@@ -82,14 +82,9 @@ jobs:
       - name: Check if image exists
         if: github.event_name == 'schedule'
         id: check_image
-        run: |
-          if docker manifest inspect $IMAGEID:$BUILDDATE > /dev/null 2>&1; then
-            echo "Image $IMAGEID:$BUILDDATE already exists."
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "Image $IMAGEID:$BUILDDATE does not exist."
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
+        uses: ./.github/actions/check-registry-manifest
+        with:
+          image: ${{ env.IMAGEID }}:${{ env.BUILDDATE }}
       - name: Set up QEMU
         if: steps.check_image.outputs.exists != 'true'
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
@@ -98,7 +93,7 @@ jobs:
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
       - name: Login to GHCR
         if: steps.check_image.outputs.exists != 'true'
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: ./.github/actions/docker-login-retry
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -142,23 +137,22 @@ jobs:
           echo "BUILDDATE=$BUILDDATE" >> $GITHUB_ENV
           echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
           echo "IMAGENAME=$IMAGENAME" >> $GITHUB_ENV
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.ref }}
       - name: Check if image exists
         if: github.event_name == 'schedule'
         id: check_image
-        run: |
-          if docker manifest inspect $IMAGEID:$BUILDDATE > /dev/null 2>&1; then
-            echo "Image $IMAGEID:$BUILDDATE already exists."
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "Image $IMAGEID:$BUILDDATE does not exist."
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
+        uses: ./.github/actions/check-registry-manifest
+        with:
+          image: ${{ env.IMAGEID }}:${{ env.BUILDDATE }}
       - name: Set up Docker Buildx
         if: steps.check_image.outputs.exists != 'true'
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
       - name: Login to GHCR
         if: steps.check_image.outputs.exists != 'true'
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: ./.github/actions/docker-login-retry
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -293,7 +287,7 @@ jobs:
         with:
           ref: ${{ github.ref }}
       - name: Login to GHCR
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: ./.github/actions/docker-login-retry
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -443,8 +437,12 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift /usr/lib/android-sdk
           sudo docker image prune --all --force
           sudo docker builder prune --force
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.ref }}
       - name: Login to GHCR
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: ./.github/actions/docker-login-retry
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}

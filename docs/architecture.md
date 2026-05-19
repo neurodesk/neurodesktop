@@ -80,7 +80,11 @@ provides browser-based remote desktop access. Configuration lives in
 - [`.github/workflows/test-cvmfs.yml`](../.github/workflows/test-cvmfs.yml):
   CVMFS server health checks
 
-CI includes multi-architecture builds for amd64 and arm64.
+CI includes multi-architecture builds for amd64 and arm64. Registry-sensitive
+build paths use local composite actions under
+[`.github/actions/`](../.github/actions/) so transient GHCR transport failures
+are retried at login and manifest-check boundaries without turning registry
+timeouts into false cache misses.
 
 ## Build-Time Behaviors
 

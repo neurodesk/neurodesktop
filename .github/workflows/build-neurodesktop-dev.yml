@@ -76,7 +76,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
       - name: Login to GHCR
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: ./.github/actions/docker-login-retry
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -211,7 +211,7 @@ jobs:
         with:
           ref: ${{ github.ref }}
       - name: Login to GHCR
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: ./.github/actions/docker-login-retry
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -356,8 +356,12 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift /usr/lib/android-sdk
           sudo docker image prune --all --force
           sudo docker builder prune --force
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.ref }}
       - name: Login to GHCR
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: ./.github/actions/docker-login-retry
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}

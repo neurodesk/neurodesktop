@@ -20,6 +20,12 @@ docker buildx build --check .
 docker buildx build --target apptainer --progress=plain .
 ```
 
+For focused CI workflow source-shape checks from a repository checkout:
+
+```bash
+pytest tests/test_github_workflows.py
+```
+
 ## Negative Test Convention
 
 When adding tests for pipeline or module-loading workflows, always include a

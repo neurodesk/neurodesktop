@@ -745,9 +745,6 @@ ADD "https://api.github.com/repos/neurodesk/neurocommand/git/refs/heads/main" /t
 RUN rm /tmp/skipcache \
     && git clone https://github.com/neurodesk/neurocommand.git /neurocommand \
     && cd /neurocommand \
-    && sed -i 's|CONTAINER_PATH=${PATH_PREFIX}/containers|CONTAINER_PATH=${NEURODESKTOP_LOCAL_CONTAINERS:-${PATH_PREFIX}/containers}|g' neurodesk/fetch_containers.sh \
-    && sed -i 's|export CONTAINER_PATH="${_base}"/containers|export CONTAINER_PATH="${NEURODESKTOP_LOCAL_CONTAINERS:-${_base}/containers}"|g' neurodesk/fetch_and_run.sh \
-    && sed -i 's|CONTAINER_PATH="${_base}"/containers|CONTAINER_PATH="${NEURODESKTOP_LOCAL_CONTAINERS:-${_base}/containers}"|g' neurodesk/fetch_and_run.sh \
     && bash build.sh --lxde --edit \
     && bash install.sh \
     && ln -s /neurodesktop-storage/containers /neurocommand/local/containers

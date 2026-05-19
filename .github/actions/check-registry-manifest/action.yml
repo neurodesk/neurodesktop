@@ -1,0 +1,127 @@
+name: Check registry manifest with retry
+description: Check whether an image manifest exists without treating transport errors as cache misses.
+
+inputs:
+  image:
+    description: Fully qualified image reference to inspect.
+    required: true
+  max-attempts:
+    description: Maximum manifest inspect attempts before failing.
+    required: false
+    default: "5"
+  attempt-timeout-seconds:
+    description: Timeout for each docker manifest inspect attempt.
+    required: false
+    default: "45"
+  curl-timeout-seconds:
+    description: Timeout for the registry reachability probe.
+    required: false
+    default: "15"
+
+outputs:
+  exists:
+    description: "true if the manifest exists, false if the registry explicitly reports it missing."
+    value: ${{ steps.check.outputs.exists }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check manifest
+      id: check
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        MAX_ATTEMPTS: ${{ inputs.max-attempts }}
+        ATTEMPT_TIMEOUT_SECONDS: ${{ inputs.attempt-timeout-seconds }}
+        CURL_TIMEOUT_SECONDS: ${{ inputs.curl-timeout-seconds }}
+      run: |
+        set -euo pipefail
+
+        require_positive_integer() {
+          local name="$1"
+          local value="$2"
+          if ! [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::${name} must be a positive integer; got '${value}'."
+            exit 2
+          fi
+        }
+
+        is_manifest_missing() {
+          local log_file="$1"
+          grep -Eiq '(manifest unknown|no such manifest|name unknown|not found)' "$log_file"
+        }
+
+        retry_delay_seconds() {
+          local attempt="$1"
+          case "$attempt" in
+            1) echo 5 ;;
+            2) echo 15 ;;
+            3) echo 30 ;;
+            *) echo 60 ;;
+          esac
+        }
+
+        require_positive_integer "max-attempts" "$MAX_ATTEMPTS"
+        require_positive_integer "attempt-timeout-seconds" "$ATTEMPT_TIMEOUT_SECONDS"
+        require_positive_integer "curl-timeout-seconds" "$CURL_TIMEOUT_SECONDS"
+
+        registry="${IMAGE%%/*}"
+        if [ "$registry" = "$IMAGE" ]; then
+          registry="registry-1.docker.io"
+        fi
+        registry_url="https://${registry}/v2/"
+
+        for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
+          echo "Checking manifest ${IMAGE}: attempt ${attempt}/${MAX_ATTEMPTS}"
+
+          probe_log="$(mktemp)"
+          probe_rc=0
+          curl -sS -o /dev/null \
+            -w "Registry probe ${registry}: http=%{http_code} connect=%{time_connect}s tls=%{time_appconnect}s total=%{time_total}s\n" \
+            --connect-timeout "$CURL_TIMEOUT_SECONDS" \
+            --max-time "$CURL_TIMEOUT_SECONDS" \
+            "$registry_url" >"$probe_log" 2>&1 || probe_rc=$?
+          cat "$probe_log"
+          rm -f "$probe_log"
+          if [ "$probe_rc" -ne 0 ]; then
+            echo "::warning::Registry probe for ${registry} exited with ${probe_rc}; manifest inspect will still be attempted."
+          fi
+
+          inspect_log="$(mktemp)"
+          set +e
+          timeout "${ATTEMPT_TIMEOUT_SECONDS}s" docker manifest inspect "$IMAGE" >"$inspect_log" 2>&1
+          inspect_rc=$?
+          set -e
+
+          if [ "$inspect_rc" -eq 0 ]; then
+            rm -f "$inspect_log"
+            echo "Manifest ${IMAGE} exists."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if is_manifest_missing "$inspect_log"; then
+            cat "$inspect_log"
+            rm -f "$inspect_log"
+            echo "Manifest ${IMAGE} does not exist."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          cat "$inspect_log"
+          rm -f "$inspect_log"
+          if [ "$inspect_rc" -eq 124 ]; then
+            echo "::warning::Manifest inspect for ${IMAGE} timed out after ${ATTEMPT_TIMEOUT_SECONDS}s."
+          else
+            echo "::warning::Manifest inspect for ${IMAGE} failed with exit code ${inspect_rc}."
+          fi
+
+          if [ "$attempt" -lt "$MAX_ATTEMPTS" ]; then
+            delay="$(retry_delay_seconds "$attempt")"
+            echo "Retrying manifest inspect for ${IMAGE} in ${delay}s."
+            sleep "$delay"
+          else
+            echo "::error::Could not determine whether ${IMAGE} exists after ${MAX_ATTEMPTS} attempts."
+            exit "$inspect_rc"
+          fi
+        done
