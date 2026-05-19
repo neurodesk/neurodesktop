@@ -526,64 +526,6 @@ def stop_backend_for_idle(idle_for):
     _close_backend_connections()
 
 
-_close_check_timer = None
-_close_check_lock = threading.Lock()
-
-CLOSE_CHECK_DELAY = 5  # seconds to wait after close beacon before checking
-
-
-def _schedule_close_check():
-    """Schedule a deferred check after a tab-close beacon.
-
-    If no heartbeat arrives within CLOSE_CHECK_DELAY seconds after the
-    close beacon, the backend is stopped immediately instead of waiting
-    for the full idle_timeout (90s).  Multiple close beacons (e.g. from
-    several tabs closing in quick succession) reset the timer so we
-    only check once, after the last one.
-    """
-    global _close_check_timer
-
-    with _close_check_lock:
-        if _close_check_timer is not None:
-            _close_check_timer.cancel()
-        _close_check_timer = threading.Timer(CLOSE_CHECK_DELAY, _perform_close_check)
-        _close_check_timer.daemon = True
-        _close_check_timer.start()
-
-
-def _perform_close_check():
-    """Called CLOSE_CHECK_DELAY seconds after the last close beacon.
-
-    If no activity happened since the beacon (i.e. no heartbeat from
-    another open tab), stop the backend right away.
-    """
-    global _close_check_timer
-
-    with _close_check_lock:
-        _close_check_timer = None
-
-    with shutdown_lock:
-        inflight = active_client_requests
-
-    if inflight > 0:
-        log("Close check: requests still in flight, rescheduling")
-        _schedule_close_check()
-        return
-
-    idle_for = time.time() - last_client_activity
-    if idle_for >= CLOSE_CHECK_DELAY - 1:
-        # No heartbeat arrived since the close beacon
-        log(f"Close check: no heartbeat for {idle_for:.1f}s after close beacon; stopping backend")
-        stop_backend_for_idle(idle_for)
-    else:
-        # Activity was recent — could be a genuine heartbeat from another
-        # tab, or a stale in-flight request completing.  Reschedule to
-        # re-check rather than giving up and waiting for the full 90s
-        # idle timeout.
-        log(f"Close check: activity detected {idle_for:.1f}s ago, rescheduling")
-        _schedule_close_check()
-
-
 def initiate_shutdown(reason):
     """Stop container processes and exit the wrapper server."""
     global httpd_server
@@ -818,6 +760,8 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
     def _handle_request(self, method):
         # Close beacons must NOT reset the idle timer — otherwise every tab
         # close extends the backend lifetime by a full idle_timeout period.
+        # They also cannot safely trigger immediate shutdown: browsers fire
+        # pagehide/beforeunload during reloads and some app-driven navigation.
         if self._is_status_endpoint() and method == "POST" and self._is_close_beacon():
             self._send_status(method, is_close=True)
             return
@@ -925,8 +869,7 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             if is_close:
-                log("Close beacon received; scheduling deferred close check")
-                _schedule_close_check()
+                log("Close beacon received; backend will stop after normal idle timeout")
             return
 
         elapsed = time.time() - startup_start_time if startup_start_time else 0
