@@ -117,6 +117,97 @@ jobs:
           no-cache: true
           push: true
           tags: ${{ env.IMAGEID }}:${{ matrix.platform.tag }}
+      # Telemetry — captures arc-base resource peak after the build step.
+      # Goal: empirically size CPU / memory / docker-lib PVC / work PVC
+      # for a future dedicated arc-neurodesktop pool. `if: always()` so
+      # disk-pressure or OOM failures still emit the data we want to see.
+      - name: Capture arc-base resource peak (sizing telemetry)
+        if: always()
+        run: |
+          set +e
+
+          echo "::group::Host / arch / kernel"
+          uname -a
+          nproc
+          grep -E "^(model name|cpu MHz|cpu cores)" /proc/cpuinfo | sort -u
+          echo "::endgroup::"
+
+          echo "::group::Memory snapshot (free -h, /proc/meminfo)"
+          free -h
+          echo "---"
+          head -20 /proc/meminfo
+          echo "::endgroup::"
+
+          # Kernel-maintained peak for the runner container's cgroup.
+          # memory.peak is the high-water-mark since the pod started — this
+          # is THE number for sizing the pod's memory request/limit.
+          # io.stat tells us if we hit storage I/O ceilings during build.
+          # cpu.stat throttled_time > 0 means we were CPU-capped.
+          echo "::group::Runner cgroup peak (memory / cpu / io)"
+          echo "--- cgroup tree (v2 root, expect memory.peak etc. present) ---"
+          ls /sys/fs/cgroup/ 2>&1 | head -20
+          echo
+          for f in memory.peak memory.current memory.max memory.events memory.events.local memory.swap.peak memory.swap.current cpu.stat cpu.max io.stat io.pressure cpu.pressure memory.pressure; do
+            if [ -r /sys/fs/cgroup/$f ]; then
+              echo "--- $f ---"
+              cat /sys/fs/cgroup/$f 2>&1
+              echo
+            fi
+          done
+          # Fallback for cgroup v1 (just in case)
+          for f in memory/memory.max_usage_in_bytes memory/memory.limit_in_bytes cpuacct/cpuacct.usage; do
+            if [ -r /sys/fs/cgroup/$f ]; then
+              echo "--- (v1 fallback) $f ---"
+              cat /sys/fs/cgroup/$f 2>&1
+            fi
+          done
+          echo "::endgroup::"
+
+          echo "::group::Filesystem from runner (df -h)"
+          df -h
+          echo "::endgroup::"
+
+          echo "::group::Work PVC usage"
+          du -sh /home/runner/_work 2>/dev/null
+          du -sh /home/runner/_work/* 2>/dev/null | sort -h
+          echo "::endgroup::"
+
+          echo "::group::Docker daemon view (docker system df -v)"
+          docker system df -v 2>&1
+          echo "::endgroup::"
+
+          echo "::group::Docker info (subset)"
+          docker info 2>&1 | grep -E "(Server Version|Storage Driver|Backing Filesystem|Docker Root|CPUs|Total Memory|Operating System|Kernel|Cgroup)" || true
+          echo "::endgroup::"
+
+          # The docker daemon runs inside its OWN container (DinD sidecar) with
+          # its OWN cgroup, separate from the runner's. We can't read its cgroup
+          # files directly, but we CAN peek at /var/lib/docker via a privileged
+          # container the daemon spawns — that gives us actual PVC fill.
+          echo "::group::docker-lib PVC fill (privileged peek into DinD)"
+          docker run --rm -v /var/lib/docker:/host-docker:ro alpine:3.20 sh -c '
+            echo "--- df of /var/lib/docker (the docker-lib PVC) ---"
+            df -h /host-docker
+            echo "--- du of top-level subdirs ---"
+            du -sh /host-docker/* 2>/dev/null | sort -h
+          ' 2>&1
+          echo "::endgroup::"
+
+          echo "::group::Buildkit cache (docker buildx du)"
+          docker buildx du 2>&1 | head -60 || true
+          echo "::endgroup::"
+
+          # Live snapshot — only catches containers still running. Builder
+          # may have been torn down already, but worth a look.
+          echo "::group::Live docker stats snapshot"
+          docker stats --no-stream 2>&1 | head -20 || true
+          echo "::endgroup::"
+
+          # Bytes in/out since pod start. Useful for: was the registry push
+          # bandwidth-bound? Compare bytes-out on eth0 to push duration.
+          echo "::group::Network bytes since pod start (/proc/net/dev)"
+          cat /proc/net/dev
+          echo "::endgroup::"
       - name: Report job failure
         if: always() && failure()
         uses: ./.github/actions/report-job-failure
