@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="seedseg-title">
+  <title id="seedseg-title">SeedSeg launcher icon</title>
+  <rect width="64" height="64" rx="12" fill="#3b345f"/>
+  <circle cx="32" cy="32" r="19" fill="#111936" stroke="#c7b9ff" stroke-width="3"/>
+  <path d="M32 14v36M14 32h36M20 20l24 24M44 20 20 44" stroke="#51498c" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="32" cy="32" r="6" fill="#ffd166"/>
+  <circle cx="22" cy="25" r="4" fill="#5de0c4"/>
+  <circle cx="43" cy="24" r="4" fill="#ff7a90"/>
+  <circle cx="40" cy="43" r="4" fill="#7dd3fc"/>
+  <path d="M22 25 32 32 43 24M32 32l8 11" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round"/>
+</svg>

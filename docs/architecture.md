@@ -46,7 +46,13 @@ when generating Jupyter Server Proxy entries. Container-backed webapps launch
 through [`config/jupyter/webapp_launcher.sh`](../config/jupyter/webapp_launcher.sh)
 and use Unix sockets such as `/tmp/neurodesk_webapp_{name}.sock` to avoid port
 conflicts. Entries with `direct_url` open the hosted application directly from
-the Neurodesk launcher.
+the Neurodesk launcher. Launcher tile icons for those entries are checked-in
+SVG or PNG files in
+[`config/jupyter/webapp_icons/`](../config/jupyter/webapp_icons/) referenced from
+`webapp_links.json` with `/opt/neurodesk/icons/*` paths; the Dockerfile copies
+them into the image before Jupyter config generation. The custom Neurodesk
+launcher reads icons through the server-proxy icon endpoint and wraps raster
+images as SVGs for JupyterLab `LabIcon` support.
 
 ### Desktop Environment
 

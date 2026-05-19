@@ -215,10 +215,8 @@ RUN wget -q https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v${TOMCA
     && mv /tmp/apache-tomcat-${TOMCAT_VERSION} /usr/local/tomcat \
     && mv /usr/local/tomcat/webapps /usr/local/tomcat/webapps.dist \
     && mkdir /usr/local/tomcat/webapps \
-    && if ! grep -q 'maxHttpRequestHeaderSize=' /usr/local/tomcat/conf/server.xml; then \
-        sed -i '/<Connector port="8080" protocol="HTTP\/1\.1"/,/^[[:space:]]*\/>/ s|^[[:space:]]*\/>$|               maxHttpRequestHeaderSize="65536"\
-               />|' /usr/local/tomcat/conf/server.xml; \
-    fi \
+    && sed -i -E '/<Connector port="8080" protocol="HTTP\/1\.1"/ {/maxHttpRequestHeaderSize=/! s|$| maxHttpRequestHeaderSize="65536"|;}' /usr/local/tomcat/conf/server.xml \
+    && grep -q 'maxHttpRequestHeaderSize="65536"' /usr/local/tomcat/conf/server.xml \
     # Make the Connector port settable per-user via CATALINA_OPTS=-Dport.http=NNNN.
     # Needed under Apptainer where multiple users share the host netns and cannot
     # all bind 8080. catalina.properties supplies 8080 as the fallback so running
@@ -741,6 +739,8 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     install -D -m 0644 /tmp/jupyter/neurodesk_brain_logo.svg /opt/neurodesk_brain_logo.svg \
     && install -D -m 0644 /tmp/jupyter/neurodesk_brain_icon.svg /opt/neurodesk_brain_icon.svg \
     && install -D -m 0644 /tmp/jupyter/vscode_logo.svg /opt/vscode_logo.svg \
+    && install -d -m 0755 /opt/neurodesk/icons \
+    && cp -a /tmp/jupyter/webapp_icons/. /opt/neurodesk/icons/ \
     && install -D -m 0644 /tmp/lxde/background.png /usr/share/lxde/wallpapers/desktop_wallpaper.png \
     && install -D -m 0644 /tmp/lxde/pcmanfm.conf /etc/xdg/pcmanfm/LXDE/pcmanfm.conf \
     && install -D -m 0644 /tmp/lxde/lxterminal.conf /usr/share/lxterminal/lxterminal.conf \

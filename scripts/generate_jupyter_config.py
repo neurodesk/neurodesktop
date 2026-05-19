@@ -13,6 +13,7 @@ import urllib.error
 from copy import deepcopy
 from pathlib import Path
 from typing import Dict, Any
+from urllib.parse import urlparse
 
 # Directory to store downloaded webapp icons
 ICONS_DIR = Path("/opt/neurodesk/icons")
@@ -31,8 +32,8 @@ def download_icon(url: str, name: str) -> str:
     """
     default_icon = "/opt/neurodesk_brain_icon.svg"
 
-    # Determine file extension from URL
-    ext = Path(url).suffix or ".svg"
+    # Determine file extension from the URL path, ignoring query strings.
+    ext = Path(urlparse(url).path).suffix or ".svg"
     local_path = ICONS_DIR / f"{name}{ext}"
 
     try:
@@ -94,8 +95,8 @@ def generate_server_proxy_entries(webapps: Dict[str, Any]) -> str:
         # Use Unix socket - path is deterministic from app name (no port conflicts!)
         socket_path = f"/tmp/neurodesk_webapp_{name}.sock"
 
-        # Main webapp entry
-        # Note: icon_path only works when category is "Notebook" or "Console" (JupyterLab limitation)
+        # Main webapp entry. The custom Neurodesk launcher extension reads
+        # icon_path values through the server-proxy icon endpoint.
         entry = f"""  '{name}': {{
     'command': ['/opt/neurodesktop/webapp_launcher.sh', '{name}'],
     'unix_socket': '{socket_path}',
