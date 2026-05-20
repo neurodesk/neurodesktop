@@ -18,6 +18,7 @@ interface ILauncherEntry {
   title: string;
   path_info: string;
   category: string;
+  url?: string;
 }
 
 interface IServerProcess {
@@ -158,7 +159,66 @@ function startResourceUsageUnitOverride(): void {
   window.setInterval(updateResourceUsageUnits, 1000);
 }
 
-async function fetchSvgText(
+function escapeXmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function readBlobAsDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () =>
+      reject(reader.error ?? new Error('Failed to read icon blob'));
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error('Icon blob did not produce a data URL'));
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+function looksLikeRasterImage(blob: Blob, header: Uint8Array): boolean {
+  if (blob.type.startsWith('image/')) {
+    return true;
+  }
+
+  return (
+    (header[0] === 0x89 &&
+      header[1] === 0x50 &&
+      header[2] === 0x4e &&
+      header[3] === 0x47) ||
+    (header[0] === 0xff && header[1] === 0xd8) ||
+    (header[0] === 0x47 &&
+      header[1] === 0x49 &&
+      header[2] === 0x46) ||
+    (header[0] === 0x52 &&
+      header[1] === 0x49 &&
+      header[2] === 0x46 &&
+      header[3] === 0x46 &&
+      header[8] === 0x57 &&
+      header[9] === 0x45 &&
+      header[10] === 0x42 &&
+      header[11] === 0x50)
+  );
+}
+
+function wrapRasterIconDataUrl(name: string, dataUrl: string): string {
+  const background =
+    name === 'sct'
+      ? '<rect width="128" height="128" rx="16" fill="#111827"/>'
+      : '';
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="${escapeXmlAttribute(name)} launcher icon">${background}<image href="${escapeXmlAttribute(dataUrl)}" x="8" y="8" width="112" height="112" preserveAspectRatio="xMidYMid meet"/></svg>`;
+}
+
+async function fetchIconSvgText(
+  name: string,
   url: string,
   settings: ServerConnection.ISettings
 ): Promise<string | null> {
@@ -167,10 +227,30 @@ async function fetchSvgText(
     if (!response.ok) {
       return null;
     }
-    const text = await response.text();
+
+    const contentType = response.headers.get('content-type') ?? '';
+    if (
+      contentType.includes('svg') ||
+      contentType.includes('xml') ||
+      contentType.startsWith('text/')
+    ) {
+      const text = await response.text();
+      return text.includes('<svg') ? text : null;
+    }
+
+    const blob = await response.blob();
+    const header = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+
+    if (looksLikeRasterImage(blob, header)) {
+      const dataUrl = await readBlobAsDataUrl(blob);
+      return wrapRasterIconDataUrl(name, dataUrl);
+    }
+
+    const text = await blob.text();
     if (text.includes('<svg')) {
       return text;
     }
+
     return null;
   } catch {
     return null;
@@ -296,7 +376,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
         'icon',
         ndProcess.name
       );
-      neuroIconSvg = await fetchSvgText(iconUrl, settings);
+      neuroIconSvg = await fetchIconSvgText(ndProcess.name, iconUrl, settings);
     }
 
     for (const sp of data.server_processes || []) {
@@ -307,9 +387,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
       const title = entry.title || name;
       const category = entry.category || 'Other';
       const pathInfo = entry.path_info || name;
-      const url = URLExt.join(settings.baseUrl, pathInfo) + '/';
+      const url = entry.url || URLExt.join(settings.baseUrl, pathInfo) + '/';
 
-      // Fetch SVG icon via the server-proxy icon endpoint.
+      // Fetch icon via the server-proxy icon endpoint.
       // Construct URL directly (like infoUrl) to avoid base-path issues on JupyterHub.
       let icon: LabIcon | undefined;
       const iconFullUrl = URLExt.join(
@@ -318,7 +398,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
         'icon',
         name
       );
-      const svgStr = await fetchSvgText(iconFullUrl, settings);
+      const svgStr = await fetchIconSvgText(name, iconFullUrl, settings);
       if (svgStr) {
         icon = new LabIcon({
           name: `neurodesk-launcher:${name}`,
