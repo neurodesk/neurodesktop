@@ -12,8 +12,9 @@ FROM golang:${APPTAINER_GO_VERSION}-bookworm AS apptainer
 ARG APPTAINER_VERSION
 ARG APPTAINER_GRPC_VERSION
 
-RUN apt-get update --yes \
-    && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
+
+RUN apt-install-retry \
     autoconf \
     automake \
     build-essential \
@@ -38,7 +39,7 @@ RUN apt-get update --yes \
     uidmap \
     wget \
     zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
@@ -72,14 +73,15 @@ ARG BUILD_ONLY_APT_PACKAGES="build-essential libcairo2-dev libjpeg-turbo8-dev li
 ARG GUACAMOLE_VERSION="1.6.0"
 ARG CODE_SERVER_VERSION="4.118.0"
 
+COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
+
 # Install build dependencies + nodejs for npm operations
-RUN apt-get update --yes \
-    && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
+RUN apt-install-retry \
     ${BUILD_ONLY_APT_PACKAGES} \
     wget \
     curl \
     && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-    && apt-get install --yes --no-install-recommends nodejs yarn \
+    && apt-install-retry nodejs yarn \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Build Guacamole server
@@ -138,14 +140,15 @@ USER root
 
 ARG GUACAMOLE_RUNTIME_APT_PACKAGES="libfreerdp2-2t64 libfreerdp-client2-2t64 libwinpr2-2t64 libvncclient1"
 
+COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
+
 #========================================#
 # Core services
 #========================================#
 
 
 # Install base image dependencies (runtime only — build deps are in the builder stage)
-RUN apt-get update --yes \
-    && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
+RUN apt-install-retry \
     software-properties-common \
     openjdk-21-jre-headless \
     ${GUACAMOLE_RUNTIME_APT_PACKAGES} \
@@ -204,8 +207,7 @@ RUN ln -sf /opt/apptainer/bin/apptainer /usr/local/bin/apptainer \
     && ln -sf /opt/apptainer/bin/singularity /usr/local/bin/singularity \
     && rm -rf /opt/apptainer/libexec/apptainer/cni \
     && sed -i 's/^allow setuid = yes/allow setuid = no/' /opt/apptainer/etc/apptainer/apptainer.conf \
-    && apt-get update -o APT::Update::Error-Mode=any -o Acquire::Retries=5 --yes \
-    && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends fuse-overlayfs squashfuse \
+    && apt-install-retry fuse-overlayfs squashfuse \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && rm -rf /root/.cache && rm -rf /home/${NB_USER}/.cache
 
@@ -261,16 +263,14 @@ RUN mv /usr/bin/systemctl /usr/bin/systemctl.orig \
 RUN wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb -P /tmp \
     && dpkg -i /tmp/cvmfs-release-latest_all.deb \
     && rm /tmp/cvmfs-release-latest_all.deb \
-    && apt-get update --yes \
-    && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
+    && apt-install-retry \
     autofs \
     cvmfs \
     uuid-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Tools and Libs
-RUN apt-get update --yes \
-    && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends \
+RUN apt-install-retry \
     aria2 \
     bc \
     davfs2 \
@@ -409,7 +409,7 @@ RUN mkdir -p "${NF_TEST_HOME}" \
 # packages with C extensions (e.g. psutil, traits). build-essential is removed
 # after extensions are built (see purge step below); nodejs stays for codex.
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-    && apt-get install --yes --no-install-recommends nodejs build-essential \
+    && apt-install-retry nodejs build-essential \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install AI coding assistants
@@ -444,8 +444,7 @@ RUN --mount=type=bind,source=config/firefox,target=/tmp/firefox,ro \
     && printf '%s\n' 'deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main' \
     > /etc/apt/sources.list.d/mozilla.list \
     && install -m 0644 /tmp/firefox/mozilla /etc/apt/preferences.d/mozilla \
-    && apt-get update -o APT::Update::Error-Mode=any --yes \
-    && DEBIAN_FRONTEND=noninteractive apt install --yes --no-install-recommends firefox \
+    && apt-install-retry firefox \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 RUN --mount=type=bind,source=config/firefox/syspref.js,target=/tmp/syspref.js,ro \
