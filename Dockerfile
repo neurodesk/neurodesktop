@@ -790,6 +790,8 @@ USER root
 
 WORKDIR "/home/${NB_USER}"
 
+HEALTHCHECK --interval=1m --timeout=1s --start-period=3s --retries=3 CMD /etc/jupyter/docker_healthcheck.py || exit 1
+
 # Image metadata
 ARG BASE_IMAGE_TAG
 ARG NEURODESKTOP_VERSION="development"
