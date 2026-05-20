@@ -9,6 +9,9 @@
   `NEURODESKTOP_LOCAL_CONTAINERS`
 - `NB_UID`, `NB_GID`: user and group IDs for permission matching
 - `START_LOCAL_LLMS`: set to `1` to enable Ollama with the Neurodesk model
+- `NEURODESKTOP_DESKTOP_BACKEND`: desktop backend started by `guacamole.sh`;
+  supported values are `rdp`, `vnc`, and `both`. The Jupyter launcher sets this
+  automatically for the separate RDP and VNC desktop entries
 - `NEURODESKTOP_VERSION`: version tag set by CI
 - `OPENCODE_MODEL_PROFILE`: set to `ollama`, `neurodesk`, `jetstream`, or
   `provider/model` to skip the interactive OpenCode model picker

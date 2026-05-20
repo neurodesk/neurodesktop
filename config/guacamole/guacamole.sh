@@ -22,6 +22,30 @@ is_apptainer_runtime() {
     [ -d "/.singularity.d" ]
 }
 
+NEURODESKTOP_DESKTOP_BACKEND="$(
+    printf '%s' "${NEURODESKTOP_DESKTOP_BACKEND:-both}" | tr '[:upper:]' '[:lower:]'
+)"
+case "${NEURODESKTOP_DESKTOP_BACKEND}" in
+    rdp)
+        _start_rdp=1
+        _start_vnc=0
+        ;;
+    vnc)
+        _start_rdp=0
+        _start_vnc=1
+        ;;
+    both|all)
+        NEURODESKTOP_DESKTOP_BACKEND="both"
+        _start_rdp=1
+        _start_vnc=1
+        ;;
+    *)
+        echo "[ERROR] Unsupported NEURODESKTOP_DESKTOP_BACKEND=${NEURODESKTOP_DESKTOP_BACKEND}. Use rdp, vnc, or both." >&2
+        exit 1
+        ;;
+esac
+export NEURODESKTOP_DESKTOP_BACKEND
+
 # Ensure per-user Guacamole config and credentials exist. init_secrets.sh is
 # idempotent - guacamole.sh invokes it defensively in case the container was
 # started in a path that skipped the jupyterlab_startup hook.
@@ -264,26 +288,34 @@ remove_mapping_connection() {
 }
 
 # RDP. ensure_rdp_backend.sh writes the chosen port to runtime/rdp_port.
-_rdp_backend_ok=0
-if [ -x /opt/neurodesktop/ensure_rdp_backend.sh ]; then
-    if /opt/neurodesktop/ensure_rdp_backend.sh; then
-        _rdp_backend_ok=1
+NEURODESKTOP_RDP_PORT=""
+if [ "${_start_rdp}" -eq 1 ]; then
+    _rdp_backend_ok=0
+    if [ -x /opt/neurodesktop/ensure_rdp_backend.sh ]; then
+        if /opt/neurodesktop/ensure_rdp_backend.sh; then
+            _rdp_backend_ok=1
+        else
+            echo "[WARN] Failed to initialize RDP backend for Guacamole."
+        fi
     else
-        echo "[WARN] Failed to initialize RDP backend for Guacamole."
+        echo "[WARN] /opt/neurodesktop/ensure_rdp_backend.sh not found."
+    fi
+    if [ "${_rdp_backend_ok}" -eq 1 ] && [ -f "${NEURODESKTOP_RUNTIME_DIR}/rdp_port" ]; then
+        NEURODESKTOP_RDP_PORT="$(cat "${NEURODESKTOP_RUNTIME_DIR}/rdp_port" 2>/dev/null || true)"
+    fi
+    if [ "${_rdp_backend_ok}" -eq 1 ] && [ -n "${NEURODESKTOP_RDP_PORT:-}" ]; then
+        update_mapping_param "rdp" "port" "${NEURODESKTOP_RDP_PORT}" || \
+            echo "[WARN] Could not stamp RDP port ${NEURODESKTOP_RDP_PORT} into mapping."
+    else
+        # No working xrdp (e.g. unprivileged container on HPC) - drop the RDP
+        # connection from the mapping so the Guacamole UI does not list a dead
+        # desktop that errors out when a user clicks it.
+        remove_mapping_connection "rdp" || \
+            echo "[WARN] Could not remove RDP connection from ${GUACAMOLE_MAPPING_FILE}."
+        unset NEURODESKTOP_RDP_PORT
     fi
 else
-    echo "[WARN] /opt/neurodesktop/ensure_rdp_backend.sh not found."
-fi
-if [ "${_rdp_backend_ok}" -eq 1 ] && [ -f "${NEURODESKTOP_RUNTIME_DIR}/rdp_port" ]; then
-    NEURODESKTOP_RDP_PORT="$(cat "${NEURODESKTOP_RUNTIME_DIR}/rdp_port" 2>/dev/null || true)"
-fi
-if [ "${_rdp_backend_ok}" -eq 1 ] && [ -n "${NEURODESKTOP_RDP_PORT:-}" ]; then
-    update_mapping_param "rdp" "port" "${NEURODESKTOP_RDP_PORT}" || \
-        echo "[WARN] Could not stamp RDP port ${NEURODESKTOP_RDP_PORT} into mapping."
-else
-    # No working xrdp (e.g. unprivileged container on HPC) - drop the RDP
-    # connection from the mapping so the Guacamole UI does not list a dead
-    # desktop that errors out when a user clicks it.
+    echo "[INFO] NEURODESKTOP_DESKTOP_BACKEND=${NEURODESKTOP_DESKTOP_BACKEND}: skipping RDP backend."
     remove_mapping_connection "rdp" || \
         echo "[WARN] Could not remove RDP connection from ${GUACAMOLE_MAPPING_FILE}."
     unset NEURODESKTOP_RDP_PORT
@@ -295,140 +327,155 @@ fi
 # dial as an SFTP side-channel at VNC connect time and aborts the whole tunnel
 # with CLIENT_UNAUTHORIZED (0x0301).
 NEURODESKTOP_SFTP_PORT=""
-if [ -x /opt/neurodesktop/ensure_sftp_sshd.sh ]; then
-    /opt/neurodesktop/ensure_sftp_sshd.sh || \
-        echo "[WARN] Failed to initialize SSH/SFTP service for Guacamole."
-else
-    echo "[WARN] /opt/neurodesktop/ensure_sftp_sshd.sh not found."
-fi
-if [ -f "${NEURODESKTOP_RUNTIME_DIR}/sftp_port" ]; then
-    NEURODESKTOP_SFTP_PORT="$(cat "${NEURODESKTOP_RUNTIME_DIR}/sftp_port" 2>/dev/null || true)"
-fi
+if [ "${_start_vnc}" -eq 1 ]; then
+    if [ -x /opt/neurodesktop/ensure_sftp_sshd.sh ]; then
+        /opt/neurodesktop/ensure_sftp_sshd.sh || \
+            echo "[WARN] Failed to initialize SSH/SFTP service for Guacamole."
+    else
+        echo "[WARN] /opt/neurodesktop/ensure_sftp_sshd.sh not found."
+    fi
+    if [ -f "${NEURODESKTOP_RUNTIME_DIR}/sftp_port" ]; then
+        NEURODESKTOP_SFTP_PORT="$(cat "${NEURODESKTOP_RUNTIME_DIR}/sftp_port" 2>/dev/null || true)"
+    fi
 
-# Decide whether the SFTP side-channel can actually authenticate. libguac
-# aborts the WHOLE VNC/RDP tunnel (upstream error 0x0203 / 515) when its
-# SFTP pubkey auth fails, even if VNC auth itself succeeded. The three
-# failure modes we must gate on:
-#   1. sshd never bound a port (NEURODESKTOP_SFTP_PORT empty).
-#   2. NB_USER is not resolvable via NSS (Apptainer on HPC: NB_USER=jovyan
-#      is inherited from the image, but the host UID has no /etc/passwd
-#      entry). sshd cannot pubkey-auth a user it cannot look up.
-#   3. Current process UID != NB_USER's UID. sshd runs as the process UID
-#      and cannot accept a different login name without root.
-_sftp_nb_user="${NB_USER:-jovyan}"
-_sftp_ok=0
-if [ -n "${NEURODESKTOP_SFTP_PORT:-}" ] \
-    && id -u "${_sftp_nb_user}" >/dev/null 2>&1 \
-    && [ "$(id -u)" = "$(id -u "${_sftp_nb_user}" 2>/dev/null)" ]; then
-    _sftp_ok=1
-fi
+    # Decide whether the SFTP side-channel can actually authenticate. libguac
+    # aborts the WHOLE VNC tunnel (upstream error 0x0203 / 515) when its
+    # SFTP pubkey auth fails, even if VNC auth itself succeeded. The three
+    # failure modes we must gate on:
+    #   1. sshd never bound a port (NEURODESKTOP_SFTP_PORT empty).
+    #   2. NB_USER is not resolvable via NSS (Apptainer on HPC: NB_USER=jovyan
+    #      is inherited from the image, but the host UID has no /etc/passwd
+    #      entry). sshd cannot pubkey-auth a user it cannot look up.
+    #   3. Current process UID != NB_USER's UID. sshd runs as the process UID
+    #      and cannot accept a different login name without root.
+    _sftp_nb_user="${NB_USER:-jovyan}"
+    _sftp_ok=0
+    if [ -n "${NEURODESKTOP_SFTP_PORT:-}" ] \
+        && id -u "${_sftp_nb_user}" >/dev/null 2>&1 \
+        && [ "$(id -u)" = "$(id -u "${_sftp_nb_user}" 2>/dev/null)" ]; then
+        _sftp_ok=1
+    fi
 
-if [ "${_sftp_ok}" -eq 1 ]; then
-    update_mapping_param "vnc" "sftp-port" "${NEURODESKTOP_SFTP_PORT}" || \
-        echo "[WARN] Could not stamp SFTP port ${NEURODESKTOP_SFTP_PORT} into mapping."
-    update_mapping_param "vnc" "sftp-username" "${_sftp_nb_user}" || \
-        echo "[WARN] Could not stamp SFTP username ${_sftp_nb_user} into mapping."
-    update_mapping_param "rdp" "sftp-username" "${_sftp_nb_user}" || true
+    if [ "${_sftp_ok}" -eq 1 ]; then
+        update_mapping_param "vnc" "sftp-port" "${NEURODESKTOP_SFTP_PORT}" || \
+            echo "[WARN] Could not stamp SFTP port ${NEURODESKTOP_SFTP_PORT} into mapping."
+        update_mapping_param "vnc" "sftp-username" "${_sftp_nb_user}" || \
+            echo "[WARN] Could not stamp SFTP username ${_sftp_nb_user} into mapping."
+        if [ "${_start_rdp}" -eq 1 ]; then
+            update_mapping_param "rdp" "sftp-username" "${_sftp_nb_user}" || true
+        fi
+    else
+        # Disable SFTP entirely so Guacamole does not attempt the side-channel.
+        # enable-sftp=false is the idiomatic way to turn off the feature in the
+        # libguac-client-vnc connection params.
+        echo "[WARN] SFTP side-channel unavailable (port=${NEURODESKTOP_SFTP_PORT:-unset}," \
+             "nb_user=${_sftp_nb_user}, resolvable=$(id -u "${_sftp_nb_user}" 2>/dev/null || echo no)," \
+             "cur_uid=$(id -u)); disabling enable-sftp in mapping."
+        update_mapping_param "vnc" "enable-sftp" "false" || true
+        if [ "${_start_rdp}" -eq 1 ]; then
+            update_mapping_param "rdp" "enable-sftp" "false" || true
+        fi
+    fi
+    unset _sftp_nb_user _sftp_ok
 else
-    # Disable SFTP entirely so Guacamole does not attempt the side-channel.
-    # enable-sftp=false is the idiomatic way to turn off the feature in the
-    # libguac-client-vnc / libguac-client-rdp connection params.
-    echo "[WARN] SFTP side-channel unavailable (port=${NEURODESKTOP_SFTP_PORT:-unset}," \
-         "nb_user=${_sftp_nb_user}, resolvable=$(id -u "${_sftp_nb_user}" 2>/dev/null || echo no)," \
-         "cur_uid=$(id -u)); disabling enable-sftp in mapping."
-    update_mapping_param "vnc" "enable-sftp" "false" || true
-    update_mapping_param "rdp" "enable-sftp" "false" || true
+    echo "[INFO] NEURODESKTOP_DESKTOP_BACKEND=${NEURODESKTOP_DESKTOP_BACKEND}: skipping VNC SFTP side-channel."
 fi
-unset _sftp_nb_user _sftp_ok
 
 # VNC.
-DISPLAY_NUM=1
-MAX_DISPLAY=42
+if [ "${_start_vnc}" -eq 1 ]; then
+    DISPLAY_NUM=1
+    MAX_DISPLAY=42
 
-echo "[DEBUG] VNC setup - checking prerequisites..."
-echo "[DEBUG] HOME=${HOME}"
-echo "[DEBUG] Contents of ${HOME}/.vnc:"
-ls -la "${HOME}/.vnc/" 2>&1 || echo "[DEBUG] .vnc directory does not exist!"
+    echo "[DEBUG] VNC setup - checking prerequisites..."
+    echo "[DEBUG] HOME=${HOME}"
+    echo "[DEBUG] Contents of ${HOME}/.vnc:"
+    ls -la "${HOME}/.vnc/" 2>&1 || echo "[DEBUG] .vnc directory does not exist!"
 
-mkdir -p "${HOME}/.vnc"
-if [ -z "${NEURODESKTOP_VNC_PASSWORD:-}" ]; then
-    echo "[ERROR] NEURODESKTOP_VNC_PASSWORD is empty - init_secrets.sh did not run?" >&2
-    exit 1
-fi
-
-# Stamp ${HOME}/.vnc/passwd with the rotated secret. `vncpasswd -f` reads the
-# plaintext from stdin and writes the DES-obfuscated 8-byte file Xvnc expects.
-#
-# Do NOT "feature-check" `-f` with `vncpasswd -f < /dev/null` - an empty
-# stdin returns non-zero even when -f is supported, pushing us into the
-# interactive fallback. That fallback CANNOT WORK: vncpasswd reads via
-# getpass() which reads from /dev/tty, not stdin, so piping produces a
-# garbage hash. The symptom is CLIENT_UNAUTHORIZED (Guacamole status 0x0301
-# / error code 769) because the garbage hash does not match the plaintext
-# stamped into user-mapping.xml. Just try -f with real input and check the
-# output size.
-_vnc_passwd_tmp="${HOME}/.vnc/passwd.tmp.$$"
-umask 077
-if /usr/bin/printf '%s\n' "${NEURODESKTOP_VNC_PASSWORD}" | vncpasswd -f > "${_vnc_passwd_tmp}" 2>/dev/null \
-    && [ -s "${_vnc_passwd_tmp}" ]; then
-    mv -f "${_vnc_passwd_tmp}" "${HOME}/.vnc/passwd"
-else
-    rm -f "${_vnc_passwd_tmp}" 2>/dev/null || true
-    echo "[ERROR] vncpasswd -f failed; Xvnc will reject Guacamole connections." >&2
-    echo "[ERROR] TigerVNC's interactive vncpasswd uses getpass() from /dev/tty and" >&2
-    echo "[ERROR] cannot be fed via a pipe, so we refuse to fall back to it here." >&2
-    exit 1
-fi
-chmod 600 "${HOME}/.vnc/passwd" 2>/dev/null || true
-unset _vnc_passwd_tmp
-
-if [ ! -f "${HOME}/.vnc/xstartup" ]; then
-    echo "[ERROR] VNC xstartup not found at ${HOME}/.vnc/xstartup"
-    echo "[DEBUG] Creating xstartup..."
-    printf '%s\n' '#!/bin/sh' '/usr/bin/startlxde' 'vncconfig -nowin -noiconic &' > "${HOME}/.vnc/xstartup"
-    chmod +x "${HOME}/.vnc/xstartup"
-fi
-
-while [ $DISPLAY_NUM -le $MAX_DISPLAY ]; do
-    vncserver -kill :${DISPLAY_NUM} 2>/dev/null
-    echo "[DEBUG] Attempting to start VNC on display :${DISPLAY_NUM}..."
-    # Note: we intentionally do NOT pass -SecurityTypes here. TigerVNC's default
-    # list all require a password; restricting to VncAuth only has broken
-    # compatibility with some libguac-client-vnc builds that negotiate a
-    # TLS-wrapped variant first. -localhost yes is what closes off off-box access.
-    VNC_OUTPUT=$(vncserver -geometry 1280x720 -depth 24 -name "VNC" \
-        -localhost yes :${DISPLAY_NUM} 2>&1)
-    VNC_EXIT=$?
-    echo "[DEBUG] vncserver exit code: ${VNC_EXIT}"
-    echo "[DEBUG] vncserver output: ${VNC_OUTPUT}"
-    if [ $VNC_EXIT -eq 0 ]; then
-        echo "VNC server started on display :${DISPLAY_NUM}"
-        break
+    mkdir -p "${HOME}/.vnc"
+    if [ -z "${NEURODESKTOP_VNC_PASSWORD:-}" ]; then
+        echo "[ERROR] NEURODESKTOP_VNC_PASSWORD is empty - init_secrets.sh did not run?" >&2
+        exit 1
     fi
-    echo "Display :${DISPLAY_NUM} unavailable, trying next..."
-    DISPLAY_NUM=$((DISPLAY_NUM + 1))
-done
 
-if [ $DISPLAY_NUM -gt $MAX_DISPLAY ]; then
-    echo "ERROR: Could not find available display (tried :1 to :${MAX_DISPLAY})"
-    exit 1
+    # Stamp ${HOME}/.vnc/passwd with the rotated secret. `vncpasswd -f` reads the
+    # plaintext from stdin and writes the DES-obfuscated 8-byte file Xvnc expects.
+    #
+    # Do NOT "feature-check" `-f` with `vncpasswd -f < /dev/null` - an empty
+    # stdin returns non-zero even when -f is supported, pushing us into the
+    # interactive fallback. That fallback CANNOT WORK: vncpasswd reads via
+    # getpass() which reads from /dev/tty, not stdin, so piping produces a
+    # garbage hash. The symptom is CLIENT_UNAUTHORIZED (Guacamole status 0x0301
+    # / error code 769) because the garbage hash does not match the plaintext
+    # stamped into user-mapping.xml. Just try -f with real input and check the
+    # output size.
+    _vnc_passwd_tmp="${HOME}/.vnc/passwd.tmp.$$"
+    umask 077
+    if /usr/bin/printf '%s\n' "${NEURODESKTOP_VNC_PASSWORD}" | vncpasswd -f > "${_vnc_passwd_tmp}" 2>/dev/null \
+        && [ -s "${_vnc_passwd_tmp}" ]; then
+        mv -f "${_vnc_passwd_tmp}" "${HOME}/.vnc/passwd"
+    else
+        rm -f "${_vnc_passwd_tmp}" 2>/dev/null || true
+        echo "[ERROR] vncpasswd -f failed; Xvnc will reject Guacamole connections." >&2
+        echo "[ERROR] TigerVNC's interactive vncpasswd uses getpass() from /dev/tty and" >&2
+        echo "[ERROR] cannot be fed via a pipe, so we refuse to fall back to it here." >&2
+        exit 1
+    fi
+    chmod 600 "${HOME}/.vnc/passwd" 2>/dev/null || true
+    unset _vnc_passwd_tmp
+
+    if [ ! -f "${HOME}/.vnc/xstartup" ]; then
+        echo "[ERROR] VNC xstartup not found at ${HOME}/.vnc/xstartup"
+        echo "[DEBUG] Creating xstartup..."
+        printf '%s\n' '#!/bin/sh' 'eval "$(dbus-launch --sh-syntax)"' 'export DBUS_SESSION_BUS_ADDRESS' '/usr/bin/startlxde' 'vncconfig -nowin -noiconic &' > "${HOME}/.vnc/xstartup"
+        chmod +x "${HOME}/.vnc/xstartup"
+    fi
+
+    while [ $DISPLAY_NUM -le $MAX_DISPLAY ]; do
+        vncserver -kill :${DISPLAY_NUM} 2>/dev/null
+        echo "[DEBUG] Attempting to start VNC on display :${DISPLAY_NUM}..."
+        # Note: we intentionally do NOT pass -SecurityTypes here. TigerVNC's default
+        # list all require a password; restricting to VncAuth only has broken
+        # compatibility with some libguac-client-vnc builds that negotiate a
+        # TLS-wrapped variant first. -localhost yes is what closes off off-box access.
+        VNC_OUTPUT=$(vncserver -geometry 1280x720 -depth 24 -name "VNC" \
+            -localhost yes :${DISPLAY_NUM} 2>&1)
+        VNC_EXIT=$?
+        echo "[DEBUG] vncserver exit code: ${VNC_EXIT}"
+        echo "[DEBUG] vncserver output: ${VNC_OUTPUT}"
+        if [ $VNC_EXIT -eq 0 ]; then
+            echo "VNC server started on display :${DISPLAY_NUM}"
+            break
+        fi
+        echo "Display :${DISPLAY_NUM} unavailable, trying next..."
+        DISPLAY_NUM=$((DISPLAY_NUM + 1))
+    done
+
+    if [ $DISPLAY_NUM -gt $MAX_DISPLAY ]; then
+        echo "ERROR: Could not find available display (tried :1 to :${MAX_DISPLAY})"
+        exit 1
+    fi
+
+    export DISPLAY=:${DISPLAY_NUM}
+    VNC_PORT=$((5900 + DISPLAY_NUM))
+    export NEURODESKTOP_VNC_PORT="${VNC_PORT}"
+
+    # Stamp the live VNC port + password into the mapping NOW, before Tomcat reads
+    # it. Failures are fatal: if we can't write the per-user port/password the
+    # browser session would silently connect to whichever VNC happens to be
+    # listening on the hardcoded default - exactly the cross-user leak we aim to
+    # prevent, and also the specific symptom of the 'VNC desktop doesn't work'
+    # regression where Guacamole cached the template port (5901) and vncserver
+    # landed on :2 / 5902.
+    update_mapping_param "vnc" "port" "${VNC_PORT}" || exit 1
+    update_mapping_param "vnc" "password" "${NEURODESKTOP_VNC_PASSWORD}" || exit 1
+
+    xset -display :${DISPLAY_NUM} s off || true
+else
+    echo "[INFO] NEURODESKTOP_DESKTOP_BACKEND=${NEURODESKTOP_DESKTOP_BACKEND}: skipping VNC backend."
+    remove_mapping_connection "vnc" || \
+        echo "[WARN] Could not remove VNC connection from ${GUACAMOLE_MAPPING_FILE}."
+    unset NEURODESKTOP_VNC_PORT VNC_PORT DISPLAY_NUM
 fi
-
-export DISPLAY=:${DISPLAY_NUM}
-VNC_PORT=$((5900 + DISPLAY_NUM))
-export NEURODESKTOP_VNC_PORT="${VNC_PORT}"
-
-# Stamp the live VNC port + password into the mapping NOW, before Tomcat reads
-# it. Failures are fatal: if we can't write the per-user port/password the
-# browser session would silently connect to whichever VNC happens to be
-# listening on the hardcoded default - exactly the cross-user leak we aim to
-# prevent, and also the specific symptom of the 'VNC desktop doesn't work'
-# regression where Guacamole cached the template port (5901) and vncserver
-# landed on :2 / 5902.
-update_mapping_param "vnc" "port" "${VNC_PORT}" || exit 1
-update_mapping_param "vnc" "password" "${NEURODESKTOP_VNC_PASSWORD}" || exit 1
-
-xset -display :${DISPLAY_NUM} s off || true
 
 # --------------------------------------------------------------------------
 # Tomcat. Now that every backend port + password is in the mapping, start the
@@ -469,9 +516,14 @@ if is_apptainer_runtime; then
     RUNTIME_LABEL="apptainer"
 fi
 echo "[INFO] Neurodesktop session ports (${RUNTIME_LABEL}):"
+echo "[INFO]   Backend mode           : ${NEURODESKTOP_DESKTOP_BACKEND}"
 echo "[INFO]   Tomcat/Guacamole HTTP : ${NEURODESKTOP_TOMCAT_PORT}"
 echo "[INFO]   guacd                 : 127.0.0.1:${NEURODESKTOP_GUACD_PORT}"
-echo "[INFO]   VNC display / port    : :${DISPLAY_NUM} / ${VNC_PORT} (localhost-only, random password)"
+if [ -n "${DISPLAY:-}" ]; then
+    echo "[INFO]   VNC display / port    : ${DISPLAY} / ${VNC_PORT:-unset} (localhost-only, random password)"
+else
+    echo "[INFO]   VNC display / port    : unset"
+fi
 echo "[INFO]   RDP port              : ${NEURODESKTOP_RDP_PORT:-unset}"
 echo "[INFO]   SFTP port             : ${NEURODESKTOP_SFTP_PORT:-unset}"
 echo "[INFO]   Guacamole web login   : ${NEURODESKTOP_GUACAMOLE_USER:-jovyan} (password rotated, see ${GUACAMOLE_WEB_PASSWORD_FILE})"

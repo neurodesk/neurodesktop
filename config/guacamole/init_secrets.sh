@@ -35,7 +35,22 @@ _neurodesk_init_secrets() {
     local WEB_USER_FILE="${SECRETS_DIR}/guacamole_web_user"
     local WEB_PASS_FILE="${SECRETS_DIR}/guacamole_web_password"
     local VNC_PASS_FILE="${SECRETS_DIR}/vnc_password"
+    local DESKTOP_BACKEND="${NEURODESKTOP_DESKTOP_BACKEND:-both}"
     local MAPPING_TEMPLATE="/etc/guacamole/user-mapping-vnc-rdp.xml"
+
+    DESKTOP_BACKEND="$(printf '%s' "${DESKTOP_BACKEND}" | tr '[:upper:]' '[:lower:]')"
+    case "${DESKTOP_BACKEND}" in
+        vnc)
+            MAPPING_TEMPLATE="/etc/guacamole/user-mapping-vnc.xml"
+            ;;
+        rdp|both|all)
+            MAPPING_TEMPLATE="/etc/guacamole/user-mapping-vnc-rdp.xml"
+            ;;
+        *)
+            echo "[ERROR] Unsupported NEURODESKTOP_DESKTOP_BACKEND=${NEURODESKTOP_DESKTOP_BACKEND}. Use rdp, vnc, or both." >&2
+            return 1
+            ;;
+    esac
 
     mkdir -p "${GUACAMOLE_HOME_LOCAL}" "${SECRETS_DIR}" 2>/dev/null || true
     chmod 700 "${SECRETS_DIR}" 2>/dev/null || true

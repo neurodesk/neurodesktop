@@ -155,6 +155,7 @@ RUN apt-get update --yes \
     xorgxrdp \
     xrdp \
     lxde \
+    gvfs \
     dbus-x11 \
     acl \
     wget \

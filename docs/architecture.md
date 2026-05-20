@@ -56,8 +56,10 @@ images as SVGs for JupyterLab `LabIcon` support.
 
 ### Desktop Environment
 
-The desktop environment uses LXDE with TigerVNC for VNC access. Apache Guacamole
-provides browser-based remote desktop access. Configuration lives in
+The desktop environment uses LXDE with TigerVNC for VNC access and xrdp for RDP
+access. Apache Guacamole provides browser-based remote desktop access. JupyterLab
+exposes separate `Neurodesktop RDP` and `Neurodesktop VNC` launcher entries so
+opening one backend does not start the other. Configuration lives in
 [`config/lxde/`](../config/lxde/) and [`config/guacamole/`](../config/guacamole/).
 
 ### Services
@@ -68,7 +70,8 @@ provides browser-based remote desktop access. Configuration lives in
   including Python, Jupyter notebook, CSV table editing, NIfTI viewing, GitHub,
   Slurm, and assistant tooling
 - Apache Tomcat: serves the Guacamole web application
-- VNC: desktop access through Guacamole
+- RDP and VNC: desktop access through Guacamole, started on demand by the
+  selected launcher entry
 - SSH: optional SSH server proxy
 - Ollama: optional local LLM service when `START_LOCAL_LLMS=1`
 
