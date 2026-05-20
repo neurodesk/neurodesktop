@@ -5,12 +5,11 @@ on:
 
 jobs:
   sanity-base:
-    name: Sanity (base warm pool)
-    # runs-on: [self-hosted, linux, x64]
-    #target a specific self-hosted runner group
-    runs-on:
-      group: arc-base
-      # labels: [self-hosted, linux, x64]
+    name: Sanity (Sydney neurodesktop pool)
+    # Phase 1 smoke test: target the scale-set name directly (bypasses
+    # runner group). Once stable, promote to `runs-on: { group: runner-neurodesktop }`
+    # per cluster team's two-phase guidance.
+    runs-on: neurodesk-syd-arcrunner-neurodesktop
     timeout-minutes: 20
     steps:
       - name: Runner identity
