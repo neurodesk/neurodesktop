@@ -12,6 +12,13 @@ The image packages a copy of the build `Dockerfile` as `/opt/tests/Dockerfile`
 so source-shape regression tests under `/opt/tests/` can run in the same
 container-only layout as CI.
 
+Desktop smoke tests keep Guacamole, Tomcat, VNC, and credential state in
+temporary per-test homes by default. Tests that need to start the global xrdp
+service are skipped unless
+`NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1` is set. The build scripts and
+GitHub Actions set this only for disposable test containers; do not set it in a
+live user desktop unless stopping or reconfiguring xrdp is acceptable.
+
 For focused Apptainer build checks:
 
 ```bash

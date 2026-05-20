@@ -60,7 +60,8 @@ run_single_test() {
         sleep 2
     done
 
-    docker exec -u jovyan "$name" pytest /opt/tests/ -v
+    docker exec -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 \
+        -u jovyan "$name" pytest /opt/tests/ -v
     local result=$?
 
     docker rm -f "$name" 2>/dev/null || true
@@ -309,7 +310,8 @@ if [ "${1:-}" = "hpctest" ]; then
     # Disable `set -e` for the test step so a non-zero pytest exit code does
     # not skip the tear-down below.
     set +e
-    docker exec "$name" pytest /opt/tests/ -v
+    docker exec -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 \
+        "$name" pytest /opt/tests/ -v
     result=$?
     set -e
 
@@ -408,9 +410,9 @@ if [ "${1:-}" = "fulltest" ]; then
         logfile="${LOGDIR}/${name}.log"
 
         if [ "$kind" = "hpc" ]; then
-            pytest_exec=(docker exec "$name" pytest /opt/tests/ -v)
+            pytest_exec=(docker exec -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 "$name" pytest /opt/tests/ -v)
         else
-            pytest_exec=(docker exec -u jovyan "$name" pytest /opt/tests/ -v)
+            pytest_exec=(docker exec -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 -u jovyan "$name" pytest /opt/tests/ -v)
         fi
 
         (
@@ -526,7 +528,7 @@ if [ "${1:-}" = "fulltest_verbose" ]; then
                     -e NEURODESKTOP_CVMFS_STARTUP_MODE=eager \
                     -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
                     neurodesktop:latest >/dev/null
-                pytest_exec=(docker exec -u jovyan "$name" pytest /opt/tests/ -v)
+                pytest_exec=(docker exec -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 -u jovyan "$name" pytest /opt/tests/ -v)
                 ;;
             hpc)
                 hpc_user="$a"
@@ -544,7 +546,7 @@ if [ "${1:-}" = "fulltest_verbose" ]; then
                 hpc_docker_args "$name" "$hpc_user" "$hpc_uid" "$hpc_gid" \
                     "$HPC_HOME_DIR" "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
                 docker run -d "${HPC_DOCKER_ARGS[@]}" neurodesktop:latest >/dev/null
-                pytest_exec=(docker exec "$name" pytest /opt/tests/ -v)
+                pytest_exec=(docker exec -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 "$name" pytest /opt/tests/ -v)
                 ;;
         esac
 

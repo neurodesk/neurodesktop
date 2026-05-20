@@ -413,7 +413,8 @@ jobs:
             fi
             sleep 2
           done
-          docker exec -u jovyan neurodesktop-test pytest /opt/tests/ -v
+          docker exec -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 \
+            -u jovyan neurodesktop-test pytest /opt/tests/ -v
           docker rm -f neurodesktop-test
 
       - name: Test container (HPC Apptainer simulation)
@@ -487,7 +488,8 @@ jobs:
             exit 1
           fi
           # Exec as the current container user (no -u jovyan: we are sciget here).
-          docker exec neurodesktop-test pytest /opt/tests/ -v
+          docker exec -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 \
+            neurodesktop-test pytest /opt/tests/ -v
           test_rc=$?
           docker rm -f neurodesktop-test
           # The container populated $HPC_HOME_DIR as UID 5000; the runner

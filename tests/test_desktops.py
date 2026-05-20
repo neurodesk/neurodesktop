@@ -1,7 +1,9 @@
 import subprocess
+import inspect
 import os
 import pwd
 import re
+import signal
 import shlex
 import json
 import socket
@@ -69,6 +71,12 @@ def _read_runtime_port(home_dir, name, default):
         except ValueError:
             pass
     return default
+
+
+def _global_desktop_service_tests_enabled():
+    return os.environ.get(
+        "NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES", ""
+    ).lower() in ("1", "true", "yes", "on")
 
 
 def _drain_stream_nonblocking(stream):
@@ -241,6 +249,7 @@ def _prepare_guacamole_runtime():
     nb_uid = os.environ.get("NB_UID", str(os.geteuid()))
     nb_gid = os.environ.get("NB_GID", str(os.getegid()))
     root_cmds_available = _can_run_root_cmds()
+    home_dir = tempfile.mkdtemp(prefix="neurodesk-test-home-")
     vnc_dir = os.path.join(home_dir, ".vnc")
     ssh_dir = os.path.join(home_dir, ".ssh")
 
@@ -266,32 +275,15 @@ def _prepare_guacamole_runtime():
         )
         assert code == 0, f"Failed to set home ownership for {home_dir}: {output}"
 
-    # Use a per-test GUACAMOLE_HOME (isolated tempdir) so the test's Tomcat
-    # writes its user-mapping.xml there, not into the live
-    # $HOME/.neurodesk/guacamole that the real Jupyter-spawned Guacamole is
-    # reading. Without this isolation, guacamole.sh stamps the test-session's
-    # VNC port into the live mapping; after cleanup kills the test vncserver,
-    # the browser session dials that now-dead port and Guacamole returns 500
-    # (or connection refused). Secrets stay shared under $HOME so Jupyter's
-    # cached Basic-auth header keeps working.
+    # Use isolated per-test state so smoke tests do not mutate the live
+    # Neurodesktop session. guacamole.sh writes Tomcat runtime, VNC credentials,
+    # SSH keys, and user-mapping.xml under HOME/GUACAMOLE_HOME, and those paths
+    # are exactly what the real Jupyter-spawned desktop uses.
     guacamole_home = tempfile.mkdtemp(prefix="neurodesk-test-guac-")
     if os.geteuid() == 0:
         run_cmd(
             f"chown -R {shlex.quote(nb_uid)}:{shlex.quote(nb_gid)} {shlex.quote(guacamole_home)}"
         )
-
-    # Wipe per-test scratch that would carry over from prior runs. We do NOT
-    # touch $HOME/.neurodesk/guacamole anymore (the live user-mapping); only
-    # the per-test tempdir (already empty) and our own tomcat/runtime caches.
-    for rel in (".neurodesk/runtime", ".neurodesk/tomcat", ".vnc/passwd"):
-        path = os.path.join(home_dir, rel)
-        if os.path.isdir(path):
-            shutil.rmtree(path, ignore_errors=True)
-        elif os.path.exists(path):
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
 
     return nb_user, home_dir, root_cmds_available, guacamole_home
 
@@ -370,6 +362,8 @@ def _start_guacamole_as_user(nb_user, home_dir, guacamole_home, tomcat_port=None
             text=True,
         )
     proc.tomcat_port = tomcat_port
+    proc.test_home_dir = home_dir
+    proc.test_guacamole_home = guacamole_home
     return proc
 
 
@@ -508,10 +502,83 @@ def _read_xrdp_log():
     return output
 
 
-def _cleanup_guacamole_process(process, guacamole_home=None):
-    output = ""
+def _read_mapping_port(guacamole_home, protocol):
+    mapping_path = os.path.join(guacamole_home, "user-mapping.xml")
+    if not os.path.exists(mapping_path):
+        return None
+    try:
+        mapping_text = open(mapping_path).read()
+    except OSError:
+        return None
+    match = re.search(
+        rf'<protocol>{re.escape(protocol)}</protocol>.*?<param name="port">(\d+)</param>',
+        mapping_text,
+        re.S,
+    )
+    if not match:
+        return None
+    return int(match.group(1))
 
+
+def _pids_listening_on_port(port):
+    if not port:
+        return set()
+    code, output = run_cmd(f"ss -lntp 'sport = :{int(port)}' 2>/dev/null || true")
+    if code != 0:
+        return set()
+    return {int(pid) for pid in re.findall(r"pid=(\d+)", output)}
+
+
+def _process_tree(root_pid):
+    seen = set()
+    stack = [root_pid]
+    while stack:
+        pid = stack.pop()
+        if pid in seen or pid <= 0:
+            continue
+        seen.add(pid)
+        code, output = run_cmd(f"pgrep -P {pid} 2>/dev/null || true")
+        if code == 0:
+            for child in output.split():
+                if child.isdigit():
+                    stack.append(int(child))
+    return seen
+
+
+def _terminate_pids(pids):
+    pids = {pid for pid in pids if pid and pid > 1 and pid != os.getpid()}
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        remaining = []
+        for pid in sorted(pids):
+            try:
+                os.kill(pid, sig)
+                remaining.append(pid)
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                pass
+        if not remaining:
+            return
+        time.sleep(1)
+        pids = set()
+        for pid in remaining:
+            try:
+                os.kill(pid, 0)
+                pids.add(pid)
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                pass
+
+
+def _cleanup_guacamole_process(process, home_dir=None, guacamole_home=None):
+    output = ""
+    home_dir = home_dir or getattr(process, "test_home_dir", None)
+    guacamole_home = guacamole_home or getattr(process, "test_guacamole_home", None)
+
+    pids_to_stop = set()
     if process.poll() is None:
+        pids_to_stop.update(_process_tree(process.pid))
         process.terminate()
     try:
         output, _ = process.communicate(timeout=10)
@@ -519,23 +586,31 @@ def _cleanup_guacamole_process(process, guacamole_home=None):
         process.kill()
         output, _ = process.communicate(timeout=10)
 
-    run_cmd("pkill -f 'guacd -b 127.0.0.1' || true")
-    run_cmd("pkill -f 'Xtigervnc' || true")
-    for display in range(1, 10):
-        run_cmd(f"vncserver -kill :{display} >/dev/null 2>&1 || true")
-    _run_root_cmd("service xrdp stop >/dev/null 2>&1 || true")
-    run_cmd("pkill -f '/usr/local/tomcat' || true")
-    # Kill the per-test sshd that ensure_sftp_sshd.sh started. Leaving it
-    # behind makes the next test's port probe skip 2222, 2223, ... and stamp
-    # an ever-higher sftp-port into its mapping; if the new sshd then fails
-    # to start on the higher port Guacamole would dial a dead SFTP service
-    # and abort VNC with CLIENT_UNAUTHORIZED.
-    run_cmd("pkill -f 'sshd .* -p 22[0-9][0-9]' || true")
+    ports = {getattr(process, "tomcat_port", None)}
+    if home_dir:
+        ports.update(
+            _read_runtime_port(home_dir, name, default=None)
+            for name in ("tomcat_port", "guacd_port", "sftp_port")
+        )
+    vnc_port = _read_mapping_port(guacamole_home, "vnc") if guacamole_home else None
+    if vnc_port:
+        ports.add(vnc_port)
+        display = vnc_port - 5900
+        if home_dir and display > 0:
+            run_cmd(
+                f"HOME={shlex.quote(home_dir)} vncserver -kill :{display} "
+                ">/dev/null 2>&1 || true"
+            )
+    for port in ports:
+        pids_to_stop.update(_pids_listening_on_port(port))
+    _terminate_pids(pids_to_stop)
 
     # Remove the isolated GUACAMOLE_HOME so subsequent tests start clean and
     # no stale mapping / properties files persist on disk.
     if guacamole_home and os.path.isdir(guacamole_home):
         shutil.rmtree(guacamole_home, ignore_errors=True)
+    if home_dir and os.path.isdir(home_dir):
+        shutil.rmtree(home_dir, ignore_errors=True)
 
     if process.returncode not in (0, -15):
         pytest.fail(
@@ -603,6 +678,31 @@ def test_guac_protocol_libs():
             f"Guacamole protocol module has unresolved runtime libraries: {module}\n"
             + "\n".join(missing)
         )
+
+
+def test_desktop_smoke_harness_uses_isolated_home():
+    nb_user, home_dir, _, guacamole_home = _prepare_guacamole_runtime()
+    try:
+        assert nb_user
+        assert os.path.abspath(home_dir) != os.path.abspath(os.environ.get("HOME", ""))
+        assert os.path.isdir(os.path.join(home_dir, ".vnc"))
+        assert os.path.isdir(guacamole_home)
+    finally:
+        shutil.rmtree(guacamole_home, ignore_errors=True)
+        shutil.rmtree(home_dir, ignore_errors=True)
+
+
+def test_desktop_smoke_cleanup_does_not_use_global_process_kills():
+    cleanup_source = inspect.getsource(_cleanup_guacamole_process)
+    forbidden = [
+        "pkill -f 'guacd -b 127.0.0.1'",
+        "pkill -f 'Xtigervnc'",
+        "service xrdp stop",
+        "pkill -f '/usr/local/tomcat'",
+        "pkill -f 'sshd .* -p 22[0-9][0-9]'",
+    ]
+    for pattern in forbidden:
+        assert pattern not in cleanup_source
 
 
 def test_init_secrets_generates_per_user_mapping(tmp_path):
@@ -860,13 +960,10 @@ def test_guac_api_connections():
     """Start Guacamole and verify its API exposes the desktop protocols this
     runtime can support. Uses the rotated Guacamole web credential that
     init_secrets.sh generates per-user."""
-    nb_user, home_dir, root_cmds_available, guacamole_home = _prepare_guacamole_runtime()
+    nb_user, home_dir, _, guacamole_home = _prepare_guacamole_runtime()
 
     expected_protocols = ["vnc"]
-    if root_cmds_available and not _xrdp_already_running():
-        expected_protocols.insert(0, "rdp")
-
-    process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home)
+    process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home, backend="vnc")
     tomcat_port = process.tomcat_port
     try:
         _guacamole_ready(tomcat_port, home_dir=home_dir, process=process)
@@ -888,7 +985,7 @@ def test_guac_api_connections():
             f"found: {protocols}"
         )
     finally:
-        _cleanup_guacamole_process(process, guacamole_home=guacamole_home)
+        _cleanup_guacamole_process(process, home_dir=home_dir, guacamole_home=guacamole_home)
 
 
 def test_guac_login_rejects_legacy_default_password():
@@ -913,7 +1010,7 @@ def test_guac_login_rejects_legacy_default_password():
         assert exc_info.value.code in (401, 403), \
             f"Expected 401/403 for legacy default password, got {exc_info.value.code}"
     finally:
-        _cleanup_guacamole_process(process, guacamole_home=guacamole_home)
+        _cleanup_guacamole_process(process, home_dir=home_dir, guacamole_home=guacamole_home)
 
 
 def test_vncserver_binds_localhost_only():
@@ -951,7 +1048,7 @@ def test_vncserver_binds_localhost_only():
         assert listen_addr.startswith("127.0.0.1:") or listen_addr.startswith("[::1]:"), \
             f"vncserver must bind loopback only; listen address was {listen_addr}"
     finally:
-        _cleanup_guacamole_process(process, guacamole_home=guacamole_home)
+        _cleanup_guacamole_process(process, home_dir=home_dir, guacamole_home=guacamole_home)
 
 
 def test_xrdp_tls_key_access():
@@ -1076,19 +1173,30 @@ def test_guac_vnc_tunnel():
                 tunnel.close()
             except Exception:
                 pass
-        _cleanup_guacamole_process(process, guacamole_home=guacamole_home)
+        _cleanup_guacamole_process(process, home_dir=home_dir, guacamole_home=guacamole_home)
 
 
 def test_guac_rdp_tunnel():
     """Verify the Guacamole RDP tunnel renders a desktop without TLS key permission errors."""
     nb_user, home_dir, root_cmds_available, guacamole_home = _prepare_guacamole_runtime()
 
+    if not _global_desktop_service_tests_enabled():
+        shutil.rmtree(guacamole_home, ignore_errors=True)
+        shutil.rmtree(home_dir, ignore_errors=True)
+        pytest.skip(
+            "RDP smoke test starts the global xrdp service; set "
+            "NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 in disposable "
+            "test containers to enable it."
+        )
+
     if not root_cmds_available:
         shutil.rmtree(guacamole_home, ignore_errors=True)
+        shutil.rmtree(home_dir, ignore_errors=True)
         pytest.skip("RDP smoke test requires root or passwordless sudo to start xrdp")
 
     if _xrdp_already_running():
         shutil.rmtree(guacamole_home, ignore_errors=True)
+        shutil.rmtree(home_dir, ignore_errors=True)
         pytest.skip(
             "xrdp is already running on this netns (likely from the live Neurodesktop "
             "session). A second guacamole.sh cannot rebind xrdp to its own port, so "
@@ -1135,7 +1243,7 @@ def test_guac_rdp_tunnel():
                 tunnel.close()
             except Exception:
                 pass
-        _cleanup_guacamole_process(process, guacamole_home=guacamole_home)
+        _cleanup_guacamole_process(process, home_dir=home_dir, guacamole_home=guacamole_home)
 
 
 def test_vnc_startup(tmp_path):
@@ -1151,14 +1259,14 @@ def test_vnc_startup(tmp_path):
     code, output = run_cmd(f"USER=jovyan HOME={tmp_path} vncserver -xstartup /opt/jovyan_defaults/.vnc/xstartup -rfbauth {pwd_file} :99")
     assert code == 0, f"VNC server failed to start: {output}"
 
-    # Give it a second
-    time.sleep(2)
+    try:
+        # Give it a second
+        time.sleep(2)
 
-    # Check if the process Xtigervnc or vncserver is running for display :99
-    code, output = run_cmd("ps auxww | grep -v grep | grep -E 'Xtigervnc.*:99'")
-    if code != 0:
-        _, log_content = run_cmd(f"cat {tmp_path}/.vnc/*:99.log || true")
-        assert False, f"Xtigervnc :99 process is not running. VNC startup crashed.\\nLog:\\n{log_content}\\n\\nPS Output:\\n{output}"
-
-    # Clean up
-    run_cmd("vncserver -kill :99")
+        # Check if the process Xtigervnc or vncserver is running for display :99
+        code, output = run_cmd("ps auxww | grep -v grep | grep -E 'Xtigervnc.*:99'")
+        if code != 0:
+            _, log_content = run_cmd(f"cat {tmp_path}/.vnc/*:99.log || true")
+            assert False, f"Xtigervnc :99 process is not running. VNC startup crashed.\\nLog:\\n{log_content}\\n\\nPS Output:\\n{output}"
+    finally:
+        run_cmd(f"USER=jovyan HOME={tmp_path} vncserver -kill :99")
