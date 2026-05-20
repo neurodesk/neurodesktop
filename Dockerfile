@@ -413,8 +413,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install AI coding assistants
-RUN npm install -g @openai/codex \
-    && rm -rf /root/.npm \
+RUN npm_config_cache=/tmp/npm-root-cache npm install -g @openai/codex \
+    && rm -rf /root/.npm /tmp/npm-root-cache /home/${NB_USER}/.npm \
     && su - "${NB_USER}" -c 'curl -fsSL https://claude.ai/install.sh | bash -s -- stable' \
     && mkdir -p /opt/jovyan_defaults/.local/bin \
     && if [ -x /home/jovyan/.local/bin/claude ]; then \
@@ -513,9 +513,9 @@ RUN --mount=type=bind,source=extensions/neurodesk-launcher,target=/tmp/neurodesk
     && mkdir -p /tmp/neurodesk-launcher \
     && cp -R /tmp/neurodesk-launcher-src/. /tmp/neurodesk-launcher/ \
     && cd /tmp/neurodesk-launcher \
-    && /opt/conda/bin/pip install . \
+    && npm_config_cache=/tmp/neurodesk-launcher-npm-cache /opt/conda/bin/pip install . \
     && /opt/conda/bin/jupyter labextension disable @jupyterhub/jupyter-server-proxy \
-    && rm -rf /tmp/neurodesk-launcher /home/${NB_USER}/.cache
+    && rm -rf /tmp/neurodesk-launcher /tmp/neurodesk-launcher-npm-cache /home/${NB_USER}/.cache
 
 #========================================#
 # Configuration (as root user)
