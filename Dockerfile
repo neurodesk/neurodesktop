@@ -155,6 +155,7 @@ RUN apt-get update --yes \
     xorgxrdp \
     xrdp \
     lxde \
+    gvfs \
     dbus-x11 \
     acl \
     wget \
@@ -741,6 +742,9 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -D -m 0644 /tmp/jupyter/vscode_logo.svg /opt/vscode_logo.svg \
     && install -d -m 0755 /opt/neurodesk/icons \
     && cp -a /tmp/jupyter/webapp_icons/. /opt/neurodesk/icons/ \
+    && install -D -m 0644 /tmp/jupyter/webapp_links.json /opt/config/jupyter/webapp_links.json \
+    && install -d -m 0755 /opt/config/jupyter/webapp_icons \
+    && cp -a /tmp/jupyter/webapp_icons/. /opt/config/jupyter/webapp_icons/ \
     && install -D -m 0644 /tmp/lxde/background.png /usr/share/lxde/wallpapers/desktop_wallpaper.png \
     && install -D -m 0644 /tmp/lxde/pcmanfm.conf /etc/xdg/pcmanfm/LXDE/pcmanfm.conf \
     && install -D -m 0644 /tmp/lxde/lxterminal.conf /usr/share/lxterminal/lxterminal.conf \
@@ -779,13 +783,15 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     /opt/neurodesktop/webapp_wrapper/webapp_wrapper.py \
     && chmod +r /opt/neurodesktop/webapp_wrapper/splash_template.html \
     /opt/neurodesktop/webapps.json \
-    && chown -R root:users /opt/neurodesktop /opt/tests
+    && chown -R root:users /opt/config /opt/neurodesktop /opt/tests
 
 # Start the container as root so docker-stacks runs before-notebook hooks with
 # the privileges needed to bootstrap local Slurm/CVMFS, then drops to NB_USER.
 USER root
 
 WORKDIR "/home/${NB_USER}"
+
+HEALTHCHECK --interval=1m --timeout=1s --start-period=3s --retries=3 CMD /etc/jupyter/docker_healthcheck.py || exit 1
 
 # Image metadata
 ARG BASE_IMAGE_TAG

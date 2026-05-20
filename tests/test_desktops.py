@@ -314,7 +314,7 @@ def _xrdp_already_running():
     return code == 0 and bool(out.strip())
 
 
-def _start_guacamole_as_user(nb_user, home_dir, guacamole_home, tomcat_port=None):
+def _start_guacamole_as_user(nb_user, home_dir, guacamole_home, tomcat_port=None, backend=None):
     """Start guacamole.sh in a child process, publishing the chosen Tomcat port.
 
     `guacamole_home` MUST be an isolated per-test path: guacamole.sh will stamp
@@ -334,8 +334,13 @@ def _start_guacamole_as_user(nb_user, home_dir, guacamole_home, tomcat_port=None
     # is exported; NB_USER/NB_UID/NB_GID flow through from the inherited shell
     # env). Forcing NB_USER here historically masked the HPC bug where the
     # inherited NB_USER=jovyan clashed with a process running as a different UID.
+    backend_assignment = ""
+    if backend:
+        backend_assignment = f"NEURODESKTOP_DESKTOP_BACKEND={shlex.quote(backend)} "
+
     command = (
         f"export HOME={shlex.quote(home_dir)} "
+        f"{backend_assignment}"
         f"NEURODESKTOP_TOMCAT_PORT={tomcat_port} "
         f"GUACAMOLE_HOME={shlex.quote(guacamole_home)}; "
         # Publish the chosen port for the test harness to read.
@@ -632,6 +637,25 @@ def test_init_secrets_generates_per_user_mapping(tmp_path):
         "Rotated Guacamole web password is suspiciously short"
 
 
+def test_init_secrets_can_seed_vnc_only_mapping(tmp_path):
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    env["NB_USER"] = "jovyan"
+    env["NEURODESKTOP_DESKTOP_BACKEND"] = "vnc"
+
+    result = subprocess.run(
+        ["/opt/neurodesktop/init_secrets.sh"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"init_secrets.sh failed: {result.stdout}\n{result.stderr}"
+
+    mapping_text = (tmp_path / ".neurodesk" / "guacamole" / "user-mapping.xml").read_text()
+    assert "<protocol>vnc</protocol>" in mapping_text
+    assert "<protocol>rdp</protocol>" not in mapping_text
+
+
 def test_init_secrets_stamps_vnc_passwd_file(tmp_path):
     """init_secrets.sh must stamp ~/.vnc/passwd with the *rotated* token, not
     the default "password" hash that restore_home_defaults.sh migrates in from
@@ -874,7 +898,7 @@ def test_guac_login_rejects_legacy_default_password():
     port on a shared netns, they cannot log into Guacamole with the baked-in
     default."""
     nb_user, home_dir, _, guacamole_home = _prepare_guacamole_runtime()
-    process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home)
+    process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home, backend="vnc")
     try:
         _guacamole_ready(process.tomcat_port, home_dir=home_dir, process=process)
 
@@ -897,7 +921,7 @@ def test_vncserver_binds_localhost_only():
     reachable only through the local loopback. On Apptainer the host netns is
     shared, but at least the backend is not reachable off-node."""
     nb_user, home_dir, _, guacamole_home = _prepare_guacamole_runtime()
-    process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home)
+    process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home, backend="vnc")
     try:
         _guacamole_ready(process.tomcat_port, home_dir=home_dir, process=process)
         # Wait for the display to register.
@@ -960,7 +984,7 @@ def test_guac_vnc_tunnel():
     dynamic port."""
     nb_user, home_dir, _, guacamole_home = _prepare_guacamole_runtime()
 
-    process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home)
+    process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home, backend="vnc")
     tunnel = None
     try:
         _guacamole_ready(process.tomcat_port, home_dir=home_dir, process=process)
@@ -1071,7 +1095,7 @@ def test_guac_rdp_tunnel():
             "the RDP tunnel smoke test is not meaningful here."
         )
 
-    process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home)
+    process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home, backend="rdp")
     tunnel = None
     try:
         _guacamole_ready(process.tomcat_port, home_dir=home_dir, process=process)
