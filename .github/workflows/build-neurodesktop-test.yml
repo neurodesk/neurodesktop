@@ -43,9 +43,12 @@ jobs:
           - arch: amd64
             docker_platform: linux/amd64
             tag: amd64
-            # Phase 2 migration: target Sydney pool by scale-set name.
-            # Promote to `runs_on: { group: runner-neurodesktop }` after stability.
-            runs_on: neurodesk-syd-arcrunner-neurodesktop
+            # Temporarily reverted to arc-base for same-commit-different-pool
+            # comparison after two Sydney builds (runs 26160783311 and
+            # 26184761584) failed at the neurodesk-launcher webpack step while
+            # QRIS arc-base passed the same step on commit 3278c034.
+            runs_on:
+              group: arc-base
           # arm64 entries temporarily disabled to retest amd64-only
           # - arch: arm64
           #   docker_platform: linux/arm64
@@ -218,9 +221,8 @@ jobs:
 
   merge-manifests:
     needs: build-image
-    # Phase 2 migration: target Sydney pool by scale-set name.
-    # Promote to `runs-on: { group: runner-neurodesktop }` after stability.
-    runs-on: neurodesk-syd-arcrunner-neurodesktop
+    runs-on:
+      group: arc-base
     steps:
       - name: Set environment variables
         run: |
