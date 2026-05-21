@@ -46,10 +46,23 @@ case "${NEURODESKTOP_DESKTOP_BACKEND}" in
 esac
 export NEURODESKTOP_DESKTOP_BACKEND
 
+HOME_DIR="${HOME:-/home/jovyan}"
+_neurodesktop_state_root="${HOME_DIR}/.neurodesk"
+
+# RDP and VNC are exposed as separate jupyter-server-proxy entries. Keep their
+# Guacamole/Tomcat/runtime state separate so starting one backend cannot reuse
+# the other backend's cached user-mapping.xml or Tomcat work directory.
+if [ -z "${GUACAMOLE_HOME:-}" ]; then
+    export GUACAMOLE_HOME="${_neurodesktop_state_root}/guacamole-${NEURODESKTOP_DESKTOP_BACKEND}"
+else
+    export GUACAMOLE_HOME
+fi
+CATALINA_BASE_PER_USER="${CATALINA_BASE:-${_neurodesktop_state_root}/tomcat-${NEURODESKTOP_DESKTOP_BACKEND}}"
+export NEURODESKTOP_RUNTIME_DIR="${NEURODESKTOP_RUNTIME_DIR:-${_neurodesktop_state_root}/runtime-${NEURODESKTOP_DESKTOP_BACKEND}}"
+
 # Ensure per-user Guacamole config and credentials exist. init_secrets.sh is
 # idempotent - guacamole.sh invokes it defensively in case the container was
 # started in a path that skipped the jupyterlab_startup hook.
-export GUACAMOLE_HOME="${GUACAMOLE_HOME:-${HOME}/.neurodesk/guacamole}"
 if [ -x /opt/neurodesktop/init_secrets.sh ]; then
     # shellcheck disable=SC1091
     source /opt/neurodesktop/init_secrets.sh || {
@@ -176,9 +189,8 @@ if [ -f "${GUACAMOLE_PROPERTIES_FILE}" ]; then
     sed -i -E "s|^guacd-port:.*|guacd-port: ${NEURODESKTOP_GUACD_PORT}|" "${GUACAMOLE_PROPERTIES_FILE}"
 fi
 
-# Per-user CATALINA_BASE. server.xml gets the Tomcat port stamped in directly -
+# Per-backend CATALINA_BASE. server.xml gets the Tomcat port stamped in directly -
 # property-substitution via -Dport.http=... has proven unreliable across builds.
-CATALINA_BASE_PER_USER="${HOME}/.neurodesk/tomcat"
 mkdir -p \
     "${CATALINA_BASE_PER_USER}/conf" \
     "${CATALINA_BASE_PER_USER}/logs" \
@@ -206,7 +218,6 @@ fi
 
 export CATALINA_BASE="${CATALINA_BASE_PER_USER}"
 
-NEURODESKTOP_RUNTIME_DIR="${HOME}/.neurodesk/runtime"
 mkdir -p "${NEURODESKTOP_RUNTIME_DIR}" 2>/dev/null || true
 printf '%s\n' "${NEURODESKTOP_TOMCAT_PORT}" > "${NEURODESKTOP_RUNTIME_DIR}/tomcat_port" 2>/dev/null || true
 printf '%s\n' "${NEURODESKTOP_GUACD_PORT}" > "${NEURODESKTOP_RUNTIME_DIR}/guacd_port" 2>/dev/null || true

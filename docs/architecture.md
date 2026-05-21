@@ -61,6 +61,9 @@ access. Apache Guacamole provides browser-based remote desktop access. JupyterLa
 exposes separate `Neurodesktop RDP` and `Neurodesktop VNC` launcher entries so
 opening one backend does not start the other. Configuration lives in
 [`config/lxde/`](../config/lxde/) and [`config/guacamole/`](../config/guacamole/).
+The RDP and VNC proxy entries use backend-specific Guacamole state directories
+under `~/.neurodesk` (`guacamole-*`, `tomcat-*`, and `runtime-*`) so one backend
+does not reuse the other backend's cached connection mapping.
 
 ### Services
 

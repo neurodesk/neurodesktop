@@ -44,6 +44,25 @@ def test_guacamole_script_gates_rdp_and_vnc_startup():
     assert 'remove_mapping_connection "vnc"' in script
 
 
+def test_guacamole_script_uses_backend_specific_state_dirs():
+    script = _read_first(
+        "/opt/neurodesktop/guacamole.sh",
+        "config/guacamole/guacamole.sh",
+    )
+
+    assert 'guacamole-${NEURODESKTOP_DESKTOP_BACKEND}' in script
+    assert 'tomcat-${NEURODESKTOP_DESKTOP_BACKEND}' in script
+    assert 'runtime-${NEURODESKTOP_DESKTOP_BACKEND}' in script
+    assert 'CATALINA_BASE_PER_USER="${CATALINA_BASE:-' in script
+
+    state_index = script.index('guacamole-${NEURODESKTOP_DESKTOP_BACKEND}')
+    init_index = script.index('source /opt/neurodesktop/init_secrets.sh')
+    assert state_index < init_index, (
+        "backend-specific GUACAMOLE_HOME must be chosen before init_secrets.sh "
+        "seeds user-mapping.xml"
+    )
+
+
 def test_init_secrets_uses_vnc_only_template_for_vnc_backend():
     script = _read_first(
         "/opt/neurodesktop/init_secrets.sh",

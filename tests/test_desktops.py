@@ -64,13 +64,39 @@ def _wait_for_tcp_port(port, timeout_seconds=30, host="127.0.0.1"):
 
 def _read_runtime_port(home_dir, name, default):
     """Read a port guacamole.sh published to $HOME/.neurodesk/runtime/<name>."""
-    runtime_file = os.path.join(home_dir, ".neurodesk", "runtime", name)
-    if os.path.exists(runtime_file):
+    state_root = os.path.join(home_dir, ".neurodesk")
+    runtime_dirs = [os.path.join(state_root, "runtime")]
+    if os.path.isdir(state_root):
+        runtime_dirs.extend(
+            os.path.join(state_root, entry)
+            for entry in sorted(os.listdir(state_root))
+            if entry.startswith("runtime-")
+        )
+
+    for runtime_dir in runtime_dirs:
+        runtime_file = os.path.join(runtime_dir, name)
+        if not os.path.exists(runtime_file):
+            continue
         try:
             return int(open(runtime_file).read().strip())
         except ValueError:
             pass
     return default
+
+
+def _latest_catalina_log(home_dir):
+    state_root = os.path.join(home_dir, ".neurodesk")
+    candidates = [os.path.join(state_root, "tomcat", "logs", "catalina.out")]
+    if os.path.isdir(state_root):
+        candidates.extend(
+            os.path.join(state_root, entry, "logs", "catalina.out")
+            for entry in sorted(os.listdir(state_root))
+            if entry.startswith("tomcat-")
+        )
+    existing = [path for path in candidates if os.path.exists(path)]
+    if not existing:
+        return None
+    return max(existing, key=lambda path: os.path.getmtime(path))
 
 
 def _global_desktop_service_tests_enabled():
@@ -142,12 +168,12 @@ def _guacamole_ready(port, timeout_seconds=90, home_dir=None, process=None):
 
     # Dump Tomcat's catalina log if we can find it in the user's CATALINA_BASE.
     if home_dir:
-        catalina = os.path.join(home_dir, ".neurodesk", "tomcat", "logs", "catalina.out")
-        if os.path.exists(catalina):
+        catalina = _latest_catalina_log(home_dir)
+        if catalina and os.path.exists(catalina):
             _, tail = run_cmd(f"tail -n 80 {shlex.quote(catalina)}")
             diag.append(f"--- {catalina} (last 80 lines) ---\n" + tail)
         else:
-            diag.append(f"(no {catalina} found)")
+            diag.append(f"(no catalina.out found under {home_dir}/.neurodesk)")
         vnc_tail = _latest_vnc_log(home_dir)
         if vnc_tail:
             diag.append(vnc_tail)
@@ -335,9 +361,6 @@ def _start_guacamole_as_user(nb_user, home_dir, guacamole_home, tomcat_port=None
         f"{backend_assignment}"
         f"NEURODESKTOP_TOMCAT_PORT={tomcat_port} "
         f"GUACAMOLE_HOME={shlex.quote(guacamole_home)}; "
-        # Publish the chosen port for the test harness to read.
-        f"mkdir -p {shlex.quote(os.path.join(home_dir, '.neurodesk/runtime'))}; "
-        f"echo {tomcat_port} > {shlex.quote(os.path.join(home_dir, '.neurodesk/runtime/tomcat_port'))}; "
         "exec /opt/neurodesktop/guacamole.sh"
     )
     current_user = _current_user_name()
@@ -681,6 +704,8 @@ def test_guac_protocol_libs():
 
 
 def test_desktop_smoke_harness_uses_isolated_home():
+    if not os.path.exists("/opt/jovyan_defaults/.vnc/xstartup"):
+        pytest.skip("Neurodesktop VNC defaults are only available inside the image")
     nb_user, home_dir, _, guacamole_home = _prepare_guacamole_runtime()
     try:
         assert nb_user
@@ -1148,9 +1173,9 @@ def test_guac_vnc_tunnel():
         except AssertionError as exc:
             # Pull the Guacamole log so we can see whether the failure was an
             # auth rejection, a connection refused, or something downstream.
-            catalina = os.path.join(home_dir, ".neurodesk", "tomcat", "logs", "catalina.out")
+            catalina = _latest_catalina_log(home_dir)
             extra = ""
-            if os.path.exists(catalina):
+            if catalina and os.path.exists(catalina):
                 _, extra = run_cmd(f"tail -n 120 {shlex.quote(catalina)}")
             vnc_logs = os.path.join(home_dir, ".vnc")
             _, vnc_tail = run_cmd(
