@@ -43,12 +43,7 @@ jobs:
           - arch: amd64
             docker_platform: linux/amd64
             tag: amd64
-            # Temporarily reverted to arc-base for same-commit-different-pool
-            # comparison after two Sydney builds (runs 26160783311 and
-            # 26184761584) failed at the neurodesk-launcher webpack step while
-            # QRIS arc-base passed the same step on commit 3278c034.
-            runs_on:
-              group: arc-base
+            runs_on: neurodesk-syd-arcrunner-neurodesktop
           # arm64 entries temporarily disabled to retest amd64-only
           # - arch: arm64
           #   docker_platform: linux/arm64
@@ -221,8 +216,7 @@ jobs:
 
   merge-manifests:
     needs: build-image
-    runs-on:
-      group: arc-base
+    runs-on: neurodesk-syd-arcrunner-neurodesktop
     steps:
       - name: Set environment variables
         run: |
