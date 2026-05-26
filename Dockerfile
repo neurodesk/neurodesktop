@@ -188,7 +188,11 @@ RUN --mount=type=bind,from=builder,source=/opt/code-server,target=/tmp/code-serv
 
 # add a static strace executable to /opt which we can copy to containers for debugging:
 RUN mkdir -p /opt/strace \
-    && wget -qO- https://github.com/JuliaBinaryWrappers/strace_jll.jl/releases/download/strace-v6.7.0%2B1/strace.v6.7.0.x86_64-linux-gnu.tar.gz | tar xz -C /opt/strace --strip-components=1 \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
+    "https://github.com/JuliaBinaryWrappers/strace_jll.jl/releases/download/strace-v6.7.0%2B1/strace.v6.7.0.x86_64-linux-gnu.tar.gz" \
+    -o /tmp/strace.tar.gz \
+    && tar xzf /tmp/strace.tar.gz -C /opt/strace --strip-components=1 \
+    && rm /tmp/strace.tar.gz \
     && chmod +x /opt/strace
 
 ARG TOMCAT_REL="11"
