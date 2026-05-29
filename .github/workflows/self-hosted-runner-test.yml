@@ -85,3 +85,60 @@ jobs:
           EOF
           docker build -t dind-cpu-smoke:latest .
           docker run --rm dind-cpu-smoke:latest
+
+  blacksmith-arm64-smoke:
+    name: Blacksmith native arm64 smoke (plain docker)
+    # Access + native-arm64 proof for a future neurodesktop arm64 build leg.
+    # ASSUMPTION: this label is carried from neurocontainers, where it builds
+    # arm64 natively. Scheme: blacksmith-<N>vcpu-ubuntu-<ver>-arm . A wrong
+    # label makes the job hang `queued` then time out (looks like "no access"
+    # but is a typo) — verify the org's entitled labels before reading red as
+    # "no access".
+    runs-on: blacksmith-8vcpu-ubuntu-2404-arm
+    timeout-minutes: 20
+    steps:
+      - name: Runner identity
+        run: |
+          echo "RUNNER_NAME=$RUNNER_NAME"
+          echo "RUNNER_OS=$RUNNER_OS"
+          echo "RUNNER_ARCH=$RUNNER_ARCH"
+          echo "hostname=$(hostname)"
+          uname -a
+
+      - name: Assert NATIVE aarch64 (fail otherwise)
+        run: |
+          set -euo pipefail
+          ARCH="$(uname -m)"
+          echo "uname -m = $ARCH"
+          if [ "$ARCH" != "aarch64" ]; then
+            echo "::error::Expected aarch64, got $ARCH (not native arm64 — possibly x86/QEMU)"
+            exit 1
+          fi
+
+      - name: Network quick check (GitHub + GHCR)
+        run: |
+          set -e
+          curl -sS -o /dev/null -w "github.com http=%{http_code} total=%{time_total}s\n" https://github.com/
+          curl -sS -o /dev/null -w "ghcr.io/v2 http=%{http_code} total=%{time_total}s\n" https://ghcr.io/v2/
+
+      - name: Docker available + native arm64 build
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker version
+          docker info
+
+          cat > Dockerfile <<'EOF'
+          FROM alpine:3.19
+          RUN echo "hello from blacksmith arm64" >/hello.txt && uname -m >/arch.txt
+          CMD ["sh","-lc","cat /hello.txt /arch.txt"]
+          EOF
+
+          docker build -t bsmith-arm64-smoke:latest .
+          docker run --rm bsmith-arm64-smoke:latest
+          IMG_ARCH="$(docker inspect bsmith-arm64-smoke:latest --format '{{.Architecture}}')"
+          echo "image Architecture = $IMG_ARCH"
+          if [ "$IMG_ARCH" != "arm64" ]; then
+            echo "::error::Built image Architecture is $IMG_ARCH, expected arm64"
+            exit 1
+          fi
