@@ -2,7 +2,7 @@
 
 # Pin to a specific jupyter/base-notebook date for reproducibility.
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
-ARG BASE_IMAGE_TAG=2026-05-11
+ARG BASE_IMAGE_TAG=2026-06-01
 ARG APPTAINER_VERSION=1.5.0
 ARG APPTAINER_GO_VERSION=1.26.3
 ARG APPTAINER_GRPC_VERSION=1.81.1
@@ -71,7 +71,7 @@ USER root
 
 ARG BUILD_ONLY_APT_PACKAGES="build-essential libcairo2-dev libjpeg-turbo8-dev libpng-dev libtool-bin freerdp2-dev libvncserver-dev libssl-dev libwebp-dev libssh2-1-dev libpango1.0-dev"
 ARG GUACAMOLE_VERSION="1.6.0"
-ARG CODE_SERVER_VERSION="4.118.0"
+ARG CODE_SERVER_VERSION="4.122.0"
 
 COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
 
@@ -121,7 +121,7 @@ RUN set -eux; \
     tar -xzf "/tmp/${cs_tar}" -C /tmp; \
     rm -rf /opt/code-server; \
     mv "/tmp/code-server-${CODE_SERVER_VERSION}-linux-${cs_arch}" /opt/code-server; \
-    # code-server currently ships basic-ftp@5.0.5 in npm-shrinkwrap.json; update to the patched release.
+    # Keep basic-ftp current in case code-server's shrinkwrap lags the patched package.
     cd /opt/code-server; \
     npm update --no-audit --no-fund basic-ftp; \
     rm -f "/tmp/${cs_tar}"; \
