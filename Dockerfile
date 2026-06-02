@@ -788,6 +788,34 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     /opt/neurodesktop/webapps.json \
     && chown -R root:users /opt/config /opt/neurodesktop /opt/tests
 
+
+# Workaround for jupyterlab-rise + jupyterlab-myst incompatibility:
+# jupyterlab-myst's federated bundle declares @jupyterlab/markdownviewer as a
+# shared module it consumes from the host. RISE's bundle does not include that
+# package in its shared scope, so MyST's plugins fail to instantiate and MyST
+# directives (admonitions, dropdowns, etc.) render as raw markdown in slides.
+# Rebuilding MyST with --core-path pointed at RISE's app directory embeds
+# @jupyterlab/markdownviewer into MyST's own bundle, so it no longer asks the
+# host for it. See https://github.com/jupyterlab-contrib/rise/issues/46
+RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
+    && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
+    && MYST_PACKAGE_DIR="$(/opt/conda/bin/python -c 'import jupyterlab_myst, os; print(os.path.dirname(jupyterlab_myst.__file__))')" \
+    && git clone --depth 1 --branch "v${MYST_VERSION}" https://github.com/jupyter-book/jupyterlab-myst.git /tmp/myst \
+    && git clone --depth 1 --branch "v${RISE_VERSION}" https://github.com/jupyterlab-contrib/rise.git /tmp/rise \
+    && cd /tmp/myst \
+    && npm_config_cache=/tmp/myst-npm-cache npm install \
+    && npm run build:css \
+    && npm run build:lib \
+    && /opt/conda/bin/jupyter labextension build --core-path=/tmp/rise/app . \
+    && MYST_LABEXT_DIR="${MYST_PACKAGE_DIR}/labextension" \
+    && APP_MYST_DIR=/opt/conda/share/jupyter/labextensions/jupyterlab-myst \
+    && rm -rf "${MYST_LABEXT_DIR}" \
+    && cp -a /tmp/myst/jupyterlab_myst/labextension "${MYST_LABEXT_DIR}" \
+    && rm -rf "${APP_MYST_DIR}" \
+    && cp -a "${MYST_LABEXT_DIR}" "${APP_MYST_DIR}" \
+    && rm -rf /tmp/myst /tmp/rise /tmp/myst-npm-cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
+
+
 # Start the container as root so docker-stacks runs before-notebook hooks with
 # the privileges needed to bootstrap local Slurm/CVMFS, then drops to NB_USER.
 USER root
