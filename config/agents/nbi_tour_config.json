@@ -1,0 +1,15 @@
+{
+  "steps": {
+    "welcome": {"enabled": false},
+    "new-chat": {"enabled": false},
+    "claude-history": {"enabled": false},
+    "settings-gear": {"enabled": false},
+    "slash-commands": {"enabled": false},
+    "add-context": {"enabled": false},
+    "upload-file": {"enabled": false},
+    "drag-and-drop": {"enabled": false},
+    "chat-mode": {"enabled": false},
+    "launcher-tiles": {"enabled": false},
+    "done": {"enabled": false}
+  }
+}

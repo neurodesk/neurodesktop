@@ -73,6 +73,7 @@ export APPTAINER_BINDPATH=/data,/mnt,/neurodesktop-storage,/tmp,/cvmfs
 
 export APPTAINERENV_SUBJECTS_DIR=${HOME}/freesurfer-subjects-dir
 export MPLCONFIGDIR=${HOME}/.config/matplotlib-mpldir
+export NBI_TOUR_CONFIG_PATH="${NBI_TOUR_CONFIG_PATH:-/opt/jovyan_defaults/.jupyter/nbi/tour_config.json}"
 
 # Keep agent wrappers in /usr/local/sbin ahead of user-level installs in ~/.local/bin.
 path_prepend() {

@@ -21,3 +21,6 @@
   OpenCode and by the Notebook Intelligence JupyterLab plugin. OpenCode
   persists it to `~/.bashrc` on first setup, and `nbi_setup.sh` injects it
   into `~/.jupyter/nbi/config.json` on each JupyterLab startup
+- `NBI_TOUR_CONFIG_PATH`: Notebook Intelligence tour override file; defaults to
+  `/opt/jovyan_defaults/.jupyter/nbi/tour_config.json`, which disables the
+  first-run tour in Neurodesktop
