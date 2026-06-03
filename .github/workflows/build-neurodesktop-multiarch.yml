@@ -1,0 +1,438 @@
+name: Build neurodesktop multiarch (TRIAL)
+
+# TRIAL workflow for native multi-arch builds. Do NOT treat as production.
+# - Copy of build-neurodesktop-test.yml, modified for native arm64 on Blacksmith.
+# - amd64 builds natively on the Sydney ARC pool; arm64 builds natively on a
+#   Blacksmith arm runner. NO QEMU emulation anywhere.
+# - Publishes to a DISTINCT trial tag (:multiarch-trial[-amd64|-arm64]) so it
+#   CANNOT clobber the real neurodesktop-test:latest / :amd64 tags.
+# - GHCR only for now (Phase 1). Quay is added in Phase 2.
+# - DockerHub steps are commented out (pending manager sign-off to drop it).
+# - workflow_dispatch only (no cron) so it never double-runs with the real
+#   daily test build.
+# - Auto-issue-on-failure (report-job-failure) is intentionally disabled while
+#   we iterate, so trial failures don't spam GitHub issues.
+
+permissions:
+  contents: read
+  packages: write
+
+on:
+  workflow_dispatch: {}
+
+env:
+  # Opt the lone Node 20 holdout into Node 24 to silence deprecation warnings.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  # Distinct trial tag prefix — keeps this workflow's output isolated from the
+  # real neurodesktop-test image tags.
+  TRIAL_TAG: "multiarch-trial"
+  # --- DockerHub: commented out pending manager decision to drop it ---
+  # DOCKERHUB_ORG: ${{ vars.DOCKERHUB_ORG }}
+  # --- Quay: added in Phase 2 (secrets: QUAY_USERNAME / QUAY_ROBOT_TOKEN) ---
+
+jobs:
+  build-image:
+    runs-on: ${{ matrix.platform.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - arch: amd64
+            docker_platform: linux/amd64
+            tag: amd64
+            runs_on: neurodesk-syd-arcrunner-neurodesktop
+          - arch: arm64
+            docker_platform: linux/arm64
+            tag: arm64
+            runs_on: blacksmith-8vcpu-ubuntu-2404-arm
+    steps:
+      - name: Fetch github api rate limit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          GITHUB_RATE_REMAINING=$(curl -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github.v3+json" https://api.github.com/rate_limit | jq '.rate.remaining')
+          echo "GITHUB_RATE_REMAINING=${GITHUB_RATE_REMAINING}"
+          case "$GITHUB_RATE_REMAINING" in
+            ''|null|0)
+              echo "::error::GitHub API rate limit probe returned '${GITHUB_RATE_REMAINING:-<empty>}'. Failing job to avoid running with unset IMAGEID/BUILDDATE."
+              exit 1
+              ;;
+          esac
+          echo "GITHUB_RATE_REMAINING=$GITHUB_RATE_REMAINING" >> $GITHUB_ENV
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.ref }}
+      - name: Set environment variables
+        run: |
+          IMAGENAME="neurodesktop-test"
+          BUILDDATE=`date +%Y-%m-%d`
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
+
+          echo "BUILDDATE=$BUILDDATE"
+          echo "IMAGEID=$IMAGEID"
+          echo "IMAGENAME=$IMAGENAME"
+
+          echo "BUILDDATE=$BUILDDATE" >> $GITHUB_ENV
+          echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
+          echo "IMAGENAME=$IMAGENAME" >> $GITHUB_ENV
+      # NOTE: no `Set up QEMU` step — both legs build NATIVELY (amd64 on the
+      # x86 ARC pool, arm64 on a Blacksmith arm runner). Emulation is gone.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        with:
+          driver-opts: |
+            network=host
+      - name: Login to GHCR
+        uses: ./.github/actions/docker-login-retry
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # --- DockerHub login: commented out (Phase: drop DockerHub) ---
+      # - name: Login to DockerHub
+      #   if: ${{ env.DOCKERHUB_ORG != '' }}
+      #   uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+      #   with:
+      #     username: ${{ secrets.DOCKERHUB_USERNAME }}
+      #     password: ${{ secrets.DOCKERHUB_PASSWORD }}
+      - name: Build and push arch image (native, no QEMU)
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          platforms: ${{ matrix.platform.docker_platform }}
+          provenance: false
+          no-cache: true
+          push: true
+          # Trial per-arch tag, e.g. ...:multiarch-trial-amd64 / -arm64
+          tags: ${{ env.IMAGEID }}:${{ env.TRIAL_TAG }}-${{ matrix.platform.tag }}
+      # Sizing telemetry — non-fatal (`set +e`, `if: always()`). Now also
+      # captures Blacksmith arm runner peaks, not just arc-base.
+      - name: Capture runner resource peak (sizing telemetry)
+        if: always()
+        run: |
+          set +e
+          echo "::group::Host / arch / kernel"
+          uname -a
+          nproc
+          grep -E "^(model name|cpu MHz|cpu cores)" /proc/cpuinfo | sort -u
+          echo "::endgroup::"
+
+          echo "::group::Memory snapshot (free -h)"
+          free -h
+          echo "::endgroup::"
+
+          echo "::group::Runner cgroup peak (memory / cpu / io)"
+          ls /sys/fs/cgroup/ 2>&1 | head -20
+          for f in memory.peak memory.current memory.max cpu.stat io.stat io.pressure cpu.pressure memory.pressure; do
+            if [ -r /sys/fs/cgroup/$f ]; then
+              echo "--- $f ---"; cat /sys/fs/cgroup/$f 2>&1; echo
+            fi
+          done
+          echo "::endgroup::"
+
+          echo "::group::Filesystem (df -h)"
+          df -h
+          echo "::endgroup::"
+
+          echo "::group::Docker info (subset)"
+          docker info 2>&1 | grep -E "(Server Version|Storage Driver|Docker Root|CPUs|Total Memory|Operating System|Kernel|Cgroup)" || true
+          echo "::endgroup::"
+      # --- Auto-issue on failure: disabled for the trial (avoid issue spam) ---
+      # - name: Report job failure
+      #   if: always() && failure()
+      #   uses: ./.github/actions/report-job-failure
+      #   with:
+      #     github-token: ${{ secrets.GITHUB_TOKEN }}
+      #     details: ${{ matrix.platform.arch || '' }}
+
+  merge-manifests:
+    needs: build-image
+    runs-on: neurodesk-syd-arcrunner-neurodesktop
+    steps:
+      - name: Set environment variables
+        run: |
+          IMAGENAME="neurodesktop-test"
+          BUILDDATE=`date +%Y-%m-%d`
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
+
+          echo "BUILDDATE=$BUILDDATE" >> $GITHUB_ENV
+          echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
+          echo "IMAGENAME=$IMAGENAME" >> $GITHUB_ENV
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.ref }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - name: Login to GHCR
+        uses: ./.github/actions/docker-login-retry
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # --- DockerHub login: commented out (Phase: drop DockerHub) ---
+      # - name: Login to DockerHub
+      #   if: ${{ env.DOCKERHUB_ORG != '' }}
+      #   uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+      #   with:
+      #     username: ${{ secrets.DOCKERHUB_USERNAME }}
+      #     password: ${{ secrets.DOCKERHUB_PASSWORD }}
+      - name: Create and push multi-arch manifest to GHCR
+        run: |
+          # Merge the two native per-arch trial tags into ONE manifest list.
+          # Result: ...:multiarch-trial resolves to amd64 or arm64 on pull.
+          docker buildx imagetools create \
+            -t ${{ env.IMAGEID }}:${{ env.TRIAL_TAG }} \
+            ${{ env.IMAGEID }}:${{ env.TRIAL_TAG }}-amd64 \
+            ${{ env.IMAGEID }}:${{ env.TRIAL_TAG }}-arm64
+      - name: Verify manifest is multi-arch
+        run: |
+          echo "Inspecting ${{ env.IMAGEID }}:${{ env.TRIAL_TAG }} ..."
+          docker buildx imagetools inspect ${{ env.IMAGEID }}:${{ env.TRIAL_TAG }}
+      # --- Phase 2 will add here: Quay login + crane copy of the merged index ---
+      # - name: Login to Quay
+      #   uses: docker/login-action@... # registry: quay.io, QUAY_USERNAME / QUAY_ROBOT_TOKEN
+      # - name: Install crane
+      #   run: curl -sL https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_x86_64.tar.gz | sudo tar -xz -C /usr/local/bin crane
+      # - name: Mirror merged index to Quay
+      #   run: crane copy ${{ env.IMAGEID }}:${{ env.TRIAL_TAG }} quay.io/neurodesk/neurodesktop-test:${{ env.TRIAL_TAG }}
+      - name: Write image publish summary
+        run: |
+          {
+            echo "## TRIAL multi-arch publish summary"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Result | Built native amd64 + arm64, merged to one manifest (GHCR) |"
+            echo "| Trial tag | \`${{ env.IMAGEID }}:${{ env.TRIAL_TAG }}\` |"
+            echo "| Per-arch tags | \`${{ env.TRIAL_TAG }}-amd64\`, \`${{ env.TRIAL_TAG }}-arm64\` |"
+            echo "| Source commit | \`${GITHUB_SHA}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  test-image:
+    name: test-image (${{ matrix.arch }} / ${{ matrix.profile.test_profile }})
+    needs: build-image
+    # arm64 tests must RUN the container, so they need a native arm64 runner.
+    runs-on: ${{ matrix.arch == 'arm64' && 'blacksmith-8vcpu-ubuntu-2404-arm' || 'ubuntu-22.04' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+        profile:
+          - test_profile: "CVMFS enabled, sudo disabled"
+            cvmfs_disable: "false"
+            grant_sudo: "no"
+            needs_cvmfs: true
+          - test_profile: "CVMFS enabled, sudo enabled"
+            cvmfs_disable: "false"
+            grant_sudo: "yes"
+            needs_cvmfs: true
+          - test_profile: "CVMFS disabled, sudo disabled"
+            cvmfs_disable: "true"
+            grant_sudo: "no"
+            needs_cvmfs: false
+          - test_profile: "CVMFS disabled, sudo enabled"
+            cvmfs_disable: "true"
+            grant_sudo: "yes"
+            needs_cvmfs: false
+          - test_profile: "HPC Apptainer simulation"
+            cvmfs_disable: "true"
+            grant_sudo: "no"
+            needs_cvmfs: false
+            hpc_mode: true
+    steps:
+      - name: Set environment variables
+        run: |
+          IMAGENAME="neurodesktop-test"
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
+          echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
+          # Pull the per-arch trial tag matching this job's arch.
+          echo "IMAGE_REF=$IMAGEID:${TRIAL_TAG}-${{ matrix.arch }}" >> $GITHUB_ENV
+      - name: Free up build space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift /usr/lib/android-sdk || true
+          sudo docker image prune --all --force || true
+          sudo docker builder prune --force || true
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.ref }}
+      - name: Login to GHCR
+        uses: ./.github/actions/docker-login-retry
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull container image
+        run: docker pull "$IMAGE_REF"
+      # NOTE / RISK: CVMFS setup on arm64 via cvmfs-contrib/github-action-cvmfs
+      # is UNVERIFIED. If it doesn't support aarch64, the two arm64 CVMFS
+      # profiles will fail here — fail-fast:false isolates them so the rest
+      # still report. This is one of the things the first trial run reveals.
+      - name: Initialize CVMFS
+        if: matrix.profile.needs_cvmfs
+        uses: cvmfs-contrib/github-action-cvmfs@v3
+      - name: Configure Neurodesk CVMFS
+        if: matrix.profile.needs_cvmfs
+        run: |
+          sudo mkdir -p /etc/cvmfs/keys/ardc.edu.au
+          sudo cp config/cvmfs/neurodesk.ardc.edu.au.pub /etc/cvmfs/keys/ardc.edu.au/neurodesk.ardc.edu.au.pub
+          sudo cp config/cvmfs/neurodesk.ardc.edu.au.conf.cdn.america /etc/cvmfs/config.d/neurodesk.ardc.edu.au.conf
+          sudo cp config/cvmfs/default.local /etc/cvmfs/default.local
+          sudo cvmfs_config setup
+          sudo ls /cvmfs/neurodesk.ardc.edu.au
+      - name: Test container (CVMFS=${{ matrix.profile.cvmfs_disable == 'false' && 'on' || 'off' }}, SUDO=${{ matrix.profile.grant_sudo }})
+        if: ${{ ! matrix.profile.hpc_mode }}
+        run: |
+          CVMFS_MOUNT=""
+          if [ "${{ matrix.profile.needs_cvmfs }}" = "true" ]; then
+            CVMFS_MOUNT="-v /cvmfs:/cvmfs:shared"
+          fi
+          docker rm -f neurodesktop-test 2>/dev/null || true
+          docker run -d --shm-size=1gb --privileged --user=root \
+            --name neurodesktop-test \
+            $CVMFS_MOUNT \
+            -e CVMFS_DISABLE=${{ matrix.profile.cvmfs_disable }} \
+            -e GRANT_SUDO=${{ matrix.profile.grant_sudo }} \
+            -e NEURODESKTOP_CVMFS_STARTUP_MODE=eager \
+            -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
+            "$IMAGE_REF"
+          echo "Waiting for container startup..."
+          for i in $(seq 1 60); do
+            code=$(docker exec neurodesktop-test curl -so /dev/null -w '%{http_code}' \
+                     --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
+            if echo "$code" | grep -Eq '^[0-9]{3}$' && [ "$code" != "000" ]; then
+              echo "Container ready after ~$((i*2))s (HTTP ${code})"
+              break
+            fi
+            sleep 2
+          done
+          docker exec -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 \
+            -u jovyan neurodesktop-test pytest /opt/tests/ -v
+          docker rm -f neurodesktop-test
+
+      - name: Test container (HPC Apptainer simulation)
+        if: ${{ matrix.profile.hpc_mode }}
+        run: |
+          HPC_USER=sciget
+          HPC_UID=5000
+          HPC_GID=5000
+          HPC_HOME_DIR="$(mktemp -d)"
+          HPC_PASSWD_FILE="$(mktemp)"
+          HPC_GROUP_FILE="$(mktemp)"
+
+          cat > "$HPC_PASSWD_FILE" <<EOF
+          root:x:0:0:root:/root:/bin/bash
+          jovyan:x:1000:100:jovyan:/home/jovyan:/bin/bash
+          ${HPC_USER}:x:${HPC_UID}:${HPC_GID}:${HPC_USER} (HPC simulated):/home/jovyan:/bin/bash
+          nobody:x:65534:65534:nobody:/:/usr/sbin/nologin
+          EOF
+          cat > "$HPC_GROUP_FILE" <<EOF
+          root:x:0:
+          users:x:100:jovyan,${HPC_USER}
+          ${HPC_USER}:x:${HPC_GID}:
+          nogroup:x:65534:
+          EOF
+          chmod 0777 "$HPC_HOME_DIR"
+          chmod 0644 "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
+
+          docker rm -f neurodesktop-test 2>/dev/null || true
+          docker run -d --shm-size=1gb \
+            --user "${HPC_UID}:${HPC_GID}" \
+            --name neurodesktop-test \
+            -v "${HPC_HOME_DIR}:/home/jovyan" \
+            -v "${HPC_PASSWD_FILE}:/etc/passwd:ro" \
+            -v "${HPC_GROUP_FILE}:/etc/group:ro" \
+            -e CVMFS_DISABLE=true \
+            -e NB_USER=${HPC_USER} \
+            -e NB_UID=${HPC_UID} \
+            -e NB_GID=${HPC_GID} \
+            -e HOME=/home/jovyan \
+            -e USER=${HPC_USER} \
+            -e LOGNAME=${HPC_USER} \
+            -e APPTAINER_CONTAINER=1 \
+            -e APPTAINER_NAME=neurodesktop-test-hpc \
+            -e NEURODESKTOP_CVMFS_STARTUP_MODE=lazy \
+            -e NEURODESKTOP_SLURM_ENABLE=0 \
+            -e NEURODESKTOP_SLURM_STARTUP_MODE=eager \
+            "$IMAGE_REF"
+          echo "Waiting for container startup..."
+          ready=0
+          for i in $(seq 1 90); do
+            if ! docker inspect -f '{{.State.Running}}' neurodesktop-test 2>/dev/null | grep -q true; then
+              echo "::error::Container exited during startup (HPC mode)."
+              docker logs --tail 120 neurodesktop-test || true
+              exit 1
+            fi
+            code=$(docker exec neurodesktop-test curl -so /dev/null -w '%{http_code}' \
+                     --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
+            if echo "$code" | grep -Eq '^[0-9]{3}$' && [ "$code" != "000" ]; then
+              echo "Container ready after ~$((i*2))s (HTTP ${code})"
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::Container did not reach /api/status in 180s (HPC mode)."
+            docker logs --tail 120 neurodesktop-test || true
+            exit 1
+          fi
+          docker exec -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 \
+            neurodesktop-test pytest /opt/tests/ -v
+          test_rc=$?
+          docker rm -f neurodesktop-test
+          docker run --rm --user 0:0 --entrypoint chown \
+            -v "$HPC_HOME_DIR":/cleanup "$IMAGE_REF" \
+            -R "$(id -u):$(id -g)" /cleanup >/dev/null 2>&1 || true
+          rm -rf "$HPC_HOME_DIR" "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
+          exit $test_rc
+
+  scan-image:
+    name: scan-image (${{ matrix.arch }})
+    needs: build-image
+    # Trivy scans image layers (it does not RUN the container), so a per-arch
+    # arm64 image can be scanned from an x86 runner. Keep scans on ubuntu-22.04.
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Set environment variables
+        run: |
+          IMAGENAME="neurodesktop-test"
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
+          echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
+          echo "IMAGE_REF=$IMAGEID:${TRIAL_TAG}-${{ matrix.arch }}" >> $GITHUB_ENV
+      - name: Free up build space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift /usr/lib/android-sdk || true
+          sudo docker image prune --all --force || true
+          sudo docker builder prune --force || true
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.ref }}
+      - name: Login to GHCR
+        uses: ./.github/actions/docker-login-retry
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull container image
+        run: docker pull "$IMAGE_REF"
+      - name: Container image scan (${{ matrix.arch }})
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_REF }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL
+          timeout: 25m0s
+          skip-files: /opt/rclone-v1.60.1-linux-amd64/README.txt,/opt/rclone-v1.60.1-linux-amd64/README.html,/opt/rclone-v1.60.1-linux-amd64/rclone.1,/opt/code-server/lib/vscode/package.json,/opt/code-server/lib/vscode/extensions/handlebars/package.json
