@@ -141,6 +141,10 @@ USER root
 ARG GUACAMOLE_RUNTIME_APT_PACKAGES="libfreerdp2-2t64 libfreerdp-client2-2t64 libwinpr2-2t64 libvncclient1"
 
 COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
+# Generic retry wrapper for flaky non-apt external downloads (curl|bash
+# installers, conda, git clone) that lack built-in retry — same spirit as the
+# `harden download` curl --retry pattern used elsewhere in this file.
+COPY --chmod=0755 scripts/retry.sh /usr/local/bin/retry
 
 #========================================#
 # Core services
@@ -216,7 +220,7 @@ RUN ln -sf /opt/apptainer/bin/apptainer /usr/local/bin/apptainer \
     && rm -rf /root/.cache && rm -rf /home/${NB_USER}/.cache
 
 # Install Apache Tomcat
-RUN wget -q https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v${TOMCAT_VERSION}/bin/apache-tomcat-${TOMCAT_VERSION}.tar.gz -P /tmp \
+RUN retry wget -q https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v${TOMCAT_VERSION}/bin/apache-tomcat-${TOMCAT_VERSION}.tar.gz -P /tmp \
     && tar -xf /tmp/apache-tomcat-${TOMCAT_VERSION}.tar.gz -C /tmp \
     && rm -rf /tmp/apache-tomcat-${TOMCAT_VERSION}.tar.gz \
     && mv /tmp/apache-tomcat-${TOMCAT_VERSION} /usr/local/tomcat \
@@ -264,7 +268,7 @@ RUN mv /usr/bin/systemctl /usr/bin/systemctl.orig \
     && chmod +x /usr/bin/systemctl
 
 # Install CVMFS
-RUN wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb -P /tmp \
+RUN retry wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb -P /tmp \
     && dpkg -i /tmp/cvmfs-release-latest_all.deb \
     && rm /tmp/cvmfs-release-latest_all.deb \
     && apt-install-retry \
@@ -394,16 +398,16 @@ ENV NF_NEURO_MODULES_DIR=/opt/nf-neuro/modules
 ENV NF_TEST_HOME=/opt/nf-test
 RUN mkdir -p "${NF_TEST_HOME}" \
     && cd /tmp \
-    && curl -fsSL https://get.nextflow.io | bash \
+    && retry bash -o pipefail -c 'curl -fsSL https://get.nextflow.io | bash' \
     && mv /tmp/nextflow /usr/local/bin/nextflow \
     && chmod 755 /usr/local/bin/nextflow \
-    && wget -qO- https://get.nf-test.com | bash -s 0.9.5 \
+    && retry bash -o pipefail -c 'wget -qO- https://get.nf-test.com | bash -s 0.9.5' \
     && test -f "${HOME}/.nf-test/nf-test.jar" \
     && cp -a "${HOME}/.nf-test/." "${NF_TEST_HOME}/" \
     && printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'exec java -jar /opt/nf-test/nf-test.jar "$@"' > /usr/local/bin/nf-test \
     && chmod 755 /usr/local/bin/nf-test \
     && mkdir -p /opt/nf-neuro \
-    && git clone --depth=1 https://github.com/nf-neuro/modules.git "${NF_NEURO_MODULES_DIR}" \
+    && retry git clone --depth=1 https://github.com/nf-neuro/modules.git "${NF_NEURO_MODULES_DIR}" \
     && chown -R ${NB_UID}:${NB_GID} /opt/nf-neuro "${NF_TEST_HOME}" "${HOME}/.nextflow" \
     && rm -rf /root/.cache "${HOME}/.nf-test" /tmp/nf-test /tmp/nextflow
 
@@ -412,14 +416,14 @@ RUN mkdir -p "${NF_TEST_HOME}" \
 # jupyterlab-slurm, neurodesk-launcher). build-essential provides gcc for pip
 # packages with C extensions (e.g. psutil, traits). build-essential is removed
 # after extensions are built (see purge step below); nodejs stays for codex.
-RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+RUN retry bash -o pipefail -c 'curl -fsSL https://deb.nodesource.com/setup_24.x | bash -' \
     && apt-install-retry nodejs build-essential \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install AI coding assistants
 RUN npm_config_cache=/tmp/npm-root-cache npm install -g @openai/codex \
     && rm -rf /root/.npm /tmp/npm-root-cache /home/${NB_USER}/.npm \
-    && su - "${NB_USER}" -c 'curl -fsSL https://claude.ai/install.sh | bash -s -- stable' \
+    && su - "${NB_USER}" -c 'retry bash -o pipefail -c "curl -fsSL https://claude.ai/install.sh | bash -s -- stable"' \
     && mkdir -p /opt/jovyan_defaults/.local/bin \
     && if [ -x /home/jovyan/.local/bin/claude ]; then \
     cp -L /home/jovyan/.local/bin/claude /opt/jovyan_defaults/.local/bin/claude; \
@@ -431,7 +435,7 @@ RUN npm_config_cache=/tmp/npm-root-cache npm install -g @openai/codex \
     && rm -rf /home/${NB_USER}/.local
 
 # Install OpenCode CLI (open source AI coding agent)
-RUN curl -fsSL https://opencode.ai/install | bash \
+RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash' \
     && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 
@@ -439,7 +443,7 @@ RUN curl -fsSL https://opencode.ai/install | bash \
 # Launchpad API and Ubuntu's snap-backed firefox package.
 RUN --mount=type=bind,source=config/firefox,target=/tmp/firefox,ro \
     install -d -m 0755 /etc/apt/keyrings \
-    && curl -fsSL https://packages.mozilla.org/apt/repo-signing-key.gpg \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 https://packages.mozilla.org/apt/repo-signing-key.gpg \
     -o /etc/apt/keyrings/packages.mozilla.org.asc \
     && install -d -m 0700 /tmp/mozilla-gnupg \
     && GNUPGHOME=/tmp/mozilla-gnupg gpg -n -q --import --import-options import-show /etc/apt/keyrings/packages.mozilla.org.asc \
@@ -462,7 +466,7 @@ RUN --mount=type=bind,source=config/firefox/syspref.js,target=/tmp/syspref.js,ro
 USER ${NB_USER}
 
 # Install conda packages
-RUN conda install -c conda-forge nb_conda_kernels \
+RUN retry conda install -c conda-forge nb_conda_kernels \
     && conda clean --all -f -y \
     && conda config --system --prepend envs_dirs '~/conda-environments' \
     && rm -rf /home/${NB_USER}/.cache
@@ -723,7 +727,7 @@ RUN --mount=type=bind,source=config/cvmfs,target=/tmp/cvmfs,ro \
 # Install neurocommand
 ADD "https://api.github.com/repos/neurodesk/neurocommand/git/refs/heads/main" /tmp/skipcache
 RUN rm /tmp/skipcache \
-    && git clone https://github.com/neurodesk/neurocommand.git /neurocommand \
+    && retry git clone https://github.com/neurodesk/neurocommand.git /neurocommand \
     && cd /neurocommand \
     && bash build.sh --lxde --edit \
     && bash install.sh \
@@ -802,8 +806,8 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
 RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
     && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
     && MYST_PACKAGE_DIR="$(/opt/conda/bin/python -c 'import jupyterlab_myst, os; print(os.path.dirname(jupyterlab_myst.__file__))')" \
-    && git clone --depth 1 --branch "v${MYST_VERSION}" https://github.com/jupyter-book/jupyterlab-myst.git /tmp/myst \
-    && git clone --depth 1 --branch "v${RISE_VERSION}" https://github.com/jupyterlab-contrib/rise.git /tmp/rise \
+    && retry git clone --depth 1 --branch "v${MYST_VERSION}" https://github.com/jupyter-book/jupyterlab-myst.git /tmp/myst \
+    && retry git clone --depth 1 --branch "v${RISE_VERSION}" https://github.com/jupyterlab-contrib/rise.git /tmp/rise \
     && cd /tmp/myst \
     && npm_config_cache=/tmp/myst-npm-cache npm install \
     && npm run build:css \
