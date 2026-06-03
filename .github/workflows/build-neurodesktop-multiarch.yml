@@ -6,7 +6,9 @@ name: Build neurodesktop multiarch (TRIAL)
 #   Blacksmith arm runner. NO QEMU emulation anywhere.
 # - Publishes to a DISTINCT trial tag (:multiarch-trial[-amd64|-arm64]) so it
 #   CANNOT clobber the real neurodesktop-test:latest / :amd64 tags.
-# - GHCR only for now (Phase 1). Quay is added in Phase 2.
+# - Publishes to GHCR, then mirrors the merged manifest to Quay (crane copy).
+# - arm64 + CVMFS test profiles are EXCLUDED for now (deferred; see
+#   tmp/cvmfs-arm64-todo.md) — arm64 CVMFS content + arch-routing not ready upstream.
 # - DockerHub steps are commented out (pending manager sign-off to drop it).
 # - workflow_dispatch only (no cron) so it never double-runs with the real
 #   daily test build.
@@ -28,7 +30,8 @@ env:
   TRIAL_TAG: "multiarch-trial"
   # --- DockerHub: commented out pending manager decision to drop it ---
   # DOCKERHUB_ORG: ${{ vars.DOCKERHUB_ORG }}
-  # --- Quay: added in Phase 2 (secrets: QUAY_USERNAME / QUAY_ROBOT_TOKEN) ---
+  # --- Quay (Phase 2): publish target (creds secrets: QUAY_USERNAME / QUAY_ROBOT_TOKEN) ---
+  QUAY_IMAGE: "quay.io/neurodesk/neurodesktop-test"
 
 jobs:
   build-image:
@@ -180,6 +183,12 @@ jobs:
       #   with:
       #     username: ${{ secrets.DOCKERHUB_USERNAME }}
       #     password: ${{ secrets.DOCKERHUB_PASSWORD }}
+      - name: Login to Quay
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_ROBOT_TOKEN }}
       - name: Create and push multi-arch manifest to GHCR
         run: |
           # Merge the two native per-arch trial tags into ONE manifest list.
@@ -188,17 +197,25 @@ jobs:
             -t ${{ env.IMAGEID }}:${{ env.TRIAL_TAG }} \
             ${{ env.IMAGEID }}:${{ env.TRIAL_TAG }}-amd64 \
             ${{ env.IMAGEID }}:${{ env.TRIAL_TAG }}-arm64
-      - name: Verify manifest is multi-arch
+      - name: Verify GHCR manifest is multi-arch
         run: |
           echo "Inspecting ${{ env.IMAGEID }}:${{ env.TRIAL_TAG }} ..."
           docker buildx imagetools inspect ${{ env.IMAGEID }}:${{ env.TRIAL_TAG }}
-      # --- Phase 2 will add here: Quay login + crane copy of the merged index ---
-      # - name: Login to Quay
-      #   uses: docker/login-action@... # registry: quay.io, QUAY_USERNAME / QUAY_ROBOT_TOKEN
-      # - name: Install crane
-      #   run: curl -sL https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_x86_64.tar.gz | sudo tar -xz -C /usr/local/bin crane
-      # - name: Mirror merged index to Quay
-      #   run: crane copy ${{ env.IMAGEID }}:${{ env.TRIAL_TAG }} quay.io/neurodesk/neurodesktop-test:${{ env.TRIAL_TAG }}
+      - name: Install crane (no sudo)
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -sL https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_x86_64.tar.gz \
+            | tar -xz -C "$HOME/bin" crane
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          "$HOME/bin/crane" version
+      - name: Mirror merged manifest to Quay
+        run: |
+          # crane copies the already-assembled multi-arch index from GHCR to Quay,
+          # preserving the manifest list. crane's blob path avoids the large-blob
+          # 400s seen pushing indexes to some registries via imagetools.
+          crane copy ${{ env.IMAGEID }}:${{ env.TRIAL_TAG }} ${{ env.QUAY_IMAGE }}:${{ env.TRIAL_TAG }}
+      - name: Verify Quay manifest is multi-arch
+        run: docker buildx imagetools inspect ${{ env.QUAY_IMAGE }}:${{ env.TRIAL_TAG }}
       - name: Write image publish summary
         run: |
           {
@@ -206,8 +223,9 @@ jobs:
             echo ""
             echo "| Field | Value |"
             echo "| --- | --- |"
-            echo "| Result | Built native amd64 + arm64, merged to one manifest (GHCR) |"
-            echo "| Trial tag | \`${{ env.IMAGEID }}:${{ env.TRIAL_TAG }}\` |"
+            echo "| Result | Built native amd64 + arm64, merged to one manifest, pushed to GHCR + Quay |"
+            echo "| GHCR tag | \`${{ env.IMAGEID }}:${{ env.TRIAL_TAG }}\` |"
+            echo "| Quay tag | \`${{ env.QUAY_IMAGE }}:${{ env.TRIAL_TAG }}\` |"
             echo "| Per-arch tags | \`${{ env.TRIAL_TAG }}-amd64\`, \`${{ env.TRIAL_TAG }}-arm64\` |"
             echo "| Source commit | \`${GITHUB_SHA}\` |"
           } >> "${GITHUB_STEP_SUMMARY}"
@@ -243,6 +261,21 @@ jobs:
             grant_sudo: "no"
             needs_cvmfs: false
             hpc_mode: true
+        exclude:
+          # arm64 + CVMFS deferred (see tmp/cvmfs-arm64-todo.md): content mid-port
+          # upstream + arch-routing (CVMFS variant symlinks) not wired yet.
+          - arch: arm64
+            profile:
+              test_profile: "CVMFS enabled, sudo disabled"
+              cvmfs_disable: "false"
+              grant_sudo: "no"
+              needs_cvmfs: true
+          - arch: arm64
+            profile:
+              test_profile: "CVMFS enabled, sudo enabled"
+              cvmfs_disable: "false"
+              grant_sudo: "yes"
+              needs_cvmfs: true
     steps:
       - name: Set environment variables
         run: |
