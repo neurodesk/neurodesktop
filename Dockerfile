@@ -782,6 +782,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     /opt/neurodesktop/webapps.json \
     /opt/neurodesktop/jupyter_notebook_config.py.template \
     /etc/jupyter/jupyter_notebook_config.py \
+    --merged-webapps-output /opt/neurodesktop/webapps.json \
     /tmp/jupyter/webapp_links.json \
     && chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/webapp_wrapper/webapp_wrapper.py \

@@ -178,6 +178,7 @@ def generate_config(
     template_path: Path,
     output_path: Path,
     overlay_paths: list[Path] | None = None,
+    merged_webapps_output_path: Path | None = None,
 ):
     """
     Generate jupyter_notebook_config.py from template and webapps.json.
@@ -187,6 +188,7 @@ def generate_config(
         template_path: Path to jupyter_notebook_config.py.template
         output_path: Path to write generated config
         overlay_paths: Optional local webapp overlay JSON files
+        merged_webapps_output_path: Optional path to write the merged webapps JSON
     """
     data = load_webapps_config(webapps_json_path, overlay_paths)
 
@@ -215,6 +217,13 @@ def generate_config(
     with open(output_path, 'w') as f:
         f.write(output)
 
+    if merged_webapps_output_path:
+        print(f"Writing merged webapps to: {merged_webapps_output_path}")
+        merged_webapps_output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(merged_webapps_output_path, 'w') as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+
     print("Done!")
     for name, config in webapps.items():
         if config.get('direct_url'):
@@ -223,21 +232,38 @@ def generate_config(
             print(f"  - {name}: {config.get('title')} (socket: /tmp/neurodesk_webapp_{name}.sock)")
 
 
-def main():
-    if len(sys.argv) < 4:
-        print("Usage: generate_jupyter_config.py <webapps.json> <template.py> <output.py> [overlay.json ...]")
-        print()
-        print("Arguments:")
-        print("  webapps.json  Path to webapp configurations JSON file")
-        print("  template.py   Path to jupyter_notebook_config.py.template")
-        print("  output.py     Path to write generated jupyter_notebook_config.py")
-        print("  overlay.json  Optional local webapp overlay JSON file(s)")
+def print_usage():
+    print("Usage: generate_jupyter_config.py <webapps.json> <template.py> <output.py> [overlay.json ...]")
+    print()
+    print("Arguments:")
+    print("  webapps.json  Path to webapp configurations JSON file")
+    print("  template.py   Path to jupyter_notebook_config.py.template")
+    print("  output.py     Path to write generated jupyter_notebook_config.py")
+    print("  overlay.json  Optional local webapp overlay JSON file(s)")
+    print("  --merged-webapps-output PATH  Optional path to write merged webapps JSON")
+
+
+def main(argv=None):
+    args = list(sys.argv[1:] if argv is None else argv)
+    merged_webapps_output_path = None
+
+    if "--merged-webapps-output" in args:
+        option_index = args.index("--merged-webapps-output")
+        if option_index + 1 >= len(args):
+            print("Error: --merged-webapps-output requires a path")
+            print_usage()
+            sys.exit(1)
+        merged_webapps_output_path = Path(args[option_index + 1])
+        del args[option_index:option_index + 2]
+
+    if len(args) < 3:
+        print_usage()
         sys.exit(1)
 
-    webapps_json_path = Path(sys.argv[1])
-    template_path = Path(sys.argv[2])
-    output_path = Path(sys.argv[3])
-    overlay_paths = [Path(arg) for arg in sys.argv[4:]]
+    webapps_json_path = Path(args[0])
+    template_path = Path(args[1])
+    output_path = Path(args[2])
+    overlay_paths = [Path(arg) for arg in args[3:]]
 
     if not webapps_json_path.exists():
         print(f"Error: webapps.json not found: {webapps_json_path}")
@@ -252,7 +278,13 @@ def main():
             print(f"Error: overlay not found: {overlay_path}")
             sys.exit(1)
 
-    generate_config(webapps_json_path, template_path, output_path, overlay_paths)
+    generate_config(
+        webapps_json_path,
+        template_path,
+        output_path,
+        overlay_paths,
+        merged_webapps_output_path,
+    )
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ import urllib.parse
 import httpx
 import os
 import json
+import re
 import time
 import signal
 import sys
@@ -251,6 +252,45 @@ def check_app_ready():
         return True
 
     return False
+
+
+def build_path_rewrite_map(path_rewrites, base_path):
+    """Build byte rewrite pairs for backend paths embedded in text responses."""
+    rewrite_map = []
+    base_bytes = base_path.encode('utf-8')
+
+    for rewrite in path_rewrites or []:
+        if isinstance(rewrite, str):
+            if rewrite:
+                rewrite_map.append((rewrite.encode('utf-8'), base_bytes))
+            continue
+
+        if not isinstance(rewrite, dict):
+            continue
+
+        source = rewrite.get("from")
+        target = rewrite.get("to", "${base_path}")
+        if not isinstance(source, str) or not source:
+            continue
+        if not isinstance(target, str):
+            continue
+
+        target = target.replace("${base_path}", base_path)
+        target = target.replace("$base_path", base_path)
+        rewrite_map.append((source.encode('utf-8'), target.encode('utf-8')))
+
+    return rewrite_map
+
+
+def apply_path_rewrites(data, rewrite_map):
+    """Apply path rewrites without rewriting replacement text again."""
+    if not rewrite_map:
+        return data
+
+    rewrite_map = sorted(rewrite_map, key=lambda item: len(item[0]), reverse=True)
+    replacements = {old: new for old, new in rewrite_map}
+    pattern = re.compile(b"|".join(re.escape(old) for old, _ in rewrite_map))
+    return pattern.sub(lambda match: replacements[match.group(0)], data)
 
 
 def mark_client_activity():
@@ -852,15 +892,30 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
 
     def _rewrite_location(self, location, target_port):
         """Rewrite Location header to go through proxy instead of direct port access."""
+        if not location:
+            return location
+
+        base_path = self._get_base_path()
+        base_path_no_slash = base_path.rstrip("/")
+
         # Rewrite http://localhost:PORT/path to base_path + path
-        import re
         pattern = rf"^https?://(?:localhost|127\.0\.0\.1):{target_port}(/.*)?$"
         match = re.match(pattern, location)
         if match:
             path = match.group(1) or "/"
-            base_path = self._get_base_path().rstrip("/")
-            return f"{base_path}{path}"
-        return location
+            return f"{base_path_no_slash}{path}"
+
+        parsed_location = urllib.parse.urlparse(location)
+        if parsed_location.scheme or parsed_location.netloc:
+            return location
+
+        if location.startswith("/"):
+            return f"{base_path_no_slash}{location}"
+
+        if location.startswith("?") or location.startswith("#"):
+            return location
+
+        return urllib.parse.urljoin(base_path, location)
 
     def _send_status(self, method, is_close=False):
         """Send current status as JSON (GET) or heartbeat ack (POST)."""
@@ -1084,11 +1139,7 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
         is_compressed = bool(response.headers.get("content-encoding"))
 
         # Build rewrite map: list of (old_bytes, new_bytes) tuples
-        rewrite_map = []
-        if config.path_rewrites:
-            base_bytes = base_path.encode('utf-8')
-            for rewrite_path in config.path_rewrites:
-                rewrite_map.append((rewrite_path.encode('utf-8'), base_bytes))
+        rewrite_map = build_path_rewrite_map(config.path_rewrites, base_path)
 
         # Overlap buffer size: max pattern length - 1 to catch boundary crossings
         max_pattern_len = max((len(old) for old, _ in rewrite_map), default=0)
@@ -1112,9 +1163,7 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
         def rewrite(data):
-            for old_bytes, new_bytes in rewrite_map:
-                data = data.replace(old_bytes, new_bytes)
-            return data
+            return apply_path_rewrites(data, rewrite_map)
 
         def stream_with_overlap(iterator):
             """Stream chunks with overlap rewriting."""

@@ -10,6 +10,15 @@
       "direct_url": "https://dicompare.neurodesk.org/",
       "icon": "/opt/neurodesk/icons/dicompare.svg"
     },
+    "jamovi": {
+      "startup_timeout": 300,
+      "path_rewrites": [
+        {
+          "from": "/assets/",
+          "to": "${base_path}assets/"
+        }
+      ]
+    },
     "musclemap": {
       "title": "MuscleMap",
       "description": "Hosted MuscleMap web application",

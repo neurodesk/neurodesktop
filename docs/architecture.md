@@ -42,7 +42,9 @@ Container-backed webapps are defined in `webapps.json`, which is fetched from
 the neurocommand repository. Hosted webapp links and local overrides are defined
 in [`config/jupyter/webapp_links.json`](../config/jupyter/webapp_links.json) and
 applied by [`scripts/generate_jupyter_config.py`](../scripts/generate_jupyter_config.py)
-when generating Jupyter Server Proxy entries. Container-backed webapps launch
+when generating Jupyter Server Proxy entries. The same merged webapp config is
+written to `/opt/neurodesktop/webapps.json` so runtime wrapper settings such as
+path rewrites use the local overrides too. Container-backed webapps launch
 through [`config/jupyter/webapp_launcher.sh`](../config/jupyter/webapp_launcher.sh)
 and use Unix sockets such as `/tmp/neurodesk_webapp_{name}.sock` to avoid port
 conflicts. Entries with `direct_url` open the hosted application directly from
@@ -107,12 +109,13 @@ timeouts into false cache misses.
 
 The Dockerfile clones neurocommand, copies its `neurodesk/webapps.json`, applies
 [`config/jupyter/webapp_links.json`](../config/jupyter/webapp_links.json), and
-generates `jupyter_notebook_config.py` using a template system. To add new
-container-backed webapps, update the source `webapps.json`. To add hosted links
-or make an existing launcher tile open a hosted app directly, update
-`webapp_links.json`. This config generation runs after the neurocommand install
-layer so local launcher-link edits do not invalidate the earlier runtime setup
-layers.
+generates `jupyter_notebook_config.py` using a template system. It also writes
+the merged webapp configuration back to `/opt/neurodesktop/webapps.json`, which
+is what the webapp wrapper reads at launch time. To add new container-backed
+webapps, update the source `webapps.json`. To add hosted links or make an
+existing launcher tile open a hosted app directly, update `webapp_links.json`.
+This config generation runs after the neurocommand install layer so local
+launcher-link edits do not invalidate the earlier runtime setup layers.
 
 ### Apptainer
 

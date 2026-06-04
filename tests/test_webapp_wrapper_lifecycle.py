@@ -1,4 +1,5 @@
 import importlib.util
+from types import SimpleNamespace
 from pathlib import Path
 
 
@@ -66,3 +67,56 @@ def test_close_beacon_does_not_schedule_immediate_backend_stop(monkeypatch):
     assert handler.ended
     assert scheduled_close_checks == []
     assert direct_stops == []
+
+
+def test_location_rewrites_keep_relative_redirects_under_app_path():
+    wrapper = _load_webapp_wrapper_module()
+    wrapper.config = SimpleNamespace(app_name="jamovi")
+    handler = object.__new__(wrapper.WebappHandler)
+    handler.path = "/user/alice/jamovi"
+
+    assert (
+        wrapper.WebappHandler._rewrite_location(handler, "session-id/", 42037)
+        == "/user/alice/jamovi/session-id/"
+    )
+    assert (
+        wrapper.WebappHandler._rewrite_location(handler, "/assets/main.js", 42037)
+        == "/user/alice/jamovi/assets/main.js"
+    )
+    assert (
+        wrapper.WebappHandler._rewrite_location(
+            handler,
+            "http://localhost:42037/session-id/",
+            42037,
+        )
+        == "/user/alice/jamovi/session-id/"
+    )
+    assert (
+        wrapper.WebappHandler._rewrite_location(
+            handler,
+            "https://example.org/external/",
+            42037,
+        )
+        == "https://example.org/external/"
+    )
+
+
+def test_path_rewrite_map_supports_explicit_base_path_targets():
+    wrapper = _load_webapp_wrapper_module()
+
+    rewrite_map = wrapper.build_path_rewrite_map(
+        [
+            {"from": "/assets/", "to": "${base_path}assets/"},
+            "/jamovi/",
+        ],
+        "/user/alice/jamovi/",
+    )
+
+    assert (b"/assets/", b"/user/alice/jamovi/assets/") in rewrite_map
+    assert (b"/jamovi/", b"/user/alice/jamovi/") in rewrite_map
+
+    html = wrapper.apply_path_rewrites(
+        b'<script src="/assets/main.js"></script>',
+        rewrite_map,
+    )
+    assert html == b'<script src="/user/alice/jamovi/assets/main.js"></script>'
