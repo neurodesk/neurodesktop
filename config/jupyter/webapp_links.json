@@ -16,6 +16,14 @@
         {
           "from": "/assets/",
           "to": "${base_path}assets/"
+        },
+        {
+          "from": "\"/version\"",
+          "to": "\"${base_path}version\""
+        },
+        {
+          "from": "\"/settings\"",
+          "to": "\"${base_path}settings\""
         }
       ]
     },

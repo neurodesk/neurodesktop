@@ -42,7 +42,9 @@ def test_generate_config_writes_merged_webapp_config_for_wrapper(tmp_path):
             "jamovi": {
                 "startup_timeout": 300,
                 "path_rewrites": [
-                    {"from": "/assets/", "to": "${base_path}assets/"}
+                    {"from": "/assets/", "to": "${base_path}assets/"},
+                    {"from": "\"/version\"", "to": "\"${base_path}version\""},
+                    {"from": "\"/settings\"", "to": "\"${base_path}settings\""},
                 ]
             }
         }
@@ -61,6 +63,8 @@ def test_generate_config_writes_merged_webapp_config_for_wrapper(tmp_path):
     assert merged["webapps"]["jamovi"]["startup_command"] == "jamovi start"
     assert merged["webapps"]["jamovi"]["startup_timeout"] == 300
     assert merged["webapps"]["jamovi"]["path_rewrites"] == [
-        {"from": "/assets/", "to": "${base_path}assets/"}
+        {"from": "/assets/", "to": "${base_path}assets/"},
+        {"from": "\"/version\"", "to": "\"${base_path}version\""},
+        {"from": "\"/settings\"", "to": "\"${base_path}settings\""},
     ]
     assert "'jamovi'" in output_config.read_text()

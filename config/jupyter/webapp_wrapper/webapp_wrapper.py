@@ -22,6 +22,7 @@ import httpx
 import os
 import json
 import re
+import select
 import time
 import signal
 import sys
@@ -1217,26 +1218,135 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
 
         self._end_chunked()
 
+    def _resolve_proxy_target(self):
+        """Resolve the current wrapper request to a backend path and port."""
+        normalized_path = self._get_normalized_path()
+
+        parsed_url = urllib.parse.urlparse(self.path)
+        query_string = f"?{parsed_url.query}" if parsed_url.query else ""
+
+        path = normalized_path
+        target_port = config.target_port
+        for prefix, port in config.routes:
+            if normalized_path.startswith(prefix):
+                path = normalized_path[len(prefix):] or "/"
+                target_port = port
+                break
+
+        return path, query_string, target_port
+
+    def _is_upgrade_request(self):
+        """Return True for HTTP Upgrade requests such as WebSocket handshakes."""
+        upgrade = self.headers.get("Upgrade", "").lower()
+        connection_tokens = {
+            token.strip().lower()
+            for token in self.headers.get("Connection", "").split(",")
+        }
+        return bool(upgrade) and "upgrade" in connection_tokens
+
+    def _proxy_upgrade_request(self, path, query_string, target_port):
+        """Tunnel an HTTP Upgrade request to the backend.
+
+        httpx intentionally handles request/response HTTP, not raw upgraded
+        byte streams.  WebSocket apps such as jamovi need the wrapper to pass
+        the initial 101 response and all following bytes through unchanged.
+        """
+        target_path = f"{path}{query_string}"
+        try:
+            with socket.create_connection(("localhost", target_port), timeout=10) as upstream:
+                upstream.settimeout(None)
+                self.close_connection = True
+
+                request_lines = [
+                    f"{self.command} {target_path} {self.request_version}",
+                    f"Host: localhost:{target_port}",
+                ]
+                for header, value in self.headers.items():
+                    if header.lower() in ("host", "content-length"):
+                        continue
+                    request_lines.append(f"{header}: {value}")
+                request_lines.append("")
+                request_lines.append("")
+                upstream.sendall("\r\n".join(request_lines).encode("iso-8859-1"))
+                self._tunnel_sockets(upstream)
+        except OSError as e:
+            log(f"Upgrade proxy error on port {target_port}: {e}")
+            try:
+                self.send_response(502)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(b"Backend upgrade unavailable")
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+    def _tunnel_sockets(self, upstream):
+        """Copy raw bytes between the client connection and backend socket."""
+        sockets = [self.connection, upstream]
+
+        while True:
+            try:
+                readable, _, _ = select.select(sockets, [], [], 60)
+            except OSError:
+                return
+
+            if not readable:
+                continue
+
+            for source in readable:
+                destination = upstream if source is self.connection else self.connection
+                try:
+                    data = source.recv(STREAM_CHUNK_SIZE)
+                except (ConnectionResetError, OSError):
+                    return
+
+                if not data:
+                    return
+
+                try:
+                    destination.sendall(data)
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    return
+
+    def _is_jamovi_config_request(self):
+        return (
+            config.app_name == "jamovi"
+            and self._get_normalized_path() == f"/{config.app_name}/config.js"
+        )
+
+    def _build_jamovi_config_js(self):
+        forwarded_host = self.headers.get("X-Forwarded-Host", "")
+        browser_host = (forwarded_host or self.headers.get("Host", "")).split(",")[0].strip()
+        base = f"{browser_host}{self._get_base_path().rstrip('/')}"
+        roots = [base, f"{base}/analyses", f"{base}/results"]
+        payload = json.dumps(
+            {"client": {"roots": roots}},
+            separators=(",", ":"),
+        )
+        return f"window.config = {payload}".encode("utf-8")
+
+    def _send_jamovi_config_response(self, response, target_port):
+        content = self._build_jamovi_config_js()
+        self._send_response_headers(
+            response,
+            target_port,
+            omit_content_length=True,
+            omit_content_encoding=True,
+        )
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(content)
+
     def _proxy_request(self, method):
         """Proxy request to the actual webapp server."""
         target_port = config.target_port
         try:
-            # Find matching route and determine target port
-            # Use normalized path for route matching (handles JupyterHub prefix)
-            normalized_path = self._get_normalized_path()
+            path, query_string, target_port = self._resolve_proxy_target()
             is_main_html = self._is_main_app_html()
 
-            # Preserve query string from original request
-            parsed_url = urllib.parse.urlparse(self.path)
-            query_string = f"?{parsed_url.query}" if parsed_url.query else ""
-
-            # Check routes and strip prefixes (apps listen at / not /appname)
-            path = normalized_path  # default to normalized path
-            for prefix, port in config.routes:
-                if normalized_path.startswith(prefix):
-                    path = normalized_path[len(prefix):] or "/"
-                    target_port = port
-                    break
+            if self._is_upgrade_request():
+                self._proxy_upgrade_request(path, query_string, target_port)
+                return
 
             # Build the target URL (add back query string)
             target_url = f"http://localhost:{target_port}{path}{query_string}"
@@ -1271,7 +1381,9 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
                 )
                 needs_base_href = is_main_html and "text/html" in content_type
 
-                if needs_path_rewrite or needs_base_href:
+                if self._is_jamovi_config_request() and response.status_code == 200:
+                    self._send_jamovi_config_response(response, target_port)
+                elif needs_path_rewrite or needs_base_href:
                     self._send_streamed_text_response(response, target_port, needs_base_href)
                 else:
                     self._send_streamed_response(response, target_port)
