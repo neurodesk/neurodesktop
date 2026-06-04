@@ -4,8 +4,15 @@ from pathlib import Path
 
 
 def _load_generate_jupyter_config_module():
-    module_path = Path(__file__).resolve().parents[1] / "scripts" / "generate_jupyter_config.py"
+    repo_root = Path(__file__).resolve().parents[1]
+    candidates = (
+        repo_root / "scripts" / "generate_jupyter_config.py",
+        Path("/opt/neurodesktop/scripts/generate_jupyter_config.py"),
+    )
+    module_path = next((candidate for candidate in candidates if candidate.exists()), None)
+    assert module_path is not None, f"generate_jupyter_config.py not found in: {candidates}"
     spec = importlib.util.spec_from_file_location("generate_jupyter_config", module_path)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
