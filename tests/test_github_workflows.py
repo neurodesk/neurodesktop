@@ -124,3 +124,39 @@ def test_retry_actions_bound_transient_registry_failures():
     assert "is_manifest_missing()" in manifest_action
     assert 'echo "exists=true" >> "$GITHUB_OUTPUT"' in manifest_action
     assert 'echo "exists=false" >> "$GITHUB_OUTPUT"' in manifest_action
+
+
+def test_neurocommand_cache_boundary_uses_build_arg_not_remote_add():
+    dockerfile = _read_repo_file("Dockerfile")
+
+    assert "api.github.com/repos/neurodesk/neurocommand/git/refs/heads/main" not in dockerfile
+    assert "ARG NEUROCOMMAND_REF=main" in dockerfile
+    assert 'git checkout --detach "$NEUROCOMMAND_REF"' in dockerfile
+
+
+def test_cached_neurocommand_builds_resolve_ref_with_retries():
+    for workflow_name in ("build-neurodesktop.yml", "build-neurodesktop-dev.yml"):
+        workflow_text = _read_repo_file(f".github/workflows/{workflow_name}")
+        resolve_steps = list(_step_bodies(workflow_text, "Resolve neurocommand ref"))
+
+        assert len(resolve_steps) == 1
+        resolve_step = resolve_steps[0]
+        assert "Authorization: Bearer $GITHUB_TOKEN" in resolve_step
+        assert "--retry 5" in resolve_step
+        assert "--retry-all-errors" in resolve_step
+        assert "api.github.com/repos/neurodesk/neurocommand/git/refs/heads/main" in resolve_step
+        assert 'echo "NEUROCOMMAND_REF=$NEUROCOMMAND_REF" >> "$GITHUB_ENV"' in resolve_step
+
+    production_build = next(
+        _step_bodies(_read_repo_file(".github/workflows/build-neurodesktop.yml"), "Build and push arch image")
+    )
+    dev_build = next(
+        _step_bodies(_read_repo_file(".github/workflows/build-neurodesktop-dev.yml"), "Build new image")
+    )
+    dev_push = next(
+        _step_bodies(_read_repo_file(".github/workflows/build-neurodesktop-dev.yml"), "Push new image (if changes found)")
+    )
+
+    for step_body in (production_build, dev_build, dev_push):
+        assert "build-args: |" in step_body
+        assert "NEUROCOMMAND_REF=${{ env.NEUROCOMMAND_REF }}" in step_body

@@ -71,6 +71,26 @@ jobs:
           echo "BUILDDATE=$BUILDDATE" >> $GITHUB_ENV
           echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
           echo "IMAGENAME=$IMAGENAME" >> $GITHUB_ENV
+      - name: Resolve neurocommand ref
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NEUROCOMMAND_REF=$(curl -fsSL \
+            --retry 5 \
+            --retry-all-errors \
+            --retry-delay 5 \
+            --connect-timeout 15 \
+            --max-time 60 \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/neurodesk/neurocommand/git/refs/heads/main \
+            | jq -r '.object.sha // empty')
+          if ! [[ "$NEUROCOMMAND_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Could not resolve neurodesk/neurocommand main SHA."
+            exit 1
+          fi
+          echo "NEUROCOMMAND_REF=$NEUROCOMMAND_REF"
+          echo "NEUROCOMMAND_REF=$NEUROCOMMAND_REF" >> "$GITHUB_ENV"
       - name: Set up QEMU
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
       - name: Set up Docker Buildx
@@ -91,6 +111,8 @@ jobs:
           context: .
           load: true
           tags: ${{ env.IMAGEID }}:${{ env.BUILDDATE }}
+          build-args: |
+            NEUROCOMMAND_REF=${{ env.NEUROCOMMAND_REF }}
           cache-from: type=registry,ref=${{ env.IMAGEID }}:latest
           cache-to: type=inline
       - name: Get rootfs of new image
@@ -131,6 +153,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            NEUROCOMMAND_REF=${{ env.NEUROCOMMAND_REF }}
           cache-from: type=registry,ref=${{ env.IMAGEID }}:latest
           cache-to: type=inline
       - name: Write image publish summary

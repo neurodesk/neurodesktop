@@ -725,10 +725,11 @@ RUN --mount=type=bind,source=config/cvmfs,target=/tmp/cvmfs,ro \
     && install -m 0644 /tmp/cvmfs/default.local /etc/cvmfs/default.local
 
 # Install neurocommand
-ADD "https://api.github.com/repos/neurodesk/neurocommand/git/refs/heads/main" /tmp/skipcache
-RUN rm /tmp/skipcache \
+ARG NEUROCOMMAND_REF=main
+RUN echo "Installing neurocommand ref ${NEUROCOMMAND_REF}" \
     && retry git clone https://github.com/neurodesk/neurocommand.git /neurocommand \
     && cd /neurocommand \
+    && git checkout --detach "$NEUROCOMMAND_REF" \
     && bash build.sh --lxde --edit \
     && bash install.sh \
     && ln -s /neurodesktop-storage/containers /neurocommand/local/containers

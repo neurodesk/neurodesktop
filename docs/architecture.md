@@ -116,6 +116,9 @@ webapps, update the source `webapps.json`. To add hosted links or make an
 existing launcher tile open a hosted app directly, update `webapp_links.json`.
 This config generation runs after the neurocommand install layer so local
 launcher-link edits do not invalidate the earlier runtime setup layers.
+Cached CI builds pass `NEUROCOMMAND_REF` as a resolved neurocommand `main` SHA
+so that neurocommand changes invalidate the install layer without requiring
+BuildKit to make unauthenticated GitHub API requests from inside the Dockerfile.
 
 ### Apptainer
 
