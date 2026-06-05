@@ -17,26 +17,32 @@ fi
 # MODULEPATH and CVMFS detection run on every source so that new shells
 # pick up CVMFS after a deferred (lazy) mount completes.
 export NEURODESKTOP_LOCAL_CONTAINERS="${NEURODESKTOP_LOCAL_CONTAINERS:-/neurodesktop-storage/containers}"
-export MODULEPATH=${NEURODESKTOP_LOCAL_CONTAINERS}/modules/:/cvmfs/neurodesk.ardc.edu.au/containers/modules/
+export OFFLINE_MODULES=${NEURODESKTOP_LOCAL_CONTAINERS}/modules/
+export CVMFS_MODULES=/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/
 
-# Only setup MODULEPATH if a module system is installed
-if [ -f '/usr/share/module.sh' ]; then
-        export OFFLINE_MODULES=${NEURODESKTOP_LOCAL_CONTAINERS}/modules/
-        export CVMFS_MODULES=/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/
+# Nudge autofs so a lazily-mounted CVMFS becomes visible to the `-d` check
+# below. Without this, the check can return false on a fresh shell even when
+# the path is mountable - in which case MODULEPATH would collapse to the
+# local modules only and users would lose access to the CVMFS catalogue.
+ls "$CVMFS_MODULES" >/dev/null 2>&1 || true
 
-        if [ ! -d $CVMFS_MODULES ]; then
-                MODULEPATH=${OFFLINE_MODULES}
-                export CVMFS_DISABLE=true
+# MODULEPATH is built to match the transparent-singularity module layout:
+# each `<category>` subdirectory of CVMFS_MODULES becomes its own MODULEPATH
+# entry so Lmod presents modules as `<tool>/<version>` rather than
+# `<category>/<tool>/<version>`.
+if [ -d "$CVMFS_MODULES" ]; then
+        cvmfs_expanded=`echo ${CVMFS_MODULES}* | sed 's/ /:/g'`
+        if [ -d "$OFFLINE_MODULES" ]; then
+                export MODULEPATH=${OFFLINE_MODULES}:${cvmfs_expanded}
         else
-                MODULEPATH=${CVMFS_MODULES}*
-                export MODULEPATH=`echo $MODULEPATH | sed 's/ /:/g'`
-                export CVMFS_DISABLE=false
-
-                # if the offline modules directory exists, we can use it and will prefer it over cvmfs
-                if [ -d ${OFFLINE_MODULES} ]; then
-                        export MODULEPATH=${OFFLINE_MODULES}:$MODULEPATH
-                fi
+                export MODULEPATH=${cvmfs_expanded}
         fi
+        export CVMFS_DISABLE=false
+        unset cvmfs_expanded
+else
+        # CVMFS genuinely unavailable (offline install / disabled).
+        export MODULEPATH=${OFFLINE_MODULES}
+        export CVMFS_DISABLE=true
 fi
 
 # Show informational messages in interactive terminals (outside the NEURODESKTOP_ENV_SOURCED guard so they show on each new terminal)
@@ -53,8 +59,8 @@ if [ -z "$NEURODESKTOP_MSG_SHOWN" ] && [ -f '/usr/share/module.sh' ]; then
 
                 # check if $CVMFS_DISABLE is set to true
                 if [[ "$CVMFS_DISABLE" == "true" ]]; then
-                        echo "CVMFS is disabled. Using local containers stored in $MODULEPATH"
-                        if [ ! -d $MODULEPATH ]; then
+                        echo "CVMFS not yet available. Using local containers stored in ${OFFLINE_MODULES} (CVMFS will be picked up automatically once mounted)."
+                        if [ ! -d "${OFFLINE_MODULES}" ]; then
                                 echo 'Neurodesk tools not yet downloaded. Choose tools to install from the Neurodesktop Application menu.'
                         fi
                 fi
@@ -67,6 +73,7 @@ export APPTAINER_BINDPATH=/data,/mnt,/neurodesktop-storage,/tmp,/cvmfs
 
 export APPTAINERENV_SUBJECTS_DIR=${HOME}/freesurfer-subjects-dir
 export MPLCONFIGDIR=${HOME}/.config/matplotlib-mpldir
+export NBI_TOUR_CONFIG_PATH="${NBI_TOUR_CONFIG_PATH:-/opt/jovyan_defaults/.jupyter/nbi/tour_config.json}"
 
 # Keep agent wrappers in /usr/local/sbin ahead of user-level installs in ~/.local/bin.
 path_prepend() {
@@ -107,6 +114,12 @@ is_apptainer_runtime() {
         [ -n "${SINGULARITY_COMMAND:-}" ] || \
         [ -d "/.apptainer.d" ] || \
         [ -d "/.singularity.d" ]
+}
+
+is_macos_host_runtime() {
+        [ "$(uname -s 2>/dev/null)" = "Darwin" ] && return 0
+        [ -r /proc/self/mountinfo ] && grep -Eq '(/host_mnt|/run/desktop/mnt/host)/(Users|private|Volumes)(/|[[:space:]])' /proc/self/mountinfo && return 0
+        [ -r /proc/sys/kernel/osrelease ] && grep -qi 'linuxkit' /proc/sys/kernel/osrelease && [ "$(uname -m 2>/dev/null)" = "aarch64" ]
 }
 
 slurm_conf_is_local_neurodesktop() {
@@ -282,9 +295,16 @@ case "${NEURODESKTOP_SLURM_MODE}" in
                 ;;
 esac
 
-# This is needed to make containers writable as a workaround for macos with Apple Silicon. We need to do it here for the desktop
-# and in the dockerfile for the jupyter notebook
-export neurodesk_singularity_opts=" --overlay /tmp/apptainer_overlay "
+# This is needed to make containers writable as a workaround for macos with Apple Silicon.
+# Directory overlays are only used for macOS root-managed Docker sessions. On HPC
+# Apptainer runs as the calling user, so use a writable tmpfs session instead.
+if is_apptainer_runtime && [ "${EUID}" -ne 0 ]; then
+        export neurodesk_singularity_opts=" --writable-tmpfs "
+elif is_macos_host_runtime; then
+        export neurodesk_singularity_opts=" --overlay /tmp/apptainer_overlay "
+else
+        export neurodesk_singularity_opts=""
+fi
 # export neurodesk_singularity_opts=" -w " THIS DOES NOT WORK FOR SIMG FILES IN OFFLINE MODE
 # There is a small delay in using --overlay in comparison to -w - maybe it would be faster to use a fixed size overlay file instead?
 

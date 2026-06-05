@@ -24,6 +24,17 @@ trap cleanup_startup_lock EXIT
 # Each file is copied if missing, or migrated when image defaults are newer.
 source /opt/neurodesktop/restore_home_defaults.sh
 
+# Initialize per-user Guacamole config and random credentials BEFORE Jupyter
+# reads jupyter_notebook_config.py - the config's Basic-auth header for the
+# /neurodesktop proxy is derived from ${HOME}/.neurodesk/secrets files written
+# by this script. Skipping this step would cause Jupyter to send stale
+# jovyan/password credentials and result in a 401 from the rotated Guacamole.
+if [ -x /opt/neurodesktop/init_secrets.sh ]; then
+    # shellcheck disable=SC1091
+    source /opt/neurodesktop/init_secrets.sh || \
+        echo "[WARN] init_secrets.sh failed; Guacamole web auth may fall back to the static default."
+fi
+
 is_apptainer_runtime() {
     [ -n "${SINGULARITY_NAME:-}" ] || \
     [ -n "${APPTAINER_NAME:-}" ] || \
@@ -36,6 +47,41 @@ is_apptainer_runtime() {
 }
 
 # Home ownership is handled by before_notebook.sh (fix_home_ownership_if_needed).
+
+# Wrap any user-installed Jupyter kernel specs with kernel_wrapper.sh so they
+# re-source environment_variables.sh at kernel spawn time. Docker-stacks
+# kernels under /opt/conda are wrapped at image build time; this catches
+# kernels installed into HOME after the image is built (e.g. via
+# `python -m ipykernel install --user --name myenv`).
+python3 - <<'PY' 2>/dev/null || true
+import json, os
+from pathlib import Path
+
+WRAPPER = "/opt/neurodesktop/kernel_wrapper.sh"
+home = Path(os.path.expanduser("~"))
+candidate_roots = [
+    home / ".local/share/jupyter/kernels",
+    Path(os.environ.get("JUPYTER_DATA_DIR", "")) / "kernels" if os.environ.get("JUPYTER_DATA_DIR") else None,
+]
+
+for root in candidate_roots:
+    if root is None or not root.is_dir():
+        continue
+    for spec_file in root.glob("*/kernel.json"):
+        try:
+            spec = json.loads(spec_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        argv = spec.get("argv")
+        if not isinstance(argv, list) or not argv or argv[0] == WRAPPER:
+            continue
+        spec["argv"] = [WRAPPER] + argv
+        try:
+            spec_file.write_text(json.dumps(spec, indent=1))
+            print(f"[INFO] Wrapped user kernel spec: {spec_file}")
+        except OSError:
+            pass
+PY
 
 sanitize_jupyterlab_workspaces() {
     local workspace_dir="${HOME}/.jupyter/lab/workspaces"
@@ -200,11 +246,24 @@ mkdir -p ${HOME}/.config/goose
 # ensure opencode config directory exists
 mkdir -p ${HOME}/.config/opencode
 
+# Align Notebook Intelligence's provider with OpenCode (Neurodesk LiteLLM
+# gpt-oss) and inject NEURODESK_API_KEY from env or ~/.bashrc if available.
+if [ -x /opt/neurodesktop/nbi_setup.sh ]; then
+    /opt/neurodesktop/nbi_setup.sh || \
+        echo "[WARN] nbi_setup.sh failed; Notebook Intelligence may require manual configuration."
+fi
+
 # Best-effort: install a small set of useful code-server extensions.
 ensure_codeserver_extension() {
     local ext_name="$1"
-    local ext_pattern="$2"
-    shift 2
+    shift
+    local ext_pattern="${1:-${ext_name}-*}"
+    if [ "$#" -gt 0 ]; then
+        shift
+    fi
+    if [ "$#" -eq 0 ]; then
+        set -- "${ext_name}"
+    fi
 
     local ext_dir="${HOME}/.local/share/code-server/extensions"
     local log_file="/tmp/code-server-${ext_name,,}-extension-install.log"
@@ -239,6 +298,13 @@ ensure_codeserver_extensions() {
 
     # GitHub auth and PR integration
     ensure_codeserver_extension "github.vscode-pull-request-github"
+
+    # Python and Jupyter notebook support
+    ensure_codeserver_extension "ms-python.python"
+    ensure_codeserver_extension "ms-toolsai.jupyter"
+
+    # CSV table viewer/editor
+    ensure_codeserver_extension "ReprEng.csv"
 
     # NIfTI/medical image viewer
     ensure_codeserver_extension "korbinianeckstein.niivue"

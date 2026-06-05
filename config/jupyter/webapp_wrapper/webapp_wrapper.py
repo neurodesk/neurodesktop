@@ -21,6 +21,8 @@ import urllib.parse
 import httpx
 import os
 import json
+import re
+import select
 import time
 import signal
 import sys
@@ -251,6 +253,45 @@ def check_app_ready():
         return True
 
     return False
+
+
+def build_path_rewrite_map(path_rewrites, base_path):
+    """Build byte rewrite pairs for backend paths embedded in text responses."""
+    rewrite_map = []
+    base_bytes = base_path.encode('utf-8')
+
+    for rewrite in path_rewrites or []:
+        if isinstance(rewrite, str):
+            if rewrite:
+                rewrite_map.append((rewrite.encode('utf-8'), base_bytes))
+            continue
+
+        if not isinstance(rewrite, dict):
+            continue
+
+        source = rewrite.get("from")
+        target = rewrite.get("to", "${base_path}")
+        if not isinstance(source, str) or not source:
+            continue
+        if not isinstance(target, str):
+            continue
+
+        target = target.replace("${base_path}", base_path)
+        target = target.replace("$base_path", base_path)
+        rewrite_map.append((source.encode('utf-8'), target.encode('utf-8')))
+
+    return rewrite_map
+
+
+def apply_path_rewrites(data, rewrite_map):
+    """Apply path rewrites without rewriting replacement text again."""
+    if not rewrite_map:
+        return data
+
+    rewrite_map = sorted(rewrite_map, key=lambda item: len(item[0]), reverse=True)
+    replacements = {old: new for old, new in rewrite_map}
+    pattern = re.compile(b"|".join(re.escape(old) for old, _ in rewrite_map))
+    return pattern.sub(lambda match: replacements[match.group(0)], data)
 
 
 def mark_client_activity():
@@ -526,64 +567,6 @@ def stop_backend_for_idle(idle_for):
     _close_backend_connections()
 
 
-_close_check_timer = None
-_close_check_lock = threading.Lock()
-
-CLOSE_CHECK_DELAY = 5  # seconds to wait after close beacon before checking
-
-
-def _schedule_close_check():
-    """Schedule a deferred check after a tab-close beacon.
-
-    If no heartbeat arrives within CLOSE_CHECK_DELAY seconds after the
-    close beacon, the backend is stopped immediately instead of waiting
-    for the full idle_timeout (90s).  Multiple close beacons (e.g. from
-    several tabs closing in quick succession) reset the timer so we
-    only check once, after the last one.
-    """
-    global _close_check_timer
-
-    with _close_check_lock:
-        if _close_check_timer is not None:
-            _close_check_timer.cancel()
-        _close_check_timer = threading.Timer(CLOSE_CHECK_DELAY, _perform_close_check)
-        _close_check_timer.daemon = True
-        _close_check_timer.start()
-
-
-def _perform_close_check():
-    """Called CLOSE_CHECK_DELAY seconds after the last close beacon.
-
-    If no activity happened since the beacon (i.e. no heartbeat from
-    another open tab), stop the backend right away.
-    """
-    global _close_check_timer
-
-    with _close_check_lock:
-        _close_check_timer = None
-
-    with shutdown_lock:
-        inflight = active_client_requests
-
-    if inflight > 0:
-        log("Close check: requests still in flight, rescheduling")
-        _schedule_close_check()
-        return
-
-    idle_for = time.time() - last_client_activity
-    if idle_for >= CLOSE_CHECK_DELAY - 1:
-        # No heartbeat arrived since the close beacon
-        log(f"Close check: no heartbeat for {idle_for:.1f}s after close beacon; stopping backend")
-        stop_backend_for_idle(idle_for)
-    else:
-        # Activity was recent — could be a genuine heartbeat from another
-        # tab, or a stale in-flight request completing.  Reschedule to
-        # re-check rather than giving up and waiting for the full 90s
-        # idle timeout.
-        log(f"Close check: activity detected {idle_for:.1f}s ago, rescheduling")
-        _schedule_close_check()
-
-
 def initiate_shutdown(reason):
     """Stop container processes and exit the wrapper server."""
     global httpd_server
@@ -818,6 +801,8 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
     def _handle_request(self, method):
         # Close beacons must NOT reset the idle timer — otherwise every tab
         # close extends the backend lifetime by a full idle_timeout period.
+        # They also cannot safely trigger immediate shutdown: browsers fire
+        # pagehide/beforeunload during reloads and some app-driven navigation.
         if self._is_status_endpoint() and method == "POST" and self._is_close_beacon():
             self._send_status(method, is_close=True)
             return
@@ -908,15 +893,30 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
 
     def _rewrite_location(self, location, target_port):
         """Rewrite Location header to go through proxy instead of direct port access."""
+        if not location:
+            return location
+
+        base_path = self._get_base_path()
+        base_path_no_slash = base_path.rstrip("/")
+
         # Rewrite http://localhost:PORT/path to base_path + path
-        import re
         pattern = rf"^https?://(?:localhost|127\.0\.0\.1):{target_port}(/.*)?$"
         match = re.match(pattern, location)
         if match:
             path = match.group(1) or "/"
-            base_path = self._get_base_path().rstrip("/")
-            return f"{base_path}{path}"
-        return location
+            return f"{base_path_no_slash}{path}"
+
+        parsed_location = urllib.parse.urlparse(location)
+        if parsed_location.scheme or parsed_location.netloc:
+            return location
+
+        if location.startswith("/"):
+            return f"{base_path_no_slash}{location}"
+
+        if location.startswith("?") or location.startswith("#"):
+            return location
+
+        return urllib.parse.urljoin(base_path, location)
 
     def _send_status(self, method, is_close=False):
         """Send current status as JSON (GET) or heartbeat ack (POST)."""
@@ -925,8 +925,7 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             if is_close:
-                log("Close beacon received; scheduling deferred close check")
-                _schedule_close_check()
+                log("Close beacon received; backend will stop after normal idle timeout")
             return
 
         elapsed = time.time() - startup_start_time if startup_start_time else 0
@@ -1141,11 +1140,7 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
         is_compressed = bool(response.headers.get("content-encoding"))
 
         # Build rewrite map: list of (old_bytes, new_bytes) tuples
-        rewrite_map = []
-        if config.path_rewrites:
-            base_bytes = base_path.encode('utf-8')
-            for rewrite_path in config.path_rewrites:
-                rewrite_map.append((rewrite_path.encode('utf-8'), base_bytes))
+        rewrite_map = build_path_rewrite_map(config.path_rewrites, base_path)
 
         # Overlap buffer size: max pattern length - 1 to catch boundary crossings
         max_pattern_len = max((len(old) for old, _ in rewrite_map), default=0)
@@ -1169,9 +1164,7 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
         def rewrite(data):
-            for old_bytes, new_bytes in rewrite_map:
-                data = data.replace(old_bytes, new_bytes)
-            return data
+            return apply_path_rewrites(data, rewrite_map)
 
         def stream_with_overlap(iterator):
             """Stream chunks with overlap rewriting."""
@@ -1225,26 +1218,135 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
 
         self._end_chunked()
 
+    def _resolve_proxy_target(self):
+        """Resolve the current wrapper request to a backend path and port."""
+        normalized_path = self._get_normalized_path()
+
+        parsed_url = urllib.parse.urlparse(self.path)
+        query_string = f"?{parsed_url.query}" if parsed_url.query else ""
+
+        path = normalized_path
+        target_port = config.target_port
+        for prefix, port in config.routes:
+            if normalized_path.startswith(prefix):
+                path = normalized_path[len(prefix):] or "/"
+                target_port = port
+                break
+
+        return path, query_string, target_port
+
+    def _is_upgrade_request(self):
+        """Return True for HTTP Upgrade requests such as WebSocket handshakes."""
+        upgrade = self.headers.get("Upgrade", "").lower()
+        connection_tokens = {
+            token.strip().lower()
+            for token in self.headers.get("Connection", "").split(",")
+        }
+        return bool(upgrade) and "upgrade" in connection_tokens
+
+    def _proxy_upgrade_request(self, path, query_string, target_port):
+        """Tunnel an HTTP Upgrade request to the backend.
+
+        httpx intentionally handles request/response HTTP, not raw upgraded
+        byte streams.  WebSocket apps such as jamovi need the wrapper to pass
+        the initial 101 response and all following bytes through unchanged.
+        """
+        target_path = f"{path}{query_string}"
+        try:
+            with socket.create_connection(("localhost", target_port), timeout=10) as upstream:
+                upstream.settimeout(None)
+                self.close_connection = True
+
+                request_lines = [
+                    f"{self.command} {target_path} {self.request_version}",
+                    f"Host: localhost:{target_port}",
+                ]
+                for header, value in self.headers.items():
+                    if header.lower() in ("host", "content-length"):
+                        continue
+                    request_lines.append(f"{header}: {value}")
+                request_lines.append("")
+                request_lines.append("")
+                upstream.sendall("\r\n".join(request_lines).encode("iso-8859-1"))
+                self._tunnel_sockets(upstream)
+        except OSError as e:
+            log(f"Upgrade proxy error on port {target_port}: {e}")
+            try:
+                self.send_response(502)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(b"Backend upgrade unavailable")
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+    def _tunnel_sockets(self, upstream):
+        """Copy raw bytes between the client connection and backend socket."""
+        sockets = [self.connection, upstream]
+
+        while True:
+            try:
+                readable, _, _ = select.select(sockets, [], [], 60)
+            except OSError:
+                return
+
+            if not readable:
+                continue
+
+            for source in readable:
+                destination = upstream if source is self.connection else self.connection
+                try:
+                    data = source.recv(STREAM_CHUNK_SIZE)
+                except (ConnectionResetError, OSError):
+                    return
+
+                if not data:
+                    return
+
+                try:
+                    destination.sendall(data)
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    return
+
+    def _is_jamovi_config_request(self):
+        return (
+            config.app_name == "jamovi"
+            and self._get_normalized_path() == f"/{config.app_name}/config.js"
+        )
+
+    def _build_jamovi_config_js(self):
+        forwarded_host = self.headers.get("X-Forwarded-Host", "")
+        browser_host = (forwarded_host or self.headers.get("Host", "")).split(",")[0].strip()
+        base = f"{browser_host}{self._get_base_path().rstrip('/')}"
+        roots = [base, f"{base}/analyses", f"{base}/results"]
+        payload = json.dumps(
+            {"client": {"roots": roots}},
+            separators=(",", ":"),
+        )
+        return f"window.config = {payload}".encode("utf-8")
+
+    def _send_jamovi_config_response(self, response, target_port):
+        content = self._build_jamovi_config_js()
+        self._send_response_headers(
+            response,
+            target_port,
+            omit_content_length=True,
+            omit_content_encoding=True,
+        )
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(content)
+
     def _proxy_request(self, method):
         """Proxy request to the actual webapp server."""
         target_port = config.target_port
         try:
-            # Find matching route and determine target port
-            # Use normalized path for route matching (handles JupyterHub prefix)
-            normalized_path = self._get_normalized_path()
+            path, query_string, target_port = self._resolve_proxy_target()
             is_main_html = self._is_main_app_html()
 
-            # Preserve query string from original request
-            parsed_url = urllib.parse.urlparse(self.path)
-            query_string = f"?{parsed_url.query}" if parsed_url.query else ""
-
-            # Check routes and strip prefixes (apps listen at / not /appname)
-            path = normalized_path  # default to normalized path
-            for prefix, port in config.routes:
-                if normalized_path.startswith(prefix):
-                    path = normalized_path[len(prefix):] or "/"
-                    target_port = port
-                    break
+            if self._is_upgrade_request():
+                self._proxy_upgrade_request(path, query_string, target_port)
+                return
 
             # Build the target URL (add back query string)
             target_url = f"http://localhost:{target_port}{path}{query_string}"
@@ -1279,7 +1381,9 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
                 )
                 needs_base_href = is_main_html and "text/html" in content_type
 
-                if needs_path_rewrite or needs_base_href:
+                if self._is_jamovi_config_request() and response.status_code == 200:
+                    self._send_jamovi_config_response(response, target_port)
+                elif needs_path_rewrite or needs_base_href:
                     self._send_streamed_text_response(response, target_port, needs_base_href)
                 else:
                     self._send_streamed_response(response, target_port)

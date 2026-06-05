@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="calmar-title">
+  <title id="calmar-title">CALMaR launcher icon</title>
+  <defs>
+    <linearGradient id="calmar-bg" x1="7" y1="8" x2="58" y2="57" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#152033"/>
+      <stop offset="1" stop-color="#0b5a66"/>
+    </linearGradient>
+    <linearGradient id="calmar-squid" x1="23" y1="10" x2="42" y2="54" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9bf4ef"/>
+      <stop offset="1" stop-color="#39a7c9"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="12" fill="url(#calmar-bg)"/>
+  <path d="M32 8c9 6 14 15 14 25 0 8-6 13-14 13s-14-5-14-13c0-10 5-19 14-25Z" fill="url(#calmar-squid)"/>
+  <path d="M24 31c4 4 12 4 16 0M27 20c3-2 7-2 10 0" fill="none" stroke="#e7fffb" stroke-width="2.4" stroke-linecap="round"/>
+  <circle cx="27" cy="28" r="2.4" fill="#10283c"/>
+  <circle cx="37" cy="28" r="2.4" fill="#10283c"/>
+  <path d="M25 43c-3 3-4 7-2 11M30 45c-2 4-2 7 0 11M34 45c2 4 2 7 0 11M39 43c3 3 4 7 2 11" fill="none" stroke="#7adbe7" stroke-width="3.4" stroke-linecap="round"/>
+  <circle cx="20" cy="43" r="4" fill="#ff715b"/>
+  <circle cx="45" cy="45" r="3.2" fill="#ffd166"/>
+  <path d="M20 43 32 35l13 10M32 35v13" fill="none" stroke="#f5fffb" stroke-width="2.2" stroke-linecap="round"/>
+</svg>

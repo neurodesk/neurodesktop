@@ -11,8 +11,8 @@
     "style/**/*.css"
   ],
   "scripts": {
-    "build": "tsc && jupyter labextension build .",
-    "build:prod": "tsc && jupyter labextension build .",
+    "build": "tsc && node build_ext.js",
+    "build:prod": "tsc && node build_ext.js",
     "clean": "rimraf lib tsconfig.tsbuildinfo"
   },
   "dependencies": {

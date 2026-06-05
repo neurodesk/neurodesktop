@@ -4,6 +4,15 @@ import time
 import pytest
 
 
+EXTERNALLY_MANAGED_CVMFS_LOG_MARKERS = (
+    "[deferred] CVMFS already mounted. Skipping.",
+    "[deferred] CVMFS is ready (external mount).",
+)
+EXTERNALLY_MANAGED_CVMFS_SKIP_REASON = (
+    "CVMFS is mounted externally; selection cache is not expected"
+)
+
+
 def run_cmd(cmd):
     """Utility to run a shell command and return its exit code and output."""
     process = subprocess.run(
@@ -17,6 +26,38 @@ def _can_run_root_cmds():
         return True
     code, _ = run_cmd("sudo -n true")
     return code == 0
+
+
+def _cvmfs_is_externally_managed(
+    log_file="/tmp/neurodesktop-deferred-startup.log",
+):
+    if not os.path.isfile(log_file):
+        return False
+
+    with open(log_file) as f:
+        log_content = f.read()
+
+    return any(
+        marker in log_content
+        for marker in EXTERNALLY_MANAGED_CVMFS_LOG_MARKERS
+    )
+
+
+def _cvmfs_selection_cache_skip_reason(
+    cvmfs_disable,
+    cvmfs_mounted,
+    cvmfs_mode,
+    cvmfs_externally_managed,
+):
+    if cvmfs_disable in ["true", "1"]:
+        return "CVMFS is disabled"
+    if not cvmfs_mounted:
+        return "CVMFS is not mounted"
+    if cvmfs_mode != "lazy":
+        return "CVMFS is not in lazy mode (cache only used in lazy mode)"
+    if cvmfs_externally_managed:
+        return EXTERNALLY_MANAGED_CVMFS_SKIP_REASON
+    return None
 
 
 class TestDeferredStartup:
@@ -168,18 +209,73 @@ class TestEagerStartupMode:
 class TestCvmfsSelectionCache:
     """Verify CVMFS selection is cached for subsequent boots."""
 
+    def test_external_cvmfs_log_marker_detected(self, tmp_path):
+        """Externally mounted CVMFS should make the selection cache test skip."""
+        log_file = tmp_path / "deferred-startup.log"
+        log_file.write_text(
+            "[deferred] CVMFS already mounted. Skipping.\n",
+            encoding="utf-8",
+        )
+
+        assert _cvmfs_is_externally_managed(str(log_file))
+
+    def test_external_cvmfs_ready_log_marker_detected(self, tmp_path):
+        """Autofs/external CVMFS readiness should also make cache checks skip."""
+        log_file = tmp_path / "deferred-startup.log"
+        log_file.write_text(
+            "[deferred] CVMFS is ready (external mount).\n",
+            encoding="utf-8",
+        )
+
+        assert _cvmfs_is_externally_managed(str(log_file))
+
+    def test_internal_cvmfs_log_does_not_skip_cache_check(self, tmp_path):
+        """Neurodesktop-managed CVMFS mounts should still require cache files."""
+        log_file = tmp_path / "deferred-startup.log"
+        log_file.write_text(
+            "[deferred] Saved CVMFS selection to cache: region=america mode=direct\n",
+            encoding="utf-8",
+        )
+
+        assert not _cvmfs_is_externally_managed(str(log_file))
+
+    def test_cache_check_skips_when_cvmfs_is_externally_managed(self):
+        """A mounted external CVMFS tree should not require a selection cache."""
+        skip_reason = _cvmfs_selection_cache_skip_reason(
+            cvmfs_disable="false",
+            cvmfs_mounted=True,
+            cvmfs_mode="lazy",
+            cvmfs_externally_managed=True,
+        )
+
+        assert skip_reason == EXTERNALLY_MANAGED_CVMFS_SKIP_REASON
+
+    def test_cache_check_required_for_neurodesktop_managed_cvmfs(self):
+        """Lazy Neurodesktop-managed CVMFS mounts should still require cache."""
+        skip_reason = _cvmfs_selection_cache_skip_reason(
+            cvmfs_disable="false",
+            cvmfs_mounted=True,
+            cvmfs_mode="lazy",
+            cvmfs_externally_managed=False,
+        )
+
+        assert skip_reason is None
+
     def test_cvmfs_cache_exists(self):
         """After CVMFS mounts successfully, a cache file should exist."""
         cvmfs_disable = os.environ.get("CVMFS_DISABLE", "false").lower()
-        if cvmfs_disable in ["true", "1"]:
-            pytest.skip("CVMFS is disabled")
-
-        if not os.path.isdir("/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/"):
-            pytest.skip("CVMFS is not mounted")
-
         cvmfs_mode = os.environ.get("NEURODESKTOP_CVMFS_STARTUP_MODE", "lazy")
-        if cvmfs_mode != "lazy":
-            pytest.skip("CVMFS is not in lazy mode (cache only used in lazy mode)")
+        cvmfs_mounted = os.path.isdir(
+            "/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/"
+        )
+        skip_reason = _cvmfs_selection_cache_skip_reason(
+            cvmfs_disable=cvmfs_disable,
+            cvmfs_mounted=cvmfs_mounted,
+            cvmfs_mode=cvmfs_mode,
+            cvmfs_externally_managed=_cvmfs_is_externally_managed(),
+        )
+        if skip_reason:
+            pytest.skip(skip_reason)
 
         cache_file = os.path.expanduser("~/.cache/neurodesktop/cvmfs-selection.env")
         assert os.path.isfile(cache_file), (

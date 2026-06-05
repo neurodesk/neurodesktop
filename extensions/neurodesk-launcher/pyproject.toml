@@ -16,7 +16,9 @@ requires-python = ">=3.9"
 [tool.hatch.build.targets.sdist]
 include = [
     "neurodesk_launcher/**",
+    "build_ext.js",
     "package.json",
+    "package-lock.json",
     "tsconfig.json",
     "src/**",
     "style/**",
@@ -35,12 +37,12 @@ ensured-targets = [
 
 [tool.hatch.build.hooks.jupyter-builder.build-kwargs]
 build_cmd = "build:prod"
-npm = ["jlpm"]
+npm = ["npm"]
 source_dir = "src"
 build_dir = "neurodesk_launcher/labextension"
 
 [tool.hatch.build.hooks.jupyter-builder.editable-build-kwargs]
 build_cmd = "build"
-npm = ["jlpm"]
+npm = ["npm"]
 source_dir = "src"
 build_dir = "neurodesk_launcher/labextension"

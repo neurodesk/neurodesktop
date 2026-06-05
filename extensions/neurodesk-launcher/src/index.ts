@@ -18,6 +18,7 @@ interface ILauncherEntry {
   title: string;
   path_info: string;
   category: string;
+  url?: string;
 }
 
 interface IServerProcess {
@@ -46,6 +47,7 @@ const UNIT_TO_GB_FACTOR: Record<string, number> = {
   GB: 1,
   TB: 1024
 };
+const RESOURCE_USAGE_SELECTOR = '[title="Current resource usage"]';
 
 function donationNotificationSuppressedFromPageConfig(): boolean {
   return (
@@ -137,28 +139,163 @@ function normalizeMemorySegmentToGb(text: string): string {
   return text.replace(fullMatch, replacement);
 }
 
-function updateResourceUsageUnits(): void {
-  document
-    .querySelectorAll<HTMLElement>('[title="Current resource usage"]')
-    .forEach(el => {
-      const text = el.textContent;
-      if (!text || !text.includes('Mem:')) {
-        return;
-      }
+function updateResourceUsageElement(el: HTMLElement): void {
+  const text = el.textContent;
+  if (!text || !text.includes('Mem:')) {
+    return;
+  }
 
-      const normalized = normalizeMemorySegmentToGb(text);
-      if (normalized !== text) {
-        el.textContent = normalized;
-      }
-    });
+  const normalized = normalizeMemorySegmentToGb(text);
+  if (normalized !== text) {
+    el.textContent = normalized;
+  }
+}
+
+function resourceUsageElementsFromNode(node: Node): HTMLElement[] {
+  if (!(node instanceof Element)) {
+    return [];
+  }
+
+  const elements: HTMLElement[] = [];
+  if (node.matches(RESOURCE_USAGE_SELECTOR)) {
+    elements.push(node as HTMLElement);
+  }
+
+  elements.push(
+    ...Array.from(node.querySelectorAll<HTMLElement>(RESOURCE_USAGE_SELECTOR))
+  );
+  return elements;
+}
+
+function updateResourceUsageUnits(root: ParentNode = document): void {
+  root
+    .querySelectorAll<HTMLElement>(RESOURCE_USAGE_SELECTOR)
+    .forEach(updateResourceUsageElement);
+}
+
+function resourceUsageNodeIsTargetOrInside(node: Node): boolean {
+  if (node instanceof Element) {
+    return (
+      node.matches(RESOURCE_USAGE_SELECTOR) ||
+      Boolean(node.closest(RESOURCE_USAGE_SELECTOR))
+    );
+  }
+
+  const parent = node.parentElement;
+  return parent ? Boolean(parent.closest(RESOURCE_USAGE_SELECTOR)) : false;
 }
 
 function startResourceUsageUnitOverride(): void {
   updateResourceUsageUnits();
-  window.setInterval(updateResourceUsageUnits, 1000);
+
+  let resourceUsageFrame: number | null = null;
+  const pendingElements = new Set<HTMLElement>();
+  const scheduleResourceUsageUpdate = (elements: HTMLElement[]) => {
+    elements.forEach(el => pendingElements.add(el));
+
+    if (pendingElements.size === 0 || resourceUsageFrame !== null) {
+      return;
+    }
+
+    resourceUsageFrame = requestAnimationFrame(() => {
+      resourceUsageFrame = null;
+      const elementsToUpdate = [...pendingElements];
+      pendingElements.clear();
+      elementsToUpdate.forEach(updateResourceUsageElement);
+    });
+  };
+
+  const observer = new MutationObserver(mutationRecords => {
+    const elements = new Set<HTMLElement>();
+
+    for (const record of mutationRecords) {
+      if (resourceUsageNodeIsTargetOrInside(record.target)) {
+        const target =
+          record.target instanceof Element
+            ? record.target
+            : record.target.parentElement;
+        const resourceUsageElement =
+          target?.closest<HTMLElement>(RESOURCE_USAGE_SELECTOR) ?? null;
+        if (resourceUsageElement) {
+          elements.add(resourceUsageElement);
+        }
+      }
+
+      record.addedNodes.forEach(node => {
+        resourceUsageElementsFromNode(node).forEach(el => elements.add(el));
+      });
+    }
+
+    scheduleResourceUsageUpdate([...elements]);
+  });
+
+  observer.observe(document.body, {
+    characterData: true,
+    childList: true,
+    subtree: true
+  });
 }
 
-async function fetchSvgText(
+function escapeXmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function readBlobAsDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () =>
+      reject(reader.error ?? new Error('Failed to read icon blob'));
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error('Icon blob did not produce a data URL'));
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+function looksLikeRasterImage(blob: Blob, header: Uint8Array): boolean {
+  if (blob.type.startsWith('image/')) {
+    return true;
+  }
+
+  return (
+    (header[0] === 0x89 &&
+      header[1] === 0x50 &&
+      header[2] === 0x4e &&
+      header[3] === 0x47) ||
+    (header[0] === 0xff && header[1] === 0xd8) ||
+    (header[0] === 0x47 &&
+      header[1] === 0x49 &&
+      header[2] === 0x46) ||
+    (header[0] === 0x52 &&
+      header[1] === 0x49 &&
+      header[2] === 0x46 &&
+      header[3] === 0x46 &&
+      header[8] === 0x57 &&
+      header[9] === 0x45 &&
+      header[10] === 0x42 &&
+      header[11] === 0x50)
+  );
+}
+
+function wrapRasterIconDataUrl(name: string, dataUrl: string): string {
+  const background =
+    name === 'sct'
+      ? '<rect width="128" height="128" rx="16" fill="#111827"/>'
+      : '';
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="${escapeXmlAttribute(name)} launcher icon">${background}<image href="${escapeXmlAttribute(dataUrl)}" x="8" y="8" width="112" height="112" preserveAspectRatio="xMidYMid meet"/></svg>`;
+}
+
+async function fetchIconSvgText(
+  name: string,
   url: string,
   settings: ServerConnection.ISettings
 ): Promise<string | null> {
@@ -167,14 +304,51 @@ async function fetchSvgText(
     if (!response.ok) {
       return null;
     }
-    const text = await response.text();
+
+    const contentType = response.headers.get('content-type') ?? '';
+    if (
+      contentType.includes('svg') ||
+      contentType.includes('xml') ||
+      contentType.startsWith('text/')
+    ) {
+      const text = await response.text();
+      return text.includes('<svg') ? text : null;
+    }
+
+    const blob = await response.blob();
+    const header = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+
+    if (looksLikeRasterImage(blob, header)) {
+      const dataUrl = await readBlobAsDataUrl(blob);
+      return wrapRasterIconDataUrl(name, dataUrl);
+    }
+
+    const text = await blob.text();
     if (text.includes('<svg')) {
       return text;
     }
+
     return null;
   } catch {
     return null;
   }
+}
+
+const iconSvgTextCache = new Map<string, Promise<string | null>>();
+
+function fetchCachedIconSvgText(
+  name: string,
+  url: string,
+  settings: ServerConnection.ISettings
+): Promise<string | null> {
+  const cached = iconSvgTextCache.get(url);
+  if (cached) {
+    return cached;
+  }
+
+  const request = fetchIconSvgText(name, url, settings);
+  iconSvgTextCache.set(url, request);
+  return request;
 }
 
 /**
@@ -252,6 +426,61 @@ function applyLauncherOrder(): void {
   });
 }
 
+function launcherNodeIsLauncherOrInside(node: Node): boolean {
+  if (node instanceof Element) {
+    return (
+      node.matches('.jp-Launcher-content, .jp-Launcher-section') ||
+      Boolean(node.closest('.jp-Launcher-content'))
+    );
+  }
+
+  return false;
+}
+
+function launcherNodeContainsLauncher(node: Node): boolean {
+  if (launcherNodeIsLauncherOrInside(node)) {
+    return true;
+  }
+
+  if (node instanceof DocumentFragment) {
+    return Boolean(
+      node.querySelector('.jp-Launcher-content, .jp-Launcher-section')
+    );
+  }
+
+  return (
+    node instanceof Element &&
+    Boolean(node.querySelector('.jp-Launcher-content, .jp-Launcher-section'))
+  );
+}
+
+function launcherMutationRecordsTouchLauncher(
+  records: MutationRecord[]
+): boolean {
+  return records.some(record => {
+    if (launcherNodeIsLauncherOrInside(record.target)) {
+      return true;
+    }
+
+    return [...record.addedNodes, ...record.removedNodes].some(node =>
+      launcherNodeContainsLauncher(node)
+    );
+  });
+}
+
+let launcherOrderFrame: number | null = null;
+
+function scheduleLauncherOrderApply(): void {
+  if (launcherOrderFrame !== null) {
+    return;
+  }
+
+  launcherOrderFrame = requestAnimationFrame(() => {
+    launcherOrderFrame = null;
+    applyLauncherOrder();
+  });
+}
+
 const plugin: JupyterFrontEndPlugin<void> = {
   id: 'neurodesk-launcher:plugin',
   description: 'Neurodesk launcher with proper icons for custom categories',
@@ -286,43 +515,60 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
     // Fetch the Neurodesk icon for use as category header icon.
     // Construct URL directly (like infoUrl) to avoid base-path issues on JupyterHub.
-    const ndProcess = (data.server_processes || []).find(
+    const serverProcesses = data.server_processes || [];
+    const ndProcess = serverProcesses.find(
       sp => sp.name === 'neurodesktop'
     );
+    const neuroIconPromise = ndProcess
+      ? fetchCachedIconSvgText(
+          ndProcess.name,
+          URLExt.join(
+            settings.baseUrl,
+            'server-proxy',
+            'icon',
+            ndProcess.name
+          ),
+          settings
+        )
+      : Promise.resolve(null);
+
+    const enabledServerProcesses = serverProcesses.filter(
+      sp => sp.launcher_entry.enabled
+    );
+    const iconPromises = new Map(
+      enabledServerProcesses.map(sp => [
+        sp.name,
+        fetchCachedIconSvgText(
+          sp.name,
+          URLExt.join(settings.baseUrl, 'server-proxy', 'icon', sp.name),
+          settings
+        )
+      ])
+    );
+
     if (ndProcess) {
-      const iconUrl = URLExt.join(
-        settings.baseUrl,
-        'server-proxy',
-        'icon',
-        ndProcess.name
-      );
-      neuroIconSvg = await fetchSvgText(iconUrl, settings);
+      neuroIconSvg = await neuroIconPromise;
     }
 
-    for (const sp of data.server_processes || []) {
+    const launcherProcesses = await Promise.all(
+      enabledServerProcesses.map(async sp => ({
+        process: sp,
+        iconSvg: await iconPromises.get(sp.name)
+      }))
+    );
+
+    for (const { process: sp, iconSvg } of launcherProcesses) {
       const { launcher_entry: entry, name, new_browser_tab: newTab } = sp;
-      if (!entry.enabled) {
-        continue;
-      }
       const title = entry.title || name;
       const category = entry.category || 'Other';
       const pathInfo = entry.path_info || name;
-      const url = URLExt.join(settings.baseUrl, pathInfo) + '/';
+      const url = entry.url || URLExt.join(settings.baseUrl, pathInfo) + '/';
 
-      // Fetch SVG icon via the server-proxy icon endpoint.
-      // Construct URL directly (like infoUrl) to avoid base-path issues on JupyterHub.
       let icon: LabIcon | undefined;
-      const iconFullUrl = URLExt.join(
-        settings.baseUrl,
-        'server-proxy',
-        'icon',
-        name
-      );
-      const svgStr = await fetchSvgText(iconFullUrl, settings);
-      if (svgStr) {
+      if (iconSvg) {
         icon = new LabIcon({
           name: `neurodesk-launcher:${name}`,
-          svgstr: svgStr
+          svgstr: iconSvg
         });
       }
 
@@ -362,11 +608,15 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
     // Apply category ordering via CSS flexbox order property.
     // MutationObserver ensures ordering is applied whenever the launcher re-renders.
-    const observer = new MutationObserver(() => {
-      applyLauncherOrder();
+    const observer = new MutationObserver(mutationRecords => {
+      if (!launcherMutationRecordsTouchLauncher(mutationRecords)) {
+        return;
+      }
+
+      scheduleLauncherOrderApply();
     });
     observer.observe(document.body, { childList: true, subtree: true });
-    requestAnimationFrame(() => applyLauncherOrder());
+    scheduleLauncherOrderApply();
   }
 };
 

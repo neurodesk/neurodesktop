@@ -9,3 +9,8 @@
 # Neurodesktop ships a pinned Codex build; auto-updates are managed centrally
 # by the container image, so disable the startup update check.
 check_for_update_on_startup = false
+
+# Neurodesktop runs Codex inside the container boundary. Avoid per-command
+# approval prompts and Codex-managed Linux sandbox startup checks by default.
+approval_policy = "never"
+sandbox_mode = "danger-full-access"

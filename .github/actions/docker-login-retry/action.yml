@@ -1,0 +1,127 @@
+name: Docker login with retry
+description: Log in to a Docker registry with bounded retries for transient registry failures.
+
+inputs:
+  registry:
+    description: Registry hostname, for example ghcr.io.
+    required: true
+  username:
+    description: Registry username.
+    required: true
+  password:
+    description: Registry password or token.
+    required: true
+  max-attempts:
+    description: Maximum login attempts before failing.
+    required: false
+    default: "5"
+  attempt-timeout-seconds:
+    description: Timeout for each docker login attempt.
+    required: false
+    default: "45"
+  curl-timeout-seconds:
+    description: Timeout for the pre-login registry probe.
+    required: false
+    default: "15"
+
+runs:
+  using: composite
+  steps:
+    - name: Login to registry
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        USERNAME: ${{ inputs.username }}
+        PASSWORD: ${{ inputs.password }}
+        MAX_ATTEMPTS: ${{ inputs.max-attempts }}
+        ATTEMPT_TIMEOUT_SECONDS: ${{ inputs.attempt-timeout-seconds }}
+        CURL_TIMEOUT_SECONDS: ${{ inputs.curl-timeout-seconds }}
+      run: |
+        set -euo pipefail
+
+        require_positive_integer() {
+          local name="$1"
+          local value="$2"
+          if ! [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::${name} must be a positive integer; got '${value}'."
+            exit 2
+          fi
+        }
+
+        is_auth_failure() {
+          local log_file="$1"
+          grep -Eiq \
+            '(unauthorized|unauthenticated|authentication required|incorrect username|invalid username|forbidden|denied:|requested access.*denied)' \
+            "$log_file"
+        }
+
+        retry_delay_seconds() {
+          local attempt="$1"
+          case "$attempt" in
+            1) echo 5 ;;
+            2) echo 15 ;;
+            3) echo 30 ;;
+            *) echo 60 ;;
+          esac
+        }
+
+        require_positive_integer "max-attempts" "$MAX_ATTEMPTS"
+        require_positive_integer "attempt-timeout-seconds" "$ATTEMPT_TIMEOUT_SECONDS"
+        require_positive_integer "curl-timeout-seconds" "$CURL_TIMEOUT_SECONDS"
+
+        registry_url="https://${REGISTRY}/v2/"
+
+        for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
+          echo "Docker login to ${REGISTRY}: attempt ${attempt}/${MAX_ATTEMPTS}"
+
+          probe_log="$(mktemp)"
+          probe_rc=0
+          curl -sS -o /dev/null \
+            -w "Registry probe ${REGISTRY}: http=%{http_code} connect=%{time_connect}s tls=%{time_appconnect}s total=%{time_total}s\n" \
+            --connect-timeout "$CURL_TIMEOUT_SECONDS" \
+            --max-time "$CURL_TIMEOUT_SECONDS" \
+            "$registry_url" >"$probe_log" 2>&1 || probe_rc=$?
+          cat "$probe_log"
+          rm -f "$probe_log"
+          if [ "$probe_rc" -ne 0 ]; then
+            echo "::warning::Registry probe for ${REGISTRY} exited with ${probe_rc}; docker login will still be attempted."
+          fi
+
+          login_log="$(mktemp)"
+          set +e
+          timeout "${ATTEMPT_TIMEOUT_SECONDS}s" bash -c \
+            'printf "%s" "$PASSWORD" | docker login "$REGISTRY" --username "$USERNAME" --password-stdin' \
+            >"$login_log" 2>&1
+          login_rc=$?
+          set -e
+
+          if [ "$login_rc" -eq 0 ]; then
+            cat "$login_log"
+            rm -f "$login_log"
+            echo "Docker login to ${REGISTRY} succeeded on attempt ${attempt}."
+            exit 0
+          fi
+
+          cat "$login_log"
+          if is_auth_failure "$login_log"; then
+            rm -f "$login_log"
+            echo "::error::Docker login to ${REGISTRY} failed with an authentication or authorization error; not retrying."
+            exit "$login_rc"
+          fi
+          rm -f "$login_log"
+
+          if [ "$login_rc" -eq 124 ]; then
+            echo "::warning::Docker login to ${REGISTRY} timed out after ${ATTEMPT_TIMEOUT_SECONDS}s."
+          else
+            echo "::warning::Docker login to ${REGISTRY} failed with exit code ${login_rc}."
+          fi
+
+          if [ "$attempt" -lt "$MAX_ATTEMPTS" ]; then
+            delay="$(retry_delay_seconds "$attempt")"
+            echo "Retrying Docker login to ${REGISTRY} in ${delay}s."
+            sleep "$delay"
+          else
+            echo "::error::Docker login to ${REGISTRY} failed after ${MAX_ATTEMPTS} attempts."
+            exit "$login_rc"
+          fi
+        done

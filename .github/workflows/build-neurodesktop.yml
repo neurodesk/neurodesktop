@@ -25,6 +25,9 @@ on:
 
 env:
   DOCKERHUB_ORG: ${{ vars.DOCKERHUB_ORG }}
+  # Opt the lone Node 20 holdout (JasonEtco/create-an-issue, no Node 24
+  # release as of 2026-05) into Node 24 to silence deprecation warnings.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   build-image:
@@ -39,9 +42,17 @@ jobs:
             docker_platform: linux/arm64
     steps:
       - name: Fetch github api rate limit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          GITHUB_RATE_REMAINING=$(curl -H "Accept: application/vnd.github.v3+json" https://api.github.com/rate_limit | jq '.rate.remaining')
+          GITHUB_RATE_REMAINING=$(curl -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github.v3+json" https://api.github.com/rate_limit | jq '.rate.remaining')
           echo "GITHUB_RATE_REMAINING=${GITHUB_RATE_REMAINING}"
+          case "$GITHUB_RATE_REMAINING" in
+            ''|null|0)
+              echo "::error::GitHub API rate limit probe returned '${GITHUB_RATE_REMAINING:-<empty>}'. Failing job to avoid running with unset IMAGEID/BUILDDATE."
+              exit 1
+              ;;
+          esac
           echo "GITHUB_RATE_REMAINING=$GITHUB_RATE_REMAINING" >> $GITHUB_ENV
       - name: Configure runner
         run: |
@@ -51,12 +62,10 @@ jobs:
           echo '{"data-root": "/mnt/docker"}' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
       - name: Checkout repository
-        if: ${{ env.GITHUB_RATE_REMAINING > 0 }}
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.ref }}
       - name: Set environment variables
-        if: ${{ env.GITHUB_RATE_REMAINING > 0 }}
         run: |
           IMAGENAME="neurodesktop"
           BUILDDATE=`date +%Y-%m-%d`
@@ -73,30 +82,27 @@ jobs:
       - name: Check if image exists
         if: github.event_name == 'schedule'
         id: check_image
-        run: |
-          if docker manifest inspect $IMAGEID:$BUILDDATE > /dev/null 2>&1; then
-            echo "Image $IMAGEID:$BUILDDATE already exists."
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "Image $IMAGEID:$BUILDDATE does not exist."
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
+        uses: ./.github/actions/check-registry-manifest
+        with:
+          image: ${{ env.IMAGEID }}:${{ env.BUILDDATE }}
       - name: Set up QEMU
-        if: steps.check_image.outputs.exists != 'true'
-        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392
+        if: steps.check_image.outputs.exists != 'true' && matrix.platform.arch == 'arm64'
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+        with:
+          platforms: arm64
       - name: Set up Docker Buildx
         if: steps.check_image.outputs.exists != 'true'
-        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
       - name: Login to GHCR
         if: steps.check_image.outputs.exists != 'true'
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        uses: ./.github/actions/docker-login-retry
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push arch image
         if: steps.check_image.outputs.exists != 'true'
-        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: .
           platforms: ${{ matrix.platform.docker_platform }}
@@ -109,22 +115,15 @@ jobs:
           cache-to: type=inline
       - name: Checkout repository for failure issue template
         if: always() && failure()
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.ref }}
-      - name: Generate issue on job failure
+      - name: Report job failure
         if: always() && failure()
-        uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_WORKFLOW: ${{ github.workflow }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
+        uses: ./.github/actions/report-job-failure
         with:
-          filename: .github/job_failure_issue_template.md
-          update_existing: true
-          search_existing: open
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          details: ${{ matrix.platform.arch || matrix.arch || matrix.cvmfs-servers || '' }}
 
   merge-manifests:
     needs: build-image
@@ -140,30 +139,29 @@ jobs:
           echo "BUILDDATE=$BUILDDATE" >> $GITHUB_ENV
           echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
           echo "IMAGENAME=$IMAGENAME" >> $GITHUB_ENV
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.ref }}
       - name: Check if image exists
         if: github.event_name == 'schedule'
         id: check_image
-        run: |
-          if docker manifest inspect $IMAGEID:$BUILDDATE > /dev/null 2>&1; then
-            echo "Image $IMAGEID:$BUILDDATE already exists."
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "Image $IMAGEID:$BUILDDATE does not exist."
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
+        uses: ./.github/actions/check-registry-manifest
+        with:
+          image: ${{ env.IMAGEID }}:${{ env.BUILDDATE }}
       - name: Set up Docker Buildx
         if: steps.check_image.outputs.exists != 'true'
-        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
       - name: Login to GHCR
         if: steps.check_image.outputs.exists != 'true'
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        uses: ./.github/actions/docker-login-retry
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Login to DockerHub
         if: ${{ env.DOCKERHUB_ORG != '' && steps.check_image.outputs.exists != 'true' }}
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
@@ -203,44 +201,77 @@ jobs:
           gh api --method DELETE -H "Accept: application/vnd.github+json" /repos/${GITHUB_REPOSITORY}/git/refs/tags/${BUILDDATE} 2>/dev/null || true
           echo "Creating tag ${BUILDDATE}"
           gh api --method POST -H "Accept: application/vnd.github+json" /repos/${GITHUB_REPOSITORY}/git/refs -f ref="refs/tags/${BUILDDATE}" -f sha="${GITHUB_SHA}"
+      - name: Write image publish summary
+        run: |
+          if [ "${{ steps.check_image.outputs.exists }}" = "true" ]; then
+            RESULT="Image already existed; build and registry push were skipped."
+          elif [ "${{ env.DOCKERHUB_ORG }}" = "" ]; then
+            RESULT="Built and pushed to GHCR."
+          else
+            RESULT="Built and pushed to GHCR and DockerHub."
+          fi
+
+          {
+            echo "## Image publish summary"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Result | ${RESULT} |"
+            echo "| Version | \`${{ env.BUILDDATE }}\` |"
+            echo "| Source commit | \`${GITHUB_SHA}\` |"
+            echo "| GHCR image | \`${{ env.IMAGEID }}:${{ env.BUILDDATE }}\`, \`${{ env.IMAGEID }}:latest\` |"
+            if [ "${{ env.DOCKERHUB_ORG }}" != "" ]; then
+              echo "| DockerHub image | \`${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:${{ env.BUILDDATE }}\`, \`${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:latest\` |"
+            else
+              echo "| DockerHub image | Not configured; \`DOCKERHUB_ORG\` is empty. |"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
       - name: Checkout repository for failure issue template
         if: always() && failure()
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.ref }}
-      - name: Generate issue on job failure
+      - name: Report job failure
         if: always() && failure()
-        uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_WORKFLOW: ${{ github.workflow }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
+        uses: ./.github/actions/report-job-failure
         with:
-          filename: .github/job_failure_issue_template.md
-          update_existing: true
-          search_existing: open
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          details: ${{ matrix.platform.arch || matrix.arch || matrix.cvmfs-servers || '' }}
 
   test-image:
+    name: test-image (${{ matrix.test_profile }})
     needs: build-image
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
         include:
-          - cvmfs_disable: "false"
+          - test_profile: "CVMFS enabled, sudo disabled"
+            cvmfs_disable: "false"
             grant_sudo: "no"
             needs_cvmfs: true
-          - cvmfs_disable: "false"
+          - test_profile: "CVMFS enabled, sudo enabled"
+            cvmfs_disable: "false"
             grant_sudo: "yes"
             needs_cvmfs: true
-          - cvmfs_disable: "true"
+          - test_profile: "CVMFS disabled, sudo disabled"
+            cvmfs_disable: "true"
             grant_sudo: "no"
             needs_cvmfs: false
-          - cvmfs_disable: "true"
+          - test_profile: "CVMFS disabled, sudo enabled"
+            cvmfs_disable: "true"
             grant_sudo: "yes"
             needs_cvmfs: false
+          # HPC Apptainer simulation: no --privileged, no --user=root, no sudo,
+          # a non-jovyan user (sciget/5000/5000) whose HOME is bind-mounted over
+          # /home/jovyan, and APPTAINER_CONTAINER=1 so is_apptainer_runtime()
+          # branches activate. Guards against HPC-only regressions that would
+          # otherwise only surface on Sherlock et al.
+          - test_profile: "HPC Apptainer simulation"
+            cvmfs_disable: "true"
+            grant_sudo: "no"
+            needs_cvmfs: false
+            hpc_mode: true
     steps:
       - name: Set environment variables
         run: |
@@ -254,11 +285,11 @@ jobs:
           sudo docker image prune --all --force
           sudo docker builder prune --force
       - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.ref }}
       - name: Login to GHCR
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        uses: ./.github/actions/docker-login-retry
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -278,6 +309,7 @@ jobs:
           sudo cvmfs_config setup
           sudo ls /cvmfs/neurodesk.ardc.edu.au
       - name: Test container (CVMFS=${{ matrix.cvmfs_disable == 'false' && 'on' || 'off' }}, SUDO=${{ matrix.grant_sudo }})
+        if: ${{ ! matrix.hpc_mode }}
         run: |
           CVMFS_MOUNT=""
           if [ "${{ matrix.needs_cvmfs }}" = "true" ]; then
@@ -294,14 +326,101 @@ jobs:
             $IMAGEID:amd64
           echo "Waiting for container startup..."
           for i in $(seq 1 60); do
-            if docker exec neurodesktop-test curl -sf http://localhost:8888/api/status >/dev/null 2>&1; then
-              echo "Container ready after ~$((i*2))s"
+            code=$(docker exec neurodesktop-test curl -so /dev/null -w '%{http_code}' \
+                     --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
+            if echo "$code" | grep -Eq '^[0-9]{3}$' && [ "$code" != "000" ]; then
+              echo "Container ready after ~$((i*2))s (HTTP ${code})"
               break
             fi
             sleep 2
           done
-          docker exec -u jovyan neurodesktop-test pytest /opt/tests/ -v
+          docker exec -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 \
+            -u jovyan neurodesktop-test pytest /opt/tests/ -v
           docker rm -f neurodesktop-test
+
+      - name: Test container (HPC Apptainer simulation)
+        if: ${{ matrix.hpc_mode }}
+        run: |
+          # Mirror the `hpctest` mode of build_and_run.sh: non-root, non-jovyan
+          # user with a synthetic /etc/passwd + /etc/group bind-mount, HOME on a
+          # host-owned tempdir over /home/jovyan, APPTAINER_CONTAINER=1.
+          HPC_USER=sciget
+          HPC_UID=5000
+          HPC_GID=5000
+          HPC_HOME_DIR="$(mktemp -d)"
+          HPC_PASSWD_FILE="$(mktemp)"
+          HPC_GROUP_FILE="$(mktemp)"
+
+          cat > "$HPC_PASSWD_FILE" <<EOF
+          root:x:0:0:root:/root:/bin/bash
+          jovyan:x:1000:100:jovyan:/home/jovyan:/bin/bash
+          ${HPC_USER}:x:${HPC_UID}:${HPC_GID}:${HPC_USER} (HPC simulated):/home/jovyan:/bin/bash
+          nobody:x:65534:65534:nobody:/:/usr/sbin/nologin
+          EOF
+          cat > "$HPC_GROUP_FILE" <<EOF
+          root:x:0:
+          users:x:100:jovyan,${HPC_USER}
+          ${HPC_USER}:x:${HPC_GID}:
+          nogroup:x:65534:
+          EOF
+          chmod 0777 "$HPC_HOME_DIR"
+          chmod 0644 "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
+
+          docker rm -f neurodesktop-test 2>/dev/null || true
+          docker run -d --shm-size=1gb \
+            --user "${HPC_UID}:${HPC_GID}" \
+            --name neurodesktop-test \
+            -v "${HPC_HOME_DIR}:/home/jovyan" \
+            -v "${HPC_PASSWD_FILE}:/etc/passwd:ro" \
+            -v "${HPC_GROUP_FILE}:/etc/group:ro" \
+            -e CVMFS_DISABLE=true \
+            -e NB_USER=${HPC_USER} \
+            -e NB_UID=${HPC_UID} \
+            -e NB_GID=${HPC_GID} \
+            -e HOME=/home/jovyan \
+            -e USER=${HPC_USER} \
+            -e LOGNAME=${HPC_USER} \
+            -e APPTAINER_CONTAINER=1 \
+            -e APPTAINER_NAME=neurodesktop-test-hpc \
+            -e NEURODESKTOP_CVMFS_STARTUP_MODE=lazy \
+            -e NEURODESKTOP_SLURM_ENABLE=0 \
+            -e NEURODESKTOP_SLURM_STARTUP_MODE=eager \
+            $IMAGEID:amd64
+          echo "Waiting for container startup..."
+          ready=0
+          for i in $(seq 1 90); do
+            if ! docker inspect -f '{{.State.Running}}' neurodesktop-test 2>/dev/null | grep -q true; then
+              echo "::error::Container exited during startup (HPC mode)."
+              docker logs --tail 120 neurodesktop-test || true
+              exit 1
+            fi
+            code=$(docker exec neurodesktop-test curl -so /dev/null -w '%{http_code}' \
+                     --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
+            if echo "$code" | grep -Eq '^[0-9]{3}$' && [ "$code" != "000" ]; then
+              echo "Container ready after ~$((i*2))s (HTTP ${code})"
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::Container did not reach /api/status in 180s (HPC mode)."
+            docker logs --tail 120 neurodesktop-test || true
+            exit 1
+          fi
+          # Exec as the current container user (no -u jovyan: we are sciget here).
+          docker exec -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 \
+            neurodesktop-test pytest /opt/tests/ -v
+          test_rc=$?
+          docker rm -f neurodesktop-test
+          # The container populated $HPC_HOME_DIR as UID 5000; the runner
+          # cannot `rm` those files directly. Use the already-pulled image
+          # as root to chown the tree back to the runner first.
+          docker run --rm --user 0:0 --entrypoint chown \
+            -v "$HPC_HOME_DIR":/cleanup "$IMAGEID:amd64" \
+            -R "$(id -u):$(id -g)" /cleanup >/dev/null 2>&1 || true
+          rm -rf "$HPC_HOME_DIR" "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
+          exit $test_rc
 
   scan-image:
     needs: build-image
@@ -322,8 +441,12 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift /usr/lib/android-sdk
           sudo docker image prune --all --force
           sudo docker builder prune --force
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.ref }}
       - name: Login to GHCR
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        uses: ./.github/actions/docker-login-retry
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -331,7 +454,7 @@ jobs:
       - name: Pull container image
         run: docker pull $IMAGEID:${{ matrix.arch }}
       - name: Container image scan (${{ matrix.arch }})
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.IMAGEID }}:${{ matrix.arch }}
           format: table
@@ -341,19 +464,12 @@ jobs:
           skip-files: /opt/rclone-v1.60.1-linux-amd64/README.txt,/opt/rclone-v1.60.1-linux-amd64/README.html,/opt/rclone-v1.60.1-linux-amd64/rclone.1,/opt/code-server/lib/vscode/package.json,/opt/code-server/lib/vscode/extensions/handlebars/package.json
       - name: Checkout repository for failure issue template
         if: always() && failure()
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.ref }}
-      - name: Generate issue on job failure
+      - name: Report job failure
         if: always() && failure()
-        uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_WORKFLOW: ${{ github.workflow }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
+        uses: ./.github/actions/report-job-failure
         with:
-          filename: .github/job_failure_issue_template.md
-          update_existing: true
-          search_existing: open
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          details: ${{ matrix.platform.arch || matrix.arch || matrix.cvmfs-servers || '' }}
