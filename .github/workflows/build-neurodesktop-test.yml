@@ -33,8 +33,6 @@ env:
   # NINJA_STATUS: "[%f/%t] "
 jobs:
   build-image:
-    # runs-on: [self-hosted, linux, arc-base]
-    # runs-on: ubuntu-24.04
     runs-on: ${{ matrix.platform.runs_on }}
     strategy:
       fail-fast: false
@@ -44,16 +42,11 @@ jobs:
             docker_platform: linux/amd64
             tag: amd64
             runs_on: neurodesk-syd-arcrunner-neurodesktop
-          # arm64 entries temporarily disabled to retest amd64-only
-          # - arch: arm64
-          #   docker_platform: linux/arm64
-          #   tag: arm64
-          #   runs_on:
-          #     group: arc-base
-          # - arch: arm64
-          #   docker_platform: linux/arm64
-          #   tag: arm64-gh
-          #   runs_on: ubuntu-24.04-arm
+          # arm64 builds NATIVELY on a Blacksmith arm runner (no QEMU).
+          - arch: arm64
+            docker_platform: linux/arm64
+            tag: arm64
+            runs_on: blacksmith-8vcpu-ubuntu-2404-arm
     steps:
       - name: Fetch github api rate limit
         env:
@@ -76,7 +69,11 @@ jobs:
         run: |
           IMAGENAME="neurodesktop-test"
           BUILDDATE=`date +%Y-%m-%d`
-          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          # GHCR path = owner + image name (e.g. ghcr.io/neurodesk/neurodesktop-test),
+          # matching the clean Quay/DockerHub style. Previously this used
+          # $GITHUB_REPOSITORY (org/repo), which doubled the name to
+          # ghcr.io/neurodesk/neurodesktop/neurodesktop-test.
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY_OWNER/$IMAGENAME
           IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
 
           echo "BUILDDATE=$BUILDDATE"
@@ -86,8 +83,8 @@ jobs:
           echo "BUILDDATE=$BUILDDATE" >> $GITHUB_ENV
           echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
           echo "IMAGENAME=$IMAGENAME" >> $GITHUB_ENV
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+      # No `Set up QEMU` step — amd64 builds natively on the x86 ARC pool and
+      # arm64 builds natively on a Blacksmith arm runner. Nothing is emulated.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
         # this is for testing the arc runners.
@@ -222,7 +219,11 @@ jobs:
         run: |
           IMAGENAME="neurodesktop-test"
           BUILDDATE=`date +%Y-%m-%d`
-          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          # GHCR path = owner + image name (e.g. ghcr.io/neurodesk/neurodesktop-test),
+          # matching the clean Quay/DockerHub style. Previously this used
+          # $GITHUB_REPOSITORY (org/repo), which doubled the name to
+          # ghcr.io/neurodesk/neurodesktop/neurodesktop-test.
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY_OWNER/$IMAGENAME
           IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
 
           PUSH_IMAGES="${IMAGEID}"
@@ -252,15 +253,22 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
+      # TRIAL: also publish to Quay. Additive — does NOT drop GHCR or DockerHub.
+      # (Dropping DockerHub is a separate decision pending manager sign-off.)
+      - name: Login to Quay
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_ROBOT_TOKEN }}
       - name: Create and push multi-arch manifest to GHCR
         run: |
           docker buildx imagetools create \
             -t ${{ env.IMAGEID }}:${{ env.BUILDDATE }} \
             -t ${{ env.IMAGEID }}:latest \
-            ${{ env.IMAGEID }}:amd64
-            # ${{ env.IMAGEID }}:arm64  # temporarily disabled while retesting amd64-only
+            ${{ env.IMAGEID }}:amd64 \
+            ${{ env.IMAGEID }}:arm64
       - name: Install crane
-        if: ${{ env.DOCKERHUB_ORG != '' }}
         run: |
           curl -sL https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_x86_64.tar.gz \
             | sudo tar -xz -C /usr/local/bin crane
@@ -278,12 +286,23 @@ jobs:
           crane copy \
             ${{ env.IMAGEID }}:latest \
             ${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:latest
+      - name: Copy multi-arch manifest to Quay (trial)
+        run: |
+          # Mirror the merged multi-arch index from GHCR to Quay (same crane
+          # path as DockerHub above). Additive trial — independent of the
+          # GHCR / DockerHub publishes.
+          crane copy \
+            ${{ env.IMAGEID }}:${{ env.BUILDDATE }} \
+            quay.io/neurodesk/${{ env.IMAGENAME }}:${{ env.BUILDDATE }}
+          crane copy \
+            ${{ env.IMAGEID }}:latest \
+            quay.io/neurodesk/${{ env.IMAGENAME }}:latest
       - name: Write image publish summary
         run: |
           if [ "${{ env.DOCKERHUB_ORG }}" = "" ]; then
-            RESULT="Built and pushed to GHCR."
+            RESULT="Built and pushed to GHCR + Quay."
           else
-            RESULT="Built and pushed to GHCR and DockerHub."
+            RESULT="Built and pushed to GHCR, DockerHub, and Quay."
           fi
 
           {
@@ -295,6 +314,7 @@ jobs:
             echo "| Version | \`${{ env.BUILDDATE }}\` |"
             echo "| Source commit | \`${GITHUB_SHA}\` |"
             echo "| GHCR image | \`${{ env.IMAGEID }}:${{ env.BUILDDATE }}\`, \`${{ env.IMAGEID }}:latest\` |"
+            echo "| Quay image | \`quay.io/neurodesk/${{ env.IMAGENAME }}:${{ env.BUILDDATE }}\`, \`quay.io/neurodesk/${{ env.IMAGENAME }}:latest\` |"
             if [ "${{ env.DOCKERHUB_ORG }}" != "" ]; then
               echo "| DockerHub image | \`${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:${{ env.BUILDDATE }}\`, \`${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:latest\` |"
             else
@@ -314,13 +334,16 @@ jobs:
           details: ${{ matrix.platform.arch || matrix.arch || matrix.cvmfs-servers || '' }}
 
   test-image:
-    name: test-image (${{ matrix.test_profile }})
+    name: test-image (${{ matrix.arch }} / ${{ matrix.profile.test_profile }})
     needs: build-image
-    runs-on: ubuntu-22.04
+    # arm64 tests RUN the container, so they need a native arm64 runner
+    # (Blacksmith); amd64 stays on the GitHub-hosted runner.
+    runs-on: ${{ matrix.arch == 'arm64' && 'blacksmith-8vcpu-ubuntu-2404-arm' || 'ubuntu-22.04' }}
     strategy:
       fail-fast: false
       matrix:
-        include:
+        arch: [amd64, arm64]
+        profile:
           - test_profile: "CVMFS enabled, sudo disabled"
             cvmfs_disable: "false"
             grant_sudo: "no"
@@ -347,18 +370,42 @@ jobs:
             grant_sudo: "no"
             needs_cvmfs: false
             hpc_mode: true
+        exclude:
+          # arm64 + CVMFS deferred: the arm64 CVMFS tool library is mid-port
+          # upstream and the arch-aware CVMFS routing (variant symlinks) isn't
+          # wired yet, so /cvmfs/neurodesk.ardc.edu.au doesn't mount on the arm64
+          # runner. Re-enable these 2 combos once arm64 CVMFS content + routing
+          # land. amd64 keeps full CVMFS coverage.
+          - arch: arm64
+            profile:
+              test_profile: "CVMFS enabled, sudo disabled"
+              cvmfs_disable: "false"
+              grant_sudo: "no"
+              needs_cvmfs: true
+          - arch: arm64
+            profile:
+              test_profile: "CVMFS enabled, sudo enabled"
+              cvmfs_disable: "false"
+              grant_sudo: "yes"
+              needs_cvmfs: true
     steps:
       - name: Set environment variables
         run: |
           IMAGENAME="neurodesktop-test"
-          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          # GHCR path = owner + image name (e.g. ghcr.io/neurodesk/neurodesktop-test),
+          # matching the clean Quay/DockerHub style. Previously this used
+          # $GITHUB_REPOSITORY (org/repo), which doubled the name to
+          # ghcr.io/neurodesk/neurodesktop/neurodesktop-test.
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY_OWNER/$IMAGENAME
           IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
           echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
+          # Pull the per-arch tag matching this job's arch.
+          echo "IMAGE_REF=$IMAGEID:${{ matrix.arch }}" >> $GITHUB_ENV
       - name: Free up build space
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift /usr/lib/android-sdk
-          sudo docker image prune --all --force
-          sudo docker builder prune --force
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift /usr/lib/android-sdk || true
+          sudo docker image prune --all --force || true
+          sudo docker builder prune --force || true
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -370,12 +417,12 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull container image
-        run: docker pull $IMAGEID:amd64
+        run: docker pull "$IMAGE_REF"
       - name: Initialize CVMFS
-        if: matrix.needs_cvmfs
+        if: matrix.profile.needs_cvmfs
         uses: cvmfs-contrib/github-action-cvmfs@v3
       - name: Configure Neurodesk CVMFS
-        if: matrix.needs_cvmfs
+        if: matrix.profile.needs_cvmfs
         run: |
           sudo mkdir -p /etc/cvmfs/keys/ardc.edu.au
           sudo cp config/cvmfs/neurodesk.ardc.edu.au.pub /etc/cvmfs/keys/ardc.edu.au/neurodesk.ardc.edu.au.pub
@@ -383,22 +430,22 @@ jobs:
           sudo cp config/cvmfs/default.local /etc/cvmfs/default.local
           sudo cvmfs_config setup
           sudo ls /cvmfs/neurodesk.ardc.edu.au
-      - name: Test container (CVMFS=${{ matrix.cvmfs_disable == 'false' && 'on' || 'off' }}, SUDO=${{ matrix.grant_sudo }})
-        if: ${{ ! matrix.hpc_mode }}
+      - name: Test container (CVMFS=${{ matrix.profile.cvmfs_disable == 'false' && 'on' || 'off' }}, SUDO=${{ matrix.profile.grant_sudo }})
+        if: ${{ ! matrix.profile.hpc_mode }}
         run: |
           CVMFS_MOUNT=""
-          if [ "${{ matrix.needs_cvmfs }}" = "true" ]; then
+          if [ "${{ matrix.profile.needs_cvmfs }}" = "true" ]; then
             CVMFS_MOUNT="-v /cvmfs:/cvmfs:shared"
           fi
           docker rm -f neurodesktop-test 2>/dev/null || true
           docker run -d --shm-size=1gb --privileged --user=root \
             --name neurodesktop-test \
             $CVMFS_MOUNT \
-            -e CVMFS_DISABLE=${{ matrix.cvmfs_disable }} \
-            -e GRANT_SUDO=${{ matrix.grant_sudo }} \
+            -e CVMFS_DISABLE=${{ matrix.profile.cvmfs_disable }} \
+            -e GRANT_SUDO=${{ matrix.profile.grant_sudo }} \
             -e NEURODESKTOP_CVMFS_STARTUP_MODE=eager \
             -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
-            $IMAGEID:amd64
+            "$IMAGE_REF"
           echo "Waiting for container startup..."
           for i in $(seq 1 60); do
             code=$(docker exec neurodesktop-test curl -so /dev/null -w '%{http_code}' \
@@ -414,7 +461,7 @@ jobs:
           docker rm -f neurodesktop-test
 
       - name: Test container (HPC Apptainer simulation)
-        if: ${{ matrix.hpc_mode }}
+        if: ${{ matrix.profile.hpc_mode }}
         run: |
           # Mirror the `hpctest` mode of build_and_run.sh: non-root, non-jovyan
           # user with a synthetic /etc/passwd + /etc/group bind-mount, HOME on a
@@ -460,7 +507,7 @@ jobs:
             -e NEURODESKTOP_CVMFS_STARTUP_MODE=lazy \
             -e NEURODESKTOP_SLURM_ENABLE=0 \
             -e NEURODESKTOP_SLURM_STARTUP_MODE=eager \
-            $IMAGEID:amd64
+            "$IMAGE_REF"
           echo "Waiting for container startup..."
           ready=0
           for i in $(seq 1 90); do
@@ -492,23 +539,30 @@ jobs:
           # (UID 1001) cannot `rm` those files directly. Use the already-
           # pulled image as root to chown the tree back to the runner first.
           docker run --rm --user 0:0 --entrypoint chown \
-            -v "$HPC_HOME_DIR":/cleanup "$IMAGEID:amd64" \
+            -v "$HPC_HOME_DIR":/cleanup "$IMAGE_REF" \
             -R "$(id -u):$(id -g)" /cleanup >/dev/null 2>&1 || true
           rm -rf "$HPC_HOME_DIR" "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
           exit $test_rc
 
   scan-image:
+    name: scan-image (${{ matrix.arch }})
     needs: build-image
+    # Trivy scans image layers (it does not RUN the container), so a per-arch
+    # arm64 image can be scanned from an x86 runner.
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
-        arch: [amd64]  # arm64 temporarily disabled while retesting amd64-only
+        arch: [amd64, arm64]
     steps:
       - name: Set environment variables
         run: |
           IMAGENAME="neurodesktop-test"
-          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          # GHCR path = owner + image name (e.g. ghcr.io/neurodesk/neurodesktop-test),
+          # matching the clean Quay/DockerHub style. Previously this used
+          # $GITHUB_REPOSITORY (org/repo), which doubled the name to
+          # ghcr.io/neurodesk/neurodesktop/neurodesktop-test.
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY_OWNER/$IMAGENAME
           IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
           echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
       - name: Free up build space
