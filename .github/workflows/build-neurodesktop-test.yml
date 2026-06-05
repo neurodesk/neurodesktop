@@ -69,7 +69,11 @@ jobs:
         run: |
           IMAGENAME="neurodesktop-test"
           BUILDDATE=`date +%Y-%m-%d`
-          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          # GHCR path = owner + image name (e.g. ghcr.io/neurodesk/neurodesktop-test),
+          # matching the clean Quay/DockerHub style. Previously this used
+          # $GITHUB_REPOSITORY (org/repo), which doubled the name to
+          # ghcr.io/neurodesk/neurodesktop/neurodesktop-test.
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY_OWNER/$IMAGENAME
           IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
 
           echo "BUILDDATE=$BUILDDATE"
@@ -215,7 +219,11 @@ jobs:
         run: |
           IMAGENAME="neurodesktop-test"
           BUILDDATE=`date +%Y-%m-%d`
-          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          # GHCR path = owner + image name (e.g. ghcr.io/neurodesk/neurodesktop-test),
+          # matching the clean Quay/DockerHub style. Previously this used
+          # $GITHUB_REPOSITORY (org/repo), which doubled the name to
+          # ghcr.io/neurodesk/neurodesktop/neurodesktop-test.
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY_OWNER/$IMAGENAME
           IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
 
           PUSH_IMAGES="${IMAGEID}"
@@ -384,7 +392,11 @@ jobs:
       - name: Set environment variables
         run: |
           IMAGENAME="neurodesktop-test"
-          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          # GHCR path = owner + image name (e.g. ghcr.io/neurodesk/neurodesktop-test),
+          # matching the clean Quay/DockerHub style. Previously this used
+          # $GITHUB_REPOSITORY (org/repo), which doubled the name to
+          # ghcr.io/neurodesk/neurodesktop/neurodesktop-test.
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY_OWNER/$IMAGENAME
           IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
           echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
           # Pull the per-arch tag matching this job's arch.
@@ -546,7 +558,11 @@ jobs:
       - name: Set environment variables
         run: |
           IMAGENAME="neurodesktop-test"
-          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          # GHCR path = owner + image name (e.g. ghcr.io/neurodesk/neurodesktop-test),
+          # matching the clean Quay/DockerHub style. Previously this used
+          # $GITHUB_REPOSITORY (org/repo), which doubled the name to
+          # ghcr.io/neurodesk/neurodesktop/neurodesktop-test.
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY_OWNER/$IMAGENAME
           IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
           echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
       - name: Free up build space
