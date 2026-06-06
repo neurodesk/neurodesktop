@@ -134,6 +134,16 @@ def test_neurocommand_cache_boundary_uses_build_arg_not_remote_add():
     assert 'git checkout --detach "$NEUROCOMMAND_REF"' in dockerfile
 
 
+def test_apptainer_dependency_downloads_are_retried():
+    dockerfile = _read_repo_file("Dockerfile")
+
+    assert "for attempt in 1 2 3 4 5; do" in dockerfile
+    assert "if ./scripts/download-dependencies; then" in dockerfile
+    assert 'echo "download-dependencies attempt ${attempt}/5 failed; retrying."' in dockerfile
+    assert 'sleep "$((attempt * 10))"' in dockerfile
+    assert "&& ./scripts/compile-dependencies" in dockerfile
+
+
 def test_cached_neurocommand_builds_resolve_ref_with_retries():
     for workflow_name in ("build-neurodesktop.yml", "build-neurodesktop-dev.yml"):
         workflow_text = _read_repo_file(f".github/workflows/{workflow_name}")

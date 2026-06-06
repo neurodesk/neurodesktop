@@ -52,7 +52,17 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         && break \
         || { if [ "$i" -eq 3 ]; then exit 1; fi; sleep 5; }; \
     done \
-    && ./scripts/download-dependencies \
+    && for attempt in 1 2 3 4 5; do \
+        if ./scripts/download-dependencies; then \
+            break; \
+        fi; \
+        if [ "$attempt" -eq 5 ]; then \
+            echo "download-dependencies failed after ${attempt} attempts." >&2; \
+            exit 1; \
+        fi; \
+        echo "download-dependencies attempt ${attempt}/5 failed; retrying." >&2; \
+        sleep "$((attempt * 10))"; \
+    done \
     && ./scripts/compile-dependencies \
     && printf '%s\n' "${APPTAINER_VERSION}" > VERSION \
     && ./mconfig --prefix=/opt/apptainer --with-suid \
