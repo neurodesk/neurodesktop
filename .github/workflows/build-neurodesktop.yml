@@ -69,7 +69,10 @@ jobs:
         run: |
           IMAGENAME="neurodesktop"
           BUILDDATE=`date +%Y-%m-%d`
-          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          # GHCR path = owner + image name (ghcr.io/neurodesk/neurodesktop),
+          # matching the Quay/DockerHub style. Previously $GITHUB_REPOSITORY
+          # (org/repo) made it ghcr.io/neurodesk/neurodesktop/neurodesktop.
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY_OWNER/$IMAGENAME
           IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
 
           echo "BUILDDATE=$BUILDDATE"
@@ -155,7 +158,10 @@ jobs:
         run: |
           IMAGENAME="neurodesktop"
           BUILDDATE=`date +%Y-%m-%d`
-          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          # GHCR path = owner + image name (ghcr.io/neurodesk/neurodesktop),
+          # matching the Quay/DockerHub style. Previously $GITHUB_REPOSITORY
+          # (org/repo) made it ghcr.io/neurodesk/neurodesktop/neurodesktop.
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY_OWNER/$IMAGENAME
           IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
 
           echo "BUILDDATE=$BUILDDATE" >> $GITHUB_ENV
@@ -298,7 +304,10 @@ jobs:
       - name: Set environment variables
         run: |
           IMAGENAME="neurodesktop"
-          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          # GHCR path = owner + image name (ghcr.io/neurodesk/neurodesktop),
+          # matching the Quay/DockerHub style. Previously $GITHUB_REPOSITORY
+          # (org/repo) made it ghcr.io/neurodesk/neurodesktop/neurodesktop.
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY_OWNER/$IMAGENAME
           IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
           echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
       - name: Free up build space
@@ -455,7 +464,10 @@ jobs:
       - name: Set environment variables
         run: |
           IMAGENAME="neurodesktop"
-          IMAGEID=ghcr.io/$GITHUB_REPOSITORY/$IMAGENAME
+          # GHCR path = owner + image name (ghcr.io/neurodesk/neurodesktop),
+          # matching the Quay/DockerHub style. Previously $GITHUB_REPOSITORY
+          # (org/repo) made it ghcr.io/neurodesk/neurodesktop/neurodesktop.
+          IMAGEID=ghcr.io/$GITHUB_REPOSITORY_OWNER/$IMAGENAME
           IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
           echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
       - name: Free up build space
