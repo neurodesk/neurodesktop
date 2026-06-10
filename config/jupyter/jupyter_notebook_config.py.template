@@ -100,3 +100,9 @@ c.ResourceUseDisplay.track_cpu_percent = True
 c.ResourceUseDisplay.mem_warning_threshold = 0.1  # Warn at 90% usage
 c.ResourceUseDisplay.track_disk_usage = True
 c.ResourceUseDisplay.disk_path = os.environ.get('HOME', '/home/jovyan')
+# The Prometheus exporter runs psutil in a 1 s PeriodicCallback on the tornado
+# event loop; with track_cpu_percent it blocks the loop ~50 ms per child
+# process (cpu_percent(interval=0.05) for every terminal/kernel) every second,
+# which makes terminal typing lag. Nothing scrapes these gauges; the top-bar
+# indicator polls /api/metrics/v1 and keeps working with the exporter off.
+c.ResourceUseDisplay.enable_prometheus_metrics = False

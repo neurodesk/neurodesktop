@@ -68,3 +68,46 @@ def test_generate_config_writes_merged_webapp_config_for_wrapper(tmp_path):
         {"from": "\"/settings\"", "to": "\"${base_path}settings\""},
     ]
     assert "'jamovi'" in output_config.read_text()
+
+
+def _real_template_path():
+    repo_root = Path(__file__).resolve().parents[1]
+    candidates = (
+        repo_root / "config" / "jupyter" / "jupyter_notebook_config.py.template",
+        Path("/opt/neurodesktop/jupyter_notebook_config.py.template"),
+    )
+    template_path = next((c for c in candidates if c.exists()), None)
+    assert template_path is not None, f"template not found in: {candidates}"
+    return template_path
+
+
+def test_rendered_config_keeps_blocking_prometheus_exporter_disabled(tmp_path):
+    """jupyter-resource-usage's Prometheus exporter runs psutil in a 1 s
+    PeriodicCallback on the tornado event loop. With track_cpu_percent it
+    calls cpu_percent(interval=0.05) per child process, blocking the loop
+    ~50 ms x (terminals + kernels) every second, which made terminal typing
+    visibly lag. The web UI indicator polls /api/metrics/v1 instead and does
+    not need the exporter. Assert the rendered config keeps it disabled.
+    """
+    import pytest
+
+    traitlets_config = pytest.importorskip("traitlets.config")
+
+    generator = _load_generate_jupyter_config_module()
+    webapps_json = tmp_path / "webapps.json"
+    webapps_json.write_text(json.dumps({"webapps": {}}))
+    output_config = tmp_path / "jupyter_notebook_config.py"
+
+    generator.generate_config(
+        webapps_json_path=webapps_json,
+        # the real template: the artifact jupyter actually loads at runtime
+        template_path=_real_template_path(),
+        output_path=output_config,
+    )
+
+    c = traitlets_config.Config()
+    exec(compile(output_config.read_text(), str(output_config), "exec"), {"c": c})
+
+    assert c.ResourceUseDisplay.enable_prometheus_metrics is False
+    # The /api/metrics/v1 path the top-bar indicator uses must stay on.
+    assert c.ResourceUseDisplay.track_cpu_percent is True
