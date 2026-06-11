@@ -2,7 +2,7 @@
 
 # Pin to a specific jupyter/base-notebook date for reproducibility.
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
-ARG BASE_IMAGE_TAG=2026-06-01
+ARG BASE_IMAGE_TAG=2026-06-08
 ARG APPTAINER_VERSION=1.5.0
 ARG APPTAINER_GO_VERSION=1.26.3
 ARG APPTAINER_GRPC_VERSION=1.81.1
@@ -81,7 +81,7 @@ USER root
 
 ARG BUILD_ONLY_APT_PACKAGES="build-essential libcairo2-dev libjpeg-turbo8-dev libpng-dev libtool-bin freerdp2-dev libvncserver-dev libssl-dev libwebp-dev libssh2-1-dev libpango1.0-dev"
 ARG GUACAMOLE_VERSION="1.6.0"
-ARG CODE_SERVER_VERSION="4.122.0"
+ARG CODE_SERVER_VERSION="4.123.0"
 
 COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
 
@@ -107,7 +107,7 @@ RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20
     && ldconfig \
     && rm -r /tmp/guacamole-server-${GUACAMOLE_VERSION}
 
-# Install code-server as a prebuilt binary and patch basic-ftp
+# Install code-server as a prebuilt binary and patch bundled npm dependencies.
 RUN set -eux; \
     deb_arch="$(dpkg --print-architecture || true)"; \
     kernel_arch="$(uname -m || true)"; \
@@ -134,6 +134,14 @@ RUN set -eux; \
     # Keep basic-ftp current in case code-server's shrinkwrap lags the patched package.
     cd /opt/code-server; \
     npm update --no-audit --no-fund basic-ftp; \
+    # Patch VS Code's nested shell-quote copy until code-server bundles 1.8.4+.
+    shell_quote_tar="$(npm pack --silent shell-quote@1.8.4)"; \
+    shell_quote_dir="/opt/code-server/lib/vscode/node_modules/shell-quote"; \
+    rm -rf "${shell_quote_dir}"; \
+    mkdir -p "${shell_quote_dir}"; \
+    tar -xzf "${shell_quote_tar}" -C "${shell_quote_dir}" --strip-components=1; \
+    rm -f "${shell_quote_tar}"; \
+    test "$(node -p 'require("/opt/code-server/lib/vscode/node_modules/shell-quote/package.json").version')" = "1.8.4"; \
     rm -f "/tmp/${cs_tar}"; \
     npm cache clean --force
 
@@ -542,10 +550,11 @@ RUN --mount=type=bind,source=extensions/neurodesk-launcher,target=/tmp/neurodesk
 USER root
 
 # Remove build-time packages: -dev headers for pip native extensions and
-# build-essential for C extensions. nodejs stays — codex CLI needs it at runtime.
+# build-essential for C extensions. linux-libc-dev is pulled in by build tools
+# and is not needed at runtime. nodejs stays — codex CLI needs it at runtime.
 # (Guacamole build deps are already excluded via multi-stage build.)
 RUN DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove \
-    libgpgme-dev libossp-uuid-dev build-essential \
+    libgpgme-dev libossp-uuid-dev build-essential linux-libc-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # The kernel-spec rewrite below embeds this path in every kernelspec. Keep this
