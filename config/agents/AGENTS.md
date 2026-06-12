@@ -5,6 +5,7 @@
 2. **Discovery before execution.** Run `module avail` or `module spider <tool>` to confirm a tool exists and check available versions before writing any script. Datalad, Git, rclone and the osfclient are installed in the main environment and do not to be loaded!
 3. **Name scripts consistently:** `analysis_<step>_<description>.sh` (e.g., `analysis_01_skull_strip.sh`, `analysis_02_registration.sh`).
 4. **Submit to SLURM, don't run interactively.** Neuroimaging jobs are long-running — submit via `sbatch`, then monitor with `squeue` and inspect log files.
+5. Always ask the user which tool to use when there are multiple choices
 
 ## Workflow
 
