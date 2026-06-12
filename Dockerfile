@@ -553,7 +553,8 @@ USER root
 # build-essential for C extensions. linux-libc-dev is pulled in by build tools
 # and is not needed at runtime. nodejs stays — codex CLI needs it at runtime.
 # (Guacamole build deps are already excluded via multi-stage build.)
-RUN DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove \
+RUN apt-mark manual autofs cvmfs uuid-dev \
+    && DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove \
     libgpgme-dev libossp-uuid-dev build-essential linux-libc-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 

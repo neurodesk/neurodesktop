@@ -158,6 +158,20 @@ def test_final_cvmfs_config_step_recreates_config_directory():
     assert cvmfs_step.index(mkdir_config) < cvmfs_step.index(copy_config)
 
 
+def test_cvmfs_runtime_packages_are_protected_from_autoremove():
+    dockerfile = _read_repo_file("Dockerfile")
+    cleanup_start = dockerfile.index("# Remove build-time packages")
+    cleanup_end = dockerfile.index("# The kernel-spec rewrite", cleanup_start)
+    cleanup_step = dockerfile[cleanup_start:cleanup_end]
+
+    manual_mark = "apt-mark manual autofs cvmfs uuid-dev"
+    purge = "apt-get purge --yes --auto-remove"
+
+    assert manual_mark in cleanup_step
+    assert purge in cleanup_step
+    assert cleanup_step.index(manual_mark) < cleanup_step.index(purge)
+
+
 def test_cached_neurocommand_builds_resolve_ref_with_retries():
     for workflow_name in ("build-neurodesktop.yml", "build-neurodesktop-dev.yml"):
         workflow_text = _read_repo_file(f".github/workflows/{workflow_name}")
