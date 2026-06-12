@@ -391,6 +391,19 @@ load_neurodesk_api_key_from_bashrc() {
     fi
 }
 
+write_bashrc_from_temp() {
+    local bashrc_file="$1"
+    local tmp_bashrc="$2"
+
+    if cp "${tmp_bashrc}" "${bashrc_file}"; then
+        rm -f "${tmp_bashrc}"
+        return 0
+    fi
+
+    rm -f "${tmp_bashrc}"
+    return 1
+}
+
 persist_neurodesk_api_key_to_bashrc() {
     local key="$1"
     local escaped_key
@@ -399,7 +412,7 @@ persist_neurodesk_api_key_to_bashrc() {
 
     escaped_key=$(printf "%s" "${key}" | sed "s/'/'\"'\"'/g")
 
-    touch "${bashrc_file}"
+    touch "${bashrc_file}" || return 1
     tmp_bashrc=$(mktemp) || return 1
 
     grep -vE '^[[:space:]]*export[[:space:]]+NEURODESK_API_KEY=|^[[:space:]]*#[[:space:]]*Neurodesk API key for OpenCode[[:space:]]*$' "${bashrc_file}" > "${tmp_bashrc}" || true
@@ -409,7 +422,7 @@ persist_neurodesk_api_key_to_bashrc() {
         printf "export NEURODESK_API_KEY='%s'\n" "${escaped_key}"
     } >> "${tmp_bashrc}"
 
-    mv "${tmp_bashrc}" "${bashrc_file}"
+    write_bashrc_from_temp "${bashrc_file}" "${tmp_bashrc}"
 }
 
 sanitize_br_mcp_token() {
@@ -469,7 +482,7 @@ persist_br_mcp_token_to_bashrc() {
 
     escaped_token=$(printf "%s" "${token}" | sed "s/'/'\"'\"'/g")
 
-    touch "${bashrc_file}"
+    touch "${bashrc_file}" || return 1
     tmp_bashrc=$(mktemp) || return 1
 
     grep -vE '^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN=|^[[:space:]]*#[[:space:]]*BR_MCP_DECLINED[[:space:]]*$|^[[:space:]]*#[[:space:]]*Brain Researcher MCP token[[:space:]]*$' "${bashrc_file}" > "${tmp_bashrc}" || true
@@ -479,14 +492,14 @@ persist_br_mcp_token_to_bashrc() {
         printf "export BR_MCP_TOKEN='%s'\n" "${escaped_token}"
     } >> "${tmp_bashrc}"
 
-    mv "${tmp_bashrc}" "${bashrc_file}"
+    write_bashrc_from_temp "${bashrc_file}" "${tmp_bashrc}"
 }
 
 persist_br_mcp_decline_to_bashrc() {
     local bashrc_file="${HOME}/.bashrc"
     local tmp_bashrc
 
-    touch "${bashrc_file}"
+    touch "${bashrc_file}" || return 1
     tmp_bashrc=$(mktemp) || return 1
 
     grep -vE '^[[:space:]]*#[[:space:]]*BR_MCP_DECLINED[[:space:]]*$' "${bashrc_file}" > "${tmp_bashrc}" || true
@@ -495,7 +508,7 @@ persist_br_mcp_decline_to_bashrc() {
         echo "# BR_MCP_DECLINED"
     } >> "${tmp_bashrc}"
 
-    mv "${tmp_bashrc}" "${bashrc_file}"
+    write_bashrc_from_temp "${bashrc_file}" "${tmp_bashrc}"
 }
 
 # Step 1: Check if Jetstream's gpt-oss-120b model API call works.
