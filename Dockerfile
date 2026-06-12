@@ -728,7 +728,7 @@ USER root
 
 # Create cvmfs keys and data directories
 RUN --mount=type=bind,source=config/cvmfs,target=/tmp/cvmfs,ro \
-    mkdir -p /etc/cvmfs/keys/ardc.edu.au \
+    mkdir -p /etc/cvmfs/keys/ardc.edu.au /etc/cvmfs/config.d \
     && mkdir -p /data /neurodesktop-storage \
     && chown ${NB_UID}:${NB_GID} /neurodesktop-storage \
     # Mode 0770 (owner jovyan:users) denied write access to HPC-style

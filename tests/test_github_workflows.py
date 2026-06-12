@@ -144,6 +144,20 @@ def test_apptainer_dependency_downloads_are_retried():
     assert "&& ./scripts/compile-dependencies" in dockerfile
 
 
+def test_final_cvmfs_config_step_recreates_config_directory():
+    dockerfile = _read_repo_file("Dockerfile")
+    step_start = dockerfile.index("# Create cvmfs keys and data directories")
+    step_end = dockerfile.index("# Install neurocommand", step_start)
+    cvmfs_step = dockerfile[step_start:step_end]
+
+    mkdir_config = "mkdir -p /etc/cvmfs/keys/ardc.edu.au /etc/cvmfs/config.d"
+    copy_config = "cp /tmp/cvmfs/neurodesk.ardc.edu.au.conf* /etc/cvmfs/config.d/"
+
+    assert mkdir_config in cvmfs_step
+    assert copy_config in cvmfs_step
+    assert cvmfs_step.index(mkdir_config) < cvmfs_step.index(copy_config)
+
+
 def test_cached_neurocommand_builds_resolve_ref_with_retries():
     for workflow_name in ("build-neurodesktop.yml", "build-neurodesktop-dev.yml"):
         workflow_text = _read_repo_file(f".github/workflows/{workflow_name}")
