@@ -550,12 +550,12 @@ RUN --mount=type=bind,source=extensions/neurodesk-launcher,target=/tmp/neurodesk
 USER root
 
 # Remove build-time packages: -dev headers for pip native extensions and
-# build-essential for C extensions. linux-libc-dev is pulled in by build tools
-# and is not needed at runtime. nodejs stays — codex CLI needs it at runtime.
+# build-essential for C extensions. nodejs stays — codex CLI needs it at
+# runtime. Keep the libc dev chain because cvmfs and uuid-dev depend on it.
 # (Guacamole build deps are already excluded via multi-stage build.)
-RUN apt-mark manual autofs cvmfs uuid-dev \
+RUN apt-mark manual autofs cvmfs libc6-dev linux-libc-dev uuid-dev \
     && DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove \
-    libgpgme-dev libossp-uuid-dev build-essential linux-libc-dev \
+    libgpgme-dev libossp-uuid-dev build-essential \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # The kernel-spec rewrite below embeds this path in every kernelspec. Keep this

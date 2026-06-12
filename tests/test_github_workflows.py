@@ -164,12 +164,14 @@ def test_cvmfs_runtime_packages_are_protected_from_autoremove():
     cleanup_end = dockerfile.index("# The kernel-spec rewrite", cleanup_start)
     cleanup_step = dockerfile[cleanup_start:cleanup_end]
 
-    manual_mark = "apt-mark manual autofs cvmfs uuid-dev"
+    manual_mark = "apt-mark manual autofs cvmfs libc6-dev linux-libc-dev uuid-dev"
     purge = "apt-get purge --yes --auto-remove"
+    purge_packages = cleanup_step[cleanup_step.index(purge) :]
 
     assert manual_mark in cleanup_step
     assert purge in cleanup_step
     assert cleanup_step.index(manual_mark) < cleanup_step.index(purge)
+    assert "linux-libc-dev" not in purge_packages
 
 
 def test_cached_neurocommand_builds_resolve_ref_with_retries():
