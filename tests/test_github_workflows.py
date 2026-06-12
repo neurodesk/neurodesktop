@@ -174,6 +174,26 @@ def test_cvmfs_runtime_packages_are_protected_from_autoremove():
     assert "linux-libc-dev" not in purge_packages
 
 
+def test_trivy_scans_use_targeted_ignore_file():
+    ignore_file = _read_repo_file(".trivyignore.yaml")
+
+    assert "CVE-2026-31637" in ignore_file
+    assert "linux-libc-dev" in ignore_file
+
+    for workflow_name in BUILD_WORKFLOWS:
+        workflow_text = _read_repo_file(f".github/workflows/{workflow_name}")
+        scan_steps = [
+            step
+            for step in _step_bodies(workflow_text, "Container image scan (${{ matrix.arch }})")
+        ]
+        scan_steps.extend(_step_bodies(workflow_text, "Scan container image"))
+
+        assert scan_steps, f"{workflow_name} has no Trivy scan steps"
+        for step_body in scan_steps:
+            assert "aquasecurity/trivy-action@" in step_body
+            assert "trivyignores: ./.trivyignore.yaml" in step_body
+
+
 def test_cached_neurocommand_builds_resolve_ref_with_retries():
     for workflow_name in ("build-neurodesktop.yml", "build-neurodesktop-dev.yml"):
         workflow_text = _read_repo_file(f".github/workflows/{workflow_name}")

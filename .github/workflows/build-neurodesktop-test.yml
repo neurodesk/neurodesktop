@@ -589,6 +589,7 @@ jobs:
           format: table
           exit-code: "1"
           severity: CRITICAL
+          trivyignores: ./.trivyignore.yaml
           timeout: 25m0s
           skip-files: /opt/rclone-v1.60.1-linux-amd64/README.txt,/opt/rclone-v1.60.1-linux-amd64/README.html,/opt/rclone-v1.60.1-linux-amd64/rclone.1,/opt/code-server/lib/vscode/package.json,/opt/code-server/lib/vscode/extensions/handlebars/package.json
       - name: Checkout repository for failure issue template
