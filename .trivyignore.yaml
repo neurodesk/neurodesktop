@@ -1,4 +1,11 @@
 vulnerabilities:
+  - id: CVE-2026-31402
+    statement: >-
+      linux-libc-dev is retained only because the CERN CVMFS runtime package
+      depends on uuid-dev/libc headers on Ubuntu 24.04. The vulnerable kernel
+      code is not the running kernel in this container. Remove this ignore when
+      Ubuntu publishes a fixed linux-libc-dev package or CVMFS drops this
+      dependency chain.
   - id: CVE-2026-31637
     statement: >-
       linux-libc-dev is retained only because the CERN CVMFS runtime package
@@ -49,6 +56,27 @@ vulnerabilities:
       Ubuntu publishes a fixed linux-libc-dev package or CVMFS drops this
       dependency chain.
   - id: CVE-2026-43501
+    statement: >-
+      linux-libc-dev is retained only because the CERN CVMFS runtime package
+      depends on uuid-dev/libc headers on Ubuntu 24.04. The vulnerable kernel
+      code is not the running kernel in this container. Remove this ignore when
+      Ubuntu publishes a fixed linux-libc-dev package or CVMFS drops this
+      dependency chain.
+  - id: CVE-2026-45988
+    statement: >-
+      linux-libc-dev is retained only because the CERN CVMFS runtime package
+      depends on uuid-dev/libc headers on Ubuntu 24.04. The vulnerable kernel
+      code is not the running kernel in this container. Remove this ignore when
+      Ubuntu publishes a fixed linux-libc-dev package or CVMFS drops this
+      dependency chain.
+  - id: CVE-2026-46043
+    statement: >-
+      linux-libc-dev is retained only because the CERN CVMFS runtime package
+      depends on uuid-dev/libc headers on Ubuntu 24.04. The vulnerable kernel
+      code is not the running kernel in this container. Remove this ignore when
+      Ubuntu publishes a fixed linux-libc-dev package or CVMFS drops this
+      dependency chain.
+  - id: CVE-2026-46135
     statement: >-
       linux-libc-dev is retained only because the CERN CVMFS runtime package
       depends on uuid-dev/libc headers on Ubuntu 24.04. The vulnerable kernel
