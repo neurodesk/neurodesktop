@@ -1,3 +1,5 @@
+import os
+import subprocess
 from pathlib import Path
 
 
@@ -15,6 +17,34 @@ def _read_first(*paths):
     raise FileNotFoundError(f"None of these paths exist: {checked}")
 
 
+def _firefox_wrapper_path():
+    candidates = [
+        Path("/usr/local/bin/neurodesktop-firefox"),
+        REPO_ROOT / "config/firefox/neurodesktop-firefox",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    checked = ", ".join(str(path) for path in candidates)
+    raise FileNotFoundError(f"Firefox wrapper not found: {checked}")
+
+
+def _fake_firefox(tmp_path):
+    fake = tmp_path / "real-firefox"
+    fake.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\0' \"$@\" > \"$NEURODESKTOP_TEST_ARGV\"\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    return fake
+
+
+def _captured_argv(path):
+    raw = path.read_bytes()
+    return [part.decode("utf-8") for part in raw.split(b"\0") if part]
+
+
 def test_jupyter_launcher_exposes_separate_desktop_backends():
     config = _read_first(
         "/etc/jupyter/jupyter_notebook_config.py",
@@ -27,6 +57,97 @@ def test_jupyter_launcher_exposes_separate_desktop_backends():
     assert "'neurodesktop-vnc': _neurodesktop_server('vnc', 'Neurodesktop VNC', 'neurodesktop-vnc')" in config
     assert 'NEURODESKTOP_DESKTOP_BACKEND="{backend}"' in config
     assert "launcher_enabled=False" in config
+
+
+def test_firefox_wrapper_uses_display_specific_profile(tmp_path):
+    wrapper = _firefox_wrapper_path()
+    fake = _fake_firefox(tmp_path)
+    argv_file = tmp_path / "argv.bin"
+    home = tmp_path / "home"
+    home.mkdir()
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "DISPLAY": ":10.0",
+            "NEURODESKTOP_REAL_FIREFOX": str(fake),
+            "NEURODESKTOP_TEST_ARGV": str(argv_file),
+        }
+    )
+
+    subprocess.run(
+        [str(wrapper), "--new-window", "about:blank"],
+        check=True,
+        env=env,
+    )
+
+    profile = home / ".mozilla/neurodesktop-firefox-profiles/display-10.0"
+    argv = _captured_argv(argv_file)
+    assert argv == ["--profile", str(profile), "--new-window", "about:blank"]
+    assert profile.is_dir()
+    assert "--no-remote" not in argv
+
+
+def test_firefox_wrapper_respects_explicit_profile(tmp_path):
+    wrapper = _firefox_wrapper_path()
+    fake = _fake_firefox(tmp_path)
+    argv_file = tmp_path / "argv.bin"
+    home = tmp_path / "home"
+    explicit_profile = tmp_path / "custom-profile"
+    home.mkdir()
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "DISPLAY": ":10.0",
+            "NEURODESKTOP_REAL_FIREFOX": str(fake),
+            "NEURODESKTOP_TEST_ARGV": str(argv_file),
+        }
+    )
+
+    subprocess.run(
+        [str(wrapper), "--profile", str(explicit_profile), "about:blank"],
+        check=True,
+        env=env,
+    )
+
+    argv = _captured_argv(argv_file)
+    assert argv == ["--profile", str(explicit_profile), "about:blank"]
+    assert not (home / ".mozilla/neurodesktop-firefox-profiles").exists()
+
+
+def test_firefox_wrapper_passes_through_without_display(tmp_path):
+    wrapper = _firefox_wrapper_path()
+    fake = _fake_firefox(tmp_path)
+    argv_file = tmp_path / "argv.bin"
+    home = tmp_path / "home"
+    home.mkdir()
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "NEURODESKTOP_REAL_FIREFOX": str(fake),
+            "NEURODESKTOP_TEST_ARGV": str(argv_file),
+        }
+    )
+    env.pop("DISPLAY", None)
+
+    subprocess.run([str(wrapper), "--version"], check=True, env=env)
+
+    assert _captured_argv(argv_file) == ["--version"]
+    assert not (home / ".mozilla/neurodesktop-firefox-profiles").exists()
+
+
+def test_dockerfile_installs_firefox_wrapper_and_rewrites_desktop_entry():
+    dockerfile = _read_first("/opt/tests/Dockerfile", "Dockerfile")
+
+    assert "/usr/local/bin/neurodesktop-firefox" in dockerfile
+    assert "ln -sf /usr/local/bin/neurodesktop-firefox /usr/local/bin/firefox" in dockerfile
+    assert "/usr/share/applications/firefox.desktop" in dockerfile
+    assert "Exec=/usr/local/bin/neurodesktop-firefox" in dockerfile
 
 
 def test_guacamole_script_gates_rdp_and_vnc_startup():

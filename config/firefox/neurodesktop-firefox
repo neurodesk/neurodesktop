@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REAL_FIREFOX="${NEURODESKTOP_REAL_FIREFOX:-/usr/bin/firefox}"
+
+use_session_profile=1
+if [ -z "${DISPLAY:-}" ]; then
+    use_session_profile=0
+fi
+
+expect_profile_value=0
+for arg in "$@"; do
+    if [ "${expect_profile_value}" -eq 1 ]; then
+        expect_profile_value=0
+        continue
+    fi
+
+    case "${arg}" in
+        -P|--profile|-profile)
+            use_session_profile=0
+            expect_profile_value=1
+            ;;
+        -P?*|--profile=*|-profile=*|--ProfileManager|-ProfileManager|--profilemanager|\
+        --headless|--help|-h|-help|--version|-v)
+            use_session_profile=0
+            ;;
+    esac
+done
+
+if [ "${use_session_profile}" -eq 1 ]; then
+    display_key="$(
+        printf '%s' "${DISPLAY}" \
+            | sed -E 's/[^A-Za-z0-9_.-]+/-/g; s/^-+//; s/-+$//'
+    )"
+    display_key="${display_key:-unknown}"
+
+    profile_root="${NEURODESKTOP_FIREFOX_PROFILE_ROOT:-${HOME:-/tmp}/.mozilla/neurodesktop-firefox-profiles}"
+    profile_dir="${NEURODESKTOP_FIREFOX_PROFILE_DIR:-${profile_root}/display-${display_key}}"
+    mkdir -p "${profile_dir}"
+
+    exec "${REAL_FIREFOX}" --profile "${profile_dir}" "$@"
+fi
+
+exec "${REAL_FIREFOX}" "$@"

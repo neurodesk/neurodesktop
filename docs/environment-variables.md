@@ -24,3 +24,9 @@
 - `NBI_TOUR_CONFIG_PATH`: Notebook Intelligence tour override file; defaults to
   `/opt/jovyan_defaults/.jupyter/nbi/tour_config.json`, which disables the
   first-run tour in Neurodesktop
+- `NEURODESKTOP_FIREFOX_PROFILE_ROOT`: directory where the Neurodesktop Firefox
+  wrapper stores display-specific profiles; defaults to
+  `~/.mozilla/neurodesktop-firefox-profiles`
+- `NEURODESKTOP_FIREFOX_PROFILE_DIR`: absolute Firefox profile directory override
+  for the Neurodesktop Firefox wrapper; when unset, the wrapper derives a
+  profile from `NEURODESKTOP_FIREFOX_PROFILE_ROOT` and the current `DISPLAY`

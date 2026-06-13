@@ -65,7 +65,10 @@ opening one backend does not start the other. Configuration lives in
 [`config/lxde/`](../config/lxde/) and [`config/guacamole/`](../config/guacamole/).
 The RDP and VNC proxy entries use backend-specific Guacamole state directories
 under `~/.neurodesk` (`guacamole-*`, `tomcat-*`, and `runtime-*`) so one backend
-does not reuse the other backend's cached connection mapping.
+does not reuse the other backend's cached connection mapping. Firefox launches
+through `/usr/local/bin/neurodesktop-firefox`, which assigns a profile under
+`~/.mozilla/neurodesktop-firefox-profiles/` for each X display so simultaneous
+VNC and RDP desktops do not contend for the same Firefox profile lock.
 
 ### Services
 
@@ -99,9 +102,9 @@ does not reuse the other backend's cached connection mapping.
 
 CI includes multi-architecture builds for amd64 and arm64. Registry-sensitive
 build paths use local composite actions under
-[`.github/actions/`](../.github/actions/) so transient GHCR transport failures
-are retried at login and manifest-check boundaries without turning registry
-timeouts into false cache misses.
+[`.github/actions/`](../.github/actions/) so transient registry transport
+failures are retried at login, manifest-check, and registry-copy boundaries
+without turning registry timeouts into false cache misses.
 
 ## Build-Time Behaviors
 

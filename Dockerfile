@@ -471,6 +471,12 @@ RUN --mount=type=bind,source=config/firefox,target=/tmp/firefox,ro \
     > /etc/apt/sources.list.d/mozilla.list \
     && install -m 0644 /tmp/firefox/mozilla /etc/apt/preferences.d/mozilla \
     && apt-install-retry firefox \
+    && install -m 0755 /tmp/firefox/neurodesktop-firefox /usr/local/bin/neurodesktop-firefox \
+    && ln -sf /usr/local/bin/neurodesktop-firefox /usr/local/bin/firefox \
+    && sed -i -E \
+    -e 's|^Exec=firefox$|Exec=/usr/local/bin/neurodesktop-firefox|' \
+    -e 's|^Exec=firefox([[:space:]])|Exec=/usr/local/bin/neurodesktop-firefox\1|' \
+    /usr/share/applications/firefox.desktop \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 RUN --mount=type=bind,source=config/firefox/syspref.js,target=/tmp/syspref.js,ro \
