@@ -122,6 +122,9 @@ launcher-link edits do not invalidate the earlier runtime setup layers.
 Cached CI builds pass `NEUROCOMMAND_REF` as a resolved neurocommand `main` SHA
 so that neurocommand changes invalidate the install layer without requiring
 BuildKit to make unauthenticated GitHub API requests from inside the Dockerfile.
+The Dockerfile resets the local neurocommand `main` branch to that ref and keeps
+it tracking `origin/main` so the runtime Update launcher can use
+`git pull --rebase --autostash`.
 
 ### Apptainer
 

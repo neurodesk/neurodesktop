@@ -755,7 +755,8 @@ ARG NEUROCOMMAND_REF=main
 RUN echo "Installing neurocommand ref ${NEUROCOMMAND_REF}" \
     && retry git clone https://github.com/neurodesk/neurocommand.git /neurocommand \
     && cd /neurocommand \
-    && git checkout --detach "$NEUROCOMMAND_REF" \
+    && git checkout -B main "$NEUROCOMMAND_REF" \
+    && git branch --set-upstream-to=origin/main main \
     && bash build.sh --lxde --edit \
     && bash install.sh \
     && ln -s /neurodesktop-storage/containers /neurocommand/local/containers
