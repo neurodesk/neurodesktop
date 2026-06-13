@@ -1,6 +1,7 @@
 import os
 import subprocess
 from pathlib import Path
+from xml.etree import ElementTree
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -43,6 +44,18 @@ def _fake_firefox(tmp_path):
 def _captured_argv(path):
     raw = path.read_bytes()
     return [part.decode("utf-8") for part in raw.split(b"\0") if part]
+
+
+def _rdp_param(mapping_text, name):
+    root = ElementTree.fromstring(mapping_text)
+    for connection in root.findall(".//connection"):
+        if (connection.findtext("protocol") or "").strip() != "rdp":
+            continue
+        for param in connection.findall("param"):
+            if param.get("name") == name:
+                return (param.text or "").strip()
+        raise AssertionError(f"RDP connection is missing param {name!r}")
+    raise AssertionError("mapping does not contain an RDP connection")
 
 
 def test_jupyter_launcher_exposes_separate_desktop_backends():
@@ -163,6 +176,18 @@ def test_guacamole_script_gates_rdp_and_vnc_startup():
     assert 'skipping VNC backend' in script
     assert 'remove_mapping_connection "rdp"' in script
     assert 'remove_mapping_connection "vnc"' in script
+
+
+def test_guacamole_rdp_template_forces_plain_rdp_security():
+    active_mapping = _read_first(
+        "/etc/guacamole/user-mapping-vnc-rdp.xml",
+        "config/guacamole/user-mapping-vnc-rdp.xml",
+    )
+    assert _rdp_param(active_mapping, "security") == "rdp"
+
+    legacy_mapping = REPO_ROOT / "config/guacamole/user-mapping.xml"
+    if legacy_mapping.exists():
+        assert _rdp_param(legacy_mapping.read_text(encoding="utf-8"), "security") == "rdp"
 
 
 def test_guacamole_script_uses_backend_specific_state_dirs():
