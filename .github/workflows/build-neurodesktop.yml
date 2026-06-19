@@ -25,6 +25,7 @@ on:
 
 env:
   DOCKERHUB_ORG: ${{ vars.DOCKERHUB_ORG }}
+  QUAY_ORG: ${{ vars.QUAY_ORG }}
   # Opt the lone Node 20 holdout (JasonEtco/create-an-issue, no Node 24
   # release as of 2026-05) into Node 24 to silence deprecation warnings.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -195,9 +196,11 @@ jobs:
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
       # Quay is a backup mirror; GHCR remains the production registry. The
       # neurodesktop repo is canonical for the `neurodesktop` name, so this
-      # build owns quay.io/neurodesk/neurodesktop, including `:latest`.
+      # build owns quay.io/${QUAY_ORG}/neurodesktop, including `:latest`.
+      # QUAY_ORG (a repo variable) is both the namespace and the on/off switch,
+      # mirroring DOCKERHUB_ORG — forks without it set simply skip Quay.
       - name: Login to Quay
-        if: steps.check_image.outputs.exists != 'true'
+        if: ${{ env.QUAY_ORG != '' && steps.check_image.outputs.exists != 'true' }}
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           registry: quay.io
@@ -212,7 +215,7 @@ jobs:
             ${{ env.IMAGEID }}:amd64 \
             ${{ env.IMAGEID }}:arm64
       - name: Install crane
-        if: steps.check_image.outputs.exists != 'true'
+        if: ${{ (env.DOCKERHUB_ORG != '' || env.QUAY_ORG != '') && steps.check_image.outputs.exists != 'true' }}
         run: |
           curl -sL https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_x86_64.tar.gz \
             | sudo tar -xz -C /usr/local/bin crane
@@ -230,17 +233,17 @@ jobs:
           source: ${{ env.IMAGEID }}:latest
           destination: ${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:latest
       - name: Copy dated multi-arch manifest to Quay
-        if: steps.check_image.outputs.exists != 'true'
+        if: ${{ env.QUAY_ORG != '' && steps.check_image.outputs.exists != 'true' }}
         uses: ./.github/actions/crane-copy-retry
         with:
           source: ${{ env.IMAGEID }}:${{ env.BUILDDATE }}
-          destination: quay.io/neurodesk/${{ env.IMAGENAME }}:${{ env.BUILDDATE }}
+          destination: quay.io/${{ env.QUAY_ORG }}/${{ env.IMAGENAME }}:${{ env.BUILDDATE }}
       - name: Copy latest multi-arch manifest to Quay
-        if: steps.check_image.outputs.exists != 'true'
+        if: ${{ env.QUAY_ORG != '' && steps.check_image.outputs.exists != 'true' }}
         uses: ./.github/actions/crane-copy-retry
         with:
           source: ${{ env.IMAGEID }}:latest
-          destination: quay.io/neurodesk/${{ env.IMAGENAME }}:latest
+          destination: quay.io/${{ env.QUAY_ORG }}/${{ env.IMAGENAME }}:latest
       - name: Create github tag
         if: steps.check_image.outputs.exists != 'true'
         env:
@@ -254,10 +257,11 @@ jobs:
         run: |
           if [ "${{ steps.check_image.outputs.exists }}" = "true" ]; then
             RESULT="Image already existed; build and registry push were skipped."
-          elif [ "${{ env.DOCKERHUB_ORG }}" = "" ]; then
-            RESULT="Built and pushed to GHCR and Quay."
           else
-            RESULT="Built and pushed to GHCR, DockerHub, and Quay."
+            REGISTRIES="GHCR"
+            [ "${{ env.DOCKERHUB_ORG }}" != "" ] && REGISTRIES="${REGISTRIES}, DockerHub"
+            [ "${{ env.QUAY_ORG }}" != "" ] && REGISTRIES="${REGISTRIES}, Quay"
+            RESULT="Built and pushed to ${REGISTRIES}."
           fi
 
           {
@@ -269,7 +273,11 @@ jobs:
             echo "| Version | \`${{ env.BUILDDATE }}\` |"
             echo "| Source commit | \`${GITHUB_SHA}\` |"
             echo "| GHCR image | \`${{ env.IMAGEID }}:${{ env.BUILDDATE }}\`, \`${{ env.IMAGEID }}:latest\` |"
-            echo "| Quay image | \`quay.io/neurodesk/${{ env.IMAGENAME }}:${{ env.BUILDDATE }}\`, \`quay.io/neurodesk/${{ env.IMAGENAME }}:latest\` |"
+            if [ "${{ env.QUAY_ORG }}" != "" ]; then
+              echo "| Quay image | \`quay.io/${{ env.QUAY_ORG }}/${{ env.IMAGENAME }}:${{ env.BUILDDATE }}\`, \`quay.io/${{ env.QUAY_ORG }}/${{ env.IMAGENAME }}:latest\` |"
+            else
+              echo "| Quay image | Not configured; \`QUAY_ORG\` is empty. |"
+            fi
             if [ "${{ env.DOCKERHUB_ORG }}" != "" ]; then
               echo "| DockerHub image | \`${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:${{ env.BUILDDATE }}\`, \`${{ env.DOCKERHUB_ORG }}/${{ env.IMAGENAME }}:latest\` |"
             else
