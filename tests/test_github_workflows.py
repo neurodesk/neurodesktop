@@ -85,14 +85,16 @@ def test_production_manifest_checks_use_retry_action():
     assert "docker manifest inspect $IMAGEID:$BUILDDATE" not in workflow_text
 
 
-def test_production_qemu_setup_only_runs_for_emulated_arch():
+def test_production_arm64_build_uses_blacksmith_runner():
     workflow_text = _read_repo_file(".github/workflows/build-neurodesktop.yml")
-    qemu_steps = list(_step_bodies(workflow_text, "Set up QEMU"))
 
-    assert len(qemu_steps) == 1
-    step_body = qemu_steps[0]
-    assert "matrix.platform.arch == 'arm64'" in step_body
-    assert "platforms: arm64" in step_body
+    assert "runs-on: ${{ matrix.platform.runs_on }}" in workflow_text
+    assert "runs_on: ubuntu-24.04" in workflow_text
+    assert "runs_on: blacksmith-8vcpu-ubuntu-2404-arm" in workflow_text
+    assert "docker/setup-qemu-action@" not in workflow_text
+
+    configure_runner = next(_step_bodies(workflow_text, "Configure runner"))
+    assert "matrix.platform.arch == 'amd64'" in configure_runner
 
 
 def test_local_actions_run_after_checkout():

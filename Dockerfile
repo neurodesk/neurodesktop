@@ -2,7 +2,7 @@
 
 # Pin to a specific jupyter/base-notebook date for reproducibility.
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
-ARG BASE_IMAGE_TAG=2026-06-08
+ARG BASE_IMAGE_TAG=2026-06-22
 ARG APPTAINER_VERSION=1.5.0
 ARG APPTAINER_GO_VERSION=1.26.3
 ARG APPTAINER_GRPC_VERSION=1.81.1

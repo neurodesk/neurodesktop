@@ -34,11 +34,84 @@ if [ "${use_session_profile}" -eq 1 ]; then
     )"
     display_key="${display_key:-unknown}"
 
-    profile_root="${NEURODESKTOP_FIREFOX_PROFILE_ROOT:-${HOME:-/tmp}/.mozilla/neurodesktop-firefox-profiles}"
-    profile_dir="${NEURODESKTOP_FIREFOX_PROFILE_DIR:-${profile_root}/display-${display_key}}"
-    mkdir -p "${profile_dir}"
+    profile_store="${HOME:-/tmp}/.mozilla/firefox"
+    profile_name="neurodesktop-display-${display_key}"
+    create_profile_arg="${profile_name}"
+    profile_dir="${profile_store}/${profile_name}"
+    profile_ini_path="${profile_name}"
+    profile_ini_is_relative=1
+    if [ -n "${NEURODESKTOP_FIREFOX_PROFILE_DIR:-}" ]; then
+        profile_dir="${NEURODESKTOP_FIREFOX_PROFILE_DIR}"
+        profile_ini_path="${profile_dir}"
+        profile_ini_is_relative=0
+        create_profile_arg="${profile_name} ${NEURODESKTOP_FIREFOX_PROFILE_DIR}"
+    elif [ -n "${NEURODESKTOP_FIREFOX_PROFILE_ROOT:-}" ]; then
+        profile_dir="${NEURODESKTOP_FIREFOX_PROFILE_ROOT}/${profile_name}"
+        profile_ini_path="${profile_dir}"
+        profile_ini_is_relative=0
+        create_profile_arg="${profile_name} ${profile_dir}"
+    fi
 
-    exec "${REAL_FIREFOX}" --profile "${profile_dir}" "$@"
+    profiles_ini="${profile_store}/profiles.ini"
+    profile_registered=0
+    if [ -f "${profiles_ini}" ] && grep -Fxq "Name=${profile_name}" "${profiles_ini}"; then
+        profile_registered=1
+    else
+        mkdir -p "$(dirname "${profiles_ini}")"
+        if MOZ_NO_REMOTE=1 "${REAL_FIREFOX}" -no-remote -CreateProfile "${create_profile_arg}" >/dev/null 2>&1; then
+            if [ -f "${profiles_ini}" ] && grep -Fxq "Name=${profile_name}" "${profiles_ini}"; then
+                profile_registered=1
+            fi
+        fi
+
+        if [ "${profile_registered}" -eq 0 ]; then
+            mkdir -p "${profile_dir}"
+            if [ ! -s "${profiles_ini}" ]; then
+                printf '%s\n' "[General]" "StartWithLastProfile=1" "" > "${profiles_ini}"
+            elif grep -q '^StartWithLastProfile=' "${profiles_ini}"; then
+                sed -i -E 's|^StartWithLastProfile=.*|StartWithLastProfile=1|' "${profiles_ini}"
+            elif grep -q '^\[General\]$' "${profiles_ini}"; then
+                sed -i '/^\[General\]$/a StartWithLastProfile=1' "${profiles_ini}"
+            else
+                tmp_profiles_ini="$(mktemp)"
+                {
+                    printf '%s\n' "[General]" "StartWithLastProfile=1" ""
+                    cat "${profiles_ini}"
+                } > "${tmp_profiles_ini}"
+                mv -f "${tmp_profiles_ini}" "${profiles_ini}"
+            fi
+            profile_index="$(
+                awk '
+                    /^\[Profile[0-9]+\]$/ {
+                        value=$0
+                        sub(/^\[Profile/, "", value)
+                        sub(/\]$/, "", value)
+                        if (value >= max) max = value + 1
+                    }
+                    END { print max + 0 }
+                ' "${profiles_ini}"
+            )"
+            {
+                printf '\n[Profile%s]\n' "${profile_index}"
+                printf 'Name=%s\n' "${profile_name}"
+                printf 'IsRelative=%s\n' "${profile_ini_is_relative}"
+                printf 'Path=%s\n' "${profile_ini_path}"
+                printf 'Default=1\n'
+            } >> "${profiles_ini}"
+            profile_registered=1
+        fi
+    fi
+
+    if [ "${profile_registered}" -eq 1 ]; then
+        if [ -f "${profiles_ini}" ] && grep -q '^StartWithLastProfile=' "${profiles_ini}"; then
+            sed -i -E 's|^StartWithLastProfile=.*|StartWithLastProfile=1|' "${profiles_ini}"
+        elif [ -f "${profiles_ini}" ] && grep -q '^\[General\]$' "${profiles_ini}"; then
+            sed -i '/^\[General\]$/a StartWithLastProfile=1' "${profiles_ini}"
+        fi
+        exec "${REAL_FIREFOX}" -P "${profile_name}" "$@"
+    fi
+
+    exec "${REAL_FIREFOX}" "$@"
 fi
 
 exec "${REAL_FIREFOX}" "$@"

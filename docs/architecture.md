@@ -66,9 +66,12 @@ opening one backend does not start the other. Configuration lives in
 The RDP and VNC proxy entries use backend-specific Guacamole state directories
 under `~/.neurodesk` (`guacamole-*`, `tomcat-*`, and `runtime-*`) so one backend
 does not reuse the other backend's cached connection mapping. Firefox launches
-through `/usr/local/bin/neurodesktop-firefox`, which assigns a profile under
-`~/.mozilla/neurodesktop-firefox-profiles/` for each X display so simultaneous
-VNC and RDP desktops do not contend for the same Firefox profile lock.
+through `/usr/local/bin/neurodesktop-firefox`, which assigns a Firefox profile
+for each X display and lets Firefox register that profile in its standard
+profile store. If Firefox's profile-creation command does not write the profile
+metadata, the wrapper creates the profile directory and `profiles.ini` entry
+itself. Simultaneous VNC and RDP desktops therefore do not contend for the same
+default Firefox profile.
 
 ### Services
 

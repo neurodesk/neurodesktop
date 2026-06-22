@@ -34,7 +34,41 @@ def _fake_firefox(tmp_path):
     fake = tmp_path / "real-firefox"
     fake.write_text(
         "#!/usr/bin/env bash\n"
-        "printf '%s\\0' \"$@\" > \"$NEURODESKTOP_TEST_ARGV\"\n",
+        "original_args=(\"$@\")\n"
+        "printf '%s\\0' \"$@\" >> \"${NEURODESKTOP_TEST_ALL_ARGV:-$NEURODESKTOP_TEST_ARGV.all}\"\n"
+        "printf '\\n' >> \"${NEURODESKTOP_TEST_ALL_ARGV:-$NEURODESKTOP_TEST_ARGV.all}\"\n"
+        "profile_spec=''\n"
+        "while [ \"$#\" -gt 0 ]; do\n"
+        "  if [ \"$1\" = \"-CreateProfile\" ]; then\n"
+        "    shift\n"
+        "    profile_spec=\"${1:-}\"\n"
+        "    break\n"
+        "  fi\n"
+        "  shift\n"
+        "done\n"
+        "if [ -n \"$profile_spec\" ]; then\n"
+        "  if [ \"${NEURODESKTOP_TEST_CREATE_PROFILE_NOOP:-}\" = \"1\" ]; then\n"
+        "    exit 0\n"
+        "  fi\n"
+        "  spec=\"$profile_spec\"\n"
+        "  name=\"${spec%% *}\"\n"
+        "  path=\"${spec#* }\"\n"
+        "  if [ \"$path\" = \"$spec\" ]; then\n"
+        "    path=\"$HOME/.mozilla/firefox/$name\"\n"
+        "    stored_path=\"$name\"\n"
+        "    is_relative=1\n"
+        "  else\n"
+        "    stored_path=\"$path\"\n"
+        "    is_relative=0\n"
+        "  fi\n"
+        "  mkdir -p \"$path\" \"$HOME/.mozilla/firefox\"\n"
+        "  if [ ! -s \"$HOME/.mozilla/firefox/profiles.ini\" ]; then\n"
+        "    printf '%s\\n' '[General]' 'StartWithLastProfile=0' '' > \"$HOME/.mozilla/firefox/profiles.ini\"\n"
+        "  fi\n"
+        "  printf '%s\\n' '[Profile99]' \"Name=$name\" \"IsRelative=$is_relative\" \"Path=$stored_path\" >> \"$HOME/.mozilla/firefox/profiles.ini\"\n"
+        "  exit 0\n"
+        "fi\n"
+        "printf '%s\\0' \"${original_args[@]}\" > \"$NEURODESKTOP_TEST_ARGV\"\n",
         encoding="utf-8",
     )
     fake.chmod(0o755)
@@ -44,6 +78,14 @@ def _fake_firefox(tmp_path):
 def _captured_argv(path):
     raw = path.read_bytes()
     return [part.decode("utf-8") for part in raw.split(b"\0") if part]
+
+
+def _captured_invocations(path):
+    return [
+        [part.decode("utf-8") for part in line.split(b"\0") if part]
+        for line in path.read_bytes().splitlines()
+        if line
+    ]
 
 
 def _rdp_param(mapping_text, name):
@@ -76,6 +118,7 @@ def test_firefox_wrapper_uses_display_specific_profile(tmp_path):
     wrapper = _firefox_wrapper_path()
     fake = _fake_firefox(tmp_path)
     argv_file = tmp_path / "argv.bin"
+    all_argv_file = tmp_path / "all-argv.bin"
     home = tmp_path / "home"
     home.mkdir()
 
@@ -86,6 +129,7 @@ def test_firefox_wrapper_uses_display_specific_profile(tmp_path):
             "DISPLAY": ":10.0",
             "NEURODESKTOP_REAL_FIREFOX": str(fake),
             "NEURODESKTOP_TEST_ARGV": str(argv_file),
+            "NEURODESKTOP_TEST_ALL_ARGV": str(all_argv_file),
         }
     )
 
@@ -95,11 +139,171 @@ def test_firefox_wrapper_uses_display_specific_profile(tmp_path):
         env=env,
     )
 
-    profile = home / ".mozilla/neurodesktop-firefox-profiles/display-10.0"
+    profile = home / ".mozilla/firefox/neurodesktop-display-10.0"
     argv = _captured_argv(argv_file)
-    assert argv == ["--profile", str(profile), "--new-window", "about:blank"]
+    assert argv == [
+        "-P",
+        "neurodesktop-display-10.0",
+        "--new-window",
+        "about:blank",
+    ]
+    assert _captured_invocations(all_argv_file)[0] == [
+        "-no-remote",
+        "-CreateProfile",
+        "neurodesktop-display-10.0",
+    ]
     assert profile.is_dir()
-    assert "--no-remote" not in argv
+    assert (
+        "StartWithLastProfile=1"
+        in (home / ".mozilla/firefox/profiles.ini").read_text(encoding="utf-8")
+    )
+    assert not (home / ".mozilla/neurodesktop-firefox-profiles").exists()
+
+
+def test_firefox_wrapper_respects_profile_root_override(tmp_path):
+    wrapper = _firefox_wrapper_path()
+    fake = _fake_firefox(tmp_path)
+    argv_file = tmp_path / "argv.bin"
+    home = tmp_path / "home"
+    profile_root = tmp_path / "custom-root"
+    home.mkdir()
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "DISPLAY": ":1",
+            "NEURODESKTOP_FIREFOX_PROFILE_ROOT": str(profile_root),
+            "NEURODESKTOP_REAL_FIREFOX": str(fake),
+            "NEURODESKTOP_TEST_ARGV": str(argv_file),
+        }
+    )
+
+    subprocess.run(
+        [str(wrapper), "about:blank"],
+        check=True,
+        env=env,
+    )
+
+    profile = profile_root / "neurodesktop-display-1"
+    assert _captured_argv(argv_file) == [
+        "-P",
+        "neurodesktop-display-1",
+        "about:blank",
+    ]
+    assert profile.is_dir()
+
+
+def test_firefox_wrapper_uses_explicit_profile_dir_override(tmp_path):
+    wrapper = _firefox_wrapper_path()
+    fake = _fake_firefox(tmp_path)
+    argv_file = tmp_path / "argv.bin"
+    home = tmp_path / "home"
+    profile_dir = tmp_path / "explicit-profile"
+    home.mkdir()
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "DISPLAY": ":1",
+            "NEURODESKTOP_FIREFOX_PROFILE_DIR": str(profile_dir),
+            "NEURODESKTOP_REAL_FIREFOX": str(fake),
+            "NEURODESKTOP_TEST_ARGV": str(argv_file),
+        }
+    )
+
+    subprocess.run(
+        [str(wrapper), "about:blank"],
+        check=True,
+        env=env,
+    )
+
+    argv = _captured_argv(argv_file)
+    assert argv == ["-P", "neurodesktop-display-1", "about:blank"]
+    assert profile_dir.is_dir()
+
+
+def test_firefox_wrapper_falls_back_when_create_profile_does_not_register(tmp_path):
+    wrapper = _firefox_wrapper_path()
+    fake = _fake_firefox(tmp_path)
+    argv_file = tmp_path / "argv.bin"
+    home = tmp_path / "home"
+    home.mkdir()
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "DISPLAY": ":1",
+            "NEURODESKTOP_REAL_FIREFOX": str(fake),
+            "NEURODESKTOP_TEST_ARGV": str(argv_file),
+            "NEURODESKTOP_TEST_CREATE_PROFILE_NOOP": "1",
+        }
+    )
+
+    subprocess.run(
+        [str(wrapper), "about:blank"],
+        check=True,
+        env=env,
+    )
+
+    profile_dir = home / ".mozilla/firefox/neurodesktop-display-1"
+    profiles_ini = home / ".mozilla/firefox/profiles.ini"
+    assert _captured_argv(argv_file) == [
+        "-P",
+        "neurodesktop-display-1",
+        "about:blank",
+    ]
+    assert profile_dir.is_dir()
+    profiles_ini_text = profiles_ini.read_text(encoding="utf-8")
+    assert "StartWithLastProfile=1" in profiles_ini_text
+    assert "Name=neurodesktop-display-1" in profiles_ini_text
+    assert "IsRelative=1" in profiles_ini_text
+    assert "Path=neurodesktop-display-1" in profiles_ini_text
+    assert "Default=1" in profiles_ini_text
+
+
+def test_firefox_wrapper_fallback_enables_last_profile_for_existing_ini(tmp_path):
+    wrapper = _firefox_wrapper_path()
+    fake = _fake_firefox(tmp_path)
+    argv_file = tmp_path / "argv.bin"
+    home = tmp_path / "home"
+    firefox_dir = home / ".mozilla/firefox"
+    firefox_dir.mkdir(parents=True)
+    (firefox_dir / "profiles.ini").write_text(
+        "[General]\n"
+        "StartWithLastProfile=0\n"
+        "\n"
+        "[Profile0]\n"
+        "Name=manual\n"
+        "IsRelative=1\n"
+        "Path=manual\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "DISPLAY": ":1",
+            "NEURODESKTOP_REAL_FIREFOX": str(fake),
+            "NEURODESKTOP_TEST_ARGV": str(argv_file),
+            "NEURODESKTOP_TEST_CREATE_PROFILE_NOOP": "1",
+        }
+    )
+
+    subprocess.run(
+        [str(wrapper), "about:blank"],
+        check=True,
+        env=env,
+    )
+
+    profiles_ini_text = (firefox_dir / "profiles.ini").read_text(encoding="utf-8")
+    assert "StartWithLastProfile=1" in profiles_ini_text
+    assert "[Profile1]" in profiles_ini_text
+    assert "Name=neurodesktop-display-1" in profiles_ini_text
+    assert "Default=1" in profiles_ini_text
 
 
 def test_firefox_wrapper_respects_explicit_profile(tmp_path):

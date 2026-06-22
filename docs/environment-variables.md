@@ -25,8 +25,10 @@
   `/opt/jovyan_defaults/.jupyter/nbi/tour_config.json`, which disables the
   first-run tour in Neurodesktop
 - `NEURODESKTOP_FIREFOX_PROFILE_ROOT`: directory where the Neurodesktop Firefox
-  wrapper stores display-specific profiles; defaults to
-  `~/.mozilla/neurodesktop-firefox-profiles`
+  wrapper stores display-specific profiles when an explicit profile root is
+  needed. By default, the wrapper lets Firefox create and register profiles in
+  its standard `~/.mozilla/firefox` profile store using names like
+  `neurodesktop-display-1`
 - `NEURODESKTOP_FIREFOX_PROFILE_DIR`: absolute Firefox profile directory override
   for the Neurodesktop Firefox wrapper; when unset, the wrapper derives a
   profile from `NEURODESKTOP_FIREFOX_PROFILE_ROOT` and the current `DISPLAY`
