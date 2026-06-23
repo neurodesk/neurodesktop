@@ -110,6 +110,38 @@ def test_local_actions_run_after_checkout():
             )
 
 
+def test_report_job_failure_dispatches_issue_investigator():
+    action_text = _read_repo_file(".github/actions/report-job-failure/action.yml")
+
+    comment_step = action_text.index("- name: Comment on the failure issue")
+    dispatch_step = action_text.index("- name: Dispatch issue investigator")
+
+    assert comment_step < dispatch_step
+    assert "uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3" in action_text
+    assert "github.rest.actions.createWorkflowDispatch" in action_text
+    assert 'workflow_id: "issue-investigator.lock.yml"' in action_text
+    assert '"issue-number": String(issueNumber)' in action_text
+    assert "steps.failure_issue.outputs.number" in action_text
+    assert "github-token: ${{ inputs.github-token }}" in action_text
+
+
+def test_report_job_failure_callers_can_dispatch_workflows():
+    workflow_paths = sorted((_repo_root() / ".github/workflows").glob("*.yml"))
+    callers = []
+
+    for workflow_path in workflow_paths:
+        workflow_text = workflow_path.read_text(encoding="utf-8")
+        if "uses: ./.github/actions/report-job-failure" in workflow_text:
+            callers.append(workflow_path)
+            header = workflow_text.split("\non:", 1)[0]
+            assert "actions: write" in header, (
+                f"{workflow_path.name} calls report-job-failure but does not grant "
+                "GITHUB_TOKEN permission to dispatch issue-investigator.lock.yml"
+            )
+
+    assert callers, "No workflows call report-job-failure"
+
+
 def test_retry_actions_bound_transient_registry_failures():
     login_action = _read_repo_file(".github/actions/docker-login-retry/action.yml")
     manifest_action = _read_repo_file(".github/actions/check-registry-manifest/action.yml")
@@ -133,7 +165,7 @@ def test_neurocommand_cache_boundary_uses_build_arg_not_remote_add():
 
     assert "api.github.com/repos/neurodesk/neurocommand/git/refs/heads/main" not in dockerfile
     assert "ARG NEUROCOMMAND_REF=main" in dockerfile
-    assert 'git checkout --detach "$NEUROCOMMAND_REF"' in dockerfile
+    assert 'git checkout -B main "$NEUROCOMMAND_REF"' in dockerfile
 
 
 def test_apptainer_dependency_downloads_are_retried():

@@ -1,6 +1,7 @@
 name: Test cvmfs
 
 permissions:
+  actions: write
   contents: read
   pull-requests: write
   issues: write
@@ -25,7 +26,7 @@ jobs:
       uses: ./.github/actions/report-job-failure
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
-        details: ${{ matrix.platform.arch || matrix.arch || matrix.cvmfs-servers || '' }}
+        details: multi-entry setup
   test_cvmfs:
     runs-on: ubuntu-24.04
     strategy:
@@ -57,4 +58,4 @@ jobs:
       uses: ./.github/actions/report-job-failure
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
-        details: ${{ matrix.platform.arch || matrix.arch || matrix.cvmfs-servers || '' }}
+        details: ${{ matrix.cvmfs-servers }}

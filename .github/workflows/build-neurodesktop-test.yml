@@ -7,6 +7,7 @@ name: Build neurodesktop-test
 # Github Packages: https://github.com/NeuroDesk/neurodesktop/pkgs/container/neurodesktop%2Fneurodesktop
 
 permissions:
+  actions: write
   contents: write
   issues: write
   pull-requests: write
@@ -60,7 +61,7 @@ jobs:
               exit 1
               ;;
           esac
-          echo "GITHUB_RATE_REMAINING=$GITHUB_RATE_REMAINING" >> $GITHUB_ENV
+          echo "GITHUB_RATE_REMAINING=$GITHUB_RATE_REMAINING" >> "$GITHUB_ENV"
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -68,21 +69,23 @@ jobs:
       - name: Set environment variables
         run: |
           IMAGENAME="neurodesktop-test"
-          BUILDDATE=`date +%Y-%m-%d`
+          BUILDDATE=$(date +%Y-%m-%d)
           # GHCR path = owner + image name (e.g. ghcr.io/neurodesk/neurodesktop-test),
           # matching the clean Quay/DockerHub style. Previously this used
           # $GITHUB_REPOSITORY (org/repo), which doubled the name to
           # ghcr.io/neurodesk/neurodesktop/neurodesktop-test.
-          IMAGEID=ghcr.io/$GITHUB_REPOSITORY_OWNER/$IMAGENAME
-          IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
+          IMAGEID="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${IMAGENAME}"
+          IMAGEID=$(echo "$IMAGEID" | tr '[:upper:]' '[:lower:]')
 
           echo "BUILDDATE=$BUILDDATE"
           echo "IMAGEID=$IMAGEID"
           echo "IMAGENAME=$IMAGENAME"
 
-          echo "BUILDDATE=$BUILDDATE" >> $GITHUB_ENV
-          echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
-          echo "IMAGENAME=$IMAGENAME" >> $GITHUB_ENV
+          {
+            echo "BUILDDATE=$BUILDDATE"
+            echo "IMAGEID=$IMAGEID"
+            echo "IMAGENAME=$IMAGENAME"
+          } >> "$GITHUB_ENV"
       # No `Set up QEMU` step — amd64 builds natively on the x86 ARC pool and
       # arm64 builds natively on a Blacksmith arm runner. Nothing is emulated.
       - name: Set up Docker Buildx
@@ -141,20 +144,20 @@ jobs:
           # cpu.stat throttled_time > 0 means we were CPU-capped.
           echo "::group::Runner cgroup peak (memory / cpu / io)"
           echo "--- cgroup tree (v2 root, expect memory.peak etc. present) ---"
-          ls /sys/fs/cgroup/ 2>&1 | head -20
+          find /sys/fs/cgroup -maxdepth 1 -mindepth 1 -printf '%f\n' 2>&1 | head -20
           echo
           for f in memory.peak memory.current memory.max memory.events memory.events.local memory.swap.peak memory.swap.current cpu.stat cpu.max io.stat io.pressure cpu.pressure memory.pressure; do
-            if [ -r /sys/fs/cgroup/$f ]; then
+            if [ -r "/sys/fs/cgroup/$f" ]; then
               echo "--- $f ---"
-              cat /sys/fs/cgroup/$f 2>&1
+              cat "/sys/fs/cgroup/$f" 2>&1
               echo
             fi
           done
           # Fallback for cgroup v1 (just in case)
           for f in memory/memory.max_usage_in_bytes memory/memory.limit_in_bytes cpuacct/cpuacct.usage; do
-            if [ -r /sys/fs/cgroup/$f ]; then
+            if [ -r "/sys/fs/cgroup/$f" ]; then
               echo "--- (v1 fallback) $f ---"
-              cat /sys/fs/cgroup/$f 2>&1
+              cat "/sys/fs/cgroup/$f" 2>&1
             fi
           done
           echo "::endgroup::"
@@ -209,7 +212,7 @@ jobs:
         uses: ./.github/actions/report-job-failure
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          details: ${{ matrix.platform.arch || matrix.arch || matrix.cvmfs-servers || '' }}
+          details: ${{ matrix.platform.arch }}
 
   merge-manifests:
     needs: build-image
@@ -218,23 +221,25 @@ jobs:
       - name: Set environment variables
         run: |
           IMAGENAME="neurodesktop-test"
-          BUILDDATE=`date +%Y-%m-%d`
+          BUILDDATE=$(date +%Y-%m-%d)
           # GHCR path = owner + image name (e.g. ghcr.io/neurodesk/neurodesktop-test),
           # matching the clean Quay/DockerHub style. Previously this used
           # $GITHUB_REPOSITORY (org/repo), which doubled the name to
           # ghcr.io/neurodesk/neurodesktop/neurodesktop-test.
-          IMAGEID=ghcr.io/$GITHUB_REPOSITORY_OWNER/$IMAGENAME
-          IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
+          IMAGEID="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${IMAGENAME}"
+          IMAGEID=$(echo "$IMAGEID" | tr '[:upper:]' '[:lower:]')
 
           PUSH_IMAGES="${IMAGEID}"
-          if [ ! -z "${DOCKERHUB_ORG}" ]; then
+          if [ -n "${DOCKERHUB_ORG}" ]; then
             PUSH_IMAGES="${PUSH_IMAGES}, ${DOCKERHUB_ORG}/${IMAGENAME}"
           fi
 
-          echo "BUILDDATE=$BUILDDATE" >> $GITHUB_ENV
-          echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
-          echo "IMAGENAME=$IMAGENAME" >> $GITHUB_ENV
-          echo "PUSH_IMAGES=$PUSH_IMAGES" >> $GITHUB_ENV
+          {
+            echo "BUILDDATE=$BUILDDATE"
+            echo "IMAGEID=$IMAGEID"
+            echo "IMAGENAME=$IMAGENAME"
+            echo "PUSH_IMAGES=$PUSH_IMAGES"
+          } >> "$GITHUB_ENV"
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -329,7 +334,7 @@ jobs:
         uses: ./.github/actions/report-job-failure
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          details: ${{ matrix.platform.arch || matrix.arch || matrix.cvmfs-servers || '' }}
+          details: merge-manifests
 
   test-image:
     name: test-image (${{ matrix.arch }} / ${{ matrix.profile.test_profile }})
@@ -394,11 +399,11 @@ jobs:
           # matching the clean Quay/DockerHub style. Previously this used
           # $GITHUB_REPOSITORY (org/repo), which doubled the name to
           # ghcr.io/neurodesk/neurodesktop/neurodesktop-test.
-          IMAGEID=ghcr.io/$GITHUB_REPOSITORY_OWNER/$IMAGENAME
-          IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
-          echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
+          IMAGEID="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${IMAGENAME}"
+          IMAGEID=$(echo "$IMAGEID" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGEID=$IMAGEID" >> "$GITHUB_ENV"
           # Pull the per-arch tag matching this job's arch.
-          echo "IMAGE_REF=$IMAGEID:${{ matrix.arch }}" >> $GITHUB_ENV
+          echo "IMAGE_REF=$IMAGEID:${{ matrix.arch }}" >> "$GITHUB_ENV"
       - name: Free up build space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift /usr/lib/android-sdk || true
@@ -431,16 +436,16 @@ jobs:
       - name: Test container (CVMFS=${{ matrix.profile.cvmfs_disable == 'false' && 'on' || 'off' }}, SUDO=${{ matrix.profile.grant_sudo }})
         if: ${{ ! matrix.profile.hpc_mode }}
         run: |
-          CVMFS_MOUNT=""
+          docker_args=()
           if [ "${{ matrix.profile.needs_cvmfs }}" = "true" ]; then
-            CVMFS_MOUNT="-v /cvmfs:/cvmfs:shared"
+            docker_args=(-v /cvmfs:/cvmfs:shared)
           fi
           docker rm -f neurodesktop-test 2>/dev/null || true
           docker run -d --shm-size=1gb --privileged --user=root \
             --name neurodesktop-test \
-            $CVMFS_MOUNT \
-            -e CVMFS_DISABLE=${{ matrix.profile.cvmfs_disable }} \
-            -e GRANT_SUDO=${{ matrix.profile.grant_sudo }} \
+            "${docker_args[@]}" \
+            -e "CVMFS_DISABLE=${{ matrix.profile.cvmfs_disable }}" \
+            -e "GRANT_SUDO=${{ matrix.profile.grant_sudo }}" \
             -e NEURODESKTOP_CVMFS_STARTUP_MODE=eager \
             -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
             "$IMAGE_REF"
@@ -494,12 +499,12 @@ jobs:
             -v "${HPC_PASSWD_FILE}:/etc/passwd:ro" \
             -v "${HPC_GROUP_FILE}:/etc/group:ro" \
             -e CVMFS_DISABLE=true \
-            -e NB_USER=${HPC_USER} \
-            -e NB_UID=${HPC_UID} \
-            -e NB_GID=${HPC_GID} \
+            -e "NB_USER=${HPC_USER}" \
+            -e "NB_UID=${HPC_UID}" \
+            -e "NB_GID=${HPC_GID}" \
             -e HOME=/home/jovyan \
-            -e USER=${HPC_USER} \
-            -e LOGNAME=${HPC_USER} \
+            -e "USER=${HPC_USER}" \
+            -e "LOGNAME=${HPC_USER}" \
             -e APPTAINER_CONTAINER=1 \
             -e APPTAINER_NAME=neurodesktop-test-hpc \
             -e NEURODESKTOP_CVMFS_STARTUP_MODE=lazy \
@@ -560,9 +565,9 @@ jobs:
           # matching the clean Quay/DockerHub style. Previously this used
           # $GITHUB_REPOSITORY (org/repo), which doubled the name to
           # ghcr.io/neurodesk/neurodesktop/neurodesktop-test.
-          IMAGEID=ghcr.io/$GITHUB_REPOSITORY_OWNER/$IMAGENAME
-          IMAGEID=$(echo $IMAGEID | tr '[A-Z]' '[a-z]')
-          echo "IMAGEID=$IMAGEID" >> $GITHUB_ENV
+          IMAGEID="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${IMAGENAME}"
+          IMAGEID=$(echo "$IMAGEID" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGEID=$IMAGEID" >> "$GITHUB_ENV"
       - name: Free up build space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift /usr/lib/android-sdk
@@ -579,7 +584,7 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull container image
-        run: docker pull $IMAGEID:${{ matrix.arch }}
+        run: docker pull "$IMAGEID:${{ matrix.arch }}"
       - name: Container image scan (${{ matrix.arch }})
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -600,4 +605,4 @@ jobs:
         uses: ./.github/actions/report-job-failure
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          details: ${{ matrix.platform.arch || matrix.arch || matrix.cvmfs-servers || '' }}
+          details: ${{ matrix.arch }}

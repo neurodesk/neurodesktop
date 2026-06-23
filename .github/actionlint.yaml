@@ -1,0 +1,11 @@
+self-hosted-runner:
+  labels:
+    - neurodesk-syd-arcrunner-neurodesktop
+
+config-variables: null
+
+paths:
+  .github/workflows/issue-investigator.lock.yml:
+    ignore:
+      - 'unknown permission scope "copilot-requests"'
+      - 'unexpected key "queue" for "concurrency" section'

@@ -6,7 +6,7 @@ description: >
 
 inputs:
   github-token:
-    description: Token used to create the issue and comment.
+    description: Token used to create the issue, comment, and investigator dispatch.
     required: true
   details:
     description: Optional context appended to the comment (e.g. matrix axis).
@@ -38,3 +38,26 @@ runs:
         body: |
           Job `${{ github.job }}`${{ inputs.details && format(' / {0}', inputs.details) || '' }} failed on attempt ${{ github.run_attempt }}.
           ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+
+    - name: Dispatch issue investigator
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const issueNumber = Number("${{ steps.failure_issue.outputs.number }}");
+          if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
+            throw new Error(`Cannot dispatch issue investigator without a valid issue number: ${issueNumber}`);
+          }
+
+          const ref = context.payload.repository?.default_branch || "main";
+          await github.rest.actions.createWorkflowDispatch({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            workflow_id: "issue-investigator.lock.yml",
+            ref,
+            inputs: {
+              "issue-number": String(issueNumber),
+              "retry-reason": `Failure issue created or updated by ${context.workflow} run ${context.runId}; dispatching explicitly because GITHUB_TOKEN-created issues do not trigger issues.opened workflows.`
+            }
+          });
+          core.info(`Dispatched issue-investigator.lock.yml for issue #${issueNumber} on ${ref}.`);
