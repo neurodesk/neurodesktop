@@ -73,13 +73,22 @@ jobs:
             [ -z "${SRC[$t]:-}" ] && SRC["$t"]="$SRC_OLD"
           done
 
-          # --- Keep only dated desktop-host tags: YYYY-MM-DD or legacy YYYYMMDD. ---
+          # --- Keep only dated desktop-host tags. ---
+          # Current scheme is YYYY-MM-DD. The legacy YYYYMMDD scheme was retired
+          # after 2023-09; the desktop-host has used dashes since. So an 8-digit
+          # tag from 2024+ is NOT desktop-host — it's the neurocontainers recipe
+          # version (e.g. 20260428). Accept YYYYMMDD only for years <= 2023.
           TAGS=()
           for t in "${!SRC[@]}"; do
-            if [[ "$t" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || [[ "$t" =~ ^[0-9]{8}$ ]]; then
-              if [ "$YEAR_FILTER" = "all" ] || [ "${t:0:4}" = "$YEAR_FILTER" ]; then
-                TAGS+=("$t")
-              fi
+            if [[ "$t" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+              :
+            elif [[ "$t" =~ ^[0-9]{8}$ ]] && [ "${t:0:4}" -lt 2024 ]; then
+              :
+            else
+              continue
+            fi
+            if [ "$YEAR_FILTER" = "all" ] || [ "${t:0:4}" = "$YEAR_FILTER" ]; then
+              TAGS+=("$t")
             fi
           done
           if [ "${#TAGS[@]}" -gt 0 ]; then
