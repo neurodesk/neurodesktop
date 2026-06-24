@@ -1,20 +1,28 @@
-name: Backfill neurodesktop history to Quay
+name: Backfill neurodesktop history
 
-# One-off utility (dispatch only). Mirrors the FULL desktop-host neurodesktop
-# history from GHCR into quay.io/neurodesk/neurodesktop, so Quay matches what
-# GHCR/DockerHub already carry. Safe to re-run: tags already present (same
-# digest) are skipped, so it resumes where it left off.
+# One-off utility (dispatch only). Mirrors the full desktop-host neurodesktop
+# history into a chosen destination. GHCR is always the source.
 #
-# Run with dry_run=true first to preview what would be copied. GHCR is the
-# source (no pull rate limits, unlike DockerHub on shared runner IPs):
-#   - old path ghcr.io/neurodesk/neurodesktop/neurodesktop  -> 2021..rename
-#   - new path ghcr.io/neurodesk/neurodesktop               -> rename..now
-# The recipe tags (20260428*) are NOT desktop-host; they are skipped
-# automatically because they 404 on the GHCR source.
+#   target=ghcr -> ghcr.io/neurodesk/neurodesktop  (new short path, prod)
+#                  Additive: fills old history only; does NOT touch :latest /
+#                  recent tags (owned by the nightly build). Source = old path.
+#   target=quay -> quay.io/neurodesk/neurodesktop  (backup mirror)
+#                  Full mirror incl. :latest. Source = old + new GHCR paths.
+#
+# Run dry_run=true first to preview. Safe to re-run: tags already present
+# (same digest) are skipped, so it resumes where it left off. The recipe
+# version tags (e.g. 20260428) are excluded by the <=2023 guard on 8-digit tags.
 
 on:
   workflow_dispatch:
     inputs:
+      target:
+        description: "Destination registry"
+        type: choice
+        options:
+          - ghcr
+          - quay
+        default: ghcr
       dry_run:
         description: "Preview only — list tags, copy nothing"
         type: boolean
@@ -26,17 +34,16 @@ on:
 
 permissions:
   contents: read
-  packages: read
+  packages: write
 
 env:
-  DEST: quay.io/neurodesk/neurodesktop
-  SRC_NEW: ghcr.io/neurodesk/neurodesktop
   SRC_OLD: ghcr.io/neurodesk/neurodesktop/neurodesktop
+  SRC_NEW: ghcr.io/neurodesk/neurodesktop
 
 jobs:
   backfill:
     runs-on: ubuntu-22.04
-    timeout-minutes: 350 # under the 6h hard cap; re-dispatch to resume if needed
+    timeout-minutes: 350 # under the 6h cap; re-dispatch to resume if needed
     steps:
       - name: Install crane
         run: |
@@ -52,32 +59,45 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login to Quay (destination)
+        if: ${{ inputs.target == 'quay' }}
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           registry: quay.io
           username: ${{ secrets.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_ROBOT_TOKEN }}
 
-      - name: Backfill desktop-host history to Quay
+      - name: Backfill desktop-host history
         shell: bash --noprofile --norc {0}
         env:
+          TARGET: ${{ inputs.target }}
           DRY_RUN: ${{ inputs.dry_run }}
           YEAR_FILTER: ${{ inputs.year_filter }}
         run: |
           set -uo pipefail
 
-          # --- Enumerate source tags. New path wins; old path fills deep history. ---
+          # --- Resolve destination + behaviour from the target. ---
+          if [ "$TARGET" = "quay" ]; then
+            DEST="quay.io/neurodesk/neurodesktop"; SET_LATEST=1; UNION_NEW=1
+          else
+            DEST="ghcr.io/neurodesk/neurodesktop"; SET_LATEST=0; UNION_NEW=0
+          fi
+          echo "DEST=$DEST" >> "$GITHUB_ENV"
+          echo "Target: ${TARGET} -> ${DEST}"
+
+          # --- Enumerate source tags. Old path always; new path only for quay
+          #     (for ghcr the new path IS the destination). New path wins. ---
           declare -A SRC
-          for t in $(crane ls "$SRC_NEW" 2>/dev/null || true); do SRC["$t"]="$SRC_NEW"; done
-          for t in $(crane ls "$SRC_OLD" 2>/dev/null || true); do
-            [ -z "${SRC[$t]:-}" ] && SRC["$t"]="$SRC_OLD"
-          done
+          for t in $(crane ls "$SRC_OLD" 2>/dev/null || true); do SRC["$t"]="$SRC_OLD"; done
+          if [ "$UNION_NEW" = "1" ]; then
+            for t in $(crane ls "$SRC_NEW" 2>/dev/null || true); do
+              [ -z "${SRC[$t]:-}" ] && SRC["$t"]="$SRC_NEW"
+            done
+          fi
 
           # --- Keep only dated desktop-host tags. ---
-          # Current scheme is YYYY-MM-DD. The legacy YYYYMMDD scheme was retired
-          # after 2023-09; the desktop-host has used dashes since. So an 8-digit
-          # tag from 2024+ is NOT desktop-host — it's the neurocontainers recipe
-          # version (e.g. 20260428). Accept YYYYMMDD only for years <= 2023.
+          # Current scheme is YYYY-MM-DD. Legacy YYYYMMDD was retired after
+          # 2023-09, so an 8-digit tag from 2024+ is the neurocontainers recipe
+          # version (e.g. 20260428), not desktop-host. Accept YYYYMMDD <= 2023.
           TAGS=()
           for t in "${!SRC[@]}"; do
             if [[ "$t" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
@@ -120,22 +140,25 @@ jobs:
             sdig="$(crane digest "$src" 2>/dev/null || true)"
             if [ -z "$sdig" ]; then echo "skip (source missing): $t"; skipped=$((skipped + 1)); continue; fi
             ddig="$(crane digest "${DEST}:${t}" 2>/dev/null || true)"
-            if [ "$sdig" = "$ddig" ]; then echo "skip (already in Quay): $t"; skipped=$((skipped + 1)); continue; fi
+            if [ "$sdig" = "$ddig" ]; then echo "skip (already present): $t"; skipped=$((skipped + 1)); continue; fi
             if [ "$DRY_RUN" = "true" ]; then echo "[dry-run] would copy ${src} -> ${DEST}:${t}"; continue; fi
             echo "copying ${t} ..."
             if copy_one "$src" "${DEST}:${t}"; then copied=$((copied + 1)); else echo "::warning::failed ${t}"; failed=$((failed + 1)); fi
           done
 
-          # --- Set :latest to the current desktop-host latest (newest build). ---
-          if [ "$DRY_RUN" = "true" ]; then
-            echo "[dry-run] would set ${DEST}:latest from ${SRC_NEW}:latest"
-          else
-            echo "setting :latest ..."
-            copy_one "${SRC_NEW}:latest" "${DEST}:latest" || echo "::warning::failed to set latest"
+          # --- For a full mirror (quay), point :latest at the newest build. ---
+          if [ "$SET_LATEST" = "1" ]; then
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "[dry-run] would set ${DEST}:latest from ${SRC_NEW}:latest"
+            else
+              echo "setting :latest ..."
+              copy_one "${SRC_NEW}:latest" "${DEST}:latest" || echo "::warning::failed to set latest"
+            fi
           fi
 
           {
             echo "## Backfill summary"
+            echo "- target: ${TARGET} (${DEST})"
             echo "- mode: $([ "$DRY_RUN" = "true" ] && echo dry-run || echo live)"
             echo "- year filter: ${YEAR_FILTER}"
             echo "- considered: ${#TAGS[@]}"
@@ -146,9 +169,9 @@ jobs:
 
           [ "$failed" -eq 0 ]
 
-      - name: Verify Quay dated-tag count
+      - name: Verify destination dated-tag count
         if: ${{ inputs.dry_run == false }}
         run: |
           n=$(crane ls "$DEST" | grep -Ec '^[0-9]{4}-[0-9]{2}-[0-9]{2}$|^[0-9]{8}$') || n=0
-          echo "Quay now has ${n} dated tags."
-          echo "- Quay dated tags after run: ${n}" >> "$GITHUB_STEP_SUMMARY"
+          echo "${DEST} now has ${n} dated tags."
+          echo "- ${DEST} dated tags after run: ${n}" >> "$GITHUB_STEP_SUMMARY"
