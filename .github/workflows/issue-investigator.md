@@ -22,7 +22,13 @@ permissions:
   issues: read
   pull-requests: read
   actions: read
-  copilot-requests: write
+
+engine:
+  id: codex
+  model: ${{ vars.GH_AW_MODEL_AGENT_CODEX || vars.GH_AW_DEFAULT_MODEL_CODEX || 'kimi-k2.7' }}
+  args:
+    - -c
+    - openai_base_url="https://llm.neurodesk.org/openai"
 
 strict: true
 network:
@@ -33,6 +39,7 @@ network:
     - node
     - containers
     - linux-distros
+    - llm.neurodesk.org
 
 tools:
   github:
@@ -40,6 +47,8 @@ tools:
     toolsets: [default]
 
 safe-outputs:
+  threat-detection:
+    engine: false
   add-comment:
     max: 1
     target: "*"
