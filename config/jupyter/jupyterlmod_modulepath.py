@@ -9,6 +9,7 @@ environment_variables.sh later, but jupyter-lmod reads os.environ directly.
 import functools
 import inspect
 import os
+import warnings
 from glob import glob
 
 
@@ -101,7 +102,16 @@ def install():
     """Patch jupyter-lmod so each request sees the current CVMFS MODULEPATH."""
 
     try:
-        import jupyterlmod.handler as handler
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=(
+                    "Keyword `trait` is deprecated in traitlets 5.0, "
+                    "use `value_trait` instead"
+                ),
+                category=DeprecationWarning,
+            )
+            import jupyterlmod.handler as handler
     except Exception:
         return False
 

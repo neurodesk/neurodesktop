@@ -3,6 +3,7 @@ import importlib.util
 import os
 import sys
 import types
+import warnings
 from pathlib import Path
 
 
@@ -103,3 +104,35 @@ def test_install_refreshes_before_jupyterlmod_api_calls(tmp_path, monkeypatch):
     monkeypatch.delenv("MODULEPATH", raising=False)
     paths_result = asyncio.run(fake_handler.ModulePaths().get())
     assert str(cvmfs_modules / "mri") in paths_result
+
+
+def test_install_ignores_jupyterlmod_traitlets_deprecation(tmp_path, monkeypatch):
+    module = load_modulepath_module()
+    package_dir = tmp_path / "jupyterlmod"
+    package_dir.mkdir()
+    (package_dir / "__init__.py").write_text(
+        "import warnings\n"
+        "warnings.warn(\n"
+        "    'Keyword `trait` is deprecated in traitlets 5.0, use `value_trait` instead',\n"
+        "    DeprecationWarning,\n"
+        ")\n"
+    )
+    (package_dir / "handler.py").write_text(
+        "class FakeModuleAPI:\n"
+        "    async def avail(self):\n"
+        "        return []\n"
+        "\n"
+        "async def fake_paths_get(self):\n"
+        "    return ''\n"
+        "\n"
+        "MODULE = FakeModuleAPI()\n"
+        "ModulePaths = type('ModulePaths', (), {'get': fake_paths_get})\n"
+    )
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "jupyterlmod", raising=False)
+    monkeypatch.delitem(sys.modules, "jupyterlmod.handler", raising=False)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        assert module.install() is True
