@@ -1,11 +1,11 @@
-# syntax=docker/dockerfile:1.24
+# syntax=docker/dockerfile:1.25
 
 # Pin to a specific jupyter/base-notebook date for reproducibility.
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
-ARG BASE_IMAGE_TAG=2026-06-22
-ARG APPTAINER_VERSION=1.5.0
-ARG APPTAINER_GO_VERSION=1.26.3
-ARG APPTAINER_GRPC_VERSION=1.81.1
+ARG BASE_IMAGE_TAG=2026-06-29
+ARG APPTAINER_VERSION=1.5.2
+ARG APPTAINER_GO_VERSION=1.26.4
+ARG APPTAINER_GRPC_VERSION=1.82.0
 
 FROM golang:${APPTAINER_GO_VERSION}-bookworm AS apptainer
 
@@ -81,7 +81,7 @@ USER root
 
 ARG BUILD_ONLY_APT_PACKAGES="build-essential libcairo2-dev libjpeg-turbo8-dev libpng-dev libtool-bin freerdp2-dev libvncserver-dev libssl-dev libwebp-dev libssh2-1-dev libpango1.0-dev"
 ARG GUACAMOLE_VERSION="1.6.0"
-ARG CODE_SERVER_VERSION="4.123.0"
+ARG CODE_SERVER_VERSION="4.126.0"
 
 COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
 
@@ -218,8 +218,8 @@ RUN mkdir -p /opt/strace \
     && chmod +x /opt/strace
 
 ARG TOMCAT_REL="11"
-ARG TOMCAT_VERSION="11.0.22"
-ARG TOMCAT_MIGRATION_VERSION="1.0.10"
+ARG TOMCAT_VERSION="11.0.23"
+ARG TOMCAT_MIGRATION_VERSION="1.0.12"
 ARG GUACAMOLE_VERSION="1.6.0"
 ENV LANG=""
 ENV LANGUAGE=""
