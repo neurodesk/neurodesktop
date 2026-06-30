@@ -61,7 +61,10 @@ images as SVGs for JupyterLab `LabIcon` support.
 The desktop environment uses LXDE with TigerVNC for VNC access and xrdp for RDP
 access. Apache Guacamole provides browser-based remote desktop access. JupyterLab
 exposes separate `Neurodesktop RDP` and `Neurodesktop VNC` launcher entries so
-opening one backend does not start the other. Configuration lives in
+opening one backend does not start the other. In unprivileged Apptainer or
+Singularity sessions, the RDP launcher entry is hidden because starting or
+reconfiguring xrdp requires root/sudo permissions; the VNC launcher remains
+available. Configuration lives in
 [`config/lxde/`](../config/lxde/) and [`config/guacamole/`](../config/guacamole/).
 The RDP and VNC proxy entries use backend-specific Guacamole state directories
 under `~/.neurodesk` (`guacamole-*`, `tomcat-*`, and `runtime-*`) so one backend

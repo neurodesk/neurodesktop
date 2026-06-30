@@ -31,6 +31,31 @@ except OSError:
     pass
 _guac_basic = base64.b64encode(f'{_guac_user}:{_guac_pass}'.encode()).decode()
 
+
+def _is_apptainer_runtime():
+  return (
+    any(
+      os.environ.get(name)
+      for name in (
+        'SINGULARITY_NAME',
+        'APPTAINER_NAME',
+        'APPTAINER_CONTAINER',
+        'SINGULARITY_CONTAINER',
+        'APPTAINER_COMMAND',
+        'SINGULARITY_COMMAND',
+      )
+    )
+    or os.path.isdir('/.apptainer.d')
+    or os.path.isdir('/.singularity.d')
+  )
+
+
+def _rdp_launcher_enabled():
+  # In unprivileged Apptainer/Singularity sessions, guacamole.sh cannot start
+  # or reconfigure xrdp because service management requires root/sudo.
+  return not (_is_apptainer_runtime() and os.geteuid() != 0)
+
+
 def _neurodesktop_server(backend, title, path_info, launcher_enabled=True):
   server = {
     # No fixed 'port' - Jupyter Server Proxy picks a free port and substitutes
@@ -56,7 +81,7 @@ def _neurodesktop_server(backend, title, path_info, launcher_enabled=True):
   return server
 
 c.ServerProxy.servers = {
-  'neurodesktop-rdp': _neurodesktop_server('rdp', 'Neurodesktop RDP', 'neurodesktop-rdp'),
+  'neurodesktop-rdp': _neurodesktop_server('rdp', 'Neurodesktop RDP', 'neurodesktop-rdp', launcher_enabled=_rdp_launcher_enabled()),
   'neurodesktop-vnc': _neurodesktop_server('vnc', 'Neurodesktop VNC', 'neurodesktop-vnc'),
   # Preserve the historical /neurodesktop route for old links without adding a
   # third launcher tile. New launcher entries choose the backend explicitly.

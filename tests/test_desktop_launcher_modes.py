@@ -1,6 +1,7 @@
 import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from xml.etree import ElementTree
 
 
@@ -100,6 +101,34 @@ def _rdp_param(mapping_text, name):
     raise AssertionError("mapping does not contain an RDP connection")
 
 
+def _execute_jupyter_config(config, tmp_path, monkeypatch, *, apptainer=False, euid=1000):
+    home = tmp_path / "home"
+    home.mkdir()
+
+    monkeypatch.setenv("HOME", str(home))
+    for name in (
+        "SINGULARITY_NAME",
+        "APPTAINER_NAME",
+        "APPTAINER_CONTAINER",
+        "SINGULARITY_CONTAINER",
+        "APPTAINER_COMMAND",
+        "SINGULARITY_COMMAND",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    if apptainer:
+        monkeypatch.setenv("APPTAINER_CONTAINER", "1")
+    monkeypatch.setattr(os, "geteuid", lambda: euid)
+
+    c = SimpleNamespace(
+        ServerProxy=SimpleNamespace(),
+        ServerApp=SimpleNamespace(),
+        FileContentsManager=SimpleNamespace(),
+        ResourceUseDisplay=SimpleNamespace(),
+    )
+    exec(compile(config, "jupyter_notebook_config.py.template", "exec"), {"c": c})
+    return c.ServerProxy.servers
+
+
 def test_jupyter_launcher_exposes_separate_desktop_backends():
     config = _read_first(
         "/etc/jupyter/jupyter_notebook_config.py",
@@ -108,10 +137,49 @@ def test_jupyter_launcher_exposes_separate_desktop_backends():
     )
     compile(config, "jupyter_notebook_config.py.template", "exec")
 
-    assert "'neurodesktop-rdp': _neurodesktop_server('rdp', 'Neurodesktop RDP', 'neurodesktop-rdp')" in config
+    assert "'neurodesktop-rdp': _neurodesktop_server('rdp', 'Neurodesktop RDP', 'neurodesktop-rdp', launcher_enabled=_rdp_launcher_enabled())" in config
     assert "'neurodesktop-vnc': _neurodesktop_server('vnc', 'Neurodesktop VNC', 'neurodesktop-vnc')" in config
     assert 'NEURODESKTOP_DESKTOP_BACKEND="{backend}"' in config
     assert "launcher_enabled=False" in config
+
+
+def test_jupyter_launcher_hides_rdp_for_unprivileged_apptainer(tmp_path, monkeypatch):
+    config = _read_first(
+        "/etc/jupyter/jupyter_notebook_config.py",
+        "/opt/neurodesktop/jupyter_notebook_config.py.template",
+        "config/jupyter/jupyter_notebook_config.py.template",
+    )
+
+    servers = _execute_jupyter_config(
+        config,
+        tmp_path,
+        monkeypatch,
+        apptainer=True,
+        euid=5000,
+    )
+
+    assert servers["neurodesktop-rdp"]["launcher_entry"]["enabled"] is False
+    assert servers["neurodesktop-vnc"]["launcher_entry"]["enabled"] is True
+    assert servers["neurodesktop"]["launcher_entry"]["enabled"] is False
+
+
+def test_jupyter_launcher_keeps_rdp_outside_apptainer(tmp_path, monkeypatch):
+    config = _read_first(
+        "/etc/jupyter/jupyter_notebook_config.py",
+        "/opt/neurodesktop/jupyter_notebook_config.py.template",
+        "config/jupyter/jupyter_notebook_config.py.template",
+    )
+
+    servers = _execute_jupyter_config(
+        config,
+        tmp_path,
+        monkeypatch,
+        apptainer=False,
+        euid=5000,
+    )
+
+    assert servers["neurodesktop-rdp"]["launcher_entry"]["enabled"] is True
+    assert servers["neurodesktop-vnc"]["launcher_entry"]["enabled"] is True
 
 
 def test_firefox_wrapper_uses_display_specific_profile(tmp_path):
