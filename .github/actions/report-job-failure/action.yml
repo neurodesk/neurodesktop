@@ -31,20 +31,131 @@ runs:
         search_existing: open
 
     - name: Comment on the failure issue
+      id: failure_comment
       uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9
       with:
         token: ${{ inputs.github-token }}
         issue-number: ${{ steps.failure_issue.outputs.number }}
         body: |
+          <!-- neurodesktop-job-failure-report: run=${{ github.run_id }} attempt=${{ github.run_attempt }} job=${{ github.job }} -->
           Job `${{ github.job }}`${{ inputs.details && format(' / {0}', inputs.details) || '' }} failed on attempt ${{ github.run_attempt }}.
           ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
 
-    - name: Dispatch issue investigator
+    - name: Gate issue investigator dispatch
+      id: dispatch_gate
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
       with:
         github-token: ${{ inputs.github-token }}
         script: |
           const issueNumber = Number("${{ steps.failure_issue.outputs.number }}");
+          const commentId = Number("${{ steps.failure_comment.outputs.comment-id }}");
+          if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
+            throw new Error(`Cannot gate issue investigator without a valid issue number: ${issueNumber}`);
+          }
+          if (!Number.isInteger(commentId) || commentId <= 0) {
+            throw new Error(`Cannot gate issue investigator without a valid failure comment id: ${commentId}`);
+          }
+
+          const runId = String(context.runId);
+          const runAttempt = String(context.runAttempt);
+          const markerPrefix = "<!-- neurodesktop-issue-investigator-dispatched:";
+          const failureMarker = `<!-- neurodesktop-job-failure-report: run=${runId}`;
+          const expectedTitle = `Job failure - ${context.workflow} - run ${runId}`;
+          const runUrlFragment = `/actions/runs/${runId}`;
+
+          const search = await github.rest.search.issuesAndPullRequests({
+            q: `repo:${context.repo.owner}/${context.repo.repo} is:issue "${runUrlFragment}"`,
+            per_page: 20,
+          });
+          const matchingIssues = search.data.items
+            .filter((issue) => issue.title === expectedTitle)
+            .sort((a, b) => a.number - b.number);
+          const canonicalIssueNumber = matchingIssues[0]?.number || issueNumber;
+          core.setOutput("issue_number", String(canonicalIssueNumber));
+
+          if (issueNumber !== canonicalIssueNumber) {
+            core.info(
+              `Skipping investigator dispatch from duplicate issue #${issueNumber}; ` +
+              `canonical run issue is #${canonicalIssueNumber}.`
+            );
+            core.setOutput("should_dispatch", "false");
+            return;
+          }
+
+          const comments = await github.paginate(github.rest.issues.listComments, {
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: canonicalIssueNumber,
+            per_page: 100,
+          });
+          const alreadyDispatched = comments.some((comment) =>
+            comment.body?.includes(`${markerPrefix} run=${runId} issue=${canonicalIssueNumber}`)
+          );
+          if (alreadyDispatched) {
+            core.info(`Skipping investigator dispatch; run ${runId} already has a dispatch marker on issue #${canonicalIssueNumber}.`);
+            core.setOutput("should_dispatch", "false");
+            return;
+          }
+
+          const failureComments = comments
+            .filter((comment) =>
+              comment.body?.includes(failureMarker) &&
+              comment.body?.includes(`/actions/runs/${runId}/attempts/${runAttempt}`)
+            )
+            .sort((a, b) => {
+              const createdDiff = new Date(a.created_at) - new Date(b.created_at);
+              return createdDiff || a.id - b.id;
+            });
+          const firstFailureCommentId = failureComments[0]?.id || commentId;
+          if (commentId !== firstFailureCommentId) {
+            core.info(
+              `Skipping investigator dispatch from comment ${commentId}; ` +
+              `first failure comment for run ${runId} is ${firstFailureCommentId}.`
+            );
+            core.setOutput("should_dispatch", "false");
+            return;
+          }
+
+          const dispatchMarker = await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: canonicalIssueNumber,
+            body:
+              `${markerPrefix} run=${runId} issue=${canonicalIssueNumber} comment=${commentId} -->\n` +
+              `Dispatching Issue Investigator once for workflow run ${runId}.`,
+          });
+          const updatedComments = await github.paginate(github.rest.issues.listComments, {
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: canonicalIssueNumber,
+            per_page: 100,
+          });
+          const dispatchMarkers = updatedComments
+            .filter((comment) =>
+              comment.body?.includes(`${markerPrefix} run=${runId} issue=${canonicalIssueNumber}`)
+            )
+            .sort((a, b) => {
+              const createdDiff = new Date(a.created_at) - new Date(b.created_at);
+              return createdDiff || a.id - b.id;
+          });
+          const firstDispatchMarker = dispatchMarkers[0];
+          if (firstDispatchMarker?.id && firstDispatchMarker.id !== dispatchMarker.data.id) {
+            core.info(
+              `Skipping investigator dispatch from comment ${commentId}; ` +
+              `first dispatch marker for run ${runId} is ${firstDispatchMarker.id}.`
+            );
+            core.setOutput("should_dispatch", "false");
+            return;
+          }
+          core.setOutput("should_dispatch", "true");
+
+    - name: Dispatch issue investigator
+      if: steps.dispatch_gate.outputs.should_dispatch == 'true'
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const issueNumber = Number("${{ steps.dispatch_gate.outputs.issue_number }}");
           if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
             throw new Error(`Cannot dispatch issue investigator without a valid issue number: ${issueNumber}`);
           }
