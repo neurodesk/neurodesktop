@@ -7,8 +7,9 @@ The startup sequence follows this order:
 1. [`config/jupyter/start_notebook.sh`](../config/jupyter/start_notebook.sh)
    sets ownership permissions for the home directory.
 2. [`config/jupyter/before_notebook.sh`](../config/jupyter/before_notebook.sh)
-   mounts CVMFS, selects the fastest regional server, and configures the
-   environment.
+   mounts CVMFS, ranks the CVMFS servers by measured download throughput via
+   [`config/jupyter/cvmfs_server_select.sh`](../config/jupyter/cvmfs_server_select.sh),
+   and configures the environment.
 3. `jupyter_notebook_config.py` is generated and defines JupyterLab server
    proxies for webapps. It also installs
    [`config/jupyter/jupyterlmod_modulepath.py`](../config/jupyter/jupyterlmod_modulepath.py)
@@ -22,8 +23,22 @@ The startup sequence follows this order:
 ### CVMFS
 
 CVMFS, the CernVM File System, distributes neuroimaging software containers
-without local storage. Regional server selection is based on latency probing for
-Europe, America, and Asia. Direct access or CDN mode is selected automatically.
+without local storage. Server selection is handled by
+[`config/jupyter/cvmfs_server_select.sh`](../config/jupyter/cvmfs_server_select.sh):
+it probes a pool of direct Stratum-1 servers and Cloudflare-fronted CDN
+endpoints in parallel for reachability, measures cold-cache download
+throughput on the lowest-latency finalists, and writes `CVMFS_SERVER_URL` with
+the fastest server first and the runners-up as fallbacks (plus a non-CDN host
+if the top picks are all on the same CDN). Every probe carries a unique
+cache-busting query string so CDN edge caches cannot inflate the measurement —
+real workloads fetch long-tail objects that are cold at the edge. The CVMFS client walks the list in order and
+abandons a degraded server at runtime via the failover settings
+(`CVMFS_LOW_SPEED_LIMIT`, `CVMFS_TIMEOUT`, `CVMFS_MAX_RETRIES`,
+`CVMFS_HOST_RESET_AFTER`) in
+[`config/cvmfs/default.local`](../config/cvmfs/default.local). A successful
+ranking is cached in `~/.cache/neurodesktop/cvmfs-selection.env` for seven days
+and reused while its primary server passes a health check; a failed mount
+triggers a forced re-probe.
 
 Configuration lives in [`config/cvmfs/`](../config/cvmfs/). CVMFS can be
 disabled with `CVMFS_DISABLE=true`.
@@ -155,6 +170,8 @@ permissions.
 
 ### CVMFS Setup
 
-CVMFS configuration files exist for different regions and modes, including
-direct and CDN access. The startup script probes servers and copies the best
-configuration to the active location.
+The active repository configuration is generated at startup by
+`cvmfs_server_select.sh` (see the CVMFS section above). The image bakes in
+[`config/cvmfs/neurodesk.ardc.edu.au.conf`](../config/cvmfs/neurodesk.ardc.edu.au.conf)
+as a static default so mounts that happen before the selection ran still work;
+CI jobs that configure CVMFS on the build host copy the same file.

@@ -794,6 +794,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/before_notebook.sh \
     && install -m 0755 /tmp/jupyter/jupyterlab_startup.sh /opt/neurodesktop/jupyterlab_startup.sh \
     && install -m 0755 /tmp/jupyter/deferred_startup.sh /opt/neurodesktop/deferred_startup.sh \
+    && install -m 0755 /tmp/jupyter/cvmfs_server_select.sh /opt/neurodesktop/cvmfs_server_select.sh \
     && install -m 0755 /tmp/guacamole/guacamole.sh /opt/neurodesktop/guacamole.sh \
     && install -m 0755 /tmp/guacamole/init_secrets.sh /opt/neurodesktop/init_secrets.sh \
     && install -m 0755 /tmp/guacamole/ensure_rdp_backend.sh /opt/neurodesktop/ensure_rdp_backend.sh \

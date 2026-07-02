@@ -1,3 +1,15 @@
 CVMFS_HTTP_PROXY=DIRECT
 CVMFS_QUOTA_LIMIT=5000
 CVMFS_CACHE_BASE=/home/jovyan/cvmfs_cache
+
+# Runtime failover: abandon a degraded server instead of waiting on it.
+# A transfer below CVMFS_LOW_SPEED_LIMIT (bytes/s) counts as a host failure
+# and moves the client to the next entry in CVMFS_SERVER_URL. 10 KB/s is low
+# enough not to evict users on genuinely slow links, but catches stalled or
+# overloaded servers (the client default of 1 KB/s effectively never fires).
+CVMFS_LOW_SPEED_LIMIT=10240
+CVMFS_TIMEOUT=5
+CVMFS_TIMEOUT_DIRECT=10
+CVMFS_MAX_RETRIES=2
+# Retry the (throughput-ranked) primary server after 30 minutes.
+CVMFS_HOST_RESET_AFTER=1800

@@ -3,6 +3,18 @@
 - `CVMFS_DISABLE`: set to `true` to disable CVMFS mounting
 - `CVMFS_MODULES`: CVMFS module catalogue path used when refreshing
   `MODULEPATH`; defaults to `/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/`
+- `NEURODESKTOP_CVMFS_SELECTION_TTL_SECONDS`: lifetime of the cached CVMFS
+  server ranking produced by `cvmfs_server_select.sh`; defaults to `604800`
+  (7 days). Set to `0` to re-probe on every startup
+- `NEURODESKTOP_CVMFS_HOST_POOL`: whitespace-separated `http://host[:port]`
+  list overriding the built-in pool of CVMFS servers that
+  `cvmfs_server_select.sh` probes (mainly for testing)
+- `NEURODESKTOP_CVMFS_TARGET_CONFIG`: file that `cvmfs_server_select.sh`
+  writes the generated repository config to; defaults to
+  `/etc/cvmfs/config.d/neurodesk.ardc.edu.au.conf` (mainly for testing)
+- `NEURODESKTOP_CVMFS_CACHE_FILE`: location of the CVMFS server selection
+  cache; defaults to `~/.cache/neurodesktop/cvmfs-selection.env` (mainly for
+  testing)
 - `NEURODESKTOP_LOCAL_CONTAINERS`: local container root used to derive
   `OFFLINE_MODULES`; defaults to `/neurodesktop-storage/containers`
 - `OFFLINE_MODULES`: local Lmod module path derived from
