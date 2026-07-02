@@ -13,6 +13,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -124,6 +125,13 @@ def run_select(tmp_path, host_pool, extra_env=None, args=()):
     return proc, (config.read_text() if config.is_file() else "")
 
 
+def _configured_server_urls(config):
+    server_line = next(
+        line for line in config.splitlines() if line.startswith("CVMFS_SERVER_URL=")
+    )
+    return server_line.split('"')[1].split(";")
+
+
 def test_script_syntax_ok():
     code = subprocess.run(["bash", "-n", _script_path()]).returncode
     assert code == 0, "cvmfs_server_select.sh has a bash syntax error"
@@ -149,7 +157,7 @@ def test_faster_server_ranked_first(tmp_path, fast_server, slow_server):
     server_line = next(
         line for line in config.splitlines() if line.startswith("CVMFS_SERVER_URL=")
     )
-    servers = server_line.split('"')[1].split(";")
+    servers = _configured_server_urls(config)
     assert servers[0] == f"{fast_server}/cvmfs/@fqrn@", (
         f"Expected the fast server first, got: {server_line}\n{proc.stdout}"
     )
@@ -170,7 +178,8 @@ def test_all_unreachable_writes_fallback(tmp_path, dead_server_url):
 
     assert proc.returncode == 1, proc.stdout
     assert "CVMFS_USE_GEOAPI=yes" in config
-    assert "cvmfs-geoproximity.neurodesk.org" in config
+    server_hosts = {urlparse(url).hostname for url in _configured_server_urls(config)}
+    assert "cvmfs-geoproximity.neurodesk.org" in server_hosts
     # A failed probe must not poison the cache.
     assert not (tmp_path / "selection.env").is_file()
 
