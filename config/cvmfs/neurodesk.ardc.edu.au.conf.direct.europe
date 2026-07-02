@@ -1,3 +1,0 @@
-CVMFS_USE_GEOAPI=no
-CVMFS_SERVER_URL="http://cvmfs-geoproximity.neurodesk.org/cvmfs/@fqrn@;http://cvmfs-frankfurt.neurodesk.org/cvmfs/@fqrn@;http://cvmfs01.nikhef.nl:8000/cvmfs/@fqrn@"
-CVMFS_KEYS_DIR="/etc/cvmfs/keys/ardc.edu.au/"

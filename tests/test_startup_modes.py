@@ -233,7 +233,8 @@ class TestCvmfsSelectionCache:
         """Neurodesktop-managed CVMFS mounts should still require cache files."""
         log_file = tmp_path / "deferred-startup.log"
         log_file.write_text(
-            "[deferred] Saved CVMFS selection to cache: region=america mode=direct\n",
+            "[cvmfs-select] Saved CVMFS server selection to cache: "
+            "/home/jovyan/.cache/neurodesktop/cvmfs-selection.env\n",
             encoding="utf-8",
         )
 
@@ -285,5 +286,9 @@ class TestCvmfsSelectionCache:
         with open(cache_file) as f:
             content = f.read()
 
-        assert "CACHED_REGION=" in content, "CACHED_REGION not found in cache file"
-        assert "CACHED_MODE=" in content, "CACHED_MODE not found in cache file"
+        assert "CACHED_CVMFS_SERVER_URL=" in content, (
+            "CACHED_CVMFS_SERVER_URL not found in cache file"
+        )
+        assert "CACHED_TIMESTAMP=" in content, (
+            "CACHED_TIMESTAMP not found in cache file"
+        )
