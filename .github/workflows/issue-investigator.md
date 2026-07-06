@@ -112,6 +112,17 @@ For an `issues` event, use `${{ github.event.issue.number }}` as the issue numbe
 
 Use `gh` through the GitHub tool to read the issue, comments, linked pull requests, related checks, and relevant repository files. Pull only the context needed for the reported symptom. Reproduce the issue locally when practical, then run the smallest focused validation that gives useful evidence.
 
+## Evidence Collection Budget
+
+Before choosing an output action, collect only bounded evidence:
+
+- Use a maximum of 8 read commands before deciding whether to create a pull request, add a comment, dispatch a workflow, or no-op.
+- For CI failures, read the issue body and comments, the workflow run/job summary, one representative failing job log, and the smallest owning workflow or script file. If matrix failures disagree, read at most 2 representative failing job logs.
+- For matrix CI failures, do not inspect every matrix entry. Classify the failure from the common pattern and mention the sampled jobs in the output.
+- Use a maximum of 2 live network probes such as `curl`, `wget`, `dig`, package-manager commands, or registry checks. If those probes are inconclusive, treat the remaining question as infrastructure evidence and add a comment instead of probing more.
+- Do not retry a failing read or probe more than once unless the retry is the final action needed to decide.
+- If you hit any budget, stop investigating and call a safe-output tool immediately. Use `create-pull-request` when you already have a focused repository fix, `add-comment` when the issue needs human or infrastructure follow-up, `dispatch-workflow` only for a likely transient failure that one allowed rerun can verify, and `noop` only when no visible repository or issue action is needed.
+
 ## Decision Rules
 
 - If the issue describes an actionable bug or maintenance problem that can be fixed within the allowed files, make the smallest coherent change, add or update focused tests when appropriate, run relevant validation, and use `create-pull-request`.

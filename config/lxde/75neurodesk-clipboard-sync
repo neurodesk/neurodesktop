@@ -1,0 +1,15 @@
+# Unify the X11 CLIPBOARD and PRIMARY selections inside xrdp desktop sessions.
+#
+# Guacamole's RDP clipboard channel (xrdp chansrv) only populates CLIPBOARD,
+# but VTE terminals (LXTerminal) paste PRIMARY on Shift+Insert - the paste
+# keystroke synthesized by the Safari clipboard shim and forwarded verbatim
+# from other browsers. Bridging the two selections makes Shift+Insert paste
+# uniformly in terminals and GUI apps, matching the VNC backend where
+# TigerVNC's vncconfig already feeds both selections.
+#
+# This file is sourced by /etc/X11/Xsession (xrdp sessions only); the VNC
+# xstartup runs startlxde directly and never reaches Xsession.d.
+if command -v autocutsel >/dev/null 2>&1; then
+    autocutsel -fork
+    autocutsel -selection PRIMARY -fork
+fi
