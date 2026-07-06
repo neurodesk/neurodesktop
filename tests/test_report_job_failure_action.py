@@ -44,9 +44,9 @@ def test_issue_investigator_routes_codex_through_neurodesk_gateway():
 
     assert 'OPENAI_BASE_URL: "https://llm.neurodesk.org/openai"' in workflow
     assert "OPENAI_API_KEY: ${{ secrets.CODEX_API_KEY || secrets.OPENAI_API_KEY }}" in workflow
-    assert "max-turn-cache-misses: 50" in workflow
+    assert "max-turn-cache-misses: 200" in workflow
     assert "openai_base_url=" not in workflow
     assert "openai_base_url=" not in lock
     assert '\\"targets\\":{\\"openai\\":{\\"host\\":\\"llm.neurodesk.org\\"}}' in lock
-    assert '\\"maxCacheMisses\\":50' in lock
+    assert '\\"maxCacheMisses\\":200' in lock
     assert "--openai-api-base-path /openai" in lock
