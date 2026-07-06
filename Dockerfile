@@ -315,7 +315,9 @@ RUN apt-install-retry \
     libgpgme-dev \
     libossp-uuid-dev \
     libpci3 \
+    libreoffice-calc \
     libreoffice-core \
+    libreoffice-writer \
     lmod \
     lua-bit32 \
     lua-filesystem \
