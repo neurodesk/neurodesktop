@@ -91,6 +91,28 @@ metadata, the wrapper creates the profile directory and `profiles.ini` entry
 itself. Simultaneous VNC and RDP desktops therefore do not contend for the same
 default Firefox profile.
 
+Clipboard sync between the browser and the remote desktop uses Guacamole's
+stock focus-driven `navigator.clipboard` integration in Chrome-family browsers.
+Safari and Firefox restrict clipboard reads outside an explicit paste gesture
+(Safari has no persistable clipboard-read permission at all), and no browser
+makes Cmd+V paste into the remote session, so the Dockerfile injects
+[`config/guacamole/mac-clipboard-shim.js`](../config/guacamole/mac-clipboard-shim.js)
+into the Guacamole webapp's `index.html`. On macOS (any browser) the shim
+intercepts Cmd+V, lets the browser's paste command land in a hidden textarea
+and reads the text from the paste event's `clipboardData` (prompt-free in
+every engine, unlike `navigator.clipboard.readText()`), streams it to the
+remote clipboard through Guacamole's `clipboardService`, and synthesizes
+Shift+Insert in the remote session (pastes in both terminals and GUI apps);
+text copied in the remote session is cached and flushed to the local clipboard
+on the next user gesture (Cmd+C or a mouse click). The shim is a no-op on
+non-macOS platforms, and its `index.html` script tag carries a content-hash
+query so browser caches cannot serve a stale shim after an image upgrade. Because Guacamole's RDP clipboard channel only
+populates the X11 CLIPBOARD selection while VTE terminals paste PRIMARY on
+Shift+Insert, xrdp sessions also start `autocutsel` (via
+[`config/lxde/75neurodesk-clipboard-sync`](../config/lxde/75neurodesk-clipboard-sync)
+in `/etc/X11/Xsession.d/`) to bridge the two selections; VNC sessions already
+get this from TigerVNC's `vncconfig`.
+
 ### Services
 
 - JupyterLab: main interface on port 8888

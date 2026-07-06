@@ -53,6 +53,42 @@ def test_guacamole_webapp():
     assert os.path.exists("/usr/local/tomcat/bin/startup.sh"), "Tomcat startup script missing"
 
 
+def test_guacamole_mac_clipboard_shim():
+    """Verify the macOS Cmd+V clipboard shim is installed and loaded by the webapp."""
+    shim_path = "/usr/local/tomcat/webapps/ROOT/mac-clipboard-shim.js"
+    assert os.path.exists(shim_path), "mac-clipboard-shim.js missing from Guacamole webapp"
+
+    with open(shim_path, encoding="utf-8") as f:
+        shim = f.read()
+    assert "clipboardData" in shim, \
+        "shim must capture paste-event clipboardData (readText triggers Safari's Paste callout)"
+    assert "navigator.clipboard.writeText" in shim, \
+        "shim must flush remote copies to the local clipboard"
+    assert "guacClientManager" in shim, \
+        "shim must resolve clients through Guacamole's guacClientManager"
+
+    index_path = "/usr/local/tomcat/webapps/ROOT/index.html"
+    assert os.path.exists(index_path), "Guacamole index.html missing"
+    with open(index_path, encoding="utf-8") as f:
+        index_html = f.read()
+    assert re.search(r'<script src="mac-clipboard-shim\.js\?v=[0-9a-f]{10}"></script>', index_html), \
+        "index.html does not load mac-clipboard-shim.js with a content-hash cache buster"
+
+
+def test_rdp_clipboard_selection_sync():
+    """Verify autocutsel bridges CLIPBOARD/PRIMARY in xrdp desktop sessions."""
+    code, output = run_cmd("command -v autocutsel")
+    assert code == 0, f"autocutsel not installed: {output}"
+
+    xsession_snippet = "/etc/X11/Xsession.d/75neurodesk-clipboard-sync"
+    assert os.path.exists(xsession_snippet), \
+        "Xsession.d clipboard sync snippet missing (Shift+Insert paste breaks in RDP terminals)"
+    with open(xsession_snippet, encoding="utf-8") as f:
+        snippet = f.read()
+    assert "autocutsel -fork" in snippet
+    assert "autocutsel -selection PRIMARY -fork" in snippet
+
+
 def test_tomcat_header_size():
     """Verify Tomcat accepts larger request headers for browser compatibility."""
     server_xml_path = "/usr/local/tomcat/conf/server.xml"

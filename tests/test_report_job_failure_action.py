@@ -50,3 +50,16 @@ def test_issue_investigator_routes_codex_through_neurodesk_gateway():
     assert '\\"targets\\":{\\"openai\\":{\\"host\\":\\"llm.neurodesk.org\\"}}' in lock
     assert '\\"maxCacheMisses\\":200' in lock
     assert "--openai-api-base-path /openai" in lock
+
+
+def test_issue_investigator_has_bounded_evidence_collection_guardrails():
+    workflow = _read_repo_file(WORKFLOW)
+
+    assert "## Evidence Collection Budget" in workflow
+    assert "Use a maximum of 8 read commands" in workflow
+    assert "one representative failing job log" in workflow
+    assert "read at most 2 representative failing job logs" in workflow
+    assert "For matrix CI failures, do not inspect every matrix entry" in workflow
+    assert "Use a maximum of 2 live network probes" in workflow
+    assert "Do not retry a failing read or probe more than once" in workflow
+    assert "call a safe-output tool immediately" in workflow

@@ -180,6 +180,7 @@ RUN apt-install-retry \
     xorgxrdp \
     xrdp \
     lxde \
+    autocutsel \
     gvfs \
     dbus-x11 \
     acl \
@@ -315,7 +316,6 @@ RUN apt-install-retry \
     libgpgme-dev \
     libossp-uuid-dev \
     libpci3 \
-    libreoffice-core \
     lmod \
     lua-bit32 \
     lua-filesystem \
@@ -578,6 +578,15 @@ RUN --mount=type=bind,source=config/guacamole,target=/tmp/guacamole,ro \
     && install -m 0644 -o ${NB_UID} -g ${NB_GID} /tmp/guacamole/user-mapping-vnc.xml /etc/guacamole/user-mapping-vnc.xml \
     && install -m 0644 -o ${NB_UID} -g ${NB_GID} /tmp/guacamole/user-mapping-vnc-rdp.xml /etc/guacamole/user-mapping-vnc-rdp.xml \
     && ln -sf /etc/guacamole/user-mapping-vnc.xml /etc/guacamole/user-mapping.xml \
+    # Safari has no persistable clipboard-read permission, so Guacamole's
+    # focus-driven clipboard sync fails there. Inject a shim that reads the
+    # clipboard inside the Cmd+V paste gesture instead (see the shim header).
+    && install -m 0644 /tmp/guacamole/mac-clipboard-shim.js /usr/local/tomcat/webapps/ROOT/mac-clipboard-shim.js \
+    # Content-hash cache buster: browsers cache the shim URL, so a changed
+    # shim must get a changed URL or upgraded images serve stale scripts.
+    && SHIM_V="$(sha256sum /usr/local/tomcat/webapps/ROOT/mac-clipboard-shim.js | cut -c1-10)" \
+    && sed -i "s|</body>|<script src=\"mac-clipboard-shim.js?v=${SHIM_V}\"></script></body>|" /usr/local/tomcat/webapps/ROOT/index.html \
+    && grep -q "mac-clipboard-shim.js?v=${SHIM_V}" /usr/local/tomcat/webapps/ROOT/index.html \
     && chown -R ${NB_UID}:${NB_GID} /etc/guacamole \
     && chown -R ${NB_UID}:${NB_GID} /usr/local/tomcat \
     # Apache Tomcat ships `conf/` as 0750 and a few script/dir modes that deny
@@ -698,6 +707,7 @@ RUN --mount=type=bind,source=config/itksnap,target=/tmp/itksnap,ro \
     && install -m 0644 /tmp/vscode/settings.json /opt/jovyan_defaults/.local/share/code-server/User/settings.json \
     && install -m 0644 /tmp/lxde/libfm.conf /opt/jovyan_defaults/.config/libfm/libfm.conf \
     && install -m 0755 /tmp/lxde/xstartup /opt/jovyan_defaults/.vnc/xstartup \
+    && install -m 0644 /tmp/lxde/75neurodesk-clipboard-sync /etc/X11/Xsession.d/75neurodesk-clipboard-sync \
     && install -m 0644 /tmp/conda/conda-readme.md /opt/jovyan_defaults/conda-readme.md \
     && install -m 0644 /tmp/agents/claude_settings.local.json /opt/jovyan_defaults/.claude/settings.local.json \
     && install -m 0644 /tmp/agents/claude_mcp_config.json /opt/jovyan_defaults/.claude/mcp_config.json \
