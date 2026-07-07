@@ -819,6 +819,13 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/generate_jupyter_config.py /opt/neurodesktop/scripts/generate_jupyter_config.py \
     && cp -a /tmp/jupyter/webapp_wrapper/. /opt/neurodesktop/webapp_wrapper/ \
     && install -m 0755 /tmp/jupyter/webapp_launcher.sh /opt/neurodesktop/webapp_launcher.sh \
+    # Associate office documents with the Neurodesk LibreOffice menu entries
+    # and drop xarchiver's claim on them; must run after neurocommand has
+    # generated its .desktop files.
+    && python3 /tmp/lxde/update_office_mimeapps.py \
+    /opt/jovyan_defaults/.config/mimeapps.list \
+    /usr/share/applications/neurodesk \
+    && update-desktop-database /usr/share/applications \
     && install -m 0644 /tmp/jupyter/jupyter_notebook_config.py.template /opt/neurodesktop/jupyter_notebook_config.py.template \
     && install -m 0644 /neurocommand/neurodesk/webapps.json /opt/neurodesktop/webapps.json \
     && python3 /opt/neurodesktop/scripts/generate_jupyter_config.py \
