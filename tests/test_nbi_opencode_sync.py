@@ -1,6 +1,8 @@
+import http.server
 import json
 import os
 import subprocess
+import threading
 from pathlib import Path
 
 
@@ -82,6 +84,9 @@ def run_nbi_setup(test_script, home_dir):
     env = {**os.environ, "HOME": str(home_dir)}
     env.pop("NEURODESK_API_KEY", None)
     env.pop("BR_MCP_TOKEN", None)
+    # Keep the running-server refresh hermetic: only jpserver files placed
+    # into the sandbox home by a test may be contacted.
+    env.pop("JUPYTER_RUNTIME_DIR", None)
     process = subprocess.run(
         ["bash", str(test_script)],
         stdout=subprocess.PIPE,
@@ -224,6 +229,134 @@ def test_nbi_non_openai_provider_left_alone(tmp_path):
     inline_section = cfg["inline_completion_model"]
     assert get_prop(inline_section, "base_url") == "https://llm.jetstream-cloud.org/v1"
     assert get_prop(inline_section, "model_id") == "gpt-oss-120b"
+
+
+class _RecordingNBIHandler(http.server.BaseHTTPRequestHandler):
+    """Fake Jupyter server that records NBI refresh requests."""
+
+    requests = None  # set per-instance via server attribute
+
+    def _record_and_reply(self, method):
+        self.server.recorded_requests.append(
+            {
+                "method": method,
+                "path": self.path,
+                "authorization": self.headers.get("Authorization"),
+            }
+        )
+        body = b"{}"
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        self._record_and_reply("GET")
+
+    def do_POST(self):
+        self._record_and_reply("POST")
+
+    def log_message(self, *args):
+        pass
+
+
+def start_fake_jupyter_server():
+    server = http.server.HTTPServer(("127.0.0.1", 0), _RecordingNBIHandler)
+    server.recorded_requests = []
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
+
+
+def write_jpserver_runtime_file(home_dir, url, token):
+    runtime_dir = home_dir / ".local/share/jupyter/runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    (runtime_dir / "jpserver-123.json").write_text(
+        json.dumps({"url": url, "token": token}), encoding="utf-8"
+    )
+
+
+def test_nbi_refreshes_running_jupyter_server(tmp_path):
+    """After a sync, a live Jupyter server is asked to re-read the config."""
+    test_script, home_dir = make_nbi_setup_sandbox(tmp_path)
+    write_opencode_config(home_dir, "jetstream/gpt-oss-120b")
+
+    server = start_fake_jupyter_server()
+    try:
+        port = server.server_address[1]
+        write_jpserver_runtime_file(
+            home_dir, f"http://127.0.0.1:{port}/", "secret-token"
+        )
+
+        output = run_nbi_setup(test_script, home_dir)
+    finally:
+        server.shutdown()
+
+    capability_requests = [
+        req
+        for req in server.recorded_requests
+        if req["path"] == "/notebook-intelligence/capabilities"
+    ]
+    assert len(capability_requests) == 1, server.recorded_requests
+    assert capability_requests[0]["method"] == "GET"
+    assert capability_requests[0]["authorization"] == "token secret-token"
+    # The brain-researcher MCP entry did not change, so MCP connections
+    # are not churned.
+    assert not any(
+        req["path"] == "/notebook-intelligence/reload-mcp-servers"
+        for req in server.recorded_requests
+    )
+    assert "refreshed Notebook Intelligence in 1 running" in output
+
+
+def test_nbi_reloads_mcp_servers_when_br_token_appears(tmp_path):
+    """A new BR_MCP_TOKEN also triggers a live MCP server reload."""
+    test_script, home_dir = make_nbi_setup_sandbox(tmp_path)
+    write_opencode_config(home_dir, "jetstream/gpt-oss-120b")
+    (home_dir / ".bashrc").write_text(
+        "export BR_MCP_TOKEN='br-test-token'\n", encoding="utf-8"
+    )
+
+    server = start_fake_jupyter_server()
+    try:
+        port = server.server_address[1]
+        write_jpserver_runtime_file(
+            home_dir, f"http://127.0.0.1:{port}/", "secret-token"
+        )
+
+        run_nbi_setup(test_script, home_dir)
+    finally:
+        server.shutdown()
+
+    reload_requests = [
+        req
+        for req in server.recorded_requests
+        if req["path"] == "/notebook-intelligence/reload-mcp-servers"
+    ]
+    assert len(reload_requests) == 1, server.recorded_requests
+    assert reload_requests[0]["method"] == "POST"
+    assert reload_requests[0]["authorization"] == "token secret-token"
+
+
+def test_nbi_refresh_tolerates_dead_server(tmp_path):
+    """Stale jpserver files pointing at dead ports do not fail the sync."""
+    test_script, home_dir = make_nbi_setup_sandbox(tmp_path)
+    write_opencode_config(home_dir, "jetstream/gpt-oss-120b")
+
+    # Grab a free port, then close it again so nothing is listening.
+    probe = http.server.HTTPServer(("127.0.0.1", 0), _RecordingNBIHandler)
+    dead_port = probe.server_address[1]
+    probe.server_close()
+    write_jpserver_runtime_file(
+        home_dir, f"http://127.0.0.1:{dead_port}/", "secret-token"
+    )
+
+    output = run_nbi_setup(test_script, home_dir)
+
+    assert "refreshed Notebook Intelligence" not in output
+    cfg = read_nbi_config(home_dir)
+    assert get_prop(cfg["chat_model"], "model_id") == "gpt-oss-120b"
 
 
 def test_nbi_defaults_kept_without_opencode_config(tmp_path):

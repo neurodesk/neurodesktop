@@ -22,11 +22,37 @@ find_free_tcp_port() {
     return 1
 }
 
+tcp_port_is_listening() {
+    local port="$1"
+    if ! command -v ss >/dev/null 2>&1; then
+        return 1
+    fi
+
+    ss -lnt 2>/dev/null | awk 'NR>1 {print $4}' | grep -Eq "(^|:)${port}$"
+}
+
+NEURODESKTOP_RUNTIME_DIR="${NEURODESKTOP_RUNTIME_DIR:-${HOME}/.neurodesk/runtime}"
+mkdir -p "${NEURODESKTOP_RUNTIME_DIR}" 2>/dev/null || true
+
 # Pick a free RDP port. Under Apptainer all users share the host netns, so the
 # default 3389 is very likely taken by the first user on the node. Probe from
 # 3389 upwards and export the chosen port so guacamole.sh can stamp it into the
 # user's Guacamole mapping.
 RDP_PORT="${NEURODESKTOP_RDP_PORT:-}"
+
+# Reuse the port published by a previous run when something still listens on
+# it - that listener is our own xrdp from an earlier invocation. Without this,
+# a re-run treats its own xrdp as a foreign conflict, probes on to the next
+# port, and then waits the full timeout for a port xrdp never rebinds -
+# dropping RDP from the Guacamole mapping entirely.
+if [ -z "${RDP_PORT}" ] && [ -f "${NEURODESKTOP_RUNTIME_DIR}/rdp_port" ]; then
+    _published_port="$(cat "${NEURODESKTOP_RUNTIME_DIR}/rdp_port" 2>/dev/null || true)"
+    if [ -n "${_published_port}" ] && tcp_port_is_listening "${_published_port}"; then
+        RDP_PORT="${_published_port}"
+    fi
+    unset _published_port
+fi
+
 if [ -z "${RDP_PORT}" ]; then
     RDP_PORT="$(find_free_tcp_port 3389 20 || true)"
 fi
@@ -35,16 +61,10 @@ export NEURODESKTOP_RDP_PORT="${RDP_PORT}"
 # Publish the chosen port so guacamole.sh (parent process) can read it back.
 # This file lives under the per-user runtime state directory. Subshell exports
 # don't propagate up, so a file is the simplest handoff.
-NEURODESKTOP_RUNTIME_DIR="${NEURODESKTOP_RUNTIME_DIR:-${HOME}/.neurodesk/runtime}"
-mkdir -p "${NEURODESKTOP_RUNTIME_DIR}" 2>/dev/null || true
 printf '%s\n' "${RDP_PORT}" > "${NEURODESKTOP_RUNTIME_DIR}/rdp_port" 2>/dev/null || true
 
 port_is_listening() {
-    if ! command -v ss >/dev/null 2>&1; then
-        return 1
-    fi
-
-    ss -lnt 2>/dev/null | awk 'NR>1 {print $4}' | grep -Eq "(^|:)${RDP_PORT}$"
+    tcp_port_is_listening "${RDP_PORT}"
 }
 
 start_rdp_service() {
@@ -72,11 +92,11 @@ start_rdp_service() {
 wait_for_rdp_port() {
     local attempt
 
-    for attempt in $(seq 1 15); do
+    for attempt in $(seq 1 60); do
         if port_is_listening; then
             return 0
         fi
-        sleep 1
+        sleep 0.25
     done
 
     echo "[WARN] xrdp did not begin listening on port ${RDP_PORT}."

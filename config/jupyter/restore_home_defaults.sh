@@ -201,6 +201,15 @@ restore_defaults() {
             continue
         fi
 
+        # Skip the claude binary (~230MB): /usr/local/sbin/claude (first in
+        # PATH) lazily copies it from /opt/jovyan_defaults on first use, so
+        # copying it into every fresh - possibly network-mounted - home at
+        # boot only slows startup. Skipping also avoids the newer-image
+        # migration path clobbering a self-updated user binary.
+        if [[ "$src_file" == *"/.local/bin/claude" ]]; then
+            continue
+        fi
+
         # Calculate relative path and destination
         rel_path="${src_file#${DEFAULTS_DIR}/}"
         dest_file="${HOME_DIR}/${rel_path}"
