@@ -113,6 +113,18 @@ Shift+Insert, xrdp sessions also start `autocutsel` (via
 in `/etc/X11/Xsession.d/`) to bridge the two selections; VNC sessions already
 get this from TigerVNC's `vncconfig`.
 
+Double-clicking a file in the desktop resolves its MIME type through the
+default-user [`config/lxde/mimeapps.list`](../config/lxde/mimeapps.list).
+Office documents (.odt, .docx, .xlsx, .pptx, ...) open in the Neurodesk
+LibreOffice container apps: at image build time,
+[`config/lxde/update_office_mimeapps.py`](../config/lxde/update_office_mimeapps.py)
+reads the `MimeType=` declarations from the neurocommand-generated LibreOffice
+`.desktop` entries, registers the newest version as the default handler for
+each declared type, and removes xarchiver's claim on them (ODF/OOXML documents
+are zip containers, so the archive manager would otherwise win). The build
+fails if the neurocommand revision in the image does not declare MIME types in
+its menu entries yet.
+
 ### Services
 
 - JupyterLab: main interface on port 8888
