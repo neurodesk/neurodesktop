@@ -1,13 +1,15 @@
 #!/bin/bash
 # nbi_setup.sh
 # Keep Notebook Intelligence's chat/inline-completion provider aligned with
-# the OpenCode default (llm.neurodesk.org gpt-oss) and inject the shared
-# NEURODESK_API_KEY (the one OpenCode persists to ~/.bashrc) so NBI can
-# authenticate without the user re-entering the key in the Settings UI.
+# the model the user selected in OpenCode (~/.config/opencode/opencode.json
+# is the source of truth) and inject the shared NEURODESK_API_KEY (the one
+# OpenCode persists to ~/.bashrc) so NBI can authenticate without the user
+# re-entering the key in the Settings UI.
 #
 # Called from jupyterlab_startup.sh after restore_home_defaults.sh has
 # dropped the default /opt/jovyan_defaults/.jupyter/nbi/config.json into
-# the user's home.
+# the user's home, and from the OpenCode wrapper right after a model is
+# selected or a fresh API key is saved, so NBI never lags behind.
 
 set -u
 
@@ -15,6 +17,7 @@ NBI_CONFIG_FILE="${HOME}/.jupyter/nbi/config.json"
 NBI_DEFAULT_CONFIG="/opt/jovyan_defaults/.jupyter/nbi/config.json"
 NBI_MCP_FILE="${HOME}/.jupyter/nbi/mcp.json"
 NBI_DEFAULT_MCP="/opt/jovyan_defaults/.jupyter/nbi/mcp.json"
+OPENCODE_CONFIG_FILE="${HOME}/.config/opencode/opencode.json"
 
 mkdir -p "$(dirname "${NBI_CONFIG_FILE}")" 2>/dev/null || true
 
@@ -228,6 +231,151 @@ if changed:
         fh.write("\n")
     os.replace(tmp, cfg_path)
     print("nbi_setup.sh: repaired openai-compatible chat/inline-completion config from default", file=sys.stderr)
+PY
+fi
+
+# Mirror the OpenCode model selection into NBI. The OpenCode wrapper stores
+# the chosen model as "provider/model_id" in opencode.json together with each
+# provider's baseURL, so that file is the single source of truth for which
+# model/endpoint the coding agents use. Sections the user pointed at an
+# endpoint OpenCode does not manage (via the NBI Settings UI) are left alone,
+# as are sections using a non-openai-compatible provider (claude, ollama...).
+if command -v python3 >/dev/null 2>&1 && [ -f "${OPENCODE_CONFIG_FILE}" ]; then
+    NBI_CONFIG_FILE="${NBI_CONFIG_FILE}" \
+    OPENCODE_CONFIG_FILE="${OPENCODE_CONFIG_FILE}" \
+    NEURODESK_API_KEY_VALUE="${NEURODESK_API_KEY_VALUE}" \
+    python3 - <<'PY'
+import json
+import os
+import sys
+
+cfg_path = os.environ["NBI_CONFIG_FILE"]
+opencode_path = os.environ["OPENCODE_CONFIG_FILE"]
+neurodesk_key = os.environ.get("NEURODESK_API_KEY_VALUE", "")
+
+def load_json(path):
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+opencode_cfg = load_json(opencode_path)
+cfg = load_json(cfg_path)
+if not isinstance(opencode_cfg, dict) or not isinstance(cfg, dict):
+    sys.exit(0)
+
+model_ref = opencode_cfg.get("model")
+if not isinstance(model_ref, str) or "/" not in model_ref:
+    sys.exit(0)
+provider_key, model_id = model_ref.split("/", 1)
+
+providers = opencode_cfg.get("provider")
+if not isinstance(providers, dict):
+    sys.exit(0)
+provider_cfg = providers.get(provider_key)
+if not isinstance(provider_cfg, dict):
+    sys.exit(0)
+# Only OpenAI-compatible providers map onto NBI's openai-compatible sections.
+if provider_cfg.get("npm") != "@ai-sdk/openai-compatible":
+    sys.exit(0)
+
+options = provider_cfg.get("options")
+if not isinstance(options, dict):
+    options = {}
+base_url = str(options.get("baseURL") or "").rstrip("/")
+if not base_url or not model_id:
+    sys.exit(0)
+
+def resolve_api_key(raw):
+    # OpenCode stores keys as "{env:VAR}" placeholders and resolves them from
+    # the environment itself; NBI needs the literal value.
+    raw = str(raw or "")
+    if raw.startswith("{env:") and raw.endswith("}"):
+        var_name = raw[5:-1]
+        if var_name == "NEURODESK_API_KEY":
+            return neurodesk_key
+        return os.environ.get(var_name, "")
+    return raw
+
+api_key = resolve_api_key(options.get("apiKey"))
+
+# Every baseURL OpenCode knows about counts as managed; an NBI section
+# pointing anywhere else was configured by hand and is left untouched.
+managed_urls = {"https://llm.neurodesk.org/openai"}
+for candidate in providers.values():
+    if not isinstance(candidate, dict):
+        continue
+    candidate_options = candidate.get("options")
+    if isinstance(candidate_options, dict):
+        url = str(candidate_options.get("baseURL") or "").rstrip("/")
+        if url:
+            managed_urls.add(url)
+
+context_window = ""
+models_cfg = provider_cfg.get("models")
+if isinstance(models_cfg, dict):
+    model_cfg = models_cfg.get(model_id)
+    if isinstance(model_cfg, dict):
+        limit_cfg = model_cfg.get("limit")
+        if isinstance(limit_cfg, dict):
+            try:
+                context_limit = int(limit_cfg.get("context"))
+            except (TypeError, ValueError):
+                context_limit = 0
+            if context_limit > 0:
+                context_window = str(context_limit)
+
+def get_prop(props, prop_id):
+    for prop in props:
+        if isinstance(prop, dict) and prop.get("id") == prop_id:
+            return str(prop.get("value") or "")
+    return ""
+
+def set_prop(props, prop_id, value):
+    for prop in props:
+        if isinstance(prop, dict) and prop.get("id") == prop_id:
+            if prop.get("value") != value:
+                prop["value"] = value
+                return True
+            return False
+    props.append({"id": prop_id, "value": value})
+    return True
+
+changed = False
+for section in ("chat_model", "inline_completion_model"):
+    model_section = cfg.get(section)
+    if not isinstance(model_section, dict):
+        continue
+    if model_section.get("provider") != "openai-compatible":
+        continue
+    props = model_section.get("properties")
+    if not isinstance(props, list):
+        props = []
+        model_section["properties"] = props
+    current_url = get_prop(props, "base_url").rstrip("/")
+    if current_url and current_url not in managed_urls:
+        continue
+    if set_prop(props, "base_url", base_url):
+        changed = True
+    if set_prop(props, "model_id", model_id):
+        changed = True
+    # Never wipe an existing key with an empty one (e.g. before first setup).
+    if api_key and set_prop(props, "api_key", api_key):
+        changed = True
+    if context_window and set_prop(props, "context_window", context_window):
+        changed = True
+
+if changed:
+    tmp = f"{cfg_path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(cfg, fh, indent=2)
+        fh.write("\n")
+    os.replace(tmp, cfg_path)
+    print(
+        f"nbi_setup.sh: synced Notebook Intelligence to OpenCode selection {provider_key}/{model_id}",
+        file=sys.stderr,
+    )
 PY
 fi
 

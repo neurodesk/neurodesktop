@@ -246,8 +246,9 @@ mkdir -p ${HOME}/.config/goose
 # ensure opencode config directory exists
 mkdir -p ${HOME}/.config/opencode
 
-# Align Notebook Intelligence's provider with OpenCode (Neurodesk LiteLLM
-# gpt-oss) and inject NEURODESK_API_KEY from env or ~/.bashrc if available.
+# Align Notebook Intelligence's provider/model with the model selected in
+# OpenCode (~/.config/opencode/opencode.json) and inject NEURODESK_API_KEY
+# from env or ~/.bashrc if available.
 if [ -x /opt/neurodesktop/nbi_setup.sh ]; then
     /opt/neurodesktop/nbi_setup.sh || \
         echo "[WARN] nbi_setup.sh failed; Notebook Intelligence may require manual configuration."

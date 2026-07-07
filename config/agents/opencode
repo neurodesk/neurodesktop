@@ -14,6 +14,7 @@ NEURODESK_BASE_URL="${NEURODESK_BASE_URL%/}"
 NEURODESK_DEFAULT_MODEL_ID="gpt-oss"
 BRAIN_RESEARCHER_MCP_URL="https://brain-researcher.com/mcp"
 BRAIN_RESEARCHER_SIGNUP_URL="https://brain-researcher.com/settings"
+NBI_SETUP_SCRIPT="${NBI_SETUP_SCRIPT:-/opt/neurodesktop/nbi_setup.sh}"
 OPENCODE_STARTUP_VERBOSE="${OPENCODE_STARTUP_VERBOSE:-0}"
 OPENCODE_COLOR_ENABLED=0
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
@@ -1553,9 +1554,25 @@ ensure_opencode_model_selection() {
     echo "OpenCode default model set to ${SELECTED_MODEL}."
 }
 
+# Mirror the model selection, NEURODESK_API_KEY, and BR_MCP_TOKEN into
+# Notebook Intelligence so the JupyterLab AI assistant follows whatever was
+# chosen here instead of waiting for the next JupyterLab restart
+# (nbi_setup.sh reads the selection back out of opencode.json).
+sync_notebook_intelligence_config() {
+    if [ ! -x "${NBI_SETUP_SCRIPT}" ]; then
+        return 0
+    fi
+    if "${NBI_SETUP_SCRIPT}" >/dev/null 2>&1; then
+        echo "Notebook Intelligence follows the OpenCode model selection (JupyterLab reload picks it up)."
+    else
+        echo "Warning: failed to sync Notebook Intelligence config via ${NBI_SETUP_SCRIPT}." >&2
+    fi
+}
+
 ensure_opencode_model_selection
 prompt_brain_researcher_mcp_setup
 apply_brain_researcher_mcp_to_opencode_config
+sync_notebook_intelligence_config
 
 if [ -n "${BR_MCP_TOKEN:-}" ]; then
     echo "Brain Researcher MCP server: ACTIVE (using BR_MCP_TOKEN from env/~/.bashrc)"

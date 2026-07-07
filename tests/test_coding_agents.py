@@ -536,6 +536,47 @@ def test_opencode_reprompts_when_pasted_neurodesk_key_is_rejected(tmp_path):
     assert "neurodesk-test-key" in bashrc
     assert "wrong-neurodesk-key" not in bashrc
 
+def test_opencode_wrapper_syncs_notebook_intelligence(tmp_path):
+    """Verify the wrapper pushes the model/key selection to Notebook Intelligence."""
+    test_wrapper, _home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+
+    marker = tmp_path / "nbi-sync-marker"
+    fake_nbi_setup = tmp_path / "fake-nbi-setup"
+    fake_nbi_setup.write_text(
+        "#!/bin/sh\n" f"printf '%s' \"${{NEURODESK_API_KEY:-}}\" > '{marker}'\n",
+        encoding="utf-8",
+    )
+    fake_nbi_setup.chmod(0o755)
+    env["NBI_SETUP_SCRIPT"] = str(fake_nbi_setup)
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)],
+        "neurodesk-test-key\n1\nn\n",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert returncode == 0, output
+    assert "OpenCode default model set to neurodesk/model-alpha." in output
+    assert "Notebook Intelligence follows the OpenCode model selection" in output
+    # nbi_setup.sh ran after key entry and saw the freshly exported key.
+    assert marker.read_text(encoding="utf-8") == "neurodesk-test-key"
+
+def test_opencode_wrapper_skips_nbi_sync_when_script_missing(tmp_path):
+    """Verify a missing nbi_setup.sh is not an error (non-container installs)."""
+    test_wrapper, _home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    env["NBI_SETUP_SCRIPT"] = str(tmp_path / "does-not-exist")
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)],
+        "neurodesk-test-key\n1\nn\n",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert returncode == 0, output
+    assert "Notebook Intelligence" not in output
+
 def test_codex_yolo_no_full_auto(tmp_path):
     """Verify Codex wrapper does not combine --yolo with --full-auto."""
     wrapper_path = Path("/usr/local/sbin/codex")

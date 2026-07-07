@@ -32,7 +32,12 @@
 - `NEURODESK_API_KEY`: API key for `https://llm.neurodesk.org`. Shared by
   OpenCode and by the Notebook Intelligence JupyterLab plugin. OpenCode
   persists it to `~/.bashrc` on first setup, and `nbi_setup.sh` injects it
-  into `~/.jupyter/nbi/config.json` on each JupyterLab startup
+  into `~/.jupyter/nbi/config.json` on each JupyterLab startup and after
+  each OpenCode run. `nbi_setup.sh` also mirrors the model selected in
+  OpenCode (the top-level `model` in `~/.config/opencode/opencode.json`)
+  into Notebook Intelligence, so picking a model in the OpenCode startup
+  menu updates both tools; Notebook Intelligence sections pointed at a
+  custom endpoint via its Settings UI are left alone
 - `NBI_TOUR_CONFIG_PATH`: Notebook Intelligence tour override file; defaults to
   `/opt/jovyan_defaults/.jupyter/nbi/tour_config.json`, which disables the
   first-run tour in Neurodesktop
