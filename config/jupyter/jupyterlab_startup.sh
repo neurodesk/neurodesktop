@@ -152,6 +152,13 @@ fi
 # Default ACLs ensure future keys created in .ssh get owner-only permissions
 setfacl -dRm u::rw,g::0,o::0 "${HOME}/.ssh" 2>/dev/null || true
 
+# Pre-generate the SSH keypairs guacamole.sh needs for the SFTP side-channel
+# so the first desktop open does not pay two RSA-4096 generations (~3s).
+# ensure_ssh_keys.sh serialises against a concurrent guacamole.sh via flock.
+if [ -x /opt/neurodesktop/ensure_ssh_keys.sh ]; then
+    /opt/neurodesktop/ensure_ssh_keys.sh >/dev/null 2>&1 &
+fi
+
 # Create a symlink in home if /data is mounted
 if mountpoint -q /data; then
     if [ ! -L "${HOME}/data" ]; then

@@ -18,6 +18,7 @@ NBI_DEFAULT_CONFIG="/opt/jovyan_defaults/.jupyter/nbi/config.json"
 NBI_MCP_FILE="${HOME}/.jupyter/nbi/mcp.json"
 NBI_DEFAULT_MCP="/opt/jovyan_defaults/.jupyter/nbi/mcp.json"
 OPENCODE_CONFIG_FILE="${HOME}/.config/opencode/opencode.json"
+NBI_MCP_SYNC_CHANGED=0
 
 mkdir -p "$(dirname "${NBI_CONFIG_FILE}")" 2>/dev/null || true
 
@@ -99,7 +100,8 @@ sync_mcp_brain_researcher() {
         cp "${NBI_DEFAULT_MCP}" "${NBI_MCP_FILE}" 2>/dev/null || true
     fi
 
-    NBI_MCP_FILE="${NBI_MCP_FILE}" \
+    local sync_result
+    sync_result=$(NBI_MCP_FILE="${NBI_MCP_FILE}" \
     BR_MCP_TOKEN_VALUE="${BR_MCP_TOKEN_VALUE}" \
     python3 - <<'PY'
 import json, os, sys
@@ -142,7 +144,12 @@ with open(tmp, "w", encoding="utf-8") as fh:
     json.dump(cfg, fh, indent=2)
     fh.write("\n")
 os.replace(tmp, path)
+print("changed")
 PY
+)
+    if [ "${sync_result}" = "changed" ]; then
+        NBI_MCP_SYNC_CHANGED=1
+    fi
 }
 
 sync_mcp_brain_researcher
@@ -379,16 +386,9 @@ if changed:
 PY
 fi
 
-if [ -z "${NEURODESK_API_KEY_VALUE}" ]; then
-    # No key yet; NBI will boot with an empty key. The user can run opencode
-    # once to set it up, or paste it into the NBI Settings dialog.
-    exit 0
-fi
-
-if ! command -v python3 >/dev/null 2>&1; then
-    exit 0
-fi
-
+# If there is no key yet, NBI boots with an empty key. The user can run
+# opencode once to set it up, or paste it into the NBI Settings dialog.
+if [ -n "${NEURODESK_API_KEY_VALUE}" ] && command -v python3 >/dev/null 2>&1; then
 NBI_API_KEY="${NEURODESK_API_KEY_VALUE}" NBI_CONFIG_FILE="${NBI_CONFIG_FILE}" \
 python3 - <<'PY'
 import json
@@ -438,3 +438,94 @@ if changed:
         fh.write("\n")
     os.replace(tmp, path)
 PY
+fi
+
+# A running JupyterLab keeps config.json/mcp.json cached in memory: it renders
+# the Settings dialog from that cache and writes the whole cache back to disk
+# on the next Settings save, which would both hide and then revert everything
+# synced above. Ask each live Jupyter server to re-read the files instead:
+# GET /notebook-intelligence/capabilities reloads the config and rebuilds the
+# model objects server-side without writing anything back, and when the
+# brain-researcher MCP entry changed, POST /notebook-intelligence/
+# reload-mcp-servers makes the MCP connections follow too. Best-effort: at
+# container boot no server is up yet and stale jpserver-*.json files from
+# earlier sessions point at dead hosts, so failures are silently ignored.
+refresh_running_nbi() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        return 0
+    fi
+
+    NBI_MCP_SYNC_CHANGED="${NBI_MCP_SYNC_CHANGED}" python3 - <<'PY'
+import glob
+import json
+import os
+import sys
+from urllib import error, request
+
+runtime_dir = os.environ.get("JUPYTER_RUNTIME_DIR") or os.path.join(
+    os.path.expanduser("~"), ".local", "share", "jupyter", "runtime"
+)
+mcp_changed = os.environ.get("NBI_MCP_SYNC_CHANGED", "0") == "1"
+
+
+def call_nbi(base_url, token, path, method):
+    req = request.Request(f"{base_url}/{path}", method=method)
+    if token:
+        req.add_header("Authorization", f"token {token}")
+    if method == "POST":
+        req.add_header("Content-Type", "application/json")
+        req.data = b"{}"
+    with request.urlopen(req, timeout=5) as resp:
+        return resp.status
+
+
+def file_mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
+refreshed = 0
+# Newest first: the live server's runtime file is the most recent one, and
+# persistent homes accumulate stale jpserver files from earlier sessions.
+server_files = sorted(
+    glob.glob(os.path.join(runtime_dir, "jpserver-*.json")),
+    key=file_mtime,
+    reverse=True,
+)
+for server_file in server_files[:10]:
+    try:
+        with open(server_file, "r", encoding="utf-8") as fh:
+            info = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        continue
+    if not isinstance(info, dict):
+        continue
+    base_url = str(info.get("url") or "").rstrip("/")
+    if not base_url:
+        continue
+    token = str(info.get("token") or "")
+    try:
+        call_nbi(base_url, token, "notebook-intelligence/capabilities", "GET")
+    except (error.URLError, TimeoutError, OSError, ValueError):
+        continue
+    refreshed += 1
+    if mcp_changed:
+        try:
+            call_nbi(
+                base_url, token, "notebook-intelligence/reload-mcp-servers", "POST"
+            )
+        except (error.URLError, TimeoutError, OSError, ValueError):
+            pass
+
+if refreshed:
+    print(
+        f"nbi_setup.sh: refreshed Notebook Intelligence in {refreshed} running "
+        "JupyterLab server(s)",
+        file=sys.stderr,
+    )
+PY
+}
+
+refresh_running_nbi

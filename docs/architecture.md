@@ -181,6 +181,22 @@ The Dockerfile resets the local neurocommand `main` branch to that ref and keeps
 it tracking `origin/main` so the runtime Update launcher can use
 `git pull --rebase --autostash`.
 
+### Notebook Intelligence Settings Patch
+
+The upstream Notebook Intelligence settings panel auto-saves its client-side
+state on open, using the capabilities cache fetched at page load. That
+reverts any `~/.jupyter/nbi/config.json` change made behind the server's
+back — in particular the OpenCode model selection mirrored by
+`nbi_setup.sh`. Until this is fixed upstream, the Dockerfile pins
+`notebook_intelligence` and runs
+[`config/agents/patch_nbi.py`](../config/agents/patch_nbi.py) to rewrite the
+bundled labextension so opening the settings panel first re-fetches
+capabilities (the backend reloads the config file from disk to answer) and
+rebuilds the panel from that fresh state. The patcher is anchored on the
+exact minified code and fails the image build when a `notebook_intelligence`
+upgrade changes the bundle, so the workaround cannot silently regress;
+re-verify and update (or drop) the patch when bumping the pin.
+
 ### Apptainer
 
 The Dockerfile builds Apptainer from upstream source in a dedicated build stage

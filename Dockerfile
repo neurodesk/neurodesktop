@@ -514,7 +514,9 @@ RUN /opt/conda/bin/pip install \
     jupyter-server-proxy \
     jupyterlmod \
     jupyterlab-git \
-    notebook_intelligence \
+    # Pinned: patch_nbi.py rewrites this exact release's labextension bundle;
+    # bump both together after re-verifying the patch.
+    notebook_intelligence==5.2.1 \
     jupyterlab_rise \
     jupyterlab-niivue==0.2.7 \
     jupyterlab_myst \
@@ -734,7 +736,13 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     && install -D -m 0644 /tmp/agents/AGENTS.md /opt/AGENTS.md \
     && install -m 0755 -o root -g root /tmp/agents/claude /usr/local/sbin/claude \
     && install -m 0755 -o root -g root /tmp/agents/opencode /usr/local/sbin/opencode \
-    && install -m 0755 -o root -g root /tmp/agents/codex /usr/local/sbin/codex
+    && install -m 0755 -o root -g root /tmp/agents/codex /usr/local/sbin/codex \
+    # Anchored Notebook Intelligence patch (see patch_nbi.py): make the
+    # settings panel fetch fresh capabilities on open instead of auto-saving
+    # its stale client-side cache over the OpenCode model sync. The script
+    # fails the build when the anchor no longer matches.
+    && install -m 0755 -o root -g users /tmp/agents/patch_nbi.py /opt/neurodesktop/patch_nbi.py \
+    && /opt/conda/bin/python3 /opt/neurodesktop/patch_nbi.py
 
 #========================================#
 # Finalise build
@@ -813,6 +821,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/jupyter/jupyterlmod_modulepath.py /opt/neurodesktop/jupyterlmod_modulepath.py \
     && install -m 0755 /tmp/jupyter/external_webapp_redirect.py /opt/neurodesktop/external_webapp_redirect.py \
     && install -m 0755 /tmp/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh \
+    && install -m 0755 /tmp/ssh/ensure_ssh_keys.sh /opt/neurodesktop/ensure_ssh_keys.sh \
     && install -m 0755 /tmp/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh \
     && cp -a /tmp/tests /opt/tests \
     && install -m 0644 /tmp/Dockerfile /opt/tests/Dockerfile \

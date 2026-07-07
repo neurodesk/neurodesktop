@@ -716,7 +716,12 @@ def test_codex_respects_explicit_approval_and_sandbox_flags(tmp_path):
     assert "ARG:danger-full-access" not in result.stdout
 
 def test_claude_replaces_dangling_symlink(tmp_path):
-    """Verify Claude wrapper restores binary when ~/.local/bin/claude is a dangling symlink."""
+    """Verify the wrapper handles a dangling ~/.local/bin/claude symlink.
+
+    The dangling link must be removed and the shared default binary executed
+    directly - the wrapper must NOT copy the ~230MB binary into the home
+    directory (per-user duplication, slow on network homes).
+    """
     wrapper_path = Path("/usr/local/sbin/claude")
     if not wrapper_path.exists():
         pytest.skip("Claude wrapper not installed in this environment")
@@ -759,9 +764,13 @@ def test_claude_replaces_dangling_symlink(tmp_path):
     )
 
     assert result.returncode == 0, f"Wrapper execution failed: {result.stdout}"
-    assert (bin_dir / "claude").exists(), "Claude binary was not restored"
-    assert not (bin_dir / "claude").is_symlink(), "Dangling symlink was not replaced"
-    assert os.access(bin_dir / "claude", os.X_OK), "Restored binary is not executable"
+    assert not (bin_dir / "claude").exists(), (
+        "Dangling symlink must be removed and the binary must NOT be copied "
+        "into the home directory"
+    )
+    assert str(fake_default_claude) in result.stdout, (
+        "Wrapper did not execute the shared default binary"
+    )
     assert "--allow-dangerously-skip-permissions" in result.stdout
     assert "--version" in result.stdout
 

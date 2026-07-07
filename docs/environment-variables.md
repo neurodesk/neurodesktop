@@ -21,6 +21,12 @@
   `NEURODESKTOP_LOCAL_CONTAINERS`
 - `NB_UID`, `NB_GID`: user and group IDs for permission matching
 - `START_LOCAL_LLMS`: set to `1` to enable Ollama with the Neurodesk model
+- `OLLAMA_HOST`: Ollama endpoint used by the AI tools; defaults to
+  `http://host.docker.internal:11434`. At container startup,
+  `before_notebook.sh` probes the endpoint (1s connect timeout) and repoints
+  the Jupyter server process at `http://127.0.0.1:11434` when it is
+  unreachable, so a black-holed host cannot block server startup while
+  Notebook Intelligence enumerates Ollama models
 - `NEURODESKTOP_DESKTOP_BACKEND`: desktop backend started by `guacamole.sh`;
   supported values are `rdp`, `vnc`, and `both`. The Jupyter launcher sets this
   automatically for the separate RDP and VNC desktop entries
@@ -37,7 +43,13 @@
   OpenCode (the top-level `model` in `~/.config/opencode/opencode.json`)
   into Notebook Intelligence, so picking a model in the OpenCode startup
   menu updates both tools; Notebook Intelligence sections pointed at a
-  custom endpoint via its Settings UI are left alone
+  custom endpoint via its Settings UI are left alone. After writing the
+  files, `nbi_setup.sh` asks every running Jupyter server (discovered via
+  `jpserver-*.json` under the Jupyter runtime directory) to re-read the
+  config so the change applies without a JupyterLab restart. An NBI
+  Settings tab that was already open in the browser still shows the old
+  values until the page is reloaded, and saving from such a stale tab
+  writes the old values back
 - `NBI_TOUR_CONFIG_PATH`: Notebook Intelligence tour override file; defaults to
   `/opt/jovyan_defaults/.jupyter/nbi/tour_config.json`, which disables the
   first-run tour in Neurodesktop

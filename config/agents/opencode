@@ -1557,13 +1557,14 @@ ensure_opencode_model_selection() {
 # Mirror the model selection, NEURODESK_API_KEY, and BR_MCP_TOKEN into
 # Notebook Intelligence so the JupyterLab AI assistant follows whatever was
 # chosen here instead of waiting for the next JupyterLab restart
-# (nbi_setup.sh reads the selection back out of opencode.json).
+# (nbi_setup.sh reads the selection back out of opencode.json and asks any
+# running JupyterLab server to re-read the refreshed config from disk).
 sync_notebook_intelligence_config() {
     if [ ! -x "${NBI_SETUP_SCRIPT}" ]; then
         return 0
     fi
     if "${NBI_SETUP_SCRIPT}" >/dev/null 2>&1; then
-        echo "Notebook Intelligence follows the OpenCode model selection (JupyterLab reload picks it up)."
+        echo "Notebook Intelligence follows the OpenCode model selection (reload any already-open NBI Settings tab before saving there)."
     else
         echo "Warning: failed to sync Notebook Intelligence config via ${NBI_SETUP_SCRIPT}." >&2
     fi
