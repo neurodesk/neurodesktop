@@ -306,14 +306,16 @@ jobs:
         
         echo ""
         echo "--- Test 4: FSL Module Loading ---"
-        CMD4="ml fsl"
-        echo "Sending command: $CMD4"
+        FSL_MODULE_LOADED=false
         
         for attempt in {1..3}; do
           echo "  Attempt $attempt/3..."
+          FSL_READY_MARKER="__FSL_MODULE_READY_${attempt}__"
+          CMD4="ml fsl && command -v fslmaths && echo ${FSL_READY_MARKER}"
+          echo "Sending command: $CMD4"
           
           ML_OUT=$(printf '%s\n' "[\"stdin\", \"$CMD4\\r\\n\"]" | \
-            timeout 20 websocat --text "$WS_URL" \
+            timeout 30 websocat --text "$WS_URL" \
             -H "Authorization: token $ADMIN_TOKEN" 2>&1 | \
             grep '^\["stdout"' | \
             sed 's/^\["stdout", *"//; s/"\]$//; s/\\r\\n/\n/g; s/\\n/\n/g' | \
@@ -321,12 +323,13 @@ jobs:
           
           echo "  Raw output: '$ML_OUT'"
           
-          if [ ${#ML_OUT} -ge 0 ]; then  # Module loading might not produce output
-            echo "✅ FSL module loaded successfully"
+          if echo "$ML_OUT" | grep -q "$FSL_READY_MARKER" && echo "$ML_OUT" | grep -q "fslmaths"; then
+            echo "✅ FSL module loaded and fslmaths is on PATH"
             FSL_TESTS_PASSED=$((FSL_TESTS_PASSED + 1))
+            FSL_MODULE_LOADED=true
             break
           else
-            echo "  ❌ Module loading failed, retrying in 5 seconds..."
+            echo "  ❌ Module loading did not expose fslmaths, retrying in 5 seconds..."
             sleep 5
           fi
         done
@@ -340,42 +343,45 @@ jobs:
         CMD5="fslmaths"
         echo "Sending command: $CMD5"
         echo "Note: This may take up to 120 seconds for container initialization..."
-        
-        # Send command and wait for extended time for container startup
-        (printf '%s\n' "[\"stdin\", \"$CMD5\\r\\n\"]" && sleep 120) | \
-            websocat --text "$WS_URL" \
-            -H "Authorization: token $ADMIN_TOKEN" 2>/dev/null &
-        WEBSOCAT_PID=$!
-        
         FSL_OUTPUT=""
-        for i in {1..24}; do
-          sleep 5
-          echo "  Waiting for FSL container... (${i}*5 = $((i*5))s elapsed)"
-          
-          if kill -0 "$WEBSOCAT_PID" 2>/dev/null; then
-            FSL_PARTIAL=$(timeout 3 websocat --text "$WS_URL" \
-                -H "Authorization: token $ADMIN_TOKEN" 2>/dev/null | \
-                grep '^\["stdout"' | \
-                sed 's/^\["stdout", *"//; s/"\]$//; s/\\r\\n/\n/g; s/\\n/\n/g' | \
-                tr -d '\000-\037' || echo "")
-            
-            echo "  Partial output: '${FSL_PARTIAL:0:100}...'"
-            
-            if [ -n "$FSL_PARTIAL" ] && echo "$FSL_PARTIAL" | grep -q "Usage: fslmaths"; then
-              echo "  ✅ FSL output detected!"
-              FSL_OUTPUT="$FSL_PARTIAL"
-              kill "$WEBSOCAT_PID" 2>/dev/null || true
+        if [ "$FSL_MODULE_LOADED" = true ]; then
+          # Send command and wait for extended time for container startup
+          (printf '%s\n' "[\"stdin\", \"$CMD5\\r\\n\"]" && sleep 120) | \
+              websocat --text "$WS_URL" \
+              -H "Authorization: token $ADMIN_TOKEN" 2>/dev/null &
+          WEBSOCAT_PID=$!
+
+          for i in {1..24}; do
+            sleep 5
+            echo "  Waiting for FSL container... (${i}*5 = $((i*5))s elapsed)"
+
+            if kill -0 "$WEBSOCAT_PID" 2>/dev/null; then
+              FSL_PARTIAL=$(timeout 3 websocat --text "$WS_URL" \
+                  -H "Authorization: token $ADMIN_TOKEN" 2>/dev/null | \
+                  grep '^\["stdout"' | \
+                  sed 's/^\["stdout", *"//; s/"\]$//; s/\\r\\n/\n/g; s/\\n/\n/g' | \
+                  tr -d '\000-\037' || echo "")
+
+              echo "  Partial output: '${FSL_PARTIAL:0:100}...'"
+
+              if [ -n "$FSL_PARTIAL" ] && echo "$FSL_PARTIAL" | grep -q "Usage: fslmaths"; then
+                echo "  ✅ FSL output detected!"
+                FSL_OUTPUT="$FSL_PARTIAL"
+                kill "$WEBSOCAT_PID" 2>/dev/null || true
+                break
+              fi
+            else
+              echo "  Connection ended, checking for output..."
               break
             fi
-          else
-            echo "  Connection ended, checking for output..."
-            break
-          fi
-        done
-        
-        kill "$WEBSOCAT_PID" 2>/dev/null || true
-        wait "$WEBSOCAT_PID" 2>/dev/null || true
-        
+          done
+
+          kill "$WEBSOCAT_PID" 2>/dev/null || true
+          wait "$WEBSOCAT_PID" 2>/dev/null || true
+        else
+          echo "❌ Skipping FSLMaths command because FSL module loading failed"
+        fi
+
         echo "Final FSL output length: ${#FSL_OUTPUT} chars"
         
         if [ -n "$FSL_OUTPUT" ]; then
