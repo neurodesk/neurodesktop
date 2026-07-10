@@ -534,6 +534,7 @@ RUN /opt/conda/bin/pip install \
     xnat \
     pytest \
     bash_kernel \
+    "packaging>=26.0" \
     "requests>=2.34.2" \
     "chardet<8" \
     && /opt/conda/bin/pip install --upgrade "litellm>=1.85.0" \
