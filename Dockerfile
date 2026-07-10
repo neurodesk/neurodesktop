@@ -500,6 +500,7 @@ ARG BUST_CACHE_PIP=2
 RUN /opt/conda/bin/pip install \
     datalad \
     nipype \
+    niwrap \
     nbdev \
     nf-core \
     snakemake \
