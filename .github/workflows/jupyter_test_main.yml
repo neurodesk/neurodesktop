@@ -311,19 +311,24 @@ jobs:
         for attempt in {1..3}; do
           echo "  Attempt $attempt/3..."
           FSL_READY_MARKER="__FSL_MODULE_READY_${attempt}__"
-          CMD4="ml fsl && command -v fslmaths && echo ${FSL_READY_MARKER}"
+          # Assemble the marker in the remote shell so the terminal's echoed
+          # command cannot be mistaken for successful command output.
+          CMD4="ml fsl && command -v fslmaths && echo '__FSL_MODULE_READY_'${attempt}'__'"
           echo "Sending command: $CMD4"
-          
-          ML_OUT=$(printf '%s\n' "[\"stdin\", \"$CMD4\\r\\n\"]" | \
+
+          # Keep stdin open while the module command runs. Without the sleep,
+          # websocat can close after receiving only the echoed command line.
+          ML_OUT=$(
+            (printf '%s\n' "[\"stdin\", \"$CMD4\\r\\n\"]" && sleep 25) | \
             timeout 30 websocat --text "$WS_URL" \
             -H "Authorization: token $ADMIN_TOKEN" 2>&1 | \
             grep '^\["stdout"' | \
             sed 's/^\["stdout", *"//; s/"\]$//; s/\\r\\n/\n/g; s/\\n/\n/g' | \
             tr -d '\000-\037' 2>/dev/null || echo "")
-          
+
           echo "  Raw output: '$ML_OUT'"
-          
-          if echo "$ML_OUT" | grep -q "$FSL_READY_MARKER" && echo "$ML_OUT" | grep -q "fslmaths"; then
+
+          if printf '%s\n' "$ML_OUT" | grep -Fq "$FSL_READY_MARKER"; then
             echo "✅ FSL module loaded and fslmaths is on PATH"
             FSL_TESTS_PASSED=$((FSL_TESTS_PASSED + 1))
             FSL_MODULE_LOADED=true

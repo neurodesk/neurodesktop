@@ -1,3 +1,4 @@
+import subprocess
 import sys
 from pathlib import Path
 
@@ -16,13 +17,69 @@ def _read_repo_file(path: Path) -> str:
     return path.read_text()
 
 
+def _fsl_probe_command(workflow: str) -> str:
+    for line in workflow.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('CMD4="') and stripped.endswith('"'):
+            return stripped.removeprefix('CMD4="').removesuffix('"')
+    raise AssertionError("FSL probe command not found in JupyterHub workflow")
+
+
 def test_jupyterhub_fsl_module_load_requires_fslmaths_on_path():
     workflow = _read_repo_file(JUPYTER_TEST_WORKFLOW)
 
     assert "if [ ${#ML_OUT} -ge 0 ]" not in workflow
     assert "ml fsl && command -v fslmaths" in workflow
     assert "__FSL_MODULE_READY_${attempt}__" in workflow
+    assert "echo ${FSL_READY_MARKER}" not in workflow
+    assert "echo '__FSL_MODULE_READY_'${attempt}'__'" in workflow
+    assert r"""(printf '%s\n' "[\"stdin\", \"$CMD4\\r\\n\"]" && sleep 25)""" in workflow
+    assert 'grep -Fq "$FSL_READY_MARKER"' in workflow
     assert "FSL module loaded and fslmaths is on PATH" in workflow
+
+
+def test_jupyterhub_fsl_probe_emits_marker_only_after_tool_is_found(tmp_path):
+    workflow = _read_repo_file(JUPYTER_TEST_WORKFLOW)
+    command = _fsl_probe_command(workflow)
+    tool = tmp_path / "fslmaths"
+    tool.write_text("#!/bin/sh\nexit 0\n")
+    tool.chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", "-c", f"ml() {{ return 0; }}\nattempt=positive\n{command}"],
+        capture_output=True,
+        check=False,
+        text=True,
+        env={"PATH": f"{tmp_path}:/usr/bin:/bin"},
+    )
+
+    assert result.returncode == 0
+    assert str(tool) in result.stdout
+    assert "__FSL_MODULE_READY_positive__" in result.stdout
+
+
+def test_jupyterhub_fsl_probe_rejects_missing_module():
+    workflow = _read_repo_file(JUPYTER_TEST_WORKFLOW)
+    command = _fsl_probe_command(workflow)
+    missing_module_command = command.replace(
+        "ml fsl && command -v fslmaths",
+        "module load funny-name-tool && command -v funny-name-tool",
+    )
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f"module() {{ return 1; }}\nattempt=negative\n{missing_module_command}",
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "__FSL_MODULE_READY_negative__" not in result.stdout
 
 
 def test_jupyterhub_fslmaths_test_is_skipped_when_module_load_fails():
