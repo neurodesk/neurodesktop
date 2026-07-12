@@ -348,37 +348,43 @@ jobs:
         
         echo ""
         echo "--- Test 5: FSLMaths Command ---"
-        CMD5="fslmaths"
+        FSL_RUN_MARKER="__FSLMATHS_VALID_OUTPUT__"
+        # Exercise fslmaths with a valid image instead of relying on the
+        # version-dependent diagnostic produced when it receives no arguments.
+        # Split the marker in the remote command so terminal echo cannot satisfy
+        # the success check before the output image has been created.
+        CMD5="FSL_TMPDIR=\$(mktemp -d); python -c 'import sys, numpy as np, nibabel as nib; nib.save(nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.float32), np.eye(4)), sys.argv[1])' \"\$FSL_TMPDIR/input.nii.gz\" && fslmaths \"\$FSL_TMPDIR/input.nii.gz\" -mul 2 \"\$FSL_TMPDIR/output.nii.gz\" && test -s \"\$FSL_TMPDIR/output.nii.gz\" && echo '__FSLMATHS_VALID_'OUTPUT'__'; FSL_STATUS=\$?; rm -rf \"\$FSL_TMPDIR\"; (exit \"\$FSL_STATUS\")"
         echo "Sending command: $CMD5"
         echo "Note: This may take up to 120 seconds for container initialization..."
         FSL_OUTPUT=""
+        FSL_WEBSOCKET_LOG=""
         if [ "$FSL_MODULE_LOADED" = true ]; then
-          # Send command and wait for extended time for container startup
+          # Capture the original WebSocket stream. Opening a second WebSocket
+          # after the command exits can miss the output entirely.
+          FSL_WEBSOCKET_LOG=$(mktemp)
           (printf '%s\n' "[\"stdin\", \"$CMD5\\r\\n\"]" && sleep 120) | \
               websocat --text "$WS_URL" \
-              -H "Authorization: token $ADMIN_TOKEN" 2>/dev/null &
+              -H "Authorization: token $ADMIN_TOKEN" \
+              > "$FSL_WEBSOCKET_LOG" 2>&1 &
           WEBSOCAT_PID=$!
 
           for i in {1..24}; do
             sleep 5
             echo "  Waiting for FSL container... (${i}*5 = $((i*5))s elapsed)"
 
-            if kill -0 "$WEBSOCAT_PID" 2>/dev/null; then
-              FSL_PARTIAL=$(timeout 3 websocat --text "$WS_URL" \
-                  -H "Authorization: token $ADMIN_TOKEN" 2>/dev/null | \
-                  grep '^\["stdout"' | \
-                  sed 's/^\["stdout", *"//; s/"\]$//; s/\\r\\n/\n/g; s/\\n/\n/g' | \
-                  tr -d '\000-\037' || echo "")
+            FSL_PARTIAL=$(grep '^\["stdout"' "$FSL_WEBSOCKET_LOG" | \
+                sed 's/^\["stdout", *"//; s/"\]$//; s/\\r\\n/\n/g; s/\\n/\n/g' | \
+                tr -d '\000-\037' || echo "")
 
-              echo "  Partial output: '${FSL_PARTIAL:0:100}...'"
+            echo "  Partial output: '${FSL_PARTIAL:0:100}...'"
 
-              if [ -n "$FSL_PARTIAL" ] && echo "$FSL_PARTIAL" | grep -q "Usage: fslmaths"; then
-                echo "  ✅ FSL output detected!"
-                FSL_OUTPUT="$FSL_PARTIAL"
-                kill "$WEBSOCAT_PID" 2>/dev/null || true
-                break
-              fi
-            else
+            if printf '%s\n' "$FSL_PARTIAL" | grep -Fq "$FSL_RUN_MARKER"; then
+              echo "  ✅ FSL output image created!"
+              FSL_OUTPUT="$FSL_PARTIAL"
+              break
+            fi
+
+            if ! kill -0 "$WEBSOCAT_PID" 2>/dev/null; then
               echo "  Connection ended, checking for output..."
               break
             fi
@@ -390,42 +396,17 @@ jobs:
           echo "❌ Skipping FSLMaths command because FSL module loading failed"
         fi
 
+        if [ -n "$FSL_WEBSOCKET_LOG" ]; then
+          rm -f "$FSL_WEBSOCKET_LOG"
+        fi
+
         echo "Final FSL output length: ${#FSL_OUTPUT} chars"
         
-        if [ -n "$FSL_OUTPUT" ]; then
-          if [ ${#FSL_OUTPUT} -lt 50 ]; then
-            echo "⚠️ FSL output seems too short, trying once more..."
-            sleep 10
-            
-            FSL_OUT2=$(printf '%s\n' "[\"stdin\", \"$CMD5\\r\\n\"]" | \
-              timeout 30 websocat --text "$WS_URL" \
-              -H "Authorization: token $ADMIN_TOKEN" 2>&1 | \
-              grep '^\["stdout"' | \
-              sed 's/^\["stdout", *"//; s/"\]$//; s/\\r\\n/\n/g; s/\\n/\n/g' | \
-              tr -d '\000-\037' || echo "")
-            
-            echo "Second attempt output length: ${#FSL_OUT2} chars"
-            if [ "${#FSL_OUT2}" -gt "${#FSL_OUTPUT}" ]; then
-              FSL_OUTPUT="$FSL_OUT2"
-            fi
-          fi
-          
-          PATTERNS_FOUND=0
-          echo "$FSL_OUTPUT" | grep -q "Usage: fslmaths" && PATTERNS_FOUND=$((PATTERNS_FOUND + 1)) && echo "✅ Found Usage pattern"
-          echo "$FSL_OUTPUT" | grep -q "Binary operations" && PATTERNS_FOUND=$((PATTERNS_FOUND + 1)) && echo "✅ Found Binary operations pattern"
-          echo "$FSL_OUTPUT" | grep -q "Datatype information" && PATTERNS_FOUND=$((PATTERNS_FOUND + 1)) && echo "✅ Found Datatype info pattern"
-          echo "$FSL_OUTPUT" | grep -q "threshold" && PATTERNS_FOUND=$((PATTERNS_FOUND + 1)) && echo "✅ Found threshold pattern"
-          
-          echo "Found $PATTERNS_FOUND/4 expected patterns"
-          
-          if [ "$PATTERNS_FOUND" -ge 3 ]; then
-            echo "✅ FSLMaths test PASSED"
-            FSL_TESTS_PASSED=$((FSL_TESTS_PASSED + 1))
-          else
-            echo "❌ FSLMaths test FAILED (only $PATTERNS_FOUND patterns found)"
-          fi
+        if printf '%s\n' "$FSL_OUTPUT" | grep -Fq "$FSL_RUN_MARKER"; then
+          echo "✅ FSLMaths test PASSED"
+          FSL_TESTS_PASSED=$((FSL_TESTS_PASSED + 1))
         else
-          echo "❌ FSLMaths command FAILED - no output received"
+          echo "❌ FSLMaths command FAILED - valid output marker not received"
         fi
         
         echo ""

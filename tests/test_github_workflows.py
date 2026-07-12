@@ -25,6 +25,20 @@ def _fsl_probe_command(workflow: str) -> str:
     raise AssertionError("FSL probe command not found in JupyterHub workflow")
 
 
+def _fslmaths_probe_command(workflow: str) -> str:
+    for line in workflow.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('CMD5="') and stripped.endswith('"'):
+            result = subprocess.run(
+                ["bash", "-c", f"{stripped}\nprintf '%s' \"$CMD5\""],
+                capture_output=True,
+                check=True,
+                text=True,
+            )
+            return result.stdout
+    raise AssertionError("FSLMaths probe command not found in JupyterHub workflow")
+
+
 def test_jupyterhub_fsl_module_load_requires_fslmaths_on_path():
     workflow = _read_repo_file(JUPYTER_TEST_WORKFLOW)
 
@@ -104,6 +118,80 @@ def test_jupyterhub_fslmaths_test_is_skipped_when_module_load_fails():
     assert "Skipping FSLMaths command because FSL module loading failed" in workflow
 
 
+def _write_fake_tool(path: Path, body: str) -> None:
+    path.write_text(f"#!/bin/sh\n{body}\n")
+    path.chmod(0o755)
+
+
+def test_jupyterhub_fslmaths_probe_runs_a_real_image_operation(tmp_path):
+    workflow = _read_repo_file(JUPYTER_TEST_WORKFLOW)
+    command = _fslmaths_probe_command(workflow)
+    assert "__FSLMATHS_VALID_OUTPUT__" not in command
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    _write_fake_tool(
+        tmp_path / "python",
+        'for last; do :; done\nprintf "input" > "$last"',
+    )
+    _write_fake_tool(
+        tmp_path / "fslmaths",
+        'for last; do :; done\nprintf "output" > "$last"',
+    )
+
+    result = subprocess.run(
+        ["bash", "-c", command],
+        capture_output=True,
+        check=False,
+        text=True,
+        env={
+            "PATH": f"{tmp_path}:/usr/bin:/bin",
+            "TMPDIR": str(scratch),
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "__FSLMATHS_VALID_OUTPUT__" in result.stdout
+    assert not list(scratch.iterdir()), "FSL probe left its temporary directory behind"
+
+
+def test_jupyterhub_fslmaths_probe_rejects_failed_operation(tmp_path):
+    workflow = _read_repo_file(JUPYTER_TEST_WORKFLOW)
+    command = _fslmaths_probe_command(workflow)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    _write_fake_tool(
+        tmp_path / "python",
+        'for last; do :; done\nprintf "input" > "$last"',
+    )
+    _write_fake_tool(tmp_path / "fslmaths", "exit 1")
+
+    result = subprocess.run(
+        ["bash", "-c", command],
+        capture_output=True,
+        check=False,
+        text=True,
+        env={
+            "PATH": f"{tmp_path}:/usr/bin:/bin",
+            "TMPDIR": str(scratch),
+        },
+    )
+
+    assert result.returncode != 0
+    assert "__FSLMATHS_VALID_OUTPUT__" not in result.stdout
+    assert not list(scratch.iterdir()), "failed FSL probe left temporary files behind"
+
+
+def test_jupyterhub_fslmaths_output_is_captured_from_the_original_websocket():
+    workflow = _read_repo_file(JUPYTER_TEST_WORKFLOW)
+
+    assert 'FSL_WEBSOCKET_LOG=$(mktemp)' in workflow
+    assert '> "$FSL_WEBSOCKET_LOG" 2>&1 &' in workflow
+    assert 'grep -Fq "$FSL_RUN_MARKER"' in workflow
+    assert 'grep -q "Usage: fslmaths"' not in workflow
+
+
 def test_repo_only_workflow_checks_skip_in_baked_image_layout(monkeypatch, tmp_path):
     module = sys.modules[__name__]
     monkeypatch.setattr(module, "REPO_ROOT", Path("/opt"))
@@ -116,6 +204,7 @@ def test_repo_only_workflow_checks_skip_in_baked_image_layout(monkeypatch, tmp_p
     for check in (
         test_jupyterhub_fsl_module_load_requires_fslmaths_on_path,
         test_jupyterhub_fslmaths_test_is_skipped_when_module_load_fails,
+        test_jupyterhub_fslmaths_output_is_captured_from_the_original_websocket,
     ):
         with pytest.raises(pytest.skip.Exception):
             check()
