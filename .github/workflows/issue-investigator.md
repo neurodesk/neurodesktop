@@ -31,7 +31,7 @@ engine:
     OPENAI_API_KEY: ${{ secrets.CODEX_API_KEY || secrets.OPENAI_API_KEY }}
 
 strict: true
-max-turn-cache-misses: 200
+max-turn-cache-misses: 2000
 network:
   allowed:
     - defaults
