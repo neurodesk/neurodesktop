@@ -186,6 +186,8 @@ def test_jupyterhub_fslmaths_probe_rejects_failed_operation(tmp_path):
 def test_jupyterhub_fslmaths_output_is_captured_from_the_original_websocket():
     workflow = _read_repo_file(JUPYTER_TEST_WORKFLOW)
 
+    assert "FSL_STDIN_PAYLOAD=$(jq -cn --arg data" in workflow
+    assert "(printf '%s\\n' \"$FSL_STDIN_PAYLOAD\" && sleep 120)" in workflow
     assert 'FSL_WEBSOCKET_LOG=$(mktemp)' in workflow
     assert '> "$FSL_WEBSOCKET_LOG" 2>&1 &' in workflow
     assert 'grep -Fq "$FSL_RUN_MARKER"' in workflow

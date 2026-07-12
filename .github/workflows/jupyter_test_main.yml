@@ -362,7 +362,8 @@ jobs:
           # Capture the original WebSocket stream. Opening a second WebSocket
           # after the command exits can miss the output entirely.
           FSL_WEBSOCKET_LOG=$(mktemp)
-          (printf '%s\n' "[\"stdin\", \"$CMD5\\r\\n\"]" && sleep 120) | \
+          FSL_STDIN_PAYLOAD=$(jq -cn --arg data "${CMD5}"$'\r\n' '["stdin", $data]')
+          (printf '%s\n' "$FSL_STDIN_PAYLOAD" && sleep 120) | \
               websocat --text "$WS_URL" \
               -H "Authorization: token $ADMIN_TOKEN" \
               > "$FSL_WEBSOCKET_LOG" 2>&1 &
