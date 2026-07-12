@@ -29,6 +29,10 @@ def test_jupyterhub_fsl_module_load_requires_fslmaths_on_path():
     workflow = _read_repo_file(JUPYTER_TEST_WORKFLOW)
 
     assert "if [ ${#ML_OUT} -ge 0 ]" not in workflow
+    assert (
+        "source /opt/neurodesktop/environment_variables.sh >/dev/null 2>&1 "
+        "&& ml fsl"
+    ) in workflow
     assert "ml fsl && command -v fslmaths" in workflow
     assert "__FSL_MODULE_READY_${attempt}__" in workflow
     assert "echo ${FSL_READY_MARKER}" not in workflow
@@ -44,13 +48,20 @@ def test_jupyterhub_fsl_probe_emits_marker_only_after_tool_is_found(tmp_path):
     tool = tmp_path / "fslmaths"
     tool.write_text("#!/bin/sh\nexit 0\n")
     tool.chmod(0o755)
+    refresh = tmp_path / "environment_variables.sh"
+    refresh.write_text(
+        f'ml() {{ return 0; }}\nexport PATH="{tmp_path}:$PATH"\n'
+    )
+    command = command.replace(
+        "/opt/neurodesktop/environment_variables.sh", str(refresh)
+    )
 
     result = subprocess.run(
-        ["bash", "-c", f"ml() {{ return 0; }}\nattempt=positive\n{command}"],
+        ["bash", "-c", f"attempt=positive\n{command}"],
         capture_output=True,
         check=False,
         text=True,
-        env={"PATH": f"{tmp_path}:/usr/bin:/bin"},
+        env={"PATH": "/usr/bin:/bin"},
     )
 
     assert result.returncode == 0
@@ -61,6 +72,9 @@ def test_jupyterhub_fsl_probe_emits_marker_only_after_tool_is_found(tmp_path):
 def test_jupyterhub_fsl_probe_rejects_missing_module():
     workflow = _read_repo_file(JUPYTER_TEST_WORKFLOW)
     command = _fsl_probe_command(workflow)
+    command = command.replace(
+        "/opt/neurodesktop/environment_variables.sh", "/dev/null"
+    )
     missing_module_command = command.replace(
         "ml fsl && command -v fslmaths",
         "module load funny-name-tool && command -v funny-name-tool",

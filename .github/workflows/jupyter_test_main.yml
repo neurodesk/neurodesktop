@@ -311,9 +311,12 @@ jobs:
         for attempt in {1..3}; do
           echo "  Attempt $attempt/3..."
           FSL_READY_MARKER="__FSL_MODULE_READY_${attempt}__"
+          # A terminal can open while lazy CVMFS is still populating
+          # MODULEPATH. Refresh the same shell on every retry so it can
+          # recover without requiring a brand-new terminal.
           # Assemble the marker in the remote shell so the terminal's echoed
           # command cannot be mistaken for successful command output.
-          CMD4="ml fsl && command -v fslmaths && echo '__FSL_MODULE_READY_'${attempt}'__'"
+          CMD4="source /opt/neurodesktop/environment_variables.sh >/dev/null 2>&1 && ml fsl && command -v fslmaths && echo '__FSL_MODULE_READY_'${attempt}'__'"
           echo "Sending command: $CMD4"
 
           # Keep stdin open while the module command runs. Without the sleep,
