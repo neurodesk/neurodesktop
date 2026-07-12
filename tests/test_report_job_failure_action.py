@@ -41,7 +41,12 @@ def test_report_job_failure_dispatch_uses_canonical_issue_number():
 def test_issue_investigator_routes_codex_through_neurodesk_gateway():
     workflow = _read_repo_file(WORKFLOW)
     lock = _read_repo_file(LOCK)
+    model = "${{ vars.GH_AW_MODEL_AGENT_CODEX || vars.GH_AW_DEFAULT_MODEL_CODEX || 'neurodesk' }}"
 
+    assert f"model: {model}" in workflow
+    assert model in lock
+    assert "kimi-k2.7" not in workflow
+    assert "kimi-k2.7" not in lock
     assert 'OPENAI_BASE_URL: "https://llm.neurodesk.org/openai"' in workflow
     assert "OPENAI_API_KEY: ${{ secrets.CODEX_API_KEY || secrets.OPENAI_API_KEY }}" in workflow
     assert "max-turn-cache-misses: 200" in workflow
