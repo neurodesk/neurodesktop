@@ -30,6 +30,15 @@ engine:
     OPENAI_BASE_URL: "https://llm.neurodesk.org/openai"
     OPENAI_API_KEY: ${{ secrets.CODEX_API_KEY || secrets.OPENAI_API_KEY }}
 
+models:
+  providers:
+    openai:
+      models:
+        neurodesk:
+          cost:
+            input: "3e-06"
+            output: "1.5e-05"
+
 strict: true
 max-turn-cache-misses: 2000
 network:
