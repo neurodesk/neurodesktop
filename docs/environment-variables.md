@@ -35,6 +35,16 @@
   `provider/model` to skip the interactive OpenCode model picker
 - `OPENCODE_STARTUP_VERBOSE`: set to `1` to show detailed OpenCode provider
   probe output during startup
+- `OPENCODE_WEB_STARTUP_TIMEOUT`: seconds `opencode_web.py` (the "OpenCode AI"
+  launcher tile) waits for the `opencode web` backend to become ready;
+  defaults to `180`
+- `OPENCODE_WEB_DESKTOP_PORT`: fixed local port the desktop "OpenCode Web"
+  shortcut uses for the web interface; defaults to `4747`
+- `OPENCODE_WEB_WRAPPER_BIN`, `OPENCODE_WEB_SECRET_FILE`,
+  `NEURODESK_LLM_BASE_URL`: test overrides for `opencode_web.py` (backend
+  command, credential file, and key-validation endpoint)
+- `OPENCODE_VERSION` (build argument): pins the OpenCode release installed
+  into the image (e.g. `1.18.1`); empty installs the latest release
 - `NEURODESK_API_KEY`: API key for `https://llm.neurodesk.org`. Shared by
   OpenCode and by the Notebook Intelligence JupyterLab plugin. OpenCode
   persists it to `~/.bashrc` on first setup, and `nbi_setup.sh` injects it
