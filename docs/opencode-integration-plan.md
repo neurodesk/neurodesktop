@@ -1,6 +1,20 @@
 # Plan: OpenCode web interface with one-click launch from the start page
 
-Status: proposal / implementation plan (not yet implemented).
+Status: implemented (first iteration) — see
+[architecture.md](architecture.md#opencode-web-interface) for the shipped
+design. Two deviations from the plan below, both simplifications:
+
+- The first-run key dialog is served by the launch wrapper itself
+  (`config/agents/opencode_web.py`) instead of a JupyterLab extension
+  dialog + server endpoints. It works identically in every deployment
+  (Docker, HPC, JupyterHub) and needs no frontend build.
+- The prefix problem is handled by that same wrapper's rewriting reverse
+  proxy rather than a third-party UI (pk-opencode-webui et al.), keeping the
+  official upstream web UI and zero extra runtimes. Contributing base-path
+  support upstream remains the long-term fix. The rewrite rules are
+  regex-based and validated in `tests/test_opencode_web.py`; they should be
+  re-verified against the real bundle when bumping the pinned
+  `OPENCODE_VERSION`.
 
 ## Goal
 

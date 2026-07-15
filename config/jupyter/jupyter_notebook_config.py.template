@@ -31,6 +31,33 @@ except OSError:
     pass
 _guac_basic = base64.b64encode(f'{_guac_user}:{_guac_pass}'.encode()).decode()
 
+# Per-user OpenCode web credential. opencode_web.py requires it on every
+# request so other users on a shared host cannot reach the 127.0.0.1 port;
+# Jupyter Server Proxy injects it below via request_headers_override. The same
+# file is read (or created) by opencode_web.py itself, so both sides agree.
+_opencode_secret_file = os.path.join(
+    home_dir, '.neurodesk', 'secrets', 'opencode_server_password')
+_opencode_pass = ''
+try:
+    if os.path.exists(_opencode_secret_file):
+        with open(_opencode_secret_file, 'r') as _f:
+            _opencode_pass = _f.read().strip()
+    if not _opencode_pass:
+        import secrets as _secrets
+        _opencode_pass = _secrets.token_urlsafe(24)
+        os.makedirs(os.path.dirname(_opencode_secret_file),
+                    mode=0o700, exist_ok=True)
+        _fd = os.open(_opencode_secret_file,
+                      os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(_fd, 'w') as _f:
+            _f.write(_opencode_pass + '\n')
+except OSError as _opencode_secret_error:
+    print(f'[WARN] Failed to prepare OpenCode web credential: '
+          f'{_opencode_secret_error}')
+    _opencode_pass = ''
+_opencode_basic = base64.b64encode(
+    f'opencode:{_opencode_pass}'.encode()).decode()
+
 
 def _is_apptainer_runtime():
   return (
@@ -86,6 +113,26 @@ c.ServerProxy.servers = {
   # Preserve the historical /neurodesktop route for old links without adding a
   # third launcher tile. New launcher entries choose the backend explicitly.
   'neurodesktop': _neurodesktop_server('rdp', 'Neurodesktop', 'neurodesktop', launcher_enabled=False),
+  'opencode': {
+    # opencode_web.py handles llm.neurodesk.org key setup in the browser,
+    # starts `opencode web` through the terminal wrapper (provider probing,
+    # opencode.json refresh, and NBI sync stay single-sourced), and rewrites
+    # the upstream web UI's root-absolute URLs against X-Forwarded-Prefix.
+    'command': ['python3', '/opt/neurodesktop/opencode_web.py',
+                '--port', '{port}'],
+    'timeout': 60,
+    'new_browser_tab': True,
+    'request_headers_override': {
+        'Authorization': f'Basic {_opencode_basic}',
+    },
+    'launcher_entry': {
+      'enabled': True,
+      'path_info': 'opencode',
+      'title': 'OpenCode AI',
+      'icon_path': '/opt/opencode_logo.svg',
+      'category': 'Neurodesk'
+    }
+  },
   'vscode': {
     'command': [
       '/usr/local/bin/code-server',

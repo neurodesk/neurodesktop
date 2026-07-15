@@ -138,6 +138,47 @@ its menu entries yet.
 - SSH: optional SSH server proxy
 - Ollama: optional local LLM service when `START_LOCAL_LLMS=1`
 
+### OpenCode Web Interface
+
+The JupyterLab launcher exposes an "OpenCode AI" tile backed by a Jupyter
+Server Proxy entry that runs
+[`config/agents/opencode_web.py`](../config/agents/opencode_web.py)
+(installed to `/opt/neurodesktop/opencode_web.py`). The launcher script:
+
+- requires a per-user credential on every request. The credential lives in
+  `~/.neurodesk/secrets/opencode_server_password` (created 0600 by
+  `jupyter_notebook_config.py` or by the script itself, whichever runs
+  first); Jupyter Server Proxy injects it via `request_headers_override`, so
+  the browser never sees a login prompt while other users on a shared host
+  cannot reach the 127.0.0.1 port.
+- walks first-time users through llm.neurodesk.org API key setup in the
+  browser: the pasted key is validated against the LiteLLM `/models`
+  endpoint and persisted to `~/.bashrc` in the exact format the terminal
+  wrapper writes and `nbi_setup.sh` reads, so the terminal agents and
+  Notebook Intelligence pick it up too. A "continue without a key" path
+  falls back to the other providers.
+- starts `opencode web` through the `/usr/local/sbin/opencode` wrapper
+  (non-interactive path), so provider probing, `opencode.json` refresh, and
+  the Notebook Intelligence sync stay single-sourced. A model chosen earlier
+  is preserved by passing it back as `OPENCODE_MODEL_PROFILE`.
+- reverse-proxies to the backend with HTTP Basic auth injected
+  (`OPENCODE_SERVER_PASSWORD`), streams SSE responses, and rewrites
+  root-absolute URLs in HTML/CSS/JS bodies against the `X-Forwarded-Prefix`
+  header, because the upstream web UI assumes it is served from `/` and
+  breaks behind the `/opencode/` proxy prefix (including JupyterHub base
+  URLs).
+
+Inside the VNC/RDP desktop there is no URL prefix, so the "OpenCode Web"
+menu entry
+([`config/agents/opencode-web.desktop`](../config/agents/opencode-web.desktop))
+runs [`config/agents/opencode_web_desktop.sh`](../config/agents/opencode_web_desktop.sh),
+which starts (or reuses) the same launcher on a fixed local port and opens
+Firefox with a one-time `?auth=` credential exchange that is swapped for a
+cookie. Session sharing is disabled by default in
+[`config/agents/opencode_config.json`](../config/agents/opencode_config.json)
+(`"share": "disabled"`) so research conversations are not uploaded to the
+OpenCode share service unless a user opts in.
+
 ## Directory Structure
 
 - [`config/`](../config/): service configurations
