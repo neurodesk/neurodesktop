@@ -15,12 +15,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - server_name: "Neuro-Test CI VM"
-            token_secret: "JUPYTER_CI_TEST_TOKEN"
-            url_var: "JUPYTER_API_URL_CI_TEST"
-            default_url: "https://neuro-test.ssdsorg.cloud.edu.au"
-            user_var: "JUPYTER_TEST_USER"
-            default_user: "akshitbeniwal"
+          # - server_name: "Neuro-Test CI VM"
+          #   token_secret: "JUPYTER_CI_TEST_TOKEN"
+          #   url_var: "JUPYTER_API_URL_CI_TEST"
+          #   default_url: "https://neuro-test.ssdsorg.cloud.edu.au"
+          #   user_var: "JUPYTER_TEST_USER"
+          #   default_user: "akshitbeniwal"
           - server_name: "play-eu"
             token_secret: "JUPYTER_PLAY_EU_TOKEN"
             url_var: "JUPYTER_API_URL_PLAY_EU"
