@@ -460,18 +460,27 @@ def test_setup_page_shown_until_key_is_configured(launcher):
         launcher["port"], "/", headers=launcher["auth"]
     )
     assert status == 200
-    assert "llm.neurodesk.org" in body
+    assert "Set up your Neurodesk LLM API key" in body
     assert "API Keys" in body
     assert "Create new secret key" in body
 
 
 def test_rejected_key_reprompts_and_does_not_persist(launcher):
-    status, _headers = _complete_key_setup(launcher, b"key=wrong-key")
+    status, _headers, body = _request(
+        launcher["port"],
+        "/neurodesk-setup",
+        headers={**launcher["auth"],
+                 "Content-Type": "application/x-www-form-urlencoded"},
+        data=b"key=wrong-key",
+    )
     assert status == 200
+    assert "That API key was rejected" in body
+
+    # The setup page is shown again and nothing was persisted.
     _status, _h, body = _request(
         launcher["port"], "/", headers=launcher["auth"]
     )
-    assert "rejected by llm.neurodesk.org" in body or "llm.neurodesk.org" in body
+    assert "Set up your Neurodesk LLM API key" in body
     assert not (launcher["home"] / ".bashrc").exists() or (
         "wrong-key"
         not in (launcher["home"] / ".bashrc").read_text(encoding="utf-8")
@@ -527,6 +536,24 @@ def test_skip_starts_backend_without_key(launcher):
     assert backend_env["NEURODESK_API_KEY"] == ""
 
 
+def test_sanitize_header_value_strips_crlf():
+    assert ocw.sanitize_header_value("/x\r\nInjected: 1") == "/xInjected: 1"
+    assert ocw.sanitize_header_value("clean") == "clean"
+
+
+def test_auth_redirect_cannot_become_protocol_relative(launcher):
+    """A crafted //host path must not turn the cookie exchange into an open
+    redirect: the Location header is normalized to a single-slash path."""
+    quoted = urllib.parse.quote(launcher["password"])
+    status, headers, _body = _request(
+        launcher["port"], f"//evil.example/?auth={quoted}"
+    )
+    assert status == 303
+    location = headers.get("Location", "")
+    assert location.startswith("/")
+    assert not location.startswith("//")
+
+
 def test_auth_query_param_exchanges_for_cookie(launcher):
     quoted = urllib.parse.quote(launcher["password"])
     status, headers, _body = _request(
@@ -542,7 +569,8 @@ def test_auth_query_param_exchanges_for_cookie(launcher):
         launcher["port"], "/", headers={"Cookie": cookie_value}
     )
     assert status == 200
-    assert "llm.neurodesk.org" in body  # setup page, authorized via cookie
+    # Setup page renders, i.e. the cookie authorized the request.
+    assert "Set up your Neurodesk LLM API key" in body
 
 
 def test_existing_bashrc_key_skips_setup_and_warm_starts(tmp_path):
