@@ -32,7 +32,6 @@ Environment overrides (mainly for tests):
 import argparse
 import base64
 import collections
-import hashlib
 import hmac
 import html
 import http.client
@@ -78,6 +77,11 @@ REWRITABLE_CONTENT_TYPES = (
     "application/javascript",
     "application/x-javascript",
 )
+
+
+def sanitize_header_value(value):
+    """Strip CR/LF so request-derived data cannot split response headers."""
+    return str(value).replace("\r", "").replace("\n", "")
 
 
 def secret_file_path():
@@ -474,6 +478,11 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
 
     # Injected by serve():
     proxy_password = ""
+    # Random per-process bearer for the desktop cookie flow; independent of
+    # the password so no credential material is ever derived or stored in the
+    # browser (a restart simply invalidates old cookies and the desktop
+    # shortcut re-authenticates via ?auth=).
+    cookie_token = ""
     backend = None
     llm_base_url = DEFAULT_LLM_BASE_URL
     home_dir = ""
@@ -484,18 +493,15 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write("opencode_web: %s\n" % (fmt % args))
 
-    @property
-    def cookie_token(self):
-        return hashlib.sha256(
-            f"cookie:{self.proxy_password}".encode()
-        ).hexdigest()
-
     def external_prefix(self):
         for header in ("X-Forwarded-Prefix", "X-Forwarded-Context",
                        "X-ProxyContextPath"):
             value = self.headers.get(header)
             if value:
-                return value.rstrip("/")
+                value = sanitize_header_value(value).rstrip("/")
+                if value and not value.startswith("/"):
+                    value = "/" + value
+                return value
         return ""
 
     def expected_authorization(self):
@@ -533,11 +539,16 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(payload)
 
     def redirect(self, location, extra_headers=None):
+        # Same-origin redirects only: normalize to a single-slash-rooted path
+        # so request-derived values can neither split headers nor turn into a
+        # protocol-relative ("//host") redirect.
+        location = sanitize_header_value(location)
+        location = "/" + location.lstrip("/")
         self.send_response(303)
         self.send_header("Location", location)
         self.send_header("Content-Length", "0")
         for name, value in (extra_headers or []):
-            self.send_header(name, value)
+            self.send_header(name, sanitize_header_value(value))
         self.end_headers()
 
     # -- request routing --
@@ -696,7 +707,7 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
                         "content-length", "content-encoding",
                     ):
                         continue
-                    self.send_header(name, value)
+                    self.send_header(name, sanitize_header_value(value))
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 if self.command != "HEAD":
@@ -710,7 +721,7 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
                     continue
                 if name.lower() == "content-length":
                     has_length = True
-                self.send_header(name, value)
+                self.send_header(name, sanitize_header_value(value))
             if not has_length:
                 # Chunked/streaming upstream (e.g. the SSE /event feed):
                 # delimit our response by connection close instead.
@@ -763,6 +774,7 @@ def serve(argv=None):
     )
 
     OpencodeWebHandler.proxy_password = password
+    OpencodeWebHandler.cookie_token = secrets.token_urlsafe(32)
     OpencodeWebHandler.backend = backend
     OpencodeWebHandler.llm_base_url = os.environ.get(
         "NEURODESK_LLM_BASE_URL", DEFAULT_LLM_BASE_URL
