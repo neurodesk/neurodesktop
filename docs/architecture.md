@@ -145,12 +145,13 @@ Server Proxy entry that runs
 [`config/agents/opencode_web.py`](../config/agents/opencode_web.py)
 (installed to `/opt/neurodesktop/opencode_web.py`). The launcher script:
 
-- requires a per-user credential on every request. The credential lives in
-  `~/.neurodesk/secrets/opencode_server_password` (created 0600 by
-  `jupyter_notebook_config.py` or by the script itself, whichever runs
-  first); Jupyter Server Proxy injects it via `request_headers_override`, so
-  the browser never sees a login prompt while other users on a shared host
-  cannot reach the 127.0.0.1 port.
+- requires a persistent per-user credential on every request. The credential
+  lives in `~/.neurodesk/secrets/opencode_server_password` (created 0600 and
+  atomically by a shared helper, whichever of `jupyter_notebook_config.py`
+  or the script runs first); Jupyter Server Proxy injects it via
+  `request_headers_override`, so the browser never sees a login prompt.
+  Other local users on a shared host can reach the 127.0.0.1 port but
+  cannot authenticate without the credential.
 - walks first-time users through llm.neurodesk.org API key setup in the
   browser: the pasted key is validated against the LiteLLM `/models`
   endpoint and persisted to `~/.bashrc` in the exact format the terminal
@@ -172,9 +173,10 @@ Inside the VNC/RDP desktop there is no URL prefix, so the "OpenCode Web"
 menu entry
 ([`config/agents/opencode-web.desktop`](../config/agents/opencode-web.desktop))
 runs [`config/agents/opencode_web_desktop.sh`](../config/agents/opencode_web_desktop.sh),
-which starts (or reuses) the same launcher on a fixed local port and opens
-Firefox with a one-time `?auth=` credential exchange that is swapped for a
-cookie. Session sharing is disabled by default in
+which starts the same launcher on a per-user dynamic port (reusing it only
+after verifying the recorded process is owned by the current user) and opens
+Firefox with a single-use `?auth=` login token that is swapped for a cookie
+and rotated on use. Session sharing is disabled by default in
 [`config/agents/opencode_config.json`](../config/agents/opencode_config.json)
 (`"share": "disabled"`) so research conversations are not uploaded to the
 OpenCode share service unless a user opts in.

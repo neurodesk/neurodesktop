@@ -38,13 +38,17 @@
 - `OPENCODE_WEB_STARTUP_TIMEOUT`: seconds `opencode_web.py` (the "OpenCode AI"
   launcher tile) waits for the `opencode web` backend to become ready;
   defaults to `180`
-- `OPENCODE_WEB_DESKTOP_PORT`: fixed local port the desktop "OpenCode Web"
-  shortcut uses for the web interface; defaults to `4747`
+- `OPENCODE_WEB_DESKTOP_STATE`: state file where the desktop "OpenCode Web"
+  shortcut records its launcher's PID and dynamically allocated port;
+  defaults to `~/.neurodesk/run/opencode_web_desktop.state`
 - `OPENCODE_WEB_WRAPPER_BIN`, `OPENCODE_WEB_SECRET_FILE`,
-  `NEURODESK_LLM_BASE_URL`: test overrides for `opencode_web.py` (backend
-  command, credential file, and key-validation endpoint)
-- `OPENCODE_VERSION` (build argument): pins the OpenCode release installed
-  into the image (e.g. `1.18.1`); empty installs the latest release
+  `OPENCODE_WEB_LOGIN_TOKEN_FILE`, `NEURODESK_LLM_BASE_URL`: test overrides
+  for `opencode_web.py` (backend command, credential file, single-use login
+  token file, and key-validation endpoint)
+- `OPENCODE_VERSION` (build argument): the OpenCode release installed into
+  the image; defaults to the validated pin in the Dockerfile (currently
+  `1.18.1`). Override to bump the pin, or set it to an empty value to
+  install the latest release
 - `NEURODESK_API_KEY`: API key for `https://llm.neurodesk.org`. Shared by
   OpenCode and by the Notebook Intelligence JupyterLab plugin. OpenCode
   persists it to `~/.bashrc` on first setup, and `nbi_setup.sh` injects it

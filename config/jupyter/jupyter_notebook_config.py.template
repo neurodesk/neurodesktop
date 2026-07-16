@@ -32,29 +32,21 @@ except OSError:
 _guac_basic = base64.b64encode(f'{_guac_user}:{_guac_pass}'.encode()).decode()
 
 # Per-user OpenCode web credential. opencode_web.py requires it on every
-# request so other users on a shared host cannot reach the 127.0.0.1 port;
-# Jupyter Server Proxy injects it below via request_headers_override. The same
-# file is read (or created) by opencode_web.py itself, so both sides agree.
+# request, so other local users can reach the 127.0.0.1 port but cannot
+# authenticate; Jupyter Server Proxy injects it below via
+# request_headers_override. The credential is created atomically by the
+# shared helper in opencode_web.py (the same code the launcher runs), so
+# concurrent starters always agree on one value. If no credential can be
+# obtained, the launcher entry is disabled (fail closed).
 _opencode_secret_file = os.path.join(
     home_dir, '.neurodesk', 'secrets', 'opencode_server_password')
 _opencode_pass = ''
 try:
-    if os.path.exists(_opencode_secret_file):
-        with open(_opencode_secret_file, 'r') as _f:
-            _opencode_pass = _f.read().strip()
-    if not _opencode_pass:
-        import secrets as _secrets
-        _opencode_pass = _secrets.token_urlsafe(24)
-        os.makedirs(os.path.dirname(_opencode_secret_file),
-                    mode=0o700, exist_ok=True)
-        _fd = os.open(_opencode_secret_file,
-                      os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(_fd, 'w') as _f:
-            _f.write(_opencode_pass + '\n')
-except OSError as _opencode_secret_error:
-    print(f'[WARN] Failed to prepare OpenCode web credential: '
-          f'{_opencode_secret_error}')
-    _opencode_pass = ''
+    from opencode_web import load_or_create_password as _opencode_load_password
+    _opencode_pass = _opencode_load_password(_opencode_secret_file)
+except Exception as _opencode_secret_error:
+    print(f'[WARN] OpenCode web credential unavailable; disabling the '
+          f'OpenCode launcher entry: {_opencode_secret_error}')
 _opencode_basic = base64.b64encode(
     f'opencode:{_opencode_pass}'.encode()).decode()
 
@@ -126,7 +118,7 @@ c.ServerProxy.servers = {
         'Authorization': f'Basic {_opencode_basic}',
     },
     'launcher_entry': {
-      'enabled': True,
+      'enabled': bool(_opencode_pass),
       'path_info': 'opencode',
       'title': 'OpenCode AI',
       'icon_path': '/opt/opencode_logo.svg',

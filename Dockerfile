@@ -460,10 +460,11 @@ RUN npm_config_cache=/tmp/npm-root-cache npm install -g @openai/codex \
     && rm -rf /home/${NB_USER}/.cache \
     && rm -rf /home/${NB_USER}/.local
 
-# Install OpenCode CLI (open source AI coding agent). OPENCODE_VERSION pins a
-# release (e.g. 1.18.1) so the web UI, the opencode_web.py proxy, and the
-# default config are tested as a set; empty installs the latest release.
-ARG OPENCODE_VERSION=""
+# Install OpenCode CLI (open source AI coding agent). OPENCODE_VERSION pins
+# the release so the web UI, the opencode_web.py proxy, and the default
+# config are tested as a set; override at build time to bump it, or set it
+# to an empty value to install the latest release.
+ARG OPENCODE_VERSION="1.18.1"
 RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash -s -- ${OPENCODE_VERSION:+--version "${OPENCODE_VERSION}"}' \
     && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local

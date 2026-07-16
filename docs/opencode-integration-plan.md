@@ -33,8 +33,10 @@ Give Neurodesktop users a first-class, browser-based OpenCode experience:
 ## Where we are today
 
 - OpenCode is installed at image build time via `https://opencode.ai/install`
-  (unpinned, latest at build) and moved to `/usr/bin/opencode`
-  ([Dockerfile](../Dockerfile), "Install OpenCode CLI" layer).
+  and moved to `/usr/bin/opencode` ([Dockerfile](../Dockerfile), "Install
+  OpenCode CLI" layer). The `OPENCODE_VERSION` build argument pins the
+  installed release (default 1.18.1); overriding it bumps the pin, and an
+  empty value installs the latest release.
 - Users reach it only through a **terminal**: `/usr/local/sbin/opencode`
   ([config/agents/opencode](../config/agents/opencode)) is a ~1600-line bash
   wrapper that probes the three providers (Jetstream, local Ollama,
@@ -100,17 +102,17 @@ does the same steps non-interactively (the wrapper already has non-tty
 fallbacks: first working model wins, `OPENCODE_MODEL_PROFILE` honored) and then
 starts the server:
 
-```
+```sh
 opencode web --hostname 127.0.0.1 --port "${PORT}"    # serves UI + API
 ```
 
 Security setup in the same script:
 
-- Generate a random per-session password into
+- Generate a persistent per-user password into
   `~/.neurodesk/secrets/opencode_server_password` (mode 0600, same location and
   lifecycle as the Guacamole web credentials) and export it as
   `OPENCODE_SERVER_PASSWORD`. Always set it: on shared HPC nodes other users
-  can reach 127.0.0.1 ports.
+  can reach 127.0.0.1 ports (though they cannot authenticate without it).
 - Never write the password into `opencode.json`.
 
 ### Phase 2 - launcher tile via jupyter-server-proxy
@@ -262,7 +264,7 @@ Per [docs/testing.md](testing.md) and AGENTS.md expectations:
 |---|-------------|-----------|------|
 | 1 | Shared setup library + non-interactive `opencode_web` script | - | M |
 | 2 | Desktop entry (zero-prefix official UI in VNC/RDP Firefox) | 1 | S |
-| 3 | Launcher tile + proxy entry + per-session auth | 1 | S |
+| 3 | Launcher tile + proxy entry + per-user auth | 1 | S |
 | 4 | Prefix-aware web UI evaluation + integration | 3 | M/L |
 | 5 | Key-setup dialog (server endpoints + launcher dialog) | 1 | M |
 | 6 | opencode.json v2 features (share off, agents, commands, permissions) + version pin | - | S |
