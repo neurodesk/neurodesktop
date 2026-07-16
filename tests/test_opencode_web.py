@@ -29,6 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def first_existing_path(*candidates):
+    """Return the first existing path (container install or repo checkout)."""
     for candidate in candidates:
         path = Path(candidate)
         if path.exists():
@@ -37,6 +38,7 @@ def first_existing_path(*candidates):
 
 
 def opencode_web_module_path():
+    """Locate opencode_web.py in the image or the repo."""
     return first_existing_path(
         "/opt/neurodesktop/opencode_web.py",
         REPO_ROOT / "config/agents/opencode_web.py",
@@ -44,6 +46,7 @@ def opencode_web_module_path():
 
 
 def load_opencode_web():
+    """Import opencode_web.py from its file path."""
     spec = importlib.util.spec_from_file_location(
         "opencode_web", opencode_web_module_path()
     )
@@ -61,6 +64,7 @@ PREFIX = "/user/alice/opencode"
 
 
 def test_rewrite_html_prefixes_root_absolute_references():
+    """Root-absolute attribute/CSS/JS references gain the proxy prefix."""
     html = (
         '<script type="module" src="/assets/index.js"></script>'
         '<link rel="stylesheet" href="/assets/app.css">'
@@ -82,6 +86,7 @@ def test_rewrite_html_prefixes_root_absolute_references():
 
 
 def test_rewrite_css_prefixes_url_references():
+    """CSS url(...) references gain the proxy prefix."""
     css = '@font-face { src: url("/assets/inter.woff2"); } .x { background: url(/assets/bg.svg); }'
     rewritten = ocw.rewrite_css(css, PREFIX)
     assert f'url("{PREFIX}/assets/inter.woff2")' in rewritten
@@ -89,6 +94,7 @@ def test_rewrite_css_prefixes_url_references():
 
 
 def test_rewrite_js_prefixes_asset_and_api_strings_only():
+    """Only quoted /assets/ and /api/ strings are rewritten in JS."""
     js = (
         'const font = "/assets/inter.woff2";\n'
         "const api = '/api/session';\n"
@@ -105,20 +111,51 @@ def test_rewrite_js_prefixes_asset_and_api_strings_only():
 
 
 def test_rewrite_body_is_noop_without_prefix():
+    """No prefix (desktop mode) must leave bodies byte-identical."""
     html = '<script src="/assets/index.js"></script>'
     assert ocw.rewrite_body(html, "text/html", "") == html
+
+
+def test_safe_forwarded_prefix_accepts_only_canonical_paths():
+    """Prefixes are interpolated into rewritten bodies, so only clean
+    root-relative paths may pass; anything else must collapse to ""."""
+    assert ocw.safe_forwarded_prefix("/user/alice/opencode/") == (
+        "/user/alice/opencode"
+    )
+    assert ocw.safe_forwarded_prefix("/opencode") == "/opencode"
+    assert ocw.safe_forwarded_prefix("") == ""
+    assert ocw.safe_forwarded_prefix(None) == ""
+    assert ocw.safe_forwarded_prefix("/") == ""
+    assert ocw.safe_forwarded_prefix('/x" onmouseover="alert(1)') == ""
+    assert ocw.safe_forwarded_prefix("/x<svg onload=alert(1)>") == ""
+    assert ocw.safe_forwarded_prefix("/x?y=1") == ""
+    assert ocw.safe_forwarded_prefix("/x#frag") == ""
+    assert ocw.safe_forwarded_prefix("no-leading-slash") == ""
+    assert ocw.safe_forwarded_prefix("/x\r\nInjected: 1") == ""
+
+
+def test_redact_auth_params_hides_login_tokens():
+    """Request-line logging must never contain ?auth= credentials."""
+    line = "GET /?auth=super-secret&x=1 HTTP/1.1"
+    redacted = ocw.redact_auth_params(line)
+    assert "super-secret" not in redacted
+    assert "auth=REDACTED" in redacted
+    assert "x=1" in redacted
+    assert ocw.redact_auth_params("GET / HTTP/1.1") == "GET / HTTP/1.1"
 
 
 # --- Key handling ---------------------------------------------------------------
 
 
 def test_sanitize_neurodesk_api_key_strips_control_chars_and_whitespace():
+    """Key sanitizing mirrors the terminal wrapper rules."""
     assert ocw.sanitize_neurodesk_api_key(" sk-abc\r\n") == "sk-abc"
     assert ocw.sanitize_neurodesk_api_key("sk-\x07a\x1bbc\x7f") == "sk-abc"
     assert ocw.sanitize_neurodesk_api_key(None) == ""
 
 
 def test_persist_key_roundtrip_and_replaces_previous_block(tmp_path):
+    """Persisting a key replaces the previous managed block in ~/.bashrc."""
     bashrc = tmp_path / ".bashrc"
     bashrc.write_text(
         "alias ll='ls -l'\n"
@@ -171,6 +208,7 @@ def test_persisted_key_is_readable_by_nbi_setup_sed_regexes(tmp_path):
 
 
 def test_load_or_create_password_creates_0600_and_is_stable(tmp_path):
+    """The shared credential is created 0600 and re-read verbatim."""
     secret_file = tmp_path / "secrets" / "opencode_server_password"
     password = ocw.load_or_create_password(str(secret_file))
     assert password
@@ -179,10 +217,32 @@ def test_load_or_create_password_creates_0600_and_is_stable(tmp_path):
     assert ocw.load_or_create_password(str(secret_file)) == password
 
 
+def test_load_or_create_password_is_atomic_across_racers(tmp_path):
+    """Concurrent starters (Jupyter config load, desktop shortcut, proxy
+    launcher) must all end up with the same credential."""
+    secret_file = tmp_path / "secrets" / "opencode_server_password"
+    results = []
+    threads = [
+        threading.Thread(
+            target=lambda: results.append(
+                ocw.load_or_create_password(str(secret_file))
+            )
+        )
+        for _ in range(8)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(results) == 8
+    assert len(set(results)) == 1
+
+
 # --- Static config expectations --------------------------------------------------
 
 
 def jupyter_template_path():
+    """Locate the Jupyter notebook config template."""
     return first_existing_path(
         "/opt/neurodesktop/jupyter_notebook_config.py.template",
         REPO_ROOT / "config/jupyter/jupyter_notebook_config.py.template",
@@ -190,6 +250,7 @@ def jupyter_template_path():
 
 
 def test_jupyter_template_defines_opencode_proxy_entry():
+    """The Jupyter config template ships the OpenCode proxy tile."""
     template_text = jupyter_template_path().read_text(encoding="utf-8")
     # The template must stay valid python (webapp entries are appended at the
     # {{WEBAPP_SERVERS}} comment placeholder, so it compiles as-is).
@@ -200,10 +261,12 @@ def test_jupyter_template_defines_opencode_proxy_entry():
     assert "opencode_server_password" in template_text
     assert "_opencode_basic" in template_text
     assert "'title': 'OpenCode AI'" in template_text
+    assert "'enabled': bool(_opencode_pass)" in template_text
     assert "'icon_path': '/opt/opencode_logo.svg'" in template_text
 
 
 def test_opencode_default_config_disables_sharing():
+    """Session sharing is opt-in: the shipped config disables it."""
     config_path = first_existing_path(
         "/opt/jovyan_defaults/.config/opencode/opencode.json",
         REPO_ROOT / "config/agents/opencode_config.json",
@@ -214,6 +277,7 @@ def test_opencode_default_config_disables_sharing():
 
 
 def test_desktop_launcher_script_and_entry():
+    """The desktop script parses and the menu entry points at it."""
     script = first_existing_path(
         "/opt/neurodesktop/opencode_web_desktop.sh",
         REPO_ROOT / "config/agents/opencode_web_desktop.sh",
@@ -233,9 +297,10 @@ def test_desktop_launcher_script_and_entry():
 
 class _FakeLLMHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args):
-        pass
+        """Keep the fake LLM server quiet."""
 
     def do_GET(self):
+        """Serve /openai/models with auth-dependent responses."""
         if self.path != "/openai/models":
             self.send_response(404)
             self.send_header("Content-Length", "0")
@@ -244,6 +309,10 @@ class _FakeLLMHandler(http.server.BaseHTTPRequestHandler):
         if self.headers.get("Authorization") == "Bearer good-key":
             payload = json.dumps({"data": [{"id": "model-alpha"}]}).encode()
             self.send_response(200)
+        elif self.headers.get("Authorization") == "Bearer flaky-key":
+            # Unexpected server error: the key must be accepted unverified.
+            payload = b'{"error":{"message":"upstream exploded"}}'
+            self.send_response(500)
         else:
             payload = b'{"error":{"message":"Authentication Error"}}'
             self.send_response(401)
@@ -318,12 +387,14 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
 
 
 def _free_port():
+    """Pick an ephemeral localhost port."""
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
 
 
 def _wait_for_port(port, timeout=20):
+    """Block until the port accepts connections or fail the test."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
@@ -336,6 +407,7 @@ def _wait_for_port(port, timeout=20):
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
+        """Never follow redirects; tests assert on them directly."""
         return None
 
 
@@ -343,6 +415,7 @@ _OPENER = urllib.request.build_opener(_NoRedirect)
 
 
 def _request(port, path, headers=None, data=None, method=None):
+    """HTTP request helper that surfaces redirects instead of following."""
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}{path}",
         data=data,
@@ -361,6 +434,7 @@ def _request(port, path, headers=None, data=None, method=None):
 
 @pytest.fixture()
 def launcher(tmp_path):
+    """Spawn opencode_web.py against fake backend and LLM servers."""
     home_dir = tmp_path / "home"
     home_dir.mkdir()
     state_dir = tmp_path / "state"
@@ -395,10 +469,17 @@ def launcher(tmp_path):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
+    token_file = (
+        home_dir / ".neurodesk" / "secrets"
+        / f"opencode_web_login_token.{port}"
+    )
     try:
         _wait_for_port(port)
         deadline = time.monotonic() + 10
-        while not secret_file.exists() and time.monotonic() < deadline:
+        while (
+            not (secret_file.exists() and token_file.exists())
+            and time.monotonic() < deadline
+        ):
             time.sleep(0.1)
         password = secret_file.read_text(encoding="utf-8").strip()
         auth_header = {
@@ -411,6 +492,7 @@ def launcher(tmp_path):
             "state": state_dir,
             "password": password,
             "auth": auth_header,
+            "token_file": token_file,
         }
     finally:
         process.terminate()
@@ -422,12 +504,14 @@ def launcher(tmp_path):
 
 
 def sys_executable():
+    """Return the running python executable path."""
     import sys
 
     return sys.executable
 
 
 def _complete_key_setup(ctx, key=b"key=good-key"):
+    """POST the setup form and return (status, headers)."""
     status, headers, _body = _request(
         ctx["port"],
         "/neurodesk-setup",
@@ -439,6 +523,7 @@ def _complete_key_setup(ctx, key=b"key=good-key"):
 
 
 def _wait_for_proxied_root(ctx, extra_headers=None, timeout=20):
+    """Poll / until the fake opencode backend is served through the proxy."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         status, _headers, body = _request(
@@ -451,11 +536,13 @@ def _wait_for_proxied_root(ctx, extra_headers=None, timeout=20):
 
 
 def test_requests_without_credentials_are_rejected(launcher):
+    """Every request needs the injected credential or a session cookie."""
     status, _headers, _body = _request(launcher["port"], "/")
     assert status == 401
 
 
 def test_setup_page_shown_until_key_is_configured(launcher):
+    """First launch renders the llm.neurodesk.org key setup page."""
     status, _headers, body = _request(
         launcher["port"], "/", headers=launcher["auth"]
     )
@@ -466,6 +553,7 @@ def test_setup_page_shown_until_key_is_configured(launcher):
 
 
 def test_rejected_key_reprompts_and_does_not_persist(launcher):
+    """A 401-rejected key reprompts and never lands in ~/.bashrc."""
     status, _headers, body = _request(
         launcher["port"],
         "/neurodesk-setup",
@@ -488,6 +576,7 @@ def test_rejected_key_reprompts_and_does_not_persist(launcher):
 
 
 def test_valid_key_persists_starts_backend_and_proxies_with_rewrite(launcher):
+    """The happy path: key saved, backend started, bodies rewritten."""
     status, _headers = _complete_key_setup(launcher)
     assert status == 303
 
@@ -527,6 +616,7 @@ def test_valid_key_persists_starts_backend_and_proxies_with_rewrite(launcher):
 
 
 def test_skip_starts_backend_without_key(launcher):
+    """Skipping key setup still starts the backend (other providers)."""
     status, _headers = _complete_key_setup(launcher, b"skip=1")
     assert status == 303
     _wait_for_proxied_root(launcher)
@@ -537,14 +627,20 @@ def test_skip_starts_backend_without_key(launcher):
 
 
 def test_sanitize_header_value_strips_crlf():
+    """Header values built from request data must lose CR/LF."""
     assert ocw.sanitize_header_value("/x\r\nInjected: 1") == "/xInjected: 1"
     assert ocw.sanitize_header_value("clean") == "clean"
+
+
+def _read_login_token(ctx):
+    """Read the current single-use login token the launcher wrote to disk."""
+    return ctx["token_file"].read_text(encoding="utf-8").strip()
 
 
 def test_auth_redirect_cannot_become_protocol_relative(launcher):
     """A crafted //host path must not turn the cookie exchange into an open
     redirect: the Location header is normalized to a single-slash path."""
-    quoted = urllib.parse.quote(launcher["password"])
+    quoted = urllib.parse.quote(_read_login_token(launcher))
     status, headers, _body = _request(
         launcher["port"], f"//evil.example/?auth={quoted}"
     )
@@ -554,11 +650,13 @@ def test_auth_redirect_cannot_become_protocol_relative(launcher):
     assert not location.startswith("//")
 
 
-def test_auth_query_param_exchanges_for_cookie(launcher):
-    quoted = urllib.parse.quote(launcher["password"])
-    status, headers, _body = _request(
-        launcher["port"], f"/?auth={quoted}"
-    )
+def test_login_token_exchanges_for_cookie_and_cannot_be_replayed(launcher):
+    """The desktop ?auth= login token is single-use: it yields a session
+    cookie and is rotated immediately, so a leaked URL cannot be replayed.
+    The password itself is never accepted in the URL."""
+    token = _read_login_token(launcher)
+    quoted = urllib.parse.quote(token)
+    status, headers, _body = _request(launcher["port"], f"/?auth={quoted}")
     assert status == 303
     cookie = headers.get("Set-Cookie", "")
     assert "neurodesk_opencode_auth=" in cookie
@@ -571,6 +669,28 @@ def test_auth_query_param_exchanges_for_cookie(launcher):
     assert status == 200
     # Setup page renders, i.e. the cookie authorized the request.
     assert "Set up your Neurodesk LLM API key" in body
+
+    # Replaying the consumed token is rejected, and the file now holds a
+    # fresh one.
+    status, _headers, _body = _request(launcher["port"], f"/?auth={quoted}")
+    assert status == 401
+    assert _read_login_token(launcher) != token
+
+    # The reusable proxy password is not accepted via the URL at all.
+    quoted_password = urllib.parse.quote(launcher["password"])
+    status, _headers, _body = _request(
+        launcher["port"], f"/?auth={quoted_password}"
+    )
+    assert status == 401
+
+
+def test_unexpected_validation_status_accepts_key_unverified(launcher):
+    """A 5xx from llm.neurodesk.org must not reject the key (or claim it was
+    verified) - setup completes and the key is persisted."""
+    status, _headers = _complete_key_setup(launcher, b"key=flaky-key")
+    assert status == 303
+    bashrc = (launcher["home"] / ".bashrc").read_text(encoding="utf-8")
+    assert "export NEURODESK_API_KEY='flaky-key'" in bashrc
 
 
 def test_existing_bashrc_key_skips_setup_and_warm_starts(tmp_path):

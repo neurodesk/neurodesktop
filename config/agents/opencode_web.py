@@ -6,9 +6,10 @@ desktop shortcut. It provides what the bare `opencode web` server cannot do
 behind Neurodesktop's proxy setup:
 
 1. Requires per-user credentials on every request. Jupyter Server Proxy
-   injects them via `request_headers_override`, the desktop shortcut passes
-   them once as `?auth=` and gets a cookie back, so other users on a shared
-   host cannot reach the 127.0.0.1 port.
+   injects them via `request_headers_override`; the desktop shortcut passes a
+   single-use login token as `?auth=` and gets a cookie back. Other local
+   users on a shared host can reach the 127.0.0.1 port but cannot
+   authenticate without the credential.
 2. Walks first-time users through llm.neurodesk.org API key setup in the
    browser (the terminal wrapper does this interactively). The key is
    validated against the LiteLLM endpoint and persisted to ~/.bashrc in the
@@ -84,7 +85,34 @@ def sanitize_header_value(value):
     return str(value).replace("\r", "").replace("\n", "")
 
 
+def redact_auth_params(text):
+    """Blank out ?auth=... credentials before request lines reach the logs."""
+    return re.sub(r"([?&]auth=)[^\s&]*", r"\1REDACTED", str(text))
+
+
+# Forwarded prefixes are interpolated into rewritten HTML/CSS/JS bodies, so
+# only canonical root-relative paths are accepted: no quotes, markup, spaces,
+# control characters, query strings, fragments, or backslashes.
+_SAFE_PREFIX_RE = re.compile(r"^/[A-Za-z0-9._~%/@:+-]*$")
+
+
+def safe_forwarded_prefix(value):
+    """Normalize an X-Forwarded-Prefix value to a safe root-relative path.
+
+    Returns the trimmed prefix, or "" when the value is absent, is the root,
+    or contains anything that could break out of a quoted URL context in the
+    rewritten response bodies.
+    """
+    value = sanitize_header_value(value or "").strip().rstrip("/")
+    if not value:
+        return ""
+    if not _SAFE_PREFIX_RE.match(value):
+        return ""
+    return value
+
+
 def secret_file_path():
+    """Return the shared password file path (env-overridable for tests)."""
     return os.environ.get(
         "OPENCODE_WEB_SECRET_FILE",
         os.path.join(
@@ -94,28 +122,68 @@ def secret_file_path():
     )
 
 
+def login_token_file_path(port):
+    """Return the per-instance single-use login token file path."""
+    return os.environ.get(
+        "OPENCODE_WEB_LOGIN_TOKEN_FILE",
+        os.path.join(
+            os.path.expanduser("~"), ".neurodesk", "secrets",
+            f"opencode_web_login_token.{port}",
+        ),
+    )
+
+
 def load_or_create_password(path):
-    """Read the shared per-user password, creating it 0600 when missing.
+    """Read the shared per-user password, creating it atomically when missing.
 
-    The same file is read by jupyter_notebook_config.py to build the
-    Authorization header Jupyter Server Proxy injects, so both sides always
-    agree on the credential.
+    The same file is read by jupyter_notebook_config.py (which imports this
+    helper) to build the Authorization header Jupyter Server Proxy injects.
+    O_EXCL creation makes concurrent starters (Jupyter config load, the
+    desktop shortcut, the proxy launcher) agree on a single credential: the
+    loser of the create race re-reads the winner's file. Raises OSError when
+    no credential can be obtained so callers fail closed.
     """
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            existing = fh.read().strip()
-        if existing:
-            return existing
-    except OSError:
-        pass
+    parent = os.path.dirname(path)
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    for attempt in range(20):
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                existing = fh.read().strip()
+            if existing:
+                return existing
+            # An empty file means a writer crashed mid-create; after a few
+            # re-reads, clear it so the O_EXCL create below can win.
+            if attempt >= 5:
+                os.unlink(path)
+        except OSError:
+            pass
 
-    password = secrets.token_urlsafe(24)
+        password = secrets.token_urlsafe(24)
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            time.sleep(0.05)
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(password + "\n")
+        return password
+    raise OSError(f"could not obtain the OpenCode web credential at {path}")
+
+
+def rotate_login_token(path):
+    """Write a fresh single-use browser login token (0600) and return it.
+
+    The desktop shortcut reads this file and passes the token as ?auth=; the
+    handler rotates it on every successful exchange, so a token that leaked
+    through browser history or logs cannot be replayed.
+    """
+    token = secrets.token_urlsafe(24)
     parent = os.path.dirname(path)
     os.makedirs(parent, mode=0o700, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(password + "\n")
-    return password
+        fh.write(token + "\n")
+    return token
 
 
 def sanitize_neurodesk_api_key(raw_key):
@@ -206,7 +274,14 @@ def validate_neurodesk_api_key(key, base_url):
             "That API key was rejected by llm.neurodesk.org. "
             "Please paste a correct key.",
         )
-    return True, True, "API key verified with llm.neurodesk.org."
+    if status in (200, 404):
+        return True, True, "API key verified with llm.neurodesk.org."
+    return (
+        True,
+        False,
+        f"API key received, but llm.neurodesk.org returned HTTP {status}; "
+        "continuing without verification.",
+    )
 
 
 def current_opencode_model(home_dir):
@@ -237,6 +312,7 @@ _JS_STRING_PATH_RE = re.compile(r"""(["'`])/(assets|api)/""")
 
 
 def rewrite_html(body, prefix):
+    """Prefix root-absolute attribute, CSS, and JS asset URLs in HTML."""
     body = _HTML_ATTR_RE.sub(rf"\g<1>\g<2>{prefix}/", body)
     body = _CSS_URL_RE.sub(rf"\g<1>\g<2>{prefix}/", body)
     body = _JS_STRING_PATH_RE.sub(rf"\g<1>{prefix}/\g<2>/", body)
@@ -244,14 +320,17 @@ def rewrite_html(body, prefix):
 
 
 def rewrite_css(body, prefix):
+    """Prefix root-absolute url(...) references in CSS."""
     return _CSS_URL_RE.sub(rf"\g<1>\g<2>{prefix}/", body)
 
 
 def rewrite_js(body, prefix):
+    """Prefix quoted root-absolute /assets/ and /api/ strings in JS."""
     return _JS_STRING_PATH_RE.sub(rf"\g<1>{prefix}/\g<2>/", body)
 
 
 def rewrite_body(body, content_type, prefix):
+    """Dispatch body rewriting by content type; no-op without a prefix."""
     if not prefix:
         return body
     if content_type.startswith("text/html"):
@@ -279,6 +358,7 @@ class OpencodeBackend:
         self.backend_password = ""
 
     def start(self, backend_password):
+        """Spawn `opencode web` via the terminal wrapper (idempotent)."""
         with self._lock:
             if self.state in ("starting", "ready"):
                 return
@@ -324,12 +404,14 @@ class OpencodeBackend:
         threading.Thread(target=self._wait_ready, daemon=True).start()
 
     def _pump_logs(self):
+        """Mirror backend output to our stdout and keep a tail for errors."""
         for raw_line in self.process.stdout:
             line = raw_line.decode("utf-8", errors="replace").rstrip()
             self.log_tail.append(line)
             print(f"[opencode] {line}", flush=True)
 
     def _wait_ready(self):
+        """Poll the backend until it answers HTTP or the timeout expires."""
         deadline = time.monotonic() + self.startup_timeout
         credentials = base64.b64encode(
             f"{BACKEND_USERNAME}:{self.backend_password}".encode()
@@ -360,6 +442,7 @@ class OpencodeBackend:
         self.state = "failed"
 
     def terminate(self):
+        """Stop the backend process, escalating to SIGKILL if needed."""
         if self.process and self.process.poll() is None:
             self.process.terminate()
             try:
@@ -404,6 +487,7 @@ PAGE_STYLE = """
 
 
 def setup_page(prefix, error=""):
+    """Render the llm.neurodesk.org API key setup page."""
     error_html = f'<p class="error">{html.escape(error)}</p>' if error else ""
     action = html.escape(f"{prefix}{SETUP_PATH}")
     return f"""<!DOCTYPE html>
@@ -441,6 +525,7 @@ terminal agents.</p>
 
 
 def waiting_page():
+    """Render the auto-refreshing backend-startup page."""
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="refresh" content="2">
@@ -455,6 +540,7 @@ This page refreshes automatically.</p>
 
 
 def failed_page(log_tail):
+    """Render the backend-failure page with recent log output."""
     log_html = html.escape("\n".join(log_tail)[-4000:])
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -483,6 +569,9 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
     # browser (a restart simply invalidates old cookies and the desktop
     # shortcut re-authenticates via ?auth=).
     cookie_token = ""
+    # Current single-use ?auth= login token; rotated on every successful use.
+    login_token = ""
+    login_token_file = ""
     backend = None
     llm_base_url = DEFAULT_LLM_BASE_URL
     home_dir = ""
@@ -491,26 +580,34 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
     # -- helpers --
 
     def log_message(self, fmt, *args):
+        """Write handler log lines to stderr with the launcher's tag."""
         sys.stderr.write("opencode_web: %s\n" % (fmt % args))
 
+    def log_request(self, code="-", size="-"):
+        """Log the request line with ?auth= credentials redacted."""
+        self.log_message(
+            '"%s" %s %s', redact_auth_params(self.requestline),
+            str(code), str(size),
+        )
+
     def external_prefix(self):
+        """Return the validated external proxy prefix for this request."""
         for header in ("X-Forwarded-Prefix", "X-Forwarded-Context",
                        "X-ProxyContextPath"):
             value = self.headers.get(header)
             if value:
-                value = sanitize_header_value(value).rstrip("/")
-                if value and not value.startswith("/"):
-                    value = "/" + value
-                return value
+                return safe_forwarded_prefix(value)
         return ""
 
     def expected_authorization(self):
+        """Return the Authorization header value the proxy must inject."""
         credentials = base64.b64encode(
             f"{BACKEND_USERNAME}:{self.proxy_password}".encode()
         ).decode()
         return f"Basic {credentials}"
 
     def is_authorized(self):
+        """Check the injected Authorization header or the session cookie."""
         supplied = self.headers.get("Authorization", "")
         if supplied and hmac.compare_digest(
             supplied, self.expected_authorization()
@@ -527,6 +624,7 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
         return False
 
     def send_page(self, status, body, extra_headers=None):
+        """Send a complete HTML page with no-store caching."""
         payload = body.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -539,6 +637,7 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(payload)
 
     def redirect(self, location, extra_headers=None):
+        """Send a 303 to a normalized same-origin path."""
         # Same-origin redirects only: normalize to a single-slash-rooted path
         # so request-derived values can neither split headers nor turn into a
         # protocol-relative ("//host") redirect.
@@ -554,15 +653,25 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
     # -- request routing --
 
     def handle_any(self):
+        """Route a request: login exchange, auth check, setup, or proxy."""
+        cls = type(self)
         parsed = urllib.parse.urlsplit(self.path)
         query = urllib.parse.parse_qs(parsed.query)
 
-        # Desktop flow: a one-time ?auth=<password> exchange for a cookie, so
-        # the URL in the browser bar stops carrying the credential.
+        # Desktop flow: exchange the single-use ?auth=<login token> for a
+        # cookie. The token is rotated immediately, so a URL that leaked via
+        # browser history or logs cannot be replayed.
         auth_values = query.pop("auth", [])
-        if auth_values and hmac.compare_digest(
-            auth_values[0], self.proxy_password
+        if (
+            auth_values
+            and cls.login_token
+            and hmac.compare_digest(auth_values[0], cls.login_token)
         ):
+            try:
+                cls.login_token = rotate_login_token(cls.login_token_file)
+            except OSError as exc:
+                cls.login_token = ""
+                self.log_message("failed to rotate login token: %s", exc)
             clean_query = urllib.parse.urlencode(query, doseq=True)
             location = parsed.path + (f"?{clean_query}" if clean_query else "")
             cookie = (
@@ -584,7 +693,6 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
             self.handle_setup_post()
             return
 
-        cls = type(self)
         if cls.backend.state == "not_started":
             key = os.environ.get("NEURODESK_API_KEY") or read_key_from_bashrc(
                 os.path.join(self.home_dir, ".bashrc")
@@ -607,6 +715,7 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
         self.proxy_request(parsed)
 
     def handle_setup_post(self):
+        """Validate and persist a submitted key, or record a skip."""
         cls = type(self)
         length = int(self.headers.get("Content-Length") or 0)
         raw_body = self.rfile.read(length) if length else b""
@@ -637,7 +746,18 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
         try:
             persist_key_to_bashrc(bashrc_path, key)
         except OSError as exc:
+            # Without persistence the key would silently vanish on the next
+            # restart; surface the failure instead of starting the backend.
             self.log_message("failed to persist key to %s: %s", bashrc_path, exc)
+            self.send_page(
+                200,
+                setup_page(
+                    prefix,
+                    f"The key could not be saved to {bashrc_path} ({exc}). "
+                    "Please fix the home directory permissions and try again.",
+                ),
+            )
+            return
         os.environ["NEURODESK_API_KEY"] = key
         self.log_message("neurodesk key setup: %s", message)
 
@@ -647,6 +767,7 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
     # -- reverse proxy --
 
     def proxy_request(self, parsed):
+        """Forward the request to `opencode web`, rewriting text bodies."""
         backend = type(self).backend
         body = None
         length = self.headers.get("Content-Length")
@@ -751,11 +872,14 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
 
 
 class ThreadingHTTPServer(http.server.ThreadingHTTPServer):
+    """Threaded server so streaming responses do not block other requests."""
+
     daemon_threads = True
     allow_reuse_address = True
 
 
 def serve(argv=None):
+    """Entry point: prepare credentials, warm-start, and serve the proxy."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, required=True,
                         help="port to listen on (127.0.0.1)")
@@ -775,6 +899,10 @@ def serve(argv=None):
 
     OpencodeWebHandler.proxy_password = password
     OpencodeWebHandler.cookie_token = secrets.token_urlsafe(32)
+    OpencodeWebHandler.login_token_file = login_token_file_path(args.port)
+    OpencodeWebHandler.login_token = rotate_login_token(
+        OpencodeWebHandler.login_token_file
+    )
     OpencodeWebHandler.backend = backend
     OpencodeWebHandler.llm_base_url = os.environ.get(
         "NEURODESK_LLM_BASE_URL", DEFAULT_LLM_BASE_URL
@@ -793,6 +921,7 @@ def serve(argv=None):
     server = ThreadingHTTPServer(("127.0.0.1", args.port), OpencodeWebHandler)
 
     def shutdown(_signum, _frame):
+        """Terminate the backend and stop serving on SIGTERM/SIGINT."""
         backend.terminate()
         threading.Thread(target=server.shutdown, daemon=True).start()
 
