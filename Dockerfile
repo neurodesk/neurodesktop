@@ -230,11 +230,17 @@ ENV LC_ALL=""
 # Launchpad API/PPA path and lets us pin scanner-fixed Go module/toolchain levels
 # before upstream publishes a matching multi-arch runtime image.
 COPY --from=apptainer /opt/apptainer /opt/apptainer
+# apptainer is built --with-suid but runs setuid-DISABLED (see the apptainer.conf edit below), so
+# unprivileged image builds fall back to the bundled proot (libexec/apptainer/bin/proot). proot is
+# dynamically linked and, because it's vendored (not apt-installed), nothing pulls in its runtime
+# libs. Ship libtalloc2 + libprotobuf-c1 so the proot fallback works on hosts/sessions without user
+# namespaces — otherwise `apptainer build` / `singularity` fails at the mksquashfs step with
+# "proot: error while loading shared libraries: libtalloc.so.2 / libprotobuf-c.so.1".
 RUN ln -sf /opt/apptainer/bin/apptainer /usr/local/bin/apptainer \
     && ln -sf /opt/apptainer/bin/singularity /usr/local/bin/singularity \
     && rm -rf /opt/apptainer/libexec/apptainer/cni \
     && sed -i 's/^allow setuid = yes/allow setuid = no/' /opt/apptainer/etc/apptainer/apptainer.conf \
-    && apt-install-retry fuse-overlayfs squashfuse \
+    && apt-install-retry fuse-overlayfs squashfuse libtalloc2 libprotobuf-c1 \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && rm -rf /root/.cache && rm -rf /home/${NB_USER}/.cache
 
