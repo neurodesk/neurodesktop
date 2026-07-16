@@ -1,0 +1,9 @@
+# CodeRabbit configuration
+# Reference: https://docs.coderabbit.ai/reference/yaml-template
+reviews:
+  auto_review:
+    enabled: true
+    # Review pull requests targeting any branch, not only the default branch
+    # (feature branches stacking on other feature branches still get reviews).
+    base_branches:
+      - ".*"
