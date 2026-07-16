@@ -96,11 +96,11 @@ into a sourceable library, e.g. `config/agents/opencode_common.sh` installed to
   Brain Researcher MCP helpers
 - NBI sync hook (`sync_notebook_intelligence_config`)
 
-The terminal wrapper keeps its interactive UX and sources the library; a new
-**`config/agents/opencode_web`** script (installed to `/opt/neurodesktop/`)
-does the same steps non-interactively (the wrapper already has non-tty
-fallbacks: first working model wins, `OPENCODE_MODEL_PROFILE` honored) and then
-starts the server:
+The terminal wrapper keeps its interactive UX; the shipped launcher
+**`config/agents/opencode_web.py`** (installed to `/opt/neurodesktop/`, run as
+`python3 /opt/neurodesktop/opencode_web.py --port {port}`) reuses the terminal
+wrapper non-interactively (it already has non-tty fallbacks: first working
+model wins, `OPENCODE_MODEL_PROFILE` honored) to start the server:
 
 ```sh
 opencode web --hostname 127.0.0.1 --port "${PORT}"    # serves UI + API
@@ -122,12 +122,14 @@ Add an `opencode` entry to `c.ServerProxy.servers` in
 
 ```python
 'opencode': {
-  'command': ['/bin/bash', '-lc', 'exec /opt/neurodesktop/opencode_web {port}'],
-  'timeout': 120,
+  'command': ['python3', '/opt/neurodesktop/opencode_web.py',
+              '--port', '{port}'],
+  'timeout': 60,
   'new_browser_tab': True,
   'request_headers_override': {'Authorization': f'Basic {_opencode_basic}'},
   'launcher_entry': {
-    'enabled': True,
+    # Fail closed: the tile only shows when the credential exists.
+    'enabled': bool(_opencode_pass),
     'path_info': 'opencode',
     'title': 'OpenCode AI',
     'icon_path': '/opt/neurodesk/icons/opencode.svg',
@@ -146,25 +148,24 @@ the tile itself. Add an `opencode.svg` icon under
 ### Phase 3 - solve the path-prefix problem (the actual "nice web interface")
 
 The official UI breaking under `/opencode/` is the one real technical risk.
-Three options, in recommended order:
 
-1. **Ship a prefix-aware UI in front of `opencode serve`** (recommended for
-   the JupyterLab tile). Evaluate `prokube/pk-opencode-webui` (purpose-built
-   for Kubeflow/JupyterHub-style prefixes; backend stays the unmodified
-   upstream server), and the alternatives `openchamber` and `kcrommett/oc-web`.
-   Selection criteria: license, maintenance activity, tracking of the fast-
-   moving server API, bundle weight in the image, and whether it runs on the
-   Node/Bun runtime already present in the image. The launch script then runs
-   `opencode serve` plus the UI process on `{port}`.
-2. **Contribute base-path support upstream** (parallel track, best long-term).
-   opencode is open source and takes PRs; a `--base-path` flag or relative
-   asset URLs in the web bundle would let us drop the extra UI layer and use
-   the official app directly. Track the upstream issue and remove option 1
-   when it lands.
-3. **Fallback: path rewriting via the existing webapp_wrapper.** The
-   `path_rewrites` mechanism (used for jamovi) can rewrite HTML/CSS responses,
-   but JS-computed asset URLs make this fragile for opencode's bundle; only
-   pursue if 1 and 2 both fail.
+**Shipped (first iteration):** `opencode_web.py`'s reverse proxy rewrites
+root-absolute URLs in HTML, CSS, and JavaScript responses against the
+validated `X-Forwarded-Prefix`, keeping the official upstream web UI with no
+extra runtimes. The regex rules are validated in `tests/test_opencode_web.py`
+and should be re-verified against the real bundle when bumping the pinned
+`OPENCODE_VERSION`.
+
+Alternatives that were considered, kept here for context:
+
+1. **Contribute base-path support upstream** (parallel track, best
+   long-term). opencode is open source and takes PRs; a `--base-path` flag or
+   relative asset URLs in the web bundle would let us drop the rewriting
+   layer and serve the official app directly.
+2. **Ship a prefix-aware third-party UI in front of `opencode serve`**, e.g.
+   `prokube/pk-opencode-webui` (purpose-built for Kubeflow/JupyterHub-style
+   prefixes), `openchamber`, or `kcrommett/oc-web`. Rejected for now: extra
+   runtime and a fast-moving server API to track.
 
 **Zero-prefix escape hatch that can ship immediately:** inside the Neurodesktop
 VNC/RDP desktop there is no prefix - Firefox can open
@@ -242,10 +243,12 @@ The terminal flow keeps working unchanged; both flows write the same state
 
 Per [docs/testing.md](testing.md) and AGENTS.md expectations:
 
-- `tests/test_opencode_web.py`: proxy entry present in the generated Jupyter
-  config with auth header override and `new_browser_tab`; launch script passes
-  `bash -n`; password file created 0600; `opencode.json` remains valid after
-  the non-interactive path runs (fixture-based, no network).
+- `tests/test_opencode_web.py`: proxy entry present in the Jupyter config
+  template with auth header override and `new_browser_tab`; the Python
+  launcher is exercised end-to-end against fake opencode/LLM backends (key
+  setup, auth, rewriting); the desktop shell script passes `bash -n`;
+  password file created 0600; `opencode.json` remains valid after the
+  non-interactive path runs (fixture-based, no network).
 - Extend `tests/test_coding_agents.py` for the shared-library refactor (both
   wrappers source it; behavior parity for key sanitize/persist/load).
 - Extend `tests/test_nbi_opencode_sync.py`: key set via the new endpoint is

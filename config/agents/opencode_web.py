@@ -145,28 +145,33 @@ def load_or_create_password(path):
     """
     parent = os.path.dirname(path)
     os.makedirs(parent, mode=0o700, exist_ok=True)
-    for attempt in range(20):
+    for _ in range(40):
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 existing = fh.read().strip()
             if existing:
                 return existing
-            # An empty file means a writer crashed mid-create; after a few
-            # re-reads, clear it so the O_EXCL create below can win.
-            if attempt >= 5:
-                os.unlink(path)
+            # Empty file: never delete it (another process may own it) -
+            # keep re-reading and fail closed below if it never fills.
         except OSError:
             pass
 
+        # Publish atomically: write a private temp file, then hard-link it
+        # into place. link() fails if the path exists, so readers can never
+        # observe a partially written credential and losers re-read the
+        # winner's file.
         password = secrets.token_urlsafe(24)
-        try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:
-            time.sleep(0.05)
-            continue
+        tmp_path = f"{path}.tmp.{os.getpid()}.{secrets.token_hex(4)}"
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(password + "\n")
-        return password
+        try:
+            os.link(tmp_path, path)
+            return password
+        except FileExistsError:
+            time.sleep(0.05)
+        finally:
+            os.unlink(tmp_path)
     raise OSError(f"could not obtain the OpenCode web credential at {path}")
 
 
@@ -570,8 +575,11 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
     # shortcut re-authenticates via ?auth=).
     cookie_token = ""
     # Current single-use ?auth= login token; rotated on every successful use.
+    # The lock makes compare-and-rotate atomic so concurrent requests cannot
+    # both consume the same token under the threading server.
     login_token = ""
     login_token_file = ""
+    login_token_lock = threading.Lock()
     backend = None
     llm_base_url = DEFAULT_LLM_BASE_URL
     home_dir = ""
@@ -659,19 +667,27 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed.query)
 
         # Desktop flow: exchange the single-use ?auth=<login token> for a
-        # cookie. The token is rotated immediately, so a URL that leaked via
-        # browser history or logs cannot be replayed.
+        # cookie. Compare-and-rotate happens under a lock so exactly one
+        # request can consume a token, and a URL that leaked via browser
+        # history or logs cannot be replayed.
         auth_values = query.pop("auth", [])
-        if (
-            auth_values
-            and cls.login_token
-            and hmac.compare_digest(auth_values[0], cls.login_token)
-        ):
-            try:
-                cls.login_token = rotate_login_token(cls.login_token_file)
-            except OSError as exc:
-                cls.login_token = ""
-                self.log_message("failed to rotate login token: %s", exc)
+        consumed_token = False
+        if auth_values:
+            with cls.login_token_lock:
+                if cls.login_token and hmac.compare_digest(
+                    auth_values[0], cls.login_token
+                ):
+                    consumed_token = True
+                    try:
+                        cls.login_token = rotate_login_token(
+                            cls.login_token_file
+                        )
+                    except OSError as exc:
+                        cls.login_token = ""
+                        self.log_message(
+                            "failed to rotate login token: %s", exc
+                        )
+        if consumed_token:
             clean_query = urllib.parse.urlencode(query, doseq=True)
             location = parsed.path + (f"?{clean_query}" if clean_query else "")
             cookie = (
