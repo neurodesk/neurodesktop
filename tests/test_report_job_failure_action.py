@@ -54,11 +54,15 @@ def test_issue_investigator_routes_codex_through_neurodesk_gateway():
     assert 'input: "3e-06"' in workflow
     assert 'output: "1.5e-05"' in workflow
     assert f"GH_AW_INFO_MODEL_COSTS: '{model_costs}'" in lock
+    assert "max-ai-credits: -1\n" in workflow
+    assert 'GH_AW_MAX_AI_CREDITS: "-1"' in lock
+    assert '"maxAiCredits":' not in lock
+    assert '\\"maxAiCredits\\":' not in lock
     assert "max-turn-cache-misses: 2000\n" in workflow
     assert "openai_base_url=" not in workflow
     assert "openai_base_url=" not in lock
-    assert '\\"targets\\":{\\"openai\\":{\\"host\\":\\"llm.neurodesk.org\\"}}' in lock
-    assert '\\"maxCacheMisses\\":2000,\\"targets\\"' in lock
+    assert '"targets":{"openai":{"host":"llm.neurodesk.org"}}' in lock
+    assert '"maxCacheMisses":2000,"targets"' in lock
     assert "--openai-api-base-path /openai" in lock
 
 

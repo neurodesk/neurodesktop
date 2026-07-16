@@ -20,9 +20,10 @@ while [ "${attempt}" -le "${max_attempts}" ]; do
     && apt-get update -o APT::Update::Error-Mode=any -o Acquire::Retries=5 --yes \
     && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends "$@"; then
     exit 0
+  else
+    rc=$?
   fi
 
-  rc=$?
   if [ "${attempt}" -eq "${max_attempts}" ]; then
     echo "apt-install-retry: failed after ${max_attempts} attempts." >&2
     exit "${rc}"
