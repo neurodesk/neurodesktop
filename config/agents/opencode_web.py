@@ -64,7 +64,7 @@ HOP_BY_HOP_HEADERS = {
     "keep-alive",
     "proxy-authenticate",
     "proxy-authorization",
-    "te",
+    "te",  # codespell:ignore te
     "trailers",
     "transfer-encoding",
     "upgrade",
