@@ -684,6 +684,29 @@ def test_login_token_exchanges_for_cookie_and_cannot_be_replayed(launcher):
     assert status == 401
 
 
+def test_login_token_consumed_by_exactly_one_concurrent_request(launcher):
+    """Two parallel requests with the same token must not both authenticate:
+    compare-and-rotate is atomic, so exactly one gets the cookie."""
+    token = _read_login_token(launcher)
+    quoted = urllib.parse.quote(token)
+    results = []
+
+    def attempt():
+        """Try the exchange and record the resulting status code."""
+        status, headers, _body = _request(launcher["port"], f"/?auth={quoted}")
+        results.append((status, "Set-Cookie" in headers))
+
+    threads = [threading.Thread(target=attempt) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    statuses = sorted(status for status, _cookie in results)
+    assert statuses.count(303) == 1, results
+    assert all(status == 401 for status in statuses if status != 303), results
+
+
 def test_unexpected_validation_status_accepts_key_unverified(launcher):
     """A 5xx from llm.neurodesk.org must not reject the key (or claim it was
     verified) - setup completes and the key is persisted."""
