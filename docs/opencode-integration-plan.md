@@ -149,12 +149,15 @@ the tile itself. Add an `opencode.svg` icon under
 
 The official UI breaking under `/opencode/` is the one real technical risk.
 
-**Shipped (first iteration):** `opencode_web.py`'s reverse proxy rewrites
-root-absolute URLs in HTML, CSS, and JavaScript responses against the
-validated `X-Forwarded-Prefix`, keeping the official upstream web UI with no
-extra runtimes. The regex rules are validated in `tests/test_opencode_web.py`
-and should be re-verified against the real bundle when bumping the pinned
-`OPENCODE_VERSION`.
+**Shipped:** `opencode_web.py`'s reverse proxy rewrites static root-absolute
+URLs in HTML, CSS, and JavaScript responses against the validated
+`X-Forwarded-Prefix`. Before the upstream module bundle runs, a generated
+same-origin bootstrap also sets OpenCode's native default-server URL to that
+full prefix. This is what keeps non-`/api` routes such as `/provider`,
+`/global/config`, `/session`, and `/event` inside the Jupyter proxy and makes
+the native per-prompt model picker work. The behavior and the pinned real
+OpenCode bundle contract are validated in `tests/test_opencode_web.py` and
+must be re-verified when bumping `OPENCODE_VERSION`.
 
 Alternatives that were considered, kept here for context:
 

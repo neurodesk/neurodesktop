@@ -52,6 +52,13 @@ jobs:
       API_URL: ${{ vars[matrix.url_var] || matrix.default_url }}
       NOTEBOOK_NAME: "FSL_course_bet_test.ipynb"
       OUTPUT_NAME: "FSL_course_bet_test_output.ipynb"
+      SERVER_START_SUCCEEDED: "false"
+      SERVER_START_DIAGNOSTIC: "not-attempted"
+      SERVER_STOP_SUCCEEDED: "false"
+      NOTEBOOK_CREATED: "false"
+      NOTEBOOK_SUCCESS: "false"
+      PATTERN_COUNT: "0"
+      SUCCESS_PATTERNS_TOTAL: "8"
       # JasonEtco/create-an-issue still ships Node 20 only (no v24 release
       # as of 2026-05); force runners to execute it on Node 24.
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -82,69 +89,193 @@ jobs:
         echo "=== Starting JupyterHub Server ==="
         SERVER_API_URL="${API_URL}/hub/api/users/${USER}"
         SERVER_START_URL="${SERVER_API_URL}/server"
+        REQUEST_PREFIX="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.server_name }}"
+        REQUEST_SEQUENCE=0
+        RESPONSE_BODY=$(mktemp)
+        RESPONSE_METRICS=$(mktemp)
+        trap 'rm -f "$RESPONSE_BODY" "$RESPONSE_METRICS"' EXIT
 
-        # Check if server is already running and stop it
-        echo "Checking if server is already running..."
-        SERVER_STATUS=$(curl -s -k -H "Authorization: token $USER_TOKEN" "$SERVER_API_URL" 2>/dev/null || echo "{}")
+        {
+          echo "SERVER_START_SUCCEEDED=false"
+          echo "SERVER_START_DIAGNOSTIC=not-attempted"
+          echo "SERVER_STOP_SUCCEEDED=false"
+          echo "NOTEBOOK_CREATED=false"
+          echo "NOTEBOOK_SUCCESS=false"
+          echo "PATTERN_COUNT=0"
+          echo "SUCCESS_PATTERNS_TOTAL=8"
+        } >> "$GITHUB_ENV"
 
-        # Check if the token is valid
-        if [[ "$SERVER_STATUS" == *"403"* ]]; then
-          echo "❌ Authentication failed - 403 Forbidden. Check your API token."
-          echo "Server response: $SERVER_STATUS"
+        set_start_diagnostic() {
+          echo "SERVER_START_DIAGNOSTIC=$1" >> "$GITHUB_ENV"
+        }
+
+        api_request() {
+          local method="$1"
+          local url="$2"
+          local request_id
+          local curl_rc
+
+          REQUEST_SEQUENCE=$((REQUEST_SEQUENCE + 1))
+          request_id="${REQUEST_PREFIX}-${REQUEST_SEQUENCE}"
+          : > "$RESPONSE_BODY"
+          : > "$RESPONSE_METRICS"
+
+          echo "request_id=$request_id method=$method"
+          if curl \
+              --silent --show-error --fail-with-body \
+              --connect-timeout 15 \
+              --max-time 60 \
+              --request "$method" \
+              --header "Authorization: token $USER_TOKEN" \
+              --header "X-Request-ID: $request_id" \
+              --output "$RESPONSE_BODY" \
+              --write-out 'http=%{http_code} remote_ip=%{remote_ip} dns=%{time_namelookup} tcp=%{time_connect} tls=%{time_appconnect} first_byte=%{time_starttransfer} total=%{time_total} curl_exit=%{exitcode}\n' \
+              "$url" > "$RESPONSE_METRICS"; then
+            curl_rc=0
+          else
+            curl_rc=$?
+          fi
+
+          cat "$RESPONSE_METRICS"
+          return "$curl_rc"
+        }
+
+        parse_server_state() {
+          if ! jq -e 'type == "object"' "$RESPONSE_BODY" >/dev/null; then
+            echo "❌ JupyterHub returned invalid JSON"
+            head -c 500 "$RESPONSE_BODY" || true
+            echo
+            return 1
+          fi
+
+          SERVER_PATH=$(jq -r '.server // ""' "$RESPONSE_BODY")
+          SERVER_READY=$(jq -r '.ready // false' "$RESPONSE_BODY")
+          SERVER_PENDING=$(jq -r '.pending // ""' "$RESPONSE_BODY")
+        }
+
+        fetch_server_state() {
+          local attempts="${1:-1}"
+          local attempt
+
+          for attempt in $(seq 1 "$attempts"); do
+            if api_request GET "$SERVER_API_URL" && parse_server_state; then
+              return 0
+            fi
+            echo "⚠️ Unable to read server state (attempt $attempt/$attempts)"
+            if [ "$attempt" -lt "$attempts" ]; then
+              sleep $((attempt * 5))
+            fi
+          done
+          return 1
+        }
+
+        reconcile_server_state() {
+          if ! fetch_server_state 3; then
+            return 1
+          fi
+          if [ "$SERVER_READY" = "true" ] || [ "$SERVER_PENDING" = "spawn" ] || [ -n "$SERVER_PATH" ]; then
+            return 0
+          fi
+          return 2
+        }
+
+        echo "Checking current server state..."
+        if ! fetch_server_state 3; then
+          set_start_diagnostic "initial-state-request-failed"
           exit 1
         fi
-        
-        # Check if server is running (server is not null and ready is true)
-        if [[ "$SERVER_STATUS" == *"\"server\": \"/user/$USER/\""* ]] && [[ "$SERVER_STATUS" == *"\"ready\": true"* ]]; then
-          echo "Server is running, stopping it first..."
-          curl -s -k -X DELETE -H "Authorization: token $USER_TOKEN" "$SERVER_START_URL"
-          
-          echo "Waiting for server to stop..."
+
+        SHOULD_POST=true
+        if [ "$SERVER_READY" = "true" ] && [ -n "$SERVER_PATH" ]; then
+          echo "Server is already running; stopping it first..."
+          api_request DELETE "$SERVER_START_URL" || true
+
+          SERVER_STOPPED=false
           for i in {1..12}; do
             sleep 10
-            STATUS=$(curl -s -k -H "Authorization: token $USER_TOKEN" "$SERVER_API_URL" 2>/dev/null || echo "{}")
-            if [[ "$STATUS" == *"\"server\": null"* ]] && [[ "$STATUS" == *"\"pending\": null"* ]]; then
-              echo "✅ Server stopped successfully"
+            if fetch_server_state && [ -z "$SERVER_PATH" ] && [ -z "$SERVER_PENDING" ]; then
+              echo "✅ Existing server stopped successfully"
+              SERVER_STOPPED=true
               break
             fi
-            echo "Waiting for server to stop... (${i}0s elapsed)"
+            echo "Waiting for existing server to stop... (${i}0s elapsed)"
           done
-        elif [[ "$SERVER_STATUS" == *"\"pending\": \"spawn\""* ]]; then
-          echo "Server is already starting, waiting for it to complete..."
-        else
-          echo "Server is stopped, ready to start"
+          if [ "$SERVER_STOPPED" != "true" ]; then
+            set_start_diagnostic "existing-server-stop-timeout"
+            exit 1
+          fi
+        elif [ "$SERVER_PENDING" = "spawn" ]; then
+          echo "Server is already starting; continuing to readiness polling"
+          SHOULD_POST=false
         fi
-        
-        # Start the server
-        echo "Starting server for $USER..."
-        START_RESPONSE=$(curl -s -k -X POST -H "Authorization: token $USER_TOKEN" "$SERVER_START_URL" || echo "Failed to start server")
-        echo "Start server response: ${START_RESPONSE:0:100}..."
-        
-        # Wait for server to start
+
+        if [ "$SHOULD_POST" = "true" ]; then
+          SPAWN_ACCEPTED=false
+          for attempt in {1..3}; do
+            echo "Starting server for $USER (attempt $attempt/3)..."
+            if api_request POST "$SERVER_START_URL"; then
+              echo "✅ Spawn request accepted"
+              SPAWN_ACCEPTED=true
+              break
+            fi
+
+            echo "⚠️ Spawn request failed; reconciling server state before retry"
+            if reconcile_server_state; then
+              echo "✅ Spawn is active despite the failed response; not retrying POST"
+              SPAWN_ACCEPTED=true
+              break
+            else
+              reconcile_rc=$?
+            fi
+            if [ "$reconcile_rc" -eq 1 ]; then
+              echo "❌ Spawn response failed and server state is unknown; refusing an unsafe duplicate POST"
+              set_start_diagnostic "spawn-failed-state-unknown"
+              exit 1
+            fi
+
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 5))
+            fi
+          done
+
+          if [ "$SPAWN_ACCEPTED" != "true" ]; then
+            set_start_diagnostic "spawn-request-failed"
+            exit 1
+          fi
+        fi
+
         echo "Waiting for server to start..."
         SERVER_STARTED=false
-        
+
         for i in {1..24}; do
           sleep 10
-          SERVER_STATUS=$(curl -s -k -H "Authorization: token $USER_TOKEN" "$SERVER_API_URL" 2>/dev/null || echo "{}")
-          
-          if [[ "$SERVER_STATUS" == *"\"server\": \"/user/$USER/\""* ]] && [[ "$SERVER_STATUS" == *"\"ready\": true"* ]] && [[ "$SERVER_STATUS" == *"\"pending\": null"* ]]; then
+          if ! fetch_server_state; then
+            echo "Server-state request failed; continuing readiness polling (${i}0s elapsed)"
+            continue
+          fi
+
+          if [ -n "$SERVER_PATH" ] && [ "$SERVER_READY" = "true" ] && [ -z "$SERVER_PENDING" ]; then
             echo "✅ Server started successfully (${i}0s elapsed)"
-            echo "Server status: ${SERVER_STATUS:0:150}..."
             SERVER_STARTED=true
             break
-          elif [[ "$SERVER_STATUS" == *"\"pending\": \"spawn\""* ]]; then
+          elif [ "$SERVER_PENDING" = "spawn" ]; then
             echo "Server is still starting... (${i}0s elapsed)"
           else
             echo "Waiting for server to start... (${i}0s elapsed)"
           fi
         done
-        
+
         if [ "$SERVER_STARTED" != true ]; then
+          set_start_diagnostic "server-readiness-timeout"
           echo "❌ Server failed to start within timeout"
           exit 1
         fi
-        
+
+        {
+          echo "SERVER_START_SUCCEEDED=true"
+          echo "SERVER_START_DIAGNOSTIC=ready"
+        } >> "$GITHUB_ENV"
+
         # Wait for server to fully initialize
         echo "Waiting for server to fully initialize..."
         sleep 15
@@ -248,7 +379,11 @@ jobs:
           }
         }'
         
-        CREATE_RESPONSE=$(curl -k -s -X PUT \
+        CREATE_RESPONSE=$(curl \
+            --silent --show-error --fail-with-body \
+            --connect-timeout 15 \
+            --max-time 60 \
+            --request PUT \
             -H "Authorization: token $USER_TOKEN" \
             -H "Content-Type: application/json" \
             -d "$NOTEBOOK_JSON" \
@@ -256,6 +391,7 @@ jobs:
         
         if echo "$CREATE_RESPONSE" | grep -q '"name"'; then
             echo "✅ FSL Notebook created successfully"
+            echo "NOTEBOOK_CREATED=true" >> "$GITHUB_ENV"
         else
             echo "❌ Failed to create notebook"
             echo "Response: $CREATE_RESPONSE"
@@ -267,7 +403,11 @@ jobs:
         echo "🔍 STEP 2: Create Terminal Session"
         echo "----------------------------------------"
         
-        TERMINAL_RESPONSE=$(curl -k -s -X POST \
+        TERMINAL_RESPONSE=$(curl \
+            --silent --show-error --fail-with-body \
+            --connect-timeout 15 \
+            --max-time 60 \
+            --request POST \
             -H "Authorization: token $USER_TOKEN" \
             "$API_URL/user/$USER/api/terminals")
         
@@ -275,6 +415,7 @@ jobs:
         
         if [ -n "$TERMINAL_NAME" ] && [ "$TERMINAL_NAME" != "null" ]; then
             echo "✅ Terminal created: $TERMINAL_NAME"
+            echo "TERMINAL_NAME=$TERMINAL_NAME" >> "$GITHUB_ENV"
             sleep 5
         else
             echo "❌ Terminal creation failed"
@@ -334,9 +475,6 @@ jobs:
         echo "Checking if papermill completed successfully..."
         execute_command "echo 'Papermill exit code:' && echo \$?" 5
         execute_command "wc -l \"${OUTPUT_NAME}\"" 10
-
-        # Export terminal name for cleanup
-        echo "TERMINAL_NAME=$TERMINAL_NAME" >> "$GITHUB_ENV"
 
     - name: Check Notebook Execution Results
       run: |
@@ -427,6 +565,23 @@ jobs:
       if: always()
       run: |
         echo "=== Cleaning up Notebook Files ==="
+
+        if [ -z "${TERMINAL_NAME:-}" ]; then
+          echo "No terminal was created; skipping terminal cleanup"
+          if [ "${NOTEBOOK_CREATED:-false}" = "true" ]; then
+            echo "Removing notebook files through the Jupyter Contents API"
+            for notebook in "$NOTEBOOK_NAME" "$OUTPUT_NAME"; do
+              curl \
+                --silent --show-error \
+                --connect-timeout 15 \
+                --max-time 60 \
+                --request DELETE \
+                --header "Authorization: token $USER_TOKEN" \
+                "$API_URL/user/$USER/api/contents/$notebook" || true
+            done
+          fi
+          exit 0
+        fi
         
         # Setup WebSocket connection function
         clean_api_url=${API_URL#*//}
@@ -475,8 +630,12 @@ jobs:
         # Delete terminal session
         echo ""
         echo "Deleting terminal session..."
-        curl -k -s -X DELETE \
-            -H "Authorization: token $USER_TOKEN" \
+        curl \
+            --silent --show-error \
+            --connect-timeout 15 \
+            --max-time 60 \
+            --request DELETE \
+            --header "Authorization: token $USER_TOKEN" \
             "$API_URL/user/$USER/api/terminals/$TERMINAL_NAME" || true
         
         echo "✅ Cleanup completed"
@@ -487,23 +646,67 @@ jobs:
         echo "=== Stopping JupyterHub Server ==="
         SERVER_API_URL="${API_URL}/hub/api/users/${USER}"
         SERVER_START_URL="${SERVER_API_URL}/server"
+        RESPONSE_BODY=$(mktemp)
+        RESPONSE_METRICS=$(mktemp)
+        trap 'rm -f "$RESPONSE_BODY" "$RESPONSE_METRICS"' EXIT
 
-        # Stop the server
+        api_request() {
+          local method="$1"
+          local url="$2"
+          local curl_rc
+
+          : > "$RESPONSE_BODY"
+          : > "$RESPONSE_METRICS"
+          if curl \
+              --silent --show-error --fail-with-body \
+              --connect-timeout 15 \
+              --max-time 60 \
+              --request "$method" \
+              --header "Authorization: token $USER_TOKEN" \
+              --header "X-Request-ID: gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.server_name }}-stop" \
+              --output "$RESPONSE_BODY" \
+              --write-out 'http=%{http_code} remote_ip=%{remote_ip} dns=%{time_namelookup} tcp=%{time_connect} tls=%{time_appconnect} first_byte=%{time_starttransfer} total=%{time_total} curl_exit=%{exitcode}\n' \
+              "$url" > "$RESPONSE_METRICS"; then
+            curl_rc=0
+          else
+            curl_rc=$?
+          fi
+
+          cat "$RESPONSE_METRICS"
+          return "$curl_rc"
+        }
+
         echo "Stopping server..."
-        curl -s -k -X DELETE -H "Authorization: token $USER_TOKEN" "$SERVER_START_URL" || true
+        api_request DELETE "$SERVER_START_URL" || true
         
         echo "Waiting for server to stop..."
+        SERVER_STOPPED=false
         for i in {1..12}; do
           sleep 10
-          STATUS=$(curl -s -k -H "Authorization: token $USER_TOKEN" "$SERVER_API_URL" 2>/dev/null || echo "{}")
-          if [[ "$STATUS" != *"\"server\":"* ]]; then
+          if ! api_request GET "$SERVER_API_URL"; then
+            echo "Unable to read server state; retrying (${i}0s elapsed)"
+            continue
+          fi
+          if ! jq -e 'type == "object"' "$RESPONSE_BODY" >/dev/null; then
+            echo "JupyterHub returned invalid JSON; retrying (${i}0s elapsed)"
+            continue
+          fi
+
+          SERVER_PATH=$(jq -r '.server // ""' "$RESPONSE_BODY")
+          SERVER_PENDING=$(jq -r '.pending // ""' "$RESPONSE_BODY")
+          if [ -z "$SERVER_PATH" ] && [ -z "$SERVER_PENDING" ]; then
             echo "✅ Server stopped successfully"
+            SERVER_STOPPED=true
             break
           fi
           echo "Waiting for server to stop... (${i}0s elapsed)"
         done
-        
-        echo "✅ Server cleanup completed"
+
+        if [ "$SERVER_STOPPED" != "true" ]; then
+          echo "❌ Server cleanup did not complete within timeout"
+          exit 1
+        fi
+        echo "SERVER_STOP_SUCCEEDED=true" >> "$GITHUB_ENV"
 
     - name: Generate Test Report
       if: always()
@@ -513,14 +716,20 @@ jobs:
         PATTERNS_FOUND=${PATTERN_COUNT:-0}
         PATTERNS_TOTAL=${SUCCESS_PATTERNS_TOTAL:-8}
         NOTEBOOK_STATUS=${NOTEBOOK_SUCCESS:-false}
+        SERVER_STATUS=${SERVER_START_SUCCEEDED:-false}
+        SERVER_STOP_STATUS=${SERVER_STOP_SUCCEEDED:-false}
+        NOTEBOOK_CREATED_STATUS=${NOTEBOOK_CREATED:-false}
         
         echo "Test Results Summary:"
-        echo "- Server Management: ✅"
-        echo "- Notebook Creation: ✅"
+        echo "- Server Start: $([ "$SERVER_STATUS" = "true" ] && echo "✅" || echo "❌")"
+        echo "- Server Stop: $([ "$SERVER_STOP_STATUS" = "true" ] && echo "✅" || echo "❌")"
+        echo "- Notebook Creation: $([ "$NOTEBOOK_CREATED_STATUS" = "true" ] && echo "✅" || echo "❌")"
         echo "- Notebook Execution: $([ "$NOTEBOOK_STATUS" = "true" ] && echo "✅" || echo "❌")"
         echo "- Success Patterns: $PATTERNS_FOUND/$PATTERNS_TOTAL $([ "$PATTERNS_FOUND" -ge 5 ] && echo "✅" || echo "❌")"
-        echo "- File Cleanup: ✅"
-        echo "- Server Cleanup: ✅"
+
+        if [ "$SERVER_STATUS" != "true" ]; then
+          echo "- Primary Diagnostic: ${SERVER_START_DIAGNOSTIC:-unknown}"
+        fi
         
         echo ""
         echo "Notebook Test Details:"
@@ -557,5 +766,7 @@ jobs:
         SERVER_URL: ${{ matrix.default_url }}
         PATTERNS_FOUND: ${{ env.PATTERN_COUNT }}
         NOTEBOOK_SUCCESS: ${{ env.NOTEBOOK_SUCCESS }}
+        SERVER_START_SUCCEEDED: ${{ env.SERVER_START_SUCCEEDED }}
+        SERVER_START_DIAGNOSTIC: ${{ env.SERVER_START_DIAGNOSTIC }}
       with:
         filename: .github/notebook_failure_issue_template.md
