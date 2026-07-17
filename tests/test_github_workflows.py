@@ -213,7 +213,13 @@ def test_notebook_server_start_reports_transport_failures_and_reconciles_retries
     assert "first_byte=%{time_starttransfer}" in start_step
     assert "curl_exit=%{exitcode}" in start_step
     assert "--retry-all-errors" not in start_step
-    assert "reconcile_server_state" in start_step
+    # Reconciliation must actually gate the retry flow, not merely be defined.
+    assert "if reconcile_server_state; then" in start_step
+    assert 'set_start_diagnostic "initial-state-request-failed"' in start_step
+    assert 'set_start_diagnostic "existing-server-stop-timeout"' in start_step
+    assert 'set_start_diagnostic "spawn-failed-state-unknown"' in start_step
+    assert 'set_start_diagnostic "spawn-request-failed"' in start_step
+    assert 'set_start_diagnostic "server-readiness-timeout"' in start_step
     assert 'SERVER_START_SUCCEEDED=false' in start_step
     assert 'SERVER_START_SUCCEEDED=true' in start_step
     assert 'SERVER_START_DIAGNOSTIC=not-attempted' in start_step
@@ -231,6 +237,11 @@ def test_notebook_failure_cleanup_and_report_preserve_the_primary_failure():
     assert 'SERVER_START_DIAGNOSTIC: ${{ env.SERVER_START_DIAGNOSTIC }}' in workflow
     assert "**Server Start:** {{ env.SERVER_START_SUCCEEDED }}" in issue_template
     assert "**Primary Diagnostic:** {{ env.SERVER_START_DIAGNOSTIC }}" in issue_template
+    # A stop timeout must not report a passing test, and the failure issue
+    # must carry the server-stop status.
+    assert '&& [ "$SERVER_STOP_STATUS" = "true" ]; then' in workflow
+    assert 'SERVER_STOP_SUCCEEDED: ${{ env.SERVER_STOP_SUCCEEDED }}' in workflow
+    assert "**Server Stop:** {{ env.SERVER_STOP_SUCCEEDED }}" in issue_template
 
 
 def test_repo_only_workflow_checks_skip_in_baked_image_layout(monkeypatch, tmp_path):
