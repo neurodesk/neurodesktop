@@ -318,7 +318,31 @@ _HTML_ATTR_RE = re.compile(
 )
 _CSS_URL_RE = re.compile(r"""(\burl\(\s*)(["']?)/(?!/)""", re.IGNORECASE)
 _JS_STRING_PATH_RE = re.compile(r"""(["'`])/(assets|api)/""")
-_HTML_HEAD_RE = re.compile(r"<head(?:\s[^>]*)?>", re.IGNORECASE)
+
+
+def _inject_after_head(body, snippet):
+    """Insert ``snippet`` right after the opening <head> tag.
+
+    Plain linear string scanning instead of a regex: a backtracking pattern
+    over the whole response body would be quadratic on adversarial input
+    (CodeQL py/polynomial-redos). Falls back to prepending when no <head>
+    tag is found.
+    """
+    lower = body.lower()
+    search_pos = 0
+    while True:
+        idx = lower.find("<head", search_pos)
+        if idx == -1:
+            return snippet + body
+        after = idx + len("<head")
+        # Reject longer tag names such as <header>.
+        if after < len(body) and body[after] not in ">/ \t\r\n":
+            search_pos = after
+            continue
+        close = body.find(">", after)
+        if close == -1:
+            return snippet + body
+        return body[:close + 1] + snippet + body[close + 1:]
 
 
 def prefix_bootstrap_script(prefix):
@@ -351,11 +375,7 @@ def rewrite_html(body, prefix):
     body = _JS_STRING_PATH_RE.sub(rf"\g<1>{prefix}/\g<2>/", body)
     bootstrap = f'<script src="{prefix}{PREFIX_BOOTSTRAP_PATH}"></script>'
     if PREFIX_BOOTSTRAP_PATH not in body:
-        body, replacements = _HTML_HEAD_RE.subn(
-            lambda match: match.group(0) + bootstrap, body, count=1
-        )
-        if not replacements:
-            body = bootstrap + body
+        body = _inject_after_head(body, bootstrap)
     return body
 
 
@@ -901,7 +921,10 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
                         "content-length", "content-encoding",
                     ):
                         continue
-                    self.send_header(name, sanitize_header_value(value))
+                    self.send_header(
+                        sanitize_header_value(name),
+                        sanitize_header_value(value),
+                    )
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 if self.command != "HEAD":
@@ -915,7 +938,10 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
                     continue
                 if name.lower() == "content-length":
                     has_length = True
-                self.send_header(name, sanitize_header_value(value))
+                self.send_header(
+                    sanitize_header_value(name),
+                    sanitize_header_value(value),
+                )
             if not has_length:
                 # Chunked/streaming upstream (e.g. the SSE /event feed):
                 # delimit our response by connection close instead.
