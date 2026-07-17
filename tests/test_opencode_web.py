@@ -13,6 +13,7 @@ import http.server
 import importlib.util
 import json
 import os
+import re
 import socket
 import stat
 import subprocess
@@ -66,13 +67,15 @@ PREFIX = "/user/alice/opencode"
 def test_rewrite_html_prefixes_root_absolute_references():
     """Root-absolute attribute/CSS/JS references gain the proxy prefix."""
     html = (
-        '<script type="module" src="/assets/index.js"></script>'
+        '<html><head><script type="module" src="/assets/index.js"></script>'
         '<link rel="stylesheet" href="/assets/app.css">'
+        '</head><body>'
         '<form action="/submit">'
         '<img src="//cdn.example.org/logo.png">'
         '<a href="https://opencode.ai/docs">docs</a>'
         '<style>body { background: url(/assets/bg.png); }</style>'
         '<script>const f = "/assets/font.woff2";</script>'
+        '</body></html>'
     )
     rewritten = ocw.rewrite_html(html, PREFIX)
     assert f'src="{PREFIX}/assets/index.js"' in rewritten
@@ -83,6 +86,23 @@ def test_rewrite_html_prefixes_root_absolute_references():
     assert 'href="https://opencode.ai/docs"' in rewritten
     assert f"url({PREFIX}/assets/bg.png)" in rewritten
     assert f'"{PREFIX}/assets/font.woff2"' in rewritten
+    bootstrap = f'<script src="{PREFIX}/neurodesk-prefix.js"></script>'
+    assert bootstrap in rewritten
+    assert rewritten.index(bootstrap) < rewritten.index('type="module"')
+
+
+def test_prefix_bootstrap_sets_opencode_server_to_proxy_path():
+    """The bootstrap points OpenCode's API client at the Jupyter proxy.
+
+    OpenCode 1.18 uses root API routes such as /provider and /global/config.
+    Setting its native default-server URL makes every current and future API
+    route (including the model picker) stay below the forwarded prefix.
+    """
+    script = ocw.prefix_bootstrap_script(PREFIX)
+    assert "opencode.settings.dat:defaultServerUrl" in script
+    assert "window.location.origin" in script
+    assert json.dumps(PREFIX) in script
+    assert "/provider" not in script
 
 
 def test_rewrite_css_prefixes_url_references():
@@ -355,8 +375,20 @@ PAGES = {
     ),
     "/assets/index.js": (
         "text/javascript",
-        'const font = "/assets/inter.woff2"; export default font;',
+        'const font = "/assets/inter.woff2"; '
+        'const provider = "/provider"; '
+        'const config = "/global/config"; '
+        'export { font, provider, config };',
     ),
+    "/provider": (
+        "application/json",
+        '{"all":[{"id":"neurodesk","models":{"model-alpha":{}}}]}',
+    ),
+    "/global/config": (
+        "application/json",
+        '{"model":"neurodesk/model-alpha"}',
+    ),
+    "/global/health": ("application/json", '{"healthy":true}'),
     "/binary.bin": ("application/octet-stream", "\\x00binary\\x00"),
 }
 
@@ -405,6 +437,72 @@ def _wait_for_port(port, timeout=20):
     raise AssertionError(f"port {port} did not open in time")
 
 
+@pytest.mark.skipif(
+    not Path("/usr/bin/opencode").is_file(),
+    reason="the pinned OpenCode bundle is only present inside the image",
+)
+def test_pinned_opencode_bundle_supports_native_prefixed_model_picker(tmp_path):
+    """The image's real pinned UI must honor the server URL we bootstrap.
+
+    This is the version-coupled contract that the fake-backend tests cannot
+    prove: OpenCode must still read the default-server localStorage key and
+    ship the provider route plus its native model-selection interface.
+    """
+    port = _free_port()
+    password = "bundle-contract-password"
+    env = {
+        **os.environ,
+        "HOME": str(tmp_path),
+        "OPENCODE_SERVER_PASSWORD": password,
+    }
+    process = subprocess.Popen(
+        [
+            "/usr/bin/opencode", "web", "--hostname", "127.0.0.1",
+            "--port", str(port),
+        ],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    auth = {
+        "Authorization": "Basic "
+        + base64.b64encode(f"opencode:{password}".encode()).decode()
+    }
+    try:
+        _wait_for_port(port)
+        deadline = time.monotonic() + 30
+        status = 0
+        root = ""
+        while time.monotonic() < deadline:
+            try:
+                status, _headers, root = _request(
+                    port, "/", headers=auth, timeout=3
+                )
+                if status == 200:
+                    break
+            except (OSError, TimeoutError):
+                if process.poll() is not None:
+                    break
+            time.sleep(0.2)
+        assert status == 200
+        match = re.search(r'src="([^"]+/index-[^"]+\.js)"', root)
+        assert match, root
+
+        status, _headers, bundle = _request(
+            port, match.group(1), headers=auth
+        )
+        assert status == 200
+        assert "opencode.settings.dat:defaultServerUrl" in bundle
+        assert 'url:"/provider"' in bundle
+        assert "model.select" in bundle
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         """Never follow redirects; tests assert on them directly."""
@@ -414,7 +512,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(_NoRedirect)
 
 
-def _request(port, path, headers=None, data=None, method=None):
+def _request(port, path, headers=None, data=None, method=None, timeout=15):
     """HTTP request helper that surfaces redirects instead of following."""
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}{path}",
@@ -423,7 +521,7 @@ def _request(port, path, headers=None, data=None, method=None):
         method=method,
     )
     try:
-        response = _OPENER.open(request, timeout=15)
+        response = _OPENER.open(request, timeout=timeout)
         status = response.status
     except urllib.error.HTTPError as exc:
         response = exc
@@ -550,6 +648,8 @@ def test_setup_page_shown_until_key_is_configured(launcher):
     assert "Set up your Neurodesk LLM API key" in body
     assert "API Keys" in body
     assert "Create new secret key" in body
+    assert "model picker" in body
+    assert "choose any available model" in body
 
 
 def test_rejected_key_reprompts_and_does_not_persist(launcher):
@@ -590,6 +690,19 @@ def test_valid_key_persists_starts_backend_and_proxies_with_rewrite(launcher):
     )
     # Root-absolute asset references are rewritten against the proxy prefix.
     assert f'src="{prefix}/assets/index.js"' in body
+    bootstrap_tag = f'<script src="{prefix}/neurodesk-prefix.js"></script>'
+    assert bootstrap_tag in body
+    assert body.index(bootstrap_tag) < body.index('type="module"')
+
+    status, headers, bootstrap = _request(
+        launcher["port"],
+        "/neurodesk-prefix.js",
+        headers={**launcher["auth"], "X-Forwarded-Prefix": prefix},
+    )
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/javascript")
+    assert "opencode.settings.dat:defaultServerUrl" in bootstrap
+    assert json.dumps(prefix) in bootstrap
 
     status, _headers, js_body = _request(
         launcher["port"],
@@ -599,11 +712,21 @@ def test_valid_key_persists_starts_backend_and_proxies_with_rewrite(launcher):
     assert status == 200
     assert f'"{prefix}/assets/inter.woff2"' in js_body
 
+    # OpenCode's native model picker obtains its provider/model catalogue from
+    # this route. The browser bootstrap makes the real client request it below
+    # {prefix} instead of escaping to Jupyter's root.
+    status, _headers, provider_body = _request(
+        launcher["port"], "/provider", headers=launcher["auth"]
+    )
+    assert status == 200
+    assert "model-alpha" in provider_body
+
     # Without a prefix (desktop mode) bodies pass through untouched.
     status, _headers, plain_body = _request(
         launcher["port"], "/", headers=launcher["auth"]
     )
     assert 'src="/assets/index.js"' in plain_body
+    assert "neurodesk-prefix.js" not in plain_body
 
     # The backend saw the key, the shared password, and the wrapper args.
     backend_env = json.loads(

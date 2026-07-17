@@ -7,6 +7,10 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 JUPYTER_TEST_WORKFLOW = REPO_ROOT / ".github/workflows/jupyter_test_main.yml"
+NOTEBOOK_TEST_WORKFLOW = (
+    REPO_ROOT / ".github/workflows/notebook_(FSL_bet)_workflow.yml"
+)
+NOTEBOOK_FAILURE_TEMPLATE = REPO_ROOT / ".github/notebook_failure_issue_template.md"
 
 
 def _read_repo_file(path: Path) -> str:
@@ -192,6 +196,41 @@ def test_jupyterhub_fslmaths_output_is_captured_from_the_original_websocket():
     assert '> "$FSL_WEBSOCKET_LOG" 2>&1 &' in workflow
     assert 'grep -Fq "$FSL_RUN_MARKER"' in workflow
     assert 'grep -q "Usage: fslmaths"' not in workflow
+
+
+def test_notebook_server_start_reports_transport_failures_and_reconciles_retries():
+    workflow = _read_repo_file(NOTEBOOK_TEST_WORKFLOW)
+    start_step = workflow.split("- name: Start JupyterHub Server", 1)[1].split(
+        "- name: Create and Execute FSL Notebook", 1
+    )[0]
+
+    assert "--silent --show-error --fail-with-body" in start_step
+    assert "--connect-timeout 15" in start_step
+    assert "--max-time 60" in start_step
+    assert "remote_ip=%{remote_ip}" in start_step
+    assert "tcp=%{time_connect}" in start_step
+    assert "tls=%{time_appconnect}" in start_step
+    assert "first_byte=%{time_starttransfer}" in start_step
+    assert "curl_exit=%{exitcode}" in start_step
+    assert "--retry-all-errors" not in start_step
+    assert "reconcile_server_state" in start_step
+    assert 'SERVER_START_SUCCEEDED=false' in start_step
+    assert 'SERVER_START_SUCCEEDED=true' in start_step
+    assert 'SERVER_START_DIAGNOSTIC=not-attempted' in start_step
+
+
+def test_notebook_failure_cleanup_and_report_preserve_the_primary_failure():
+    workflow = _read_repo_file(NOTEBOOK_TEST_WORKFLOW)
+    issue_template = _read_repo_file(NOTEBOOK_FAILURE_TEMPLATE)
+
+    assert 'if [ -z "${TERMINAL_NAME:-}" ]; then' in workflow
+    assert 'NOTEBOOK_SUCCESS=false' in workflow
+    assert 'PATTERN_COUNT=0' in workflow
+    assert 'NOTEBOOK_CREATED=true' in workflow
+    assert 'echo "TERMINAL_NAME=$TERMINAL_NAME" >> "$GITHUB_ENV"' in workflow
+    assert 'SERVER_START_DIAGNOSTIC: ${{ env.SERVER_START_DIAGNOSTIC }}' in workflow
+    assert "**Server Start:** {{ env.SERVER_START_SUCCEEDED }}" in issue_template
+    assert "**Primary Diagnostic:** {{ env.SERVER_START_DIAGNOSTIC }}" in issue_template
 
 
 def test_repo_only_workflow_checks_skip_in_baked_image_layout(monkeypatch, tmp_path):

@@ -59,9 +59,13 @@ in [`config/jupyter/webapp_links.json`](../config/jupyter/webapp_links.json) and
 applied by [`scripts/generate_jupyter_config.py`](../scripts/generate_jupyter_config.py)
 when generating Jupyter Server Proxy entries. The same merged webapp config is
 written to `/opt/neurodesktop/webapps.json` so runtime wrapper settings such as
-path rewrites use the local overrides too. Container-backed webapps launch
-through [`config/jupyter/webapp_launcher.sh`](../config/jupyter/webapp_launcher.sh)
-and use Unix sockets such as `/tmp/neurodesk_webapp_{name}.sock` to avoid port
+path rewrites use the local overrides too. The wrapper streams fixed-length
+request bodies to the backend in bounded chunks, so large uploads are not
+duplicated in wrapper memory; Jupyter Server and the hosting proxy still apply
+their own request-size and multipart limits before the wrapper receives a
+request. Container-backed webapps launch through
+[`config/jupyter/webapp_launcher.sh`](../config/jupyter/webapp_launcher.sh) and
+use Unix sockets such as `/tmp/neurodesk_webapp_{name}.sock` to avoid port
 conflicts. Entries with `direct_url` open the hosted application directly from
 the Neurodesk launcher. Launcher tile icons for those entries are checked-in
 SVG or PNG files in
@@ -162,12 +166,19 @@ Server Proxy entry that runs
   (non-interactive path), so provider probing, `opencode.json` refresh, and
   the Notebook Intelligence sync stay single-sourced. A model chosen earlier
   is preserved by passing it back as `OPENCODE_MODEL_PROFILE`.
+- keeps OpenCode's native model picker available in the prompt toolbar. The
+  automatically selected working model is only the initial default; users can
+  choose any model currently advertised by Neurodesk, local Ollama, or
+  JetStream and can change it again per prompt.
 - reverse-proxies to the backend with HTTP Basic auth injected
-  (`OPENCODE_SERVER_PASSWORD`), streams SSE responses, and rewrites
-  root-absolute URLs in HTML/CSS/JS bodies against the `X-Forwarded-Prefix`
-  header, because the upstream web UI assumes it is served from `/` and
-  breaks behind the `/opencode/` proxy prefix (including JupyterHub base
-  URLs).
+  (`OPENCODE_SERVER_PASSWORD`) and streams SSE responses. For prefixed
+  Jupyter/JupyterHub launches it inserts a same-origin bootstrap before the
+  OpenCode module bundle; the bootstrap sets OpenCode's native default-server
+  URL to the complete `X-Forwarded-Prefix`, keeping provider, model, session,
+  event, terminal, and future API routes below `/opencode/`. Static
+  root-absolute asset URLs in HTML/CSS/JS are rewritten against the same
+  validated prefix. This is necessary because the upstream UI otherwise uses
+  the site origin and escapes the Jupyter proxy.
 
 Inside the VNC/RDP desktop there is no URL prefix, so the "OpenCode Web"
 menu entry

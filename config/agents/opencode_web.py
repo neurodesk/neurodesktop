@@ -56,6 +56,10 @@ DEFAULT_LLM_BASE_URL = "https://llm.neurodesk.org/openai"
 BACKEND_USERNAME = "opencode"
 AUTH_COOKIE_NAME = "neurodesk_opencode_auth"
 SETUP_PATH = "/neurodesk-setup"
+PREFIX_BOOTSTRAP_PATH = "/neurodesk-prefix.js"
+OPENCODE_DEFAULT_SERVER_STORAGE_KEY = (
+    "opencode.settings.dat:defaultServerUrl"
+)
 BASHRC_KEY_COMMENT = "# Neurodesk API key for OpenCode"
 STREAM_CHUNK_SIZE = 65536
 
@@ -314,6 +318,30 @@ _HTML_ATTR_RE = re.compile(
 )
 _CSS_URL_RE = re.compile(r"""(\burl\(\s*)(["']?)/(?!/)""", re.IGNORECASE)
 _JS_STRING_PATH_RE = re.compile(r"""(["'`])/(assets|api)/""")
+_HTML_HEAD_RE = re.compile(r"<head(?:\s[^>]*)?>", re.IGNORECASE)
+
+
+def prefix_bootstrap_script(prefix):
+    """Point OpenCode's native API client at the external proxy URL.
+
+    OpenCode 1.18 builds API URLs from a default server stored in localStorage.
+    Without this bootstrap it uses ``location.origin``, so root routes such as
+    /provider and /global/config escape Jupyter's /opencode proxy. Loading this
+    same-origin script before the module bundle keeps the full API (including
+    the native model picker) under the validated forwarded prefix.
+    """
+    safe_prefix = safe_forwarded_prefix(prefix)
+    prefix_json = json.dumps(safe_prefix)
+    key_json = json.dumps(OPENCODE_DEFAULT_SERVER_STORAGE_KEY)
+    return f"""(() => {{
+  const server = window.location.origin + {prefix_json};
+  try {{
+    window.localStorage.setItem({key_json}, server);
+  }} catch (_error) {{
+    // Private browsing or a locked-down browser may disable localStorage.
+  }}
+}})();
+"""
 
 
 def rewrite_html(body, prefix):
@@ -321,6 +349,13 @@ def rewrite_html(body, prefix):
     body = _HTML_ATTR_RE.sub(rf"\g<1>\g<2>{prefix}/", body)
     body = _CSS_URL_RE.sub(rf"\g<1>\g<2>{prefix}/", body)
     body = _JS_STRING_PATH_RE.sub(rf"\g<1>{prefix}/\g<2>/", body)
+    bootstrap = f'<script src="{prefix}{PREFIX_BOOTSTRAP_PATH}"></script>'
+    if PREFIX_BOOTSTRAP_PATH not in body:
+        body, replacements = _HTML_HEAD_RE.subn(
+            lambda match: match.group(0) + bootstrap, body, count=1
+        )
+        if not replacements:
+            body = bootstrap + body
     return body
 
 
@@ -524,6 +559,9 @@ terminal agents.</p>
 <button class="secondary" type="submit">Continue without a key
 (use other providers)</button>
 </form>
+<p>After OpenCode opens, use the <strong>model picker</strong> in the prompt
+toolbar to choose any available model from Neurodesk, local Ollama, or
+JetStream. You can change the model again for each prompt.</p>
 <p class="muted">The key is saved to <code>~/.bashrc</code> as
 <code>NEURODESK_API_KEY</code>, exactly like the terminal setup.</p>
 </div></body></html>"""
@@ -644,6 +682,17 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(payload)
 
+    def send_javascript(self, status, body):
+        """Send a generated same-origin JavaScript response without caching."""
+        payload = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/javascript; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(payload)
+
     def redirect(self, location, extra_headers=None):
         """Send a 303 to a normalized same-origin path."""
         # Same-origin redirects only: normalize to a single-slash-rooted path
@@ -702,6 +751,14 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
                 401,
                 "<h1>401 Unauthorized</h1><p>Open OpenCode through the "
                 "Neurodesk launcher or desktop shortcut.</p>",
+            )
+            return
+
+        if parsed.path == PREFIX_BOOTSTRAP_PATH and self.command in (
+            "GET", "HEAD"
+        ):
+            self.send_javascript(
+                200, prefix_bootstrap_script(self.external_prefix())
             )
             return
 
