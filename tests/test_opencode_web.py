@@ -91,6 +91,22 @@ def test_rewrite_html_prefixes_root_absolute_references():
     assert rewritten.index(bootstrap) < rewritten.index('type="module"')
 
 
+def test_inject_after_head_targets_only_the_real_head_tag():
+    """The bootstrap insertion scans linearly (no regex backtracking) and
+    must skip lookalike tags such as <header>."""
+    assert ocw._inject_after_head("<head><body>", "X") == "<head>X<body>"
+    assert ocw._inject_after_head(
+        '<head lang="en"><body>', "X"
+    ) == '<head lang="en">X<body>'
+    # <header> is not <head>.
+    assert ocw._inject_after_head(
+        "<header>h</header><head><b>", "X"
+    ) == "<header>h</header><head>X<b>"
+    # No head tag or unterminated tag: prepend.
+    assert ocw._inject_after_head("<body>x</body>", "X") == "X<body>x</body>"
+    assert ocw._inject_after_head("<head <head <head ", "X").startswith("X")
+
+
 def test_prefix_bootstrap_sets_opencode_server_to_proxy_path():
     """The bootstrap points OpenCode's API client at the Jupyter proxy.
 
