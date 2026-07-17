@@ -738,7 +738,8 @@ jobs:
         echo "- BET Execution: $([ "$PATTERNS_FOUND" -ge 4 ] && echo "✅" || echo "❌")"
         echo "- Completion Markers: $([ "$PATTERNS_FOUND" -ge 5 ] && echo "✅" || echo "❌")"
 
-        if [ "$NOTEBOOK_STATUS" = "true" ] && [ "$PATTERNS_FOUND" -ge 5 ]; then
+        if [ "$NOTEBOOK_STATUS" = "true" ] && [ "$PATTERNS_FOUND" -ge 5 ] \
+          && [ "$SERVER_STOP_STATUS" = "true" ]; then
           echo ""
           echo "🎉 NOTEBOOK TEST PASSED!"
           echo "Server: ${{ matrix.server_name }}"
@@ -767,6 +768,7 @@ jobs:
         PATTERNS_FOUND: ${{ env.PATTERN_COUNT }}
         NOTEBOOK_SUCCESS: ${{ env.NOTEBOOK_SUCCESS }}
         SERVER_START_SUCCEEDED: ${{ env.SERVER_START_SUCCEEDED }}
+        SERVER_STOP_SUCCEEDED: ${{ env.SERVER_STOP_SUCCEEDED }}
         SERVER_START_DIAGNOSTIC: ${{ env.SERVER_START_DIAGNOSTIC }}
       with:
         filename: .github/notebook_failure_issue_template.md

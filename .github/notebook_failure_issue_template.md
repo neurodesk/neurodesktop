@@ -22,6 +22,7 @@ labels:
 - **Server URL:** {{ env.SERVER_URL }}
 - **Date:** {{ date | date('YYYY-MM-DD HH:mm:ss UTC') }}
 - **Server Start:** {{ env.SERVER_START_SUCCEEDED }}
+- **Server Stop:** {{ env.SERVER_STOP_SUCCEEDED }}
 - **Primary Diagnostic:** {{ env.SERVER_START_DIAGNOSTIC }}
 - **Notebook Execution Status:** {{ env.NOTEBOOK_SUCCESS }}
 - **Success Patterns Found:** {{ env.PATTERNS_FOUND }}/8
