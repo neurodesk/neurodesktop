@@ -60,6 +60,16 @@ PREFIX_BOOTSTRAP_PATH = "/neurodesk-prefix.js"
 OPENCODE_DEFAULT_SERVER_STORAGE_KEY = (
     "opencode.settings.dat:defaultServerUrl"
 )
+OPENCODE_PREFIX_SERVER_GLOBAL = "__NEURODESK_OPENCODE_SERVER_URL__"
+OPENCODE_WEB_ORIGIN_EXPRESSION = (
+    'location.hostname.includes("opencode.ai")?'
+    '"http://localhost:4096":location.origin'
+)
+OPENCODE_PREFIXED_WEB_ORIGIN_EXPRESSION = (
+    'location.hostname.includes("opencode.ai")?'
+    '"http://localhost:4096":'
+    f"window.{OPENCODE_PREFIX_SERVER_GLOBAL}||location.origin"
+)
 BASHRC_KEY_COMMENT = "# Neurodesk API key for OpenCode"
 STREAM_CHUNK_SIZE = 65536
 
@@ -359,6 +369,7 @@ def prefix_bootstrap_script(prefix):
     key_json = json.dumps(OPENCODE_DEFAULT_SERVER_STORAGE_KEY)
     return f"""(() => {{
   const server = window.location.origin + {prefix_json};
+  window.{OPENCODE_PREFIX_SERVER_GLOBAL} = server;
   try {{
     window.localStorage.setItem({key_json}, server);
   }} catch (_error) {{
@@ -385,8 +396,19 @@ def rewrite_css(body, prefix):
 
 
 def rewrite_js(body, prefix):
-    """Prefix quoted root-absolute /assets/ and /api/ strings in JS."""
-    return _JS_STRING_PATH_RE.sub(rf"\g<1>{prefix}/\g<2>/", body)
+    """Keep OpenCode's assets, API client, and server registry prefixed.
+
+    OpenCode 1.18's web entry registers ``location.origin`` as its only server.
+    Merely storing the prefixed URL as the selected default therefore makes the
+    permission provider reject it as unknown. The exact pinned-bundle origin
+    expression is rewritten to the bootstrap URL so the selected default and
+    registered canonical server have the same key.
+    """
+    body = _JS_STRING_PATH_RE.sub(rf"\g<1>{prefix}/\g<2>/", body)
+    return body.replace(
+        OPENCODE_WEB_ORIGIN_EXPRESSION,
+        OPENCODE_PREFIXED_WEB_ORIGIN_EXPRESSION,
+    )
 
 
 def rewrite_body(body, content_type, prefix):

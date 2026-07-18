@@ -117,6 +117,7 @@ def test_prefix_bootstrap_sets_opencode_server_to_proxy_path():
     script = ocw.prefix_bootstrap_script(PREFIX)
     assert "opencode.settings.dat:defaultServerUrl" in script
     assert "window.location.origin" in script
+    assert "window.__NEURODESK_OPENCODE_SERVER_URL__ = server" in script
     assert json.dumps(PREFIX) in script
     assert "/provider" not in script
 
@@ -129,8 +130,8 @@ def test_rewrite_css_prefixes_url_references():
     assert f"url({PREFIX}/assets/bg.svg)" in rewritten
 
 
-def test_rewrite_js_prefixes_asset_and_api_strings_only():
-    """Only quoted /assets/ and /api/ strings are rewritten in JS."""
+def test_rewrite_js_prefixes_assets_without_touching_unrelated_js():
+    """Quoted asset/API paths change while unrelated JS stays intact."""
     js = (
         'const font = "/assets/inter.woff2";\n'
         "const api = '/api/session';\n"
@@ -144,6 +145,20 @@ def test_rewrite_js_prefixes_asset_and_api_strings_only():
     # Division and unknown root paths are left alone.
     assert "a / b" in rewritten
     assert '"/session/history"' in rewritten
+
+
+def test_rewrite_js_registers_the_prefixed_server_used_for_permissions():
+    """The selected default server must also exist in OpenCode's registry."""
+    canonical_origin = (
+        'location.hostname.includes("opencode.ai")?'
+        '"http://localhost:4096":location.origin'
+    )
+    js = f"const canonical=()=>{canonical_origin};"
+
+    rewritten = ocw.rewrite_js(js, PREFIX)
+
+    assert canonical_origin not in rewritten
+    assert "window.__NEURODESK_OPENCODE_SERVER_URL__" in rewritten
 
 
 def test_rewrite_body_is_noop_without_prefix():
@@ -394,7 +409,9 @@ PAGES = {
         'const font = "/assets/inter.woff2"; '
         'const provider = "/provider"; '
         'const config = "/global/config"; '
-        'export { font, provider, config };',
+        'const canonical=()=>location.hostname.includes("opencode.ai")?'
+        '"http://localhost:4096":location.origin; '
+        'export { font, provider, config, canonical };',
     ),
     "/provider": (
         "application/json",
@@ -511,6 +528,14 @@ def test_pinned_opencode_bundle_supports_native_prefixed_model_picker(tmp_path):
         assert "opencode.settings.dat:defaultServerUrl" in bundle
         assert 'url:"/provider"' in bundle
         assert "model.select" in bundle
+        canonical_origin = (
+            'location.hostname.includes("opencode.ai")?'
+            '"http://localhost:4096":location.origin'
+        )
+        assert bundle.count(canonical_origin) == 1
+        proxied_bundle = ocw.rewrite_js(bundle, "/opencode")
+        assert canonical_origin not in proxied_bundle
+        assert "window.__NEURODESK_OPENCODE_SERVER_URL__" in proxied_bundle
     finally:
         process.terminate()
         try:
@@ -727,6 +752,7 @@ def test_valid_key_persists_starts_backend_and_proxies_with_rewrite(launcher):
     )
     assert status == 200
     assert f'"{prefix}/assets/inter.woff2"' in js_body
+    assert "window.__NEURODESK_OPENCODE_SERVER_URL__" in js_body
 
     # OpenCode's native model picker obtains its provider/model catalogue from
     # this route. The browser bootstrap makes the real client request it below
