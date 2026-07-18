@@ -174,11 +174,15 @@ Server Proxy entry that runs
   (`OPENCODE_SERVER_PASSWORD`) and streams SSE responses. For prefixed
   Jupyter/JupyterHub launches it inserts a same-origin bootstrap before the
   OpenCode module bundle; the bootstrap sets OpenCode's native default-server
-  URL to the complete `X-Forwarded-Prefix`, keeping provider, model, session,
-  event, terminal, and future API routes below `/opencode/`. Static
-  root-absolute asset URLs in HTML/CSS/JS are rewritten against the same
-  validated prefix. This is necessary because the upstream UI otherwise uses
-  the site origin and escapes the Jupyter proxy.
+  URL to the complete `X-Forwarded-Prefix`. The proxy also rewrites the pinned
+  web bundle's canonical local-server URL to that bootstrap value, so the
+  selected default and OpenCode's server registry use the same key; its
+  permission provider rejects a selected server that is absent from that
+  registry. Together these changes keep provider, model, session, event,
+  terminal, and future API routes below `/opencode/`. Static root-absolute
+  asset URLs in HTML/CSS/JS are rewritten against the same validated prefix.
+  This is necessary because the upstream UI otherwise uses the site origin and
+  escapes the Jupyter proxy.
 
 Inside the VNC/RDP desktop there is no URL prefix, so the "OpenCode Web"
 menu entry
