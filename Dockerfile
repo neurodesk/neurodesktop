@@ -134,6 +134,8 @@ RUN set -eux; \
     # Keep basic-ftp current in case code-server's shrinkwrap lags the patched package.
     cd /opt/code-server; \
     npm update --no-audit --no-fund basic-ftp; \
+    # Ensure bundled tar is patched against CVE-2026-59873 until code-server ships 7.5.19+.
+    npm update --no-audit --no-fund tar; \
     # Patch VS Code's nested shell-quote copy until code-server bundles 1.8.4+.
     shell_quote_tar="$(npm pack --silent shell-quote@1.8.4)"; \
     shell_quote_dir="/opt/code-server/lib/vscode/node_modules/shell-quote"; \
