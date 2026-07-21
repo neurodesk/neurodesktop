@@ -135,6 +135,9 @@ RUN set -eux; \
     cd /opt/code-server; \
     npm update --no-audit --no-fund basic-ftp; \
     # Ensure bundled tar is patched against CVE-2026-59873 until code-server ships 7.5.19+.
+    # code-server's own node_modules do not directly depend on tar; the vulnerable copy
+    # lives in the nested VS Code workspace under lib/vscode/node_modules, so patch it there.
+    (cd /opt/code-server/lib/vscode && npm update --no-audit --no-fund tar); \
     npm update --no-audit --no-fund tar; \
     # Patch VS Code's nested shell-quote copy until code-server bundles 1.8.4+.
     shell_quote_tar="$(npm pack --silent shell-quote@1.8.4)"; \
