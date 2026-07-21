@@ -61,6 +61,7 @@ OPENCODE_DEFAULT_SERVER_STORAGE_KEY = (
     "opencode.settings.dat:defaultServerUrl"
 )
 OPENCODE_PREFIX_SERVER_GLOBAL = "__NEURODESK_OPENCODE_SERVER_URL__"
+OPENCODE_PREFIX_ROUTER_GLOBAL = "__NEURODESK_OPENCODE_BASE_PATH__"
 OPENCODE_WEB_ORIGIN_EXPRESSION = (
     'location.hostname.includes("opencode.ai")?'
     '"http://localhost:4096":location.origin'
@@ -69,6 +70,14 @@ OPENCODE_PREFIXED_WEB_ORIGIN_EXPRESSION = (
     'location.hostname.includes("opencode.ai")?'
     '"http://localhost:4096":'
     f"window.{OPENCODE_PREFIX_SERVER_GLOBAL}||location.origin"
+)
+OPENCODE_WEB_ROUTER_COMPONENT_EXPRESSION = (
+    "get component(){return e.router??ppe},root:n=>"
+)
+OPENCODE_PREFIXED_WEB_ROUTER_COMPONENT_EXPRESSION = (
+    "get component(){return e.router??ppe},"
+    f"get base(){{return window.{OPENCODE_PREFIX_ROUTER_GLOBAL}||\"\"}},"
+    "root:n=>"
 )
 BASHRC_KEY_COMMENT = "# Neurodesk API key for OpenCode"
 STREAM_CHUNK_SIZE = 65536
@@ -356,20 +365,24 @@ def _inject_after_head(body, snippet):
 
 
 def prefix_bootstrap_script(prefix):
-    """Point OpenCode's native API client at the external proxy URL.
+    """Point OpenCode's API client and SPA router at the proxy prefix.
 
     OpenCode 1.18 builds API URLs from a default server stored in localStorage.
     Without this bootstrap it uses ``location.origin``, so root routes such as
     /provider and /global/config escape Jupyter's /opencode proxy. Loading this
     same-origin script before the module bundle keeps the full API (including
-    the native model picker) under the validated forwarded prefix.
+    the native model picker) under the validated forwarded prefix. The router
+    also needs the prefix as its base; otherwise it decodes the first URL
+    segment (``opencode``) as a base64 project directory.
     """
     safe_prefix = safe_forwarded_prefix(prefix)
     prefix_json = json.dumps(safe_prefix)
     key_json = json.dumps(OPENCODE_DEFAULT_SERVER_STORAGE_KEY)
     return f"""(() => {{
-  const server = window.location.origin + {prefix_json};
+  const prefix = {prefix_json};
+  const server = window.location.origin + prefix;
   window.{OPENCODE_PREFIX_SERVER_GLOBAL} = server;
+  window.{OPENCODE_PREFIX_ROUTER_GLOBAL} = prefix;
   try {{
     window.localStorage.setItem({key_json}, server);
   }} catch (_error) {{
@@ -396,18 +409,24 @@ def rewrite_css(body, prefix):
 
 
 def rewrite_js(body, prefix):
-    """Keep OpenCode's assets, API client, and server registry prefixed.
+    """Keep OpenCode's assets, API client, registry, and router prefixed.
 
     OpenCode 1.18's web entry registers ``location.origin`` as its only server.
     Merely storing the prefixed URL as the selected default therefore makes the
     permission provider reject it as unknown. The exact pinned-bundle origin
     expression is rewritten to the bootstrap URL so the selected default and
-    registered canonical server have the same key.
+    registered canonical server have the same key. The SPA router must receive
+    the forwarded prefix as its base so it strips that prefix before matching
+    ``/:dir`` and adds it back to generated browser-history URLs.
     """
     body = _JS_STRING_PATH_RE.sub(rf"\g<1>{prefix}/\g<2>/", body)
-    return body.replace(
+    body = body.replace(
         OPENCODE_WEB_ORIGIN_EXPRESSION,
         OPENCODE_PREFIXED_WEB_ORIGIN_EXPRESSION,
+    )
+    return body.replace(
+        OPENCODE_WEB_ROUTER_COMPONENT_EXPRESSION,
+        OPENCODE_PREFIXED_WEB_ROUTER_COMPONENT_EXPRESSION,
     )
 
 

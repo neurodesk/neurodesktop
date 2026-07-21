@@ -118,6 +118,7 @@ def test_prefix_bootstrap_sets_opencode_server_to_proxy_path():
     assert "opencode.settings.dat:defaultServerUrl" in script
     assert "window.location.origin" in script
     assert "window.__NEURODESK_OPENCODE_SERVER_URL__ = server" in script
+    assert "window.__NEURODESK_OPENCODE_BASE_PATH__ = prefix" in script
     assert json.dumps(PREFIX) in script
     assert "/provider" not in script
 
@@ -159,6 +160,16 @@ def test_rewrite_js_registers_the_prefixed_server_used_for_permissions():
 
     assert canonical_origin not in rewritten
     assert "window.__NEURODESK_OPENCODE_SERVER_URL__" in rewritten
+
+
+def test_rewrite_js_configures_the_spa_router_with_the_proxy_base_path():
+    """The browser must not decode the proxy name as a project directory."""
+    router_component = 'get component(){return e.router??ppe},root:n=>'
+
+    rewritten = ocw.rewrite_js(router_component, PREFIX)
+
+    assert router_component not in rewritten
+    assert "window.__NEURODESK_OPENCODE_BASE_PATH__" in rewritten
 
 
 def test_rewrite_body_is_noop_without_prefix():
@@ -411,7 +422,8 @@ PAGES = {
         'const config = "/global/config"; '
         'const canonical=()=>location.hostname.includes("opencode.ai")?'
         '"http://localhost:4096":location.origin; '
-        'export { font, provider, config, canonical };',
+        'const router={get component(){return e.router??ppe},root:n=>n}; '
+        'export { font, provider, config, canonical, router };',
     ),
     "/provider": (
         "application/json",
@@ -533,9 +545,13 @@ def test_pinned_opencode_bundle_supports_native_prefixed_model_picker(tmp_path):
             '"http://localhost:4096":location.origin'
         )
         assert bundle.count(canonical_origin) == 1
+        router_component = 'get component(){return e.router??ppe},root:n=>'
+        assert bundle.count(router_component) == 1
         proxied_bundle = ocw.rewrite_js(bundle, "/opencode")
         assert canonical_origin not in proxied_bundle
         assert "window.__NEURODESK_OPENCODE_SERVER_URL__" in proxied_bundle
+        assert router_component not in proxied_bundle
+        assert "window.__NEURODESK_OPENCODE_BASE_PATH__" in proxied_bundle
     finally:
         process.terminate()
         try:
@@ -753,6 +769,7 @@ def test_valid_key_persists_starts_backend_and_proxies_with_rewrite(launcher):
     assert status == 200
     assert f'"{prefix}/assets/inter.woff2"' in js_body
     assert "window.__NEURODESK_OPENCODE_SERVER_URL__" in js_body
+    assert "window.__NEURODESK_OPENCODE_BASE_PATH__" in js_body
 
     # OpenCode's native model picker obtains its provider/model catalogue from
     # this route. The browser bootstrap makes the real client request it below
