@@ -155,9 +155,12 @@ URLs in HTML, CSS, and JavaScript responses against the validated
 same-origin bootstrap also sets OpenCode's native default-server URL to that
 full prefix. This is what keeps non-`/api` routes such as `/provider`,
 `/global/config`, `/session`, and `/event` inside the Jupyter proxy and makes
-the native per-prompt model picker work. The behavior and the pinned real
-OpenCode bundle contract are validated in `tests/test_opencode_web.py` and
-must be re-verified when bumping `OPENCODE_VERSION`.
+the native per-prompt model picker work. The proxy also supplies the prefix as
+the official SPA's Solid router base; otherwise `/opencode/` is parsed as the
+base64 directory route and prompts fail before model inference. The behavior
+and the pinned real OpenCode bundle contract are validated in
+`tests/test_opencode_web.py` and must be re-verified when bumping
+`OPENCODE_VERSION`.
 
 Alternatives that were considered, kept here for context:
 

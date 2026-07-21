@@ -178,9 +178,13 @@ Server Proxy entry that runs
   web bundle's canonical local-server URL to that bootstrap value, so the
   selected default and OpenCode's server registry use the same key; its
   permission provider rejects a selected server that is absent from that
-  registry. Together these changes keep provider, model, session, event,
-  terminal, and future API routes below `/opencode/`. Static root-absolute
-  asset URLs in HTML/CSS/JS are rewritten against the same validated prefix.
+  registry. The same bootstrap value is supplied as the Solid router's base
+  path. Without that third invariant, the SPA treats the first proxy segment
+  (`opencode`) as a base64-encoded project directory and creates sessions in
+  an invalid path. Together these changes keep provider, model, session,
+  event, terminal, browser-history, and future API routes below `/opencode/`.
+  Static root-absolute asset URLs in HTML/CSS/JS are rewritten against the
+  same validated prefix.
   This is necessary because the upstream UI otherwise uses the site origin and
   escapes the Jupyter proxy.
 
