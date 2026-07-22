@@ -402,6 +402,7 @@ with open(os.path.join(state_dir, "env.json"), "w") as fh:
     json.dump(
         {
             "argv": sys.argv[1:],
+            "OPENCODE_DISABLE_FFF": os.environ.get("OPENCODE_DISABLE_FFF", ""),
             "OPENCODE_MODEL_PROFILE": os.environ.get("OPENCODE_MODEL_PROFILE", ""),
             "NEURODESK_API_KEY": os.environ.get("NEURODESK_API_KEY", ""),
             "OPENCODE_SERVER_PASSWORD": password,
@@ -793,6 +794,7 @@ def test_valid_key_persists_starts_backend_and_proxies_with_rewrite(launcher):
     )
     assert backend_env["NEURODESK_API_KEY"] == "good-key"
     assert backend_env["OPENCODE_SERVER_PASSWORD"] == launcher["password"]
+    assert backend_env["OPENCODE_DISABLE_FFF"] == "1"
     assert backend_env["argv"][0] == "web"
     assert "--hostname" in backend_env["argv"]
 
