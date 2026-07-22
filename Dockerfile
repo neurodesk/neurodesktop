@@ -886,6 +886,23 @@ RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {
     && cp -a "${MYST_LABEXT_DIR}" "${APP_MYST_DIR}" \
     && rm -rf /tmp/myst /tmp/rise /tmp/myst-npm-cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
 
+# Patch both nested tar copies after all npm-based build steps. Updating
+# code-server's top-level dependency graph does not reach either scanner path.
+ARG NODE_TAR_VERSION="7.5.19"
+RUN set -eux; \
+    node_tar_package="$(npm pack --silent "tar@${NODE_TAR_VERSION}")"; \
+    for node_tar_dir in \
+        /opt/code-server/lib/vscode/node_modules/tar \
+        "$(npm root -g)/npm/node_modules/tar"; do \
+        rm -rf "${node_tar_dir}"; \
+        mkdir -p "${node_tar_dir}"; \
+        tar -xzf "${node_tar_package}" -C "${node_tar_dir}" --strip-components=1; \
+    done; \
+    rm -f "${node_tar_package}"; \
+    test "$(node -p 'require("/opt/code-server/lib/vscode/node_modules/tar/package.json").version')" = "${NODE_TAR_VERSION}"; \
+    test "$(node -p 'require("/usr/lib/node_modules/npm/node_modules/tar/package.json").version')" = "${NODE_TAR_VERSION}"; \
+    npm cache clean --force
+
 
 # Start the container as root so docker-stacks runs before-notebook hooks with
 # the privileges needed to bootstrap local Slurm/CVMFS, then drops to NB_USER.
