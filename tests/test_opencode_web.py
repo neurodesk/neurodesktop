@@ -206,6 +206,23 @@ def test_redact_auth_params_hides_login_tokens():
     assert ocw.redact_auth_params("GET / HTTP/1.1") == "GET / HTTP/1.1"
 
 
+# --- Working directory ---------------------------------------------------------
+
+
+def test_create_opencode_work_dir_uses_timestamp_and_avoids_collisions(tmp_path):
+    """Every web launch gets a new project below ~/opencode-work."""
+    home = tmp_path / "home"
+    home.mkdir()
+
+    first = Path(ocw.create_opencode_work_dir(home, "20260721_203001"))
+    second = Path(ocw.create_opencode_work_dir(home, "20260721_203001"))
+
+    assert first == home / "opencode-work" / "20260721_203001"
+    assert second == home / "opencode-work" / "20260721_203001_2"
+    assert first.is_dir()
+    assert second.is_dir()
+
+
 # --- Key handling ---------------------------------------------------------------
 
 
@@ -402,6 +419,7 @@ with open(os.path.join(state_dir, "env.json"), "w") as fh:
     json.dump(
         {
             "argv": sys.argv[1:],
+            "cwd": os.getcwd(),
             "OPENCODE_DISABLE_FFF": os.environ.get("OPENCODE_DISABLE_FFF", ""),
             "OPENCODE_MODEL_PROFILE": os.environ.get("OPENCODE_MODEL_PROFILE", ""),
             "NEURODESK_API_KEY": os.environ.get("NEURODESK_API_KEY", ""),
@@ -795,6 +813,9 @@ def test_valid_key_persists_starts_backend_and_proxies_with_rewrite(launcher):
     assert backend_env["NEURODESK_API_KEY"] == "good-key"
     assert backend_env["OPENCODE_SERVER_PASSWORD"] == launcher["password"]
     assert backend_env["OPENCODE_DISABLE_FFF"] == "1"
+    work_dir = Path(backend_env["cwd"])
+    assert work_dir.parent == launcher["home"] / "opencode-work"
+    assert re.fullmatch(r"\d{8}_\d{6}(?:_\d+)?", work_dir.name)
     assert backend_env["argv"][0] == "web"
     assert "--hostname" in backend_env["argv"]
 

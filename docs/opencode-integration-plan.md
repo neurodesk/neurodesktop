@@ -106,6 +106,13 @@ model wins, `OPENCODE_MODEL_PROFILE` honored) to start the server:
 opencode web --hostname 127.0.0.1 --port "${PORT}"    # serves UI + API
 ```
 
+Before starting that command, the web launcher creates a unique
+`~/opencode-work/YYYYMMDD_HHMMSS/` project and uses it as the wrapper's current
+directory. This gives the web UI a valid default project and reuses the
+terminal wrapper's existing behavior of copying `/opt/AGENTS.md` into a new
+working directory without overwriting an existing file. Same-second launches
+receive a numeric suffix.
+
 Security setup in the same script:
 
 - Generate a persistent per-user password into

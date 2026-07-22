@@ -20,6 +20,9 @@ behind Neurodesktop's proxy setup:
 4. Rewrites root-absolute URLs in HTML/CSS/JS responses against the
    X-Forwarded-Prefix header, because the upstream web UI assumes it is
    served from `/` and breaks behind the /opencode/ proxy prefix.
+5. Creates a unique ~/opencode-work/DATE_TIME project for each backend launch
+   and runs the terminal wrapper there, which seeds the project with the
+   standard /opt/AGENTS.md instructions.
 
 Environment overrides (mainly for tests):
   OPENCODE_WEB_WRAPPER_BIN   backend command (default /usr/local/sbin/opencode)
@@ -81,6 +84,8 @@ OPENCODE_PREFIXED_WEB_ROUTER_COMPONENT_EXPRESSION = (
 )
 BASHRC_KEY_COMMENT = "# Neurodesk API key for OpenCode"
 STREAM_CHUNK_SIZE = 65536
+OPENCODE_WORK_DIR_PARENT = "opencode-work"
+OPENCODE_WORK_DIR_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
 
 # Hop-by-hop headers must not be forwarded in either direction.
 HOP_BY_HOP_HEADERS = {
@@ -444,6 +449,22 @@ def rewrite_body(body, content_type, prefix):
 # --- Backend process management ----------------------------------------------
 
 
+def create_opencode_work_dir(home_dir, timestamp=None):
+    """Create and return a unique ~/opencode-work/DATE_TIME directory."""
+    parent = os.path.join(os.fspath(home_dir), OPENCODE_WORK_DIR_PARENT)
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    timestamp = timestamp or time.strftime(OPENCODE_WORK_DIR_TIMESTAMP_FORMAT)
+    for sequence in range(1, 1001):
+        name = timestamp if sequence == 1 else f"{timestamp}_{sequence}"
+        candidate = os.path.join(parent, name)
+        try:
+            os.mkdir(candidate, mode=0o700)
+            return candidate
+        except FileExistsError:
+            continue
+    raise OSError(f"could not create a unique OpenCode work directory in {parent}")
+
+
 class OpencodeBackend:
     """Owns the `opencode web` child process and its readiness state."""
 
@@ -451,6 +472,7 @@ class OpencodeBackend:
         self.wrapper_bin = wrapper_bin
         self.startup_timeout = startup_timeout
         self.home_dir = home_dir
+        self.work_dir = None
         self.port = None
         self.process = None
         self.state = "not_started"  # not_started | starting | ready | failed
@@ -488,6 +510,8 @@ class OpencodeBackend:
                 env["OPENCODE_MODEL_PROFILE"] = model
 
         try:
+            if self.work_dir is None:
+                self.work_dir = create_opencode_work_dir(self.home_dir)
             self.process = subprocess.Popen(
                 [
                     self.wrapper_bin,
@@ -497,7 +521,7 @@ class OpencodeBackend:
                     "--port",
                     str(self.port),
                 ],
-                cwd=self.home_dir,
+                cwd=self.work_dir,
                 env=env,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,

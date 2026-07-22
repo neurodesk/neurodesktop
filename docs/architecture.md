@@ -166,6 +166,11 @@ Server Proxy entry that runs
   (non-interactive path), so provider probing, `opencode.json` refresh, and
   the Notebook Intelligence sync stay single-sourced. A model chosen earlier
   is preserved by passing it back as `OPENCODE_MODEL_PROFILE`.
+- creates a unique `~/opencode-work/YYYYMMDD_HHMMSS/` directory for every web
+  backend launch and runs the terminal wrapper from it. The wrapper therefore
+  copies `/opt/AGENTS.md` into the new project as `AGENTS.md` and OpenCode
+  opens there automatically. A numeric suffix prevents collisions between
+  launches occurring within the same second.
 - launches the web backend with OpenCode's ripgrep file search enabled instead
   of its native FFF indexer. OpenCode 1.18.1 cannot initialize FFF when the
   workspace is the user's home directory and otherwise installs an empty
