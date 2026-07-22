@@ -166,6 +166,10 @@ Server Proxy entry that runs
   (non-interactive path), so provider probing, `opencode.json` refresh, and
   the Notebook Intelligence sync stay single-sourced. A model chosen earlier
   is preserved by passing it back as `OPENCODE_MODEL_PROFILE`.
+- launches the web backend with OpenCode's ripgrep file search enabled instead
+  of its native FFF indexer. OpenCode 1.18.1 cannot initialize FFF when the
+  workspace is the user's home directory and otherwise installs an empty
+  search service, leaving the Add Project directory list blank.
 - keeps OpenCode's native model picker available in the prompt toolbar. The
   automatically selected working model is only the initial default; users can
   choose any model currently advertised by Neurodesk, local Ollama, or

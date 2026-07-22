@@ -472,6 +472,13 @@ class OpencodeBackend:
 
         env = dict(os.environ)
         env["OPENCODE_SERVER_PASSWORD"] = backend_password
+        # OpenCode 1.18.1's native FFF indexer refuses to initialize when its
+        # workspace is a filesystem root or the user's home directory. The
+        # web launcher intentionally starts in HOME so users can choose any
+        # project below it; when FFF fails, OpenCode installs an empty search
+        # service and the Add Project dialog cannot discover directories.
+        # Force OpenCode's supported ripgrep search backend for this process.
+        env["OPENCODE_DISABLE_FFF"] = "1"
         # Preserve a model chosen earlier (terminal wrapper or a previous web
         # launch): the wrapper's non-interactive path would otherwise reset
         # the default to the first working provider on every launch.

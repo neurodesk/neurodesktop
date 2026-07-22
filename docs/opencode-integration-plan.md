@@ -162,6 +162,11 @@ and the pinned real OpenCode bundle contract are validated in
 `tests/test_opencode_web.py` and must be re-verified when bumping
 `OPENCODE_VERSION`.
 
+The web child also runs with `OPENCODE_DISABLE_FFF=1`: OpenCode 1.18.1's FFF
+indexer rejects a home-directory workspace and otherwise leaves Add Project
+with an empty directory search service. OpenCode's ripgrep backend supports
+the home-rooted project picker used by Neurodesktop.
+
 Alternatives that were considered, kept here for context:
 
 1. **Contribute base-path support upstream** (parallel track, best

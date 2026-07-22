@@ -38,6 +38,9 @@
 - `OPENCODE_WEB_STARTUP_TIMEOUT`: seconds `opencode_web.py` (the "OpenCode AI"
   launcher tile) waits for the `opencode web` backend to become ready;
   defaults to `180`
+- `OPENCODE_DISABLE_FFF`: forced to `1` for the OpenCode Web child process so
+  its Add Project dialog can search below the `/home/jovyan` startup directory.
+  The terminal OpenCode workflow is unaffected
 - `OPENCODE_WEB_DESKTOP_STATE`: state file where the desktop "OpenCode Web"
   shortcut records its launcher's PID and dynamically allocated port;
   defaults to `~/.neurodesk/run/opencode_web_desktop.state`
