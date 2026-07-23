@@ -164,15 +164,19 @@ Server Proxy entry that runs
   falls back to the other providers.
 - starts `opencode web` through the `/usr/local/sbin/opencode` wrapper
   (non-interactive path), so provider probing, `opencode.json` refresh, and
-  the Notebook Intelligence sync stay single-sourced. A model chosen earlier
-  is preserved by passing it back as `OPENCODE_MODEL_PROFILE`.
-- creates a unique `~/opencode-work/YYYYMMDD_HHMMSS/` directory for every web
-  backend launch and runs the terminal wrapper from it. The wrapper therefore
-  copies `/opt/AGENTS.md` into the new project as `AGENTS.md` and OpenCode
-  opens there automatically. A numeric suffix prevents collisions between
-  launches occurring within the same second.
+  the Notebook Intelligence sync stay single-sourced. Web launches default
+  `OPENCODE_MODEL_PROFILE` to the Neurodesk provider independently of a model
+  selected in terminal OpenCode; an explicit environment override still wins.
+- initializes `~/opencode-work/` as the dedicated Git project, creates a unique
+  `YYYYMMDD_HHMMSS/` directory below it for every web backend launch, and runs
+  the terminal wrapper from that directory. The Git root is required because
+  OpenCode represents non-Git directories as its global project with worktree
+  `/`; its Home tab then opens that root worktree instead of the Neurodesktop
+  workspace. The wrapper copies `/opt/AGENTS.md` into the new launch directory
+  as `AGENTS.md`, and a numeric suffix prevents collisions between launches
+  occurring within the same second.
 - launches the web backend with OpenCode's ripgrep file search enabled instead
-  of its native FFF indexer. OpenCode 1.18.1 cannot initialize FFF when the
+  of its native FFF indexer. OpenCode 1.18.x cannot initialize FFF when the
   workspace is the user's home directory and otherwise installs an empty
   search service, leaving the Add Project directory list blank.
 - keeps OpenCode's native model picker available in the prompt toolbar. The
@@ -187,13 +191,26 @@ Server Proxy entry that runs
   web bundle's canonical local-server URL to that bootstrap value, so the
   selected default and OpenCode's server registry use the same key; its
   permission provider rejects a selected server that is absent from that
-  registry. The same bootstrap value is supplied as the Solid router's base
-  path. Without that third invariant, the SPA treats the first proxy segment
+  registry. The pinned bundle rewrite also marks its fetch-based SSE requests
+  with `Accept: text/event-stream`, which makes Jupyter Server Proxy select
+  progressive delivery, while the Python wrapper re-chunks upstream event
+  feeds so Jupyter can flush each event instead of buffering indefinitely. The
+  same bootstrap value is supplied as the Solid router's base path. Without
+  that routing invariant, the SPA treats the first proxy segment
   (`opencode`) as a base64-encoded project directory and creates sessions in
   an invalid path. Together these changes keep provider, model, session,
   event, terminal, browser-history, and future API routes below `/opencode/`.
-  Static root-absolute asset URLs in HTML/CSS/JS are rewritten against the
-  same validated prefix.
+  The proxied bundle also makes the new-layout Home control perform a full
+  navigation to the prefixed root. OpenCode's in-memory tab toggle works at a
+  site root but does not reliably leave a server-scoped session when the app is
+  mounted below Jupyter's `/opencode` prefix.
+  Static root-absolute asset URLs and relative lazy-loaded chunk URLs in
+  HTML/CSS/JS are rewritten against the same validated prefix. The relative
+  chunk rewrite matters on the Home route because `/opencode` has no trailing
+  slash, so an unmodified `assets/*` chunk would otherwise resolve to Jupyter's
+  root `/assets/*`. Generated SDK routes such as `/api/session` remain unchanged
+  because the SDK resolves them against the already-prefixed server URL;
+  rewriting those literals would apply the proxy prefix twice.
   This is necessary because the upstream UI otherwise uses the site origin and
   escapes the Jupyter proxy.
 

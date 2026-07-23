@@ -464,7 +464,7 @@ RUN npm_config_cache=/tmp/npm-root-cache npm install -g @openai/codex \
 # the release so the web UI, the opencode_web.py proxy, and the default
 # config are tested as a set; override at build time to bump it, or set it
 # to an empty value to install the latest release.
-ARG OPENCODE_VERSION="1.18.1"
+ARG OPENCODE_VERSION="1.18.4"
 RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash -s -- ${OPENCODE_VERSION:+--version "${OPENCODE_VERSION}"}' \
     && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local

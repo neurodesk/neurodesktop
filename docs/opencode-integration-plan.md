@@ -35,7 +35,7 @@ Give Neurodesktop users a first-class, browser-based OpenCode experience:
 - OpenCode is installed at image build time via `https://opencode.ai/install`
   and moved to `/usr/bin/opencode` ([Dockerfile](../Dockerfile), "Install
   OpenCode CLI" layer). The `OPENCODE_VERSION` build argument pins the
-  installed release (default 1.18.1); overriding it bumps the pin, and an
+  installed release (default 1.18.4); overriding it bumps the pin, and an
   empty value installs the latest release.
 - Users reach it only through a **terminal**: `/usr/local/sbin/opencode`
   ([config/agents/opencode](../config/agents/opencode)) is a ~1600-line bash
@@ -169,7 +169,7 @@ and the pinned real OpenCode bundle contract are validated in
 `tests/test_opencode_web.py` and must be re-verified when bumping
 `OPENCODE_VERSION`.
 
-The web child also runs with `OPENCODE_DISABLE_FFF=1`: OpenCode 1.18.1's FFF
+The web child also runs with `OPENCODE_DISABLE_FFF=1`: OpenCode 1.18.x's FFF
 indexer rejects a home-directory workspace and otherwise leaves Add Project
 with an empty directory search service. OpenCode's ripgrep backend supports
 the home-rooted project picker used by Neurodesktop.
