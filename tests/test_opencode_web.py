@@ -131,17 +131,20 @@ def test_rewrite_css_prefixes_url_references():
     assert f"url({PREFIX}/assets/bg.svg)" in rewritten
 
 
-def test_rewrite_js_prefixes_assets_without_touching_unrelated_js():
-    """Quoted asset/API paths change while unrelated JS stays intact."""
+def test_rewrite_js_prefixes_assets_without_double_prefixing_sdk_api_paths():
+    """Static assets gain the prefix; SDK routes use the prefixed base URL."""
     js = (
         'const font = "/assets/inter.woff2";\n'
+        'const chunk = "assets/home.js";\n'
         "const api = '/api/session';\n"
         "const tpl = `/assets/${name}`;\n"
         'const ratio = a / b; const other = "/session/history";\n'
     )
     rewritten = ocw.rewrite_js(js, PREFIX)
     assert f'"{PREFIX}/assets/inter.woff2"' in rewritten
-    assert f"'{PREFIX}/api/session'" in rewritten
+    assert f'"{PREFIX}/assets/home.js"' in rewritten
+    assert "'/api/session'" in rewritten
+    assert f"'{PREFIX}/api/session'" not in rewritten
     assert f"`{PREFIX}/assets/" in rewritten
     # Division and unknown root paths are left alone.
     assert "a / b" in rewritten
@@ -164,12 +167,39 @@ def test_rewrite_js_registers_the_prefixed_server_used_for_permissions():
 
 def test_rewrite_js_configures_the_spa_router_with_the_proxy_base_path():
     """The browser must not decode the proxy name as a project directory."""
-    router_component = 'get component(){return e.router??ppe},root:n=>'
+    router_component = 'get component(){return e.router??Epe},root:n=>'
 
     rewritten = ocw.rewrite_js(router_component, PREFIX)
 
     assert router_component not in rewritten
     assert "window.__NEURODESK_OPENCODE_BASE_PATH__" in rewritten
+
+
+def test_rewrite_js_forces_home_navigation_through_the_proxy_prefix():
+    """The in-session Home button must load the known-good prefixed root."""
+    js = (
+        'const Ie=()=>ce.toggleHome({home:pe.route().type==="home",'
+        'current:J()});'
+    )
+
+    rewritten = ocw.rewrite_js(js, PREFIX)
+
+    assert js not in rewritten
+    assert 'pe.route().type==="home"?ce.toggleHome' in rewritten
+    assert f'location.assign("{PREFIX}/")' in rewritten
+
+
+def test_rewrite_js_marks_fetch_based_sse_requests_for_jupyter_streaming():
+    """Jupyter Server Proxy streams only explicit event-stream requests."""
+    sse_headers = (
+        "const b=u.headers instanceof Headers?u.headers:new Headers(u.headers);"
+        'd!==void 0&&b.set("Last-Event-ID",d);'
+    )
+
+    rewritten = ocw.rewrite_js(sse_headers, PREFIX)
+
+    assert sse_headers not in rewritten
+    assert 'b.set("Accept","text/event-stream")' in rewritten
 
 
 def test_rewrite_body_is_noop_without_prefix():
@@ -221,6 +251,24 @@ def test_create_opencode_work_dir_uses_timestamp_and_avoids_collisions(tmp_path)
     assert second == home / "opencode-work" / "20260721_203001_2"
     assert first.is_dir()
     assert second.is_dir()
+
+
+def test_create_opencode_work_dir_makes_parent_a_git_project(tmp_path):
+    """OpenCode Home must receive a workspace worktree instead of ``/``."""
+    home = tmp_path / "home"
+    home.mkdir()
+
+    work_dir = Path(ocw.create_opencode_work_dir(home, "20260721_203001"))
+
+    project_root = home / "opencode-work"
+    assert work_dir.parent == project_root
+    assert (project_root / ".git").is_dir()
+    assert subprocess.run(
+        ["git", "-C", project_root, "rev-parse", "--show-toplevel"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip() == str(project_root)
 
 
 # --- Key handling ---------------------------------------------------------------
@@ -441,7 +489,10 @@ PAGES = {
         'const config = "/global/config"; '
         'const canonical=()=>location.hostname.includes("opencode.ai")?'
         '"http://localhost:4096":location.origin; '
-        'const router={get component(){return e.router??ppe},root:n=>n}; '
+        'const router={get component(){return e.router??Epe},root:n=>n}; '
+        'const sse=()=>{const b=u.headers instanceof Headers?'
+        'u.headers:new Headers(u.headers);d!==void 0&&'
+        'b.set("Last-Event-ID",d);return b}; '
         'export { font, provider, config, canonical, router };',
     ),
     "/provider": (
@@ -468,6 +519,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(401)
             self.send_header("Content-Length", "0")
             self.end_headers()
+            return
+        if self.path == "/global/event":
+            payload = b'data: {"type":"server.connected"}\\n\\n'
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache, no-transform")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            self.wfile.write(f"{len(payload):X}\\r\\n".encode())
+            self.wfile.write(payload + b"\\r\\n0\\r\\n\\r\\n")
+            self.wfile.flush()
             return
         content_type, body = PAGES.get(self.path, ("text/plain", "fallback"))
         payload = body.encode()
@@ -564,13 +626,21 @@ def test_pinned_opencode_bundle_supports_native_prefixed_model_picker(tmp_path):
             '"http://localhost:4096":location.origin'
         )
         assert bundle.count(canonical_origin) == 1
-        router_component = 'get component(){return e.router??ppe},root:n=>'
+        router_component = 'get component(){return e.router??Epe},root:n=>'
         assert bundle.count(router_component) == 1
-        proxied_bundle = ocw.rewrite_js(bundle, "/opencode")
+        proxy_prefix = "/opencode"
+        proxied_bundle = ocw.rewrite_js(bundle, proxy_prefix)
         assert canonical_origin not in proxied_bundle
         assert "window.__NEURODESK_OPENCODE_SERVER_URL__" in proxied_bundle
         assert router_component not in proxied_bundle
         assert "window.__NEURODESK_OPENCODE_BASE_PATH__" in proxied_bundle
+        assert 'location.assign("/opencode/")' in proxied_bundle
+        assert 'b.set("Accept","text/event-stream")' in proxied_bundle
+        assert 'url:"/api/session"' in proxied_bundle
+        assert f'url:"{proxy_prefix}/api/session"' not in proxied_bundle
+        assert '"assets/row-' in bundle
+        assert '"assets/row-' not in proxied_bundle
+        assert f'"{proxy_prefix}/assets/row-' in proxied_bundle
     finally:
         process.terminate()
         try:
@@ -813,11 +883,33 @@ def test_valid_key_persists_starts_backend_and_proxies_with_rewrite(launcher):
     assert backend_env["NEURODESK_API_KEY"] == "good-key"
     assert backend_env["OPENCODE_SERVER_PASSWORD"] == launcher["password"]
     assert backend_env["OPENCODE_DISABLE_FFF"] == "1"
+    assert backend_env["OPENCODE_MODEL_PROFILE"] == "neurodesk"
     work_dir = Path(backend_env["cwd"])
     assert work_dir.parent == launcher["home"] / "opencode-work"
     assert re.fullmatch(r"\d{8}_\d{6}(?:_\d+)?", work_dir.name)
     assert backend_env["argv"][0] == "web"
     assert "--hostname" in backend_env["argv"]
+
+
+def test_sse_response_remains_chunked_through_launcher_proxy(launcher):
+    """Jupyter's progressive proxy must receive framed SSE chunks."""
+    status, _headers = _complete_key_setup(launcher)
+    assert status == 303
+    _wait_for_proxied_root(launcher)
+
+    conn = http.client.HTTPConnection(
+        "127.0.0.1", launcher["port"], timeout=5
+    )
+    conn.request("GET", "/global/event", headers=launcher["auth"])
+    response = conn.getresponse()
+    try:
+        assert response.status == 200
+        assert response.getheader("Content-Type") == "text/event-stream"
+        assert response.getheader("Transfer-Encoding") == "chunked"
+        assert response.getheader("Connection") != "close"
+        assert b"server.connected" in response.read()
+    finally:
+        conn.close()
 
 
 def test_skip_starts_backend_without_key(launcher):
@@ -921,7 +1013,7 @@ def test_unexpected_validation_status_accepts_key_unverified(launcher):
     assert "export NEURODESK_API_KEY='flaky-key'" in bashrc
 
 
-def test_existing_bashrc_key_skips_setup_and_warm_starts(tmp_path):
+def test_existing_bashrc_key_skips_setup_and_web_prefers_neurodesk(tmp_path):
     """A key configured earlier (e.g. via the terminal wrapper) boots straight
     into the proxied UI without showing the setup page."""
     home_dir = tmp_path / "home"
@@ -931,12 +1023,11 @@ def test_existing_bashrc_key_skips_setup_and_warm_starts(tmp_path):
         "export NEURODESK_API_KEY='good-key'\n",
         encoding="utf-8",
     )
-    # Model selection from a previous run must be preserved via
-    # OPENCODE_MODEL_PROFILE so the wrapper does not reset the default.
+    # Web launches use Neurodesk even when a terminal run selected Ollama.
     config_dir = home_dir / ".config" / "opencode"
     config_dir.mkdir(parents=True)
     (config_dir / "opencode.json").write_text(
-        json.dumps({"model": "neurodesk/model-alpha"}), encoding="utf-8"
+        json.dumps({"model": "ollama/model-alpha"}), encoding="utf-8"
     )
 
     state_dir = tmp_path / "state"
@@ -989,7 +1080,7 @@ def test_existing_bashrc_key_skips_setup_and_warm_starts(tmp_path):
             (state_dir / "env.json").read_text(encoding="utf-8")
         )
         assert backend_env["NEURODESK_API_KEY"] == "good-key"
-        assert backend_env["OPENCODE_MODEL_PROFILE"] == "neurodesk/model-alpha"
+        assert backend_env["OPENCODE_MODEL_PROFILE"] == "neurodesk"
     finally:
         process.terminate()
         try:

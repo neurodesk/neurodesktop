@@ -75,17 +75,27 @@ OPENCODE_PREFIXED_WEB_ORIGIN_EXPRESSION = (
     f"window.{OPENCODE_PREFIX_SERVER_GLOBAL}||location.origin"
 )
 OPENCODE_WEB_ROUTER_COMPONENT_EXPRESSION = (
-    "get component(){return e.router??ppe},root:n=>"
+    "get component(){return e.router??Epe},root:n=>"
 )
 OPENCODE_PREFIXED_WEB_ROUTER_COMPONENT_EXPRESSION = (
-    "get component(){return e.router??ppe},"
+    "get component(){return e.router??Epe},"
     f"get base(){{return window.{OPENCODE_PREFIX_ROUTER_GLOBAL}||\"\"}},"
     "root:n=>"
+)
+OPENCODE_SSE_HEADERS_EXPRESSION = (
+    "const b=u.headers instanceof Headers?u.headers:new Headers(u.headers);"
+    'd!==void 0&&b.set("Last-Event-ID",d);'
+)
+OPENCODE_STREAMING_SSE_HEADERS_EXPRESSION = (
+    "const b=u.headers instanceof Headers?u.headers:new Headers(u.headers);"
+    'b.set("Accept","text/event-stream"),'
+    'd!==void 0&&b.set("Last-Event-ID",d);'
 )
 BASHRC_KEY_COMMENT = "# Neurodesk API key for OpenCode"
 STREAM_CHUNK_SIZE = 65536
 OPENCODE_WORK_DIR_PARENT = "opencode-work"
 OPENCODE_WORK_DIR_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
+OPENCODE_WEB_DEFAULT_MODEL_PROFILE = "neurodesk"
 
 # Hop-by-hop headers must not be forwarded in either direction.
 HOP_BY_HOP_HEADERS = {
@@ -341,7 +351,13 @@ _HTML_ATTR_RE = re.compile(
     re.IGNORECASE,
 )
 _CSS_URL_RE = re.compile(r"""(\burl\(\s*)(["']?)/(?!/)""", re.IGNORECASE)
-_JS_STRING_PATH_RE = re.compile(r"""(["'`])/(assets|api)/""")
+_JS_STRING_ASSET_PATH_RE = re.compile(r"""(["'`])/?assets/""")
+_JS_HOME_TOGGLE_RE = re.compile(
+    r"(?P<binding>[A-Za-z_$][A-Za-z0-9_$]*)=\(\)=>"
+    r"(?P<tabs>[A-Za-z_$][A-Za-z0-9_$]*)\.toggleHome\(\{home:"
+    r"(?P<layout>[A-Za-z_$][A-Za-z0-9_$]*)\.route\(\)\.type===\"home\","
+    r"current:(?P<current>[A-Za-z_$][A-Za-z0-9_$]*)\(\)\}\)"
+)
 
 
 def _inject_after_head(body, snippet):
@@ -401,7 +417,7 @@ def rewrite_html(body, prefix):
     """Prefix root-absolute attribute, CSS, and JS asset URLs in HTML."""
     body = _HTML_ATTR_RE.sub(rf"\g<1>\g<2>{prefix}/", body)
     body = _CSS_URL_RE.sub(rf"\g<1>\g<2>{prefix}/", body)
-    body = _JS_STRING_PATH_RE.sub(rf"\g<1>{prefix}/\g<2>/", body)
+    body = _JS_STRING_ASSET_PATH_RE.sub(rf"\g<1>{prefix}/assets/", body)
     bootstrap = f'<script src="{prefix}{PREFIX_BOOTSTRAP_PATH}"></script>'
     if PREFIX_BOOTSTRAP_PATH not in body:
         body = _inject_after_head(body, bootstrap)
@@ -424,14 +440,30 @@ def rewrite_js(body, prefix):
     the forwarded prefix as its base so it strips that prefix before matching
     ``/:dir`` and adds it back to generated browser-history URLs.
     """
-    body = _JS_STRING_PATH_RE.sub(rf"\g<1>{prefix}/\g<2>/", body)
+    body = _JS_STRING_ASSET_PATH_RE.sub(rf"\g<1>{prefix}/assets/", body)
+    home_url = json.dumps(f"{prefix}/")
+
+    def rewrite_home_toggle(match):
+        groups = match.groupdict()
+        return (
+            f'{groups["binding"]}=()=>'
+            f'{groups["layout"]}.route().type==="home"?'
+            f'{groups["tabs"]}.toggleHome({{home:!0,current:'
+            f'{groups["current"]}()}}):location.assign({home_url})'
+        )
+
+    body = _JS_HOME_TOGGLE_RE.sub(rewrite_home_toggle, body)
     body = body.replace(
         OPENCODE_WEB_ORIGIN_EXPRESSION,
         OPENCODE_PREFIXED_WEB_ORIGIN_EXPRESSION,
     )
-    return body.replace(
+    body = body.replace(
         OPENCODE_WEB_ROUTER_COMPONENT_EXPRESSION,
         OPENCODE_PREFIXED_WEB_ROUTER_COMPONENT_EXPRESSION,
+    )
+    return body.replace(
+        OPENCODE_SSE_HEADERS_EXPRESSION,
+        OPENCODE_STREAMING_SSE_HEADERS_EXPRESSION,
     )
 
 
@@ -450,9 +482,25 @@ def rewrite_body(body, content_type, prefix):
 
 
 def create_opencode_work_dir(home_dir, timestamp=None):
-    """Create and return a unique ~/opencode-work/DATE_TIME directory."""
+    """Create and return a unique directory in the OpenCode Git project."""
     parent = os.path.join(os.fspath(home_dir), OPENCODE_WORK_DIR_PARENT)
     os.makedirs(parent, mode=0o700, exist_ok=True)
+    git_dir = os.path.join(parent, ".git")
+    if not os.path.exists(git_dir):
+        try:
+            subprocess.run(
+                ["git", "init", "--quiet", parent],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+            detail = getattr(exc, "stderr", "") or str(exc)
+            raise OSError(
+                f"could not initialize OpenCode project in {parent}: "
+                f"{detail.strip()}"
+            ) from exc
     timestamp = timestamp or time.strftime(OPENCODE_WORK_DIR_TIMESTAMP_FORMAT)
     for sequence in range(1, 1001):
         name = timestamp if sequence == 1 else f"{timestamp}_{sequence}"
@@ -494,20 +542,18 @@ class OpencodeBackend:
 
         env = dict(os.environ)
         env["OPENCODE_SERVER_PASSWORD"] = backend_password
-        # OpenCode 1.18.1's native FFF indexer refuses to initialize when its
+        # OpenCode 1.18.x's native FFF indexer refuses to initialize when its
         # workspace is a filesystem root or the user's home directory. The
         # web launcher intentionally starts in HOME so users can choose any
         # project below it; when FFF fails, OpenCode installs an empty search
         # service and the Add Project dialog cannot discover directories.
         # Force OpenCode's supported ripgrep search backend for this process.
         env["OPENCODE_DISABLE_FFF"] = "1"
-        # Preserve a model chosen earlier (terminal wrapper or a previous web
-        # launch): the wrapper's non-interactive path would otherwise reset
-        # the default to the first working provider on every launch.
+        # The web launcher defaults to Neurodesk independently of a model
+        # selected in terminal OpenCode. An explicit environment override is
+        # still respected.
         if not env.get("OPENCODE_MODEL_PROFILE"):
-            model = current_opencode_model(self.home_dir)
-            if model:
-                env["OPENCODE_MODEL_PROFILE"] = model
+            env["OPENCODE_MODEL_PROFILE"] = OPENCODE_WEB_DEFAULT_MODEL_PROFILE
 
         try:
             if self.work_dir is None:
@@ -975,6 +1021,9 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
             return
 
         content_type = response.getheader("Content-Type", "")
+        event_stream = content_type.partition(";")[0].strip().lower() == (
+            "text/event-stream"
+        )
         prefix = self.external_prefix()
         rewritable = prefix and any(
             content_type.startswith(ct) for ct in REWRITABLE_CONTENT_TYPES
@@ -1014,9 +1063,17 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
                     sanitize_header_value(name),
                     sanitize_header_value(value),
                 )
-            if not has_length:
-                # Chunked/streaming upstream (e.g. the SSE /event feed):
-                # delimit our response by connection close instead.
+            downstream_chunked = event_stream and not has_length
+            if downstream_chunked:
+                # Jupyter Server Proxy progressively flushes explicit SSE
+                # requests, but its HTTP client still needs valid message
+                # framing from this intermediary. Re-frame the decoded
+                # upstream chunks instead of turning an unbounded event feed
+                # into a close-delimited response that Jupyter buffers.
+                self.send_header("Transfer-Encoding", "chunked")
+            elif not has_length:
+                # Other unbounded upstream responses retain close-delimited
+                # framing; SSE is explicitly re-chunked above.
                 self.send_header("Connection", "close")
                 self.close_connection = True
             self.end_headers()
@@ -1026,7 +1083,15 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
                 chunk = response.read1(STREAM_CHUNK_SIZE)
                 if not chunk:
                     break
-                self.wfile.write(chunk)
+                if downstream_chunked:
+                    self.wfile.write(f"{len(chunk):X}\r\n".encode("ascii"))
+                    self.wfile.write(chunk)
+                    self.wfile.write(b"\r\n")
+                else:
+                    self.wfile.write(chunk)
+                self.wfile.flush()
+            if downstream_chunked:
+                self.wfile.write(b"0\r\n\r\n")
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass

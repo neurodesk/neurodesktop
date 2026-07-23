@@ -50,7 +50,7 @@
   token file, and key-validation endpoint)
 - `OPENCODE_VERSION` (build argument): the OpenCode release installed into
   the image; defaults to the validated pin in the Dockerfile (currently
-  `1.18.1`). Override to bump the pin, or set it to an empty value to
+  `1.18.4`). Override to bump the pin, or set it to an empty value to
   install the latest release
 - `NEURODESK_API_KEY`: API key for `https://llm.neurodesk.org`. Shared by
   OpenCode and by the Notebook Intelligence JupyterLab plugin. OpenCode
