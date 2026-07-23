@@ -352,11 +352,16 @@ _HTML_ATTR_RE = re.compile(
 )
 _CSS_URL_RE = re.compile(r"""(\burl\(\s*)(["']?)/(?!/)""", re.IGNORECASE)
 _JS_STRING_ASSET_PATH_RE = re.compile(r"""(["'`])/?assets/""")
+# The identifier quantifiers are possessive (*+): the leading character
+# class is a subset of the repeated one, so a backtracking star would rescan
+# quadratically on adversarial inputs such as long '$' runs (CodeQL
+# py/polynomial-redos). Identifiers never contain the delimiters that follow
+# them, so refusing to backtrack cannot change what matches.
 _JS_HOME_TOGGLE_RE = re.compile(
-    r"(?P<binding>[A-Za-z_$][A-Za-z0-9_$]*)=\(\)=>"
-    r"(?P<tabs>[A-Za-z_$][A-Za-z0-9_$]*)\.toggleHome\(\{home:"
-    r"(?P<layout>[A-Za-z_$][A-Za-z0-9_$]*)\.route\(\)\.type===\"home\","
-    r"current:(?P<current>[A-Za-z_$][A-Za-z0-9_$]*)\(\)\}\)"
+    r"(?P<binding>[A-Za-z_$][A-Za-z0-9_$]*+)=\(\)=>"
+    r"(?P<tabs>[A-Za-z_$][A-Za-z0-9_$]*+)\.toggleHome\(\{home:"
+    r"(?P<layout>[A-Za-z_$][A-Za-z0-9_$]*+)\.route\(\)\.type===\"home\","
+    r"current:(?P<current>[A-Za-z_$][A-Za-z0-9_$]*+)\(\)\}\)"
 )
 
 
