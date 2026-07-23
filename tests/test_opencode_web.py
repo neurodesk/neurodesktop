@@ -189,6 +189,16 @@ def test_rewrite_js_forces_home_navigation_through_the_proxy_prefix():
     assert f'location.assign("{PREFIX}/")' in rewritten
 
 
+def test_rewrite_js_home_toggle_regex_is_linear_on_adversarial_input():
+    """The identifier quantifiers are possessive, so a long '$' run cannot
+    trigger quadratic backtracking (CodeQL py/polynomial-redos)."""
+    adversarial = "$" * 50000
+    started = time.monotonic()
+    rewritten = ocw.rewrite_js(adversarial, PREFIX)
+    assert time.monotonic() - started < 2.0
+    assert rewritten == adversarial
+
+
 def test_rewrite_js_marks_fetch_based_sse_requests_for_jupyter_streaming():
     """Jupyter Server Proxy streams only explicit event-stream requests."""
     sse_headers = (
