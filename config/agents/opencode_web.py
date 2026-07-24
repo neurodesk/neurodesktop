@@ -82,6 +82,17 @@ OPENCODE_PREFIXED_WEB_ROUTER_COMPONENT_EXPRESSION = (
     f"get base(){{return window.{OPENCODE_PREFIX_ROUTER_GLOBAL}||\"\"}},"
     "root:n=>"
 )
+OPENCODE_WEB_ROUTE_PARSER_EXPRESSION = (
+    '=(e,t)=>{const n=e.split("/").filter(Boolean);'
+    'if(n.length===0)return{type:"home"}'
+)
+OPENCODE_PREFIXED_WEB_ROUTE_PARSER_EXPRESSION = (
+    "=(e,t)=>{"
+    f'const _nb=window.{OPENCODE_PREFIX_ROUTER_GLOBAL}||"";'
+    '_nb&&(e===_nb||e.startsWith(_nb+"/"))&&(e=e.slice(_nb.length));'
+    'const n=e.split("/").filter(Boolean);'
+    'if(n.length===0)return{type:"home"}'
+)
 OPENCODE_SSE_HEADERS_EXPRESSION = (
     "const b=u.headers instanceof Headers?u.headers:new Headers(u.headers);"
     'd!==void 0&&b.set("Last-Event-ID",d);'
@@ -444,6 +455,13 @@ def rewrite_js(body, prefix):
     registered canonical server have the same key. The SPA router must receive
     the forwarded prefix as its base so it strips that prefix before matching
     ``/:dir`` and adds it back to generated browser-history URLs.
+
+    The router base only affects route matching: ``useLocation().pathname``
+    keeps the raw browser path. OpenCode's layout feeds that raw path to its
+    own route parser, which reads the first segment (``opencode``) as a
+    project directory and misclassifies every session URL as ``home`` — the
+    titlebar Home button then silently re-selects the current session instead
+    of navigating. The parser rewrite strips the forwarded prefix first.
     """
     body = _JS_STRING_ASSET_PATH_RE.sub(rf"\g<1>{prefix}/assets/", body)
     home_url = json.dumps(f"{prefix}/")
@@ -469,6 +487,10 @@ def rewrite_js(body, prefix):
     body = body.replace(
         OPENCODE_WEB_ROUTER_COMPONENT_EXPRESSION,
         OPENCODE_PREFIXED_WEB_ROUTER_COMPONENT_EXPRESSION,
+    )
+    body = body.replace(
+        OPENCODE_WEB_ROUTE_PARSER_EXPRESSION,
+        OPENCODE_PREFIXED_WEB_ROUTE_PARSER_EXPRESSION,
     )
     return body.replace(
         OPENCODE_SSE_HEADERS_EXPRESSION,

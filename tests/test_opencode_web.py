@@ -175,6 +175,29 @@ def test_rewrite_js_configures_the_spa_router_with_the_proxy_base_path():
     assert "window.__NEURODESK_OPENCODE_BASE_PATH__" in rewritten
 
 
+def test_rewrite_js_strips_the_proxy_prefix_in_the_layout_route_parser():
+    """The layout's route parser sees the raw pathname, not the router base.
+
+    Without stripping, ``/opencode/server/<b64>/session/<id>`` parses as
+    ``{type:"home"}`` and the titlebar Home button becomes a no-op.
+    """
+    parser = (
+        'Xke=(e,t)=>{const n=e.split("/").filter(Boolean);'
+        'if(n.length===0)return{type:"home"};'
+        'if(n[0]==="server"&&n[2]==="session"&&n[3])'
+        'return{type:"session",sessionId:n[3],server:qo(n[1])};'
+    )
+
+    rewritten = ocw.rewrite_js(parser, PREFIX)
+
+    assert 'const n=e.split("/").filter(Boolean)' in rewritten
+    assert (
+        'const _nb=window.__NEURODESK_OPENCODE_BASE_PATH__||"";'
+        '_nb&&(e===_nb||e.startsWith(_nb+"/"))&&(e=e.slice(_nb.length));'
+    ) in rewritten
+    assert rewritten.index("_nb") < rewritten.index('e.split("/")')
+
+
 def test_rewrite_js_forces_home_navigation_through_the_proxy_prefix():
     """The in-session Home button must load the known-good prefixed root."""
     js = (
@@ -638,12 +661,22 @@ def test_pinned_opencode_bundle_supports_native_prefixed_model_picker(tmp_path):
         assert bundle.count(canonical_origin) == 1
         router_component = 'get component(){return e.router??Epe},root:n=>'
         assert bundle.count(router_component) == 1
+        route_parser = (
+            '=(e,t)=>{const n=e.split("/").filter(Boolean);'
+            'if(n.length===0)return{type:"home"}'
+        )
+        assert bundle.count(route_parser) == 1
         proxy_prefix = "/opencode"
         proxied_bundle = ocw.rewrite_js(bundle, proxy_prefix)
         assert canonical_origin not in proxied_bundle
         assert "window.__NEURODESK_OPENCODE_SERVER_URL__" in proxied_bundle
         assert router_component not in proxied_bundle
         assert "window.__NEURODESK_OPENCODE_BASE_PATH__" in proxied_bundle
+        assert route_parser not in proxied_bundle
+        assert (
+            '_nb&&(e===_nb||e.startsWith(_nb+"/"))&&(e=e.slice(_nb.length))'
+            in proxied_bundle
+        )
         assert 'location.assign("/opencode/")' in proxied_bundle
         assert 'b.set("Accept","text/event-stream")' in proxied_bundle
         assert 'url:"/api/session"' in proxied_bundle
