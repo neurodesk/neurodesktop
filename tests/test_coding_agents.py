@@ -188,7 +188,11 @@ case "$url" in
         fi
         case "$auth" in
             "Authorization: Bearer neurodesk-test-key"|"Authorization: Bearer new-neurodesk-key")
-                printf '%s' '{"data":[{"id":"model-alpha"},{"id":"openai/gpt-4.1-mini"}]}' > "$outfile"
+                if [ -n "${FAKE_NEURODESK_MODELS_JSON:-}" ]; then
+                    printf '%s' "$FAKE_NEURODESK_MODELS_JSON" > "$outfile"
+                else
+                    printf '%s' '{"data":[{"id":"model-alpha"},{"id":"openai/gpt-4.1-mini"}]}' > "$outfile"
+                fi
                 printf '200'
                 ;;
             *)
@@ -324,6 +328,67 @@ def test_opencode_shows_litellm_models_after_api_key_creation(tmp_path):
         == "https://llm.neurodesk.org/openai"
     )
     assert list(neurodesk_provider["models"]) == ["model-alpha", "openai/gpt-4.1-mini"]
+
+def test_opencode_neurodesk_profile_prefers_the_curated_alias_model(tmp_path):
+    """OPENCODE_MODEL_PROFILE=neurodesk must pick the "neurodesk" alias model.
+
+    llm.neurodesk.org publishes a curated default model literally named
+    "neurodesk", but its /models listing returns it last; the profile must
+    not settle for whichever model the server happens to list first.
+    """
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    env["NEURODESK_API_KEY"] = "neurodesk-test-key"
+    env["OPENCODE_MODEL_PROFILE"] = "neurodesk"
+    env["FAKE_NEURODESK_MODELS_JSON"] = (
+        '{"data":[{"id":"qwen3"},{"id":"neurodesk"}]}'
+    )
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)],
+        "n\n",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert returncode == 0, output
+    assert (
+        "OPENCODE_MODEL_PROFILE=neurodesk requested; "
+        "using neurodesk/neurodesk." in output
+    )
+    assert "OpenCode default model set to neurodesk/neurodesk." in output
+
+    user_config = json.loads(
+        (home_dir / ".config" / "opencode" / "opencode.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert user_config["model"] == "neurodesk/neurodesk"
+
+def test_opencode_neurodesk_profile_falls_back_to_first_listed_model(tmp_path):
+    """Without the curated alias, the profile keeps the first listed model."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    env["NEURODESK_API_KEY"] = "neurodesk-test-key"
+    env["OPENCODE_MODEL_PROFILE"] = "neurodesk"
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)],
+        "n\n",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert returncode == 0, output
+    assert (
+        "OPENCODE_MODEL_PROFILE=neurodesk requested; "
+        "using neurodesk/model-alpha." in output
+    )
+
+    user_config = json.loads(
+        (home_dir / ".config" / "opencode" / "opencode.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert user_config["model"] == "neurodesk/model-alpha"
 
 def test_opencode_neurodesk_setup_choice_does_not_claim_known_model(tmp_path):
     """Verify unauthenticated Neurodesk is shown as key setup, not a known model."""
@@ -562,6 +627,45 @@ def test_opencode_wrapper_syncs_notebook_intelligence(tmp_path):
     # nbi_setup.sh ran after key entry and saw the freshly exported key.
     assert marker.read_text(encoding="utf-8") == "neurodesk-test-key"
 
+def test_opencode_wrapper_hides_tui_sidebar_by_default(tmp_path):
+    """Verify the wrapper seeds kv.json so the TUI sidebar starts hidden."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)],
+        "neurodesk-test-key\n1\nn\n",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert returncode == 0, output
+    kv_file = home_dir / ".local" / "state" / "opencode" / "kv.json"
+    assert kv_file.exists(), "wrapper did not seed the OpenCode TUI kv store"
+    kv = json.loads(kv_file.read_text(encoding="utf-8"))
+    assert kv["sidebar"] == "hide"
+
+def test_opencode_wrapper_keeps_user_sidebar_choice(tmp_path):
+    """Verify an existing sidebar preference in kv.json is never overwritten."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+
+    kv_file = home_dir / ".local" / "state" / "opencode" / "kv.json"
+    kv_file.parent.mkdir(parents=True)
+    kv_file.write_text(
+        json.dumps({"sidebar": "auto", "theme": "tokyonight"}), encoding="utf-8"
+    )
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)],
+        "neurodesk-test-key\n1\nn\n",
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert returncode == 0, output
+    kv = json.loads(kv_file.read_text(encoding="utf-8"))
+    assert kv["sidebar"] == "auto"
+    assert kv["theme"] == "tokyonight"
+
 def test_opencode_wrapper_skips_nbi_sync_when_script_missing(tmp_path):
     """Verify a missing nbi_setup.sh is not an error (non-container installs)."""
     test_wrapper, _home_dir, env = make_opencode_litellm_wrapper(tmp_path)
@@ -715,13 +819,9 @@ def test_codex_respects_explicit_approval_and_sandbox_flags(tmp_path):
     assert "ARG:never" not in result.stdout
     assert "ARG:danger-full-access" not in result.stdout
 
-def test_claude_replaces_dangling_symlink(tmp_path):
-    """Verify the wrapper handles a dangling ~/.local/bin/claude symlink.
-
-    The dangling link must be removed and the shared default binary executed
-    directly - the wrapper must NOT copy the ~230MB binary into the home
-    directory (per-user duplication, slow on network homes).
-    """
+@pytest.mark.parametrize("existing_kind", ["regular_file", "dangling_symlink"])
+def test_claude_links_user_binary_to_image_binary(tmp_path, existing_kind):
+    """The wrapper replaces stale user binaries with the image-owned binary."""
     wrapper_path = Path("/usr/local/sbin/claude")
     if not wrapper_path.exists():
         pytest.skip("Claude wrapper not installed in this environment")
@@ -731,7 +831,15 @@ def test_claude_replaces_dangling_symlink(tmp_path):
     bin_dir.mkdir(parents=True)
 
     claude_link = bin_dir / "claude"
-    claude_link.symlink_to(home_dir / "missing" / "claude")
+    if existing_kind == "regular_file":
+        claude_link.write_text(
+            "#!/bin/sh\n"
+            "echo STALE_LOCAL_CLAUDE\n",
+            encoding="utf-8",
+        )
+        claude_link.chmod(0o755)
+    else:
+        claude_link.symlink_to(home_dir / "missing" / "claude")
 
     fake_default_claude = tmp_path / "default-claude"
     fake_default_claude.write_text(
@@ -764,13 +872,12 @@ def test_claude_replaces_dangling_symlink(tmp_path):
     )
 
     assert result.returncode == 0, f"Wrapper execution failed: {result.stdout}"
-    assert not (bin_dir / "claude").exists(), (
-        "Dangling symlink must be removed and the binary must NOT be copied "
-        "into the home directory"
+    assert claude_link.is_symlink(), (
+        "The user-local Claude path must be a symlink, not a persistent binary copy"
     )
-    assert str(fake_default_claude) in result.stdout, (
-        "Wrapper did not execute the shared default binary"
-    )
+    assert claude_link.resolve() == fake_default_claude.resolve()
+    assert "STALE_LOCAL_CLAUDE" not in result.stdout
+    assert str(claude_link) in result.stdout, "Wrapper did not execute the managed symlink"
     assert "--allow-dangerously-skip-permissions" in result.stdout
     assert "--version" in result.stdout
 

@@ -5,7 +5,7 @@
   "instructions": [
     "/opt/AGENTS.md"
   ],
-  "model": "neurodesk/gpt-oss",
+  "model": "neurodesk/neurodesk",
   "provider": {
     "neurodesk": {
       "npm": "@ai-sdk/openai-compatible",
@@ -15,8 +15,8 @@
         "apiKey": "{env:NEURODESK_API_KEY}"
       },
       "models": {
-        "gpt-oss": {
-          "name": "gpt-oss",
+        "neurodesk": {
+          "name": "neurodesk",
           "limit": {
             "context": 131000,
             "output": 8192

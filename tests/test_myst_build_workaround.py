@@ -20,8 +20,8 @@ DOCKERFILE = (
 @pytest.fixture
 def dockerfile() -> str:
     text = DOCKERFILE.read_text()
-    # Locate the complete MyST rebuild block, including its package-manager pin.
-    start = text.find("ARG MYST_PNPM_VERSION=")
+    # Locate the complete MyST rebuild block.
+    start = text.find("# Workaround for jupyterlab-rise + jupyterlab-myst")
     if start == -1:
         pytest.fail("MyST rebuild RUN not found in Dockerfile")
     # Dockerfile RUNs are backslash-continued lines; stop at the next blank line.
@@ -29,23 +29,18 @@ def dockerfile() -> str:
     return text[start:end]
 
 
-def test_myst_build_uses_pinned_pnpm_and_frozen_lockfile(dockerfile: str) -> None:
-    """MyST declares pnpm and ships a pnpm lockfile, so its dependency tree must
-    not be reconstructed by an unlocked npm install.
-    """
-    assert 'ARG MYST_PNPM_VERSION="11.17.0"' in dockerfile
-    assert (
-        'COREPACK_HOME=/tmp/myst-corepack corepack "pnpm@${MYST_PNPM_VERSION}" '
-        "install --frozen-lockfile "
-        "--store-dir /tmp/myst-pnpm-store"
-    ) in dockerfile
-    assert "npm_config_cache=/tmp/myst-npm-cache npm install" not in dockerfile
+def test_myst_build_uses_pinned_release_and_frozen_lockfile(dockerfile: str) -> None:
+    """MyST 2.6.0 ships package-lock.json, so reproduce it with npm ci."""
+    assert "jupyterlab_myst==2.6.0" in DOCKERFILE.read_text()
+    assert "npm_config_cache=/tmp/myst-npm-cache npm ci" in dockerfile
+    assert "npm install" not in dockerfile
+    assert "pnpm" not in dockerfile
     assert "npx --yes" not in dockerfile
 
 
 def test_myst_build_install_runs_before_labextension_build(dockerfile: str) -> None:
     """The frozen dependency install must precede the webpack-based build."""
-    install_marker = 'corepack "pnpm@${MYST_PNPM_VERSION}" install --frozen-lockfile'
+    install_marker = "npm_config_cache=/tmp/myst-npm-cache npm ci"
     build_marker = "jupyter labextension build --core-path=/tmp/rise/app"
     assert dockerfile.find(install_marker) < dockerfile.find(build_marker)
 
@@ -57,12 +52,10 @@ def test_myst_build_does_not_copy_transitive_tsconfigs(dockerfile: str) -> None:
 
 
 def test_myst_build_removes_temporary_package_manager_state(dockerfile: str) -> None:
-    """The temporary Corepack and pnpm state must not remain in the image."""
-    assert "/tmp/myst-corepack" in dockerfile
-    assert "/tmp/myst-pnpm-store" in dockerfile
+    """The temporary npm cache must not remain in the image."""
+    assert "/tmp/myst-npm-cache" in dockerfile
     cleanup = dockerfile.rsplit("rm -rf", maxsplit=1)[-1]
-    assert "/tmp/myst-corepack" in cleanup
-    assert "/tmp/myst-pnpm-store" in cleanup
+    assert "/tmp/myst-npm-cache" in cleanup
 
 
 def test_myst_build_copies_rebuilt_labextension(dockerfile: str) -> None:

@@ -457,7 +457,11 @@ def rewrite_js(body, prefix):
             f'{groups["current"]}()}}):location.assign({home_url})'
         )
 
-    body = _JS_HOME_TOGGLE_RE.sub(rewrite_home_toggle, body)
+    # Linear prefilter: the possessive quantifiers stop per-position
+    # backtracking, but an unanchored scan over a long identifier-character
+    # run would still cost O(n^2). Bodies without the literal cannot match.
+    if ".toggleHome({home:" in body:
+        body = _JS_HOME_TOGGLE_RE.sub(rewrite_home_toggle, body)
     body = body.replace(
         OPENCODE_WEB_ORIGIN_EXPRESSION,
         OPENCODE_PREFIXED_WEB_ORIGIN_EXPRESSION,
