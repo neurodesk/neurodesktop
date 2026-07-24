@@ -6,6 +6,15 @@ import pytest
 ACTION = Path(__file__).resolve().parents[1] / ".github/actions/report-job-failure/action.yml"
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/issue-investigator.md"
 LOCK = Path(__file__).resolve().parents[1] / ".github/workflows/issue-investigator.lock.yml"
+REVIEW_WORKFLOW = (
+    Path(__file__).resolve().parents[1]
+    / ".github/workflows/issue-investigator-review.md"
+)
+REVIEW_LOCK = (
+    Path(__file__).resolve().parents[1]
+    / ".github/workflows/issue-investigator-review.lock.yml"
+)
+CODERABBIT_CONFIG = Path(__file__).resolve().parents[1] / ".coderabbit.yaml"
 
 
 def _read_repo_file(path: Path) -> str:
@@ -77,3 +86,44 @@ def test_issue_investigator_has_bounded_evidence_collection_guardrails():
     assert "Use a maximum of 2 live network probes" in workflow
     assert "Do not retry a failing read or probe more than once" in workflow
     assert "call a safe-output tool immediately" in workflow
+
+
+def test_coderabbit_auto_reviews_draft_agentic_pull_requests():
+    config = _read_repo_file(CODERABBIT_CONFIG)
+
+    assert "auto_review:" in config
+    assert "drafts: true" in config
+
+
+def test_issue_investigator_review_loop_is_scoped_to_coderabbit_agentic_prs():
+    workflow = _read_repo_file(REVIEW_WORKFLOW)
+    lock = _read_repo_file(REVIEW_LOCK)
+
+    assert "issue_comment:" in workflow
+    assert "types: [created, edited]" in workflow
+    assert 'bots: ["coderabbitai[bot]"]' in workflow
+    assert "github.event.issue.state == 'open'" in workflow
+    assert "github.event.issue.user.login == 'github-actions[bot]'" in workflow
+    assert "agentic-workflow" in workflow
+    assert "[issue-investigator] " in workflow
+    assert "summarize by coderabbit.ai" in workflow
+    assert "push-to-pull-request-branch:" in workflow
+    assert "target: triggering" in workflow
+    assert "required-labels: [agentic-workflow]" in workflow
+    assert 'required-title-prefix: "[issue-investigator] "' in workflow
+
+    assert "issue_comment:" in lock
+    assert "coderabbitai[bot]" in lock
+    assert "push_to_pull_request_branch" in lock
+
+
+def test_issue_investigator_review_loop_batches_and_rechecks_findings():
+    workflow = _read_repo_file(REVIEW_WORKFLOW)
+
+    assert "complete current CodeRabbit review" in workflow
+    assert "Do not treat the triggering comment as the complete review" in workflow
+    assert "Verify every finding against the current PR head" in workflow
+    assert "one coherent commit" in workflow
+    assert "Run the smallest relevant tests" in workflow
+    assert "@coderabbitai review" in workflow
+    assert "no active actionable findings remain" in workflow

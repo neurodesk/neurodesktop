@@ -20,6 +20,25 @@ The startup sequence follows this order:
 
 ## Core Components
 
+### Agentic issue investigation
+
+The source workflow in
+[`issue-investigator.md`](../.github/workflows/issue-investigator.md) investigates
+new issues and may open a draft pull request labeled `agentic-workflow`. The
+generated `issue-investigator.lock.yml` is the executable GitHub Actions
+workflow and must be regenerated with `gh aw compile` whenever the Markdown
+source changes.
+
+CodeRabbit reviews those pull requests while they are still drafts. Its summary
+comment updates trigger the companion
+[`issue-investigator-review.md`](../.github/workflows/issue-investigator-review.md)
+workflow. That workflow reads the complete current review, validates all active
+findings against the latest PR head, batches valid fixes into one tested commit,
+pushes it to the existing PR branch, and explicitly requests the next
+incremental CodeRabbit review. The loop stops without changing or merging the PR
+when no actionable findings remain; marking the draft ready and merging remain
+human decisions.
+
 ### CVMFS
 
 CVMFS, the CernVM File System, distributes neuroimaging software containers

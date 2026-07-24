@@ -9,3 +9,9 @@ paths:
     ignore:
       - 'unknown permission scope "copilot-requests"'
       - 'unexpected key "queue" for "concurrency" section'
+  .github/workflows/issue-investigator-review.lock.yml:
+    ignore:
+      # Both findings are emitted from gh-aw generated code, not the source
+      # workflow. Keep the exceptions scoped to the generated lock file.
+      - 'shellcheck reported issue in this script: SC2016'
+      - 'unexpected key "queue" for "concurrency" section'

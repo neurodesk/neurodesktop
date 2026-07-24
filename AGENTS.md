@@ -14,3 +14,6 @@
 - When changing OpenCode or its pinned version, run
   `pytest tests/test_opencode_web.py` in the built image; its real-bundle
   contract protects Jupyter prefix routing and the native model picker.
+- When changing an agentic workflow under `.github/workflows/*.md`, regenerate
+  its `.lock.yml` with `gh aw compile`, then run
+  `pytest tests/test_report_job_failure_action.py`.
