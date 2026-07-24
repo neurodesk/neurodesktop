@@ -304,6 +304,38 @@ def test_create_opencode_work_dir_makes_parent_a_git_project(tmp_path):
     ).stdout.strip() == str(project_root)
 
 
+def test_force_directory_query_overrides_selected_directory():
+    """A UI-selected directory is rewritten to the seeded work dir."""
+    forced = ocw.force_directory_query(
+        "directory=%2Fhome%2Fjovyan%2Fdemo", "/home/jovyan/opencode-work/D"
+    )
+    assert dict(urllib.parse.parse_qsl(forced)) == {
+        "directory": "/home/jovyan/opencode-work/D"
+    }
+
+
+def test_force_directory_query_preserves_other_params_and_order():
+    """Only ``directory`` changes; sibling parameters survive untouched."""
+    forced = ocw.force_directory_query(
+        "a=1&directory=%2Fother&z=9", "/seed"
+    )
+    assert urllib.parse.parse_qsl(forced) == [
+        ("a", "1"), ("directory", "/seed"), ("z", "9")
+    ]
+
+
+def test_force_directory_query_leaves_requests_without_directory():
+    """Requests that omit ``directory`` fall back to the backend cwd."""
+    assert ocw.force_directory_query("", "/seed") == ""
+    assert ocw.force_directory_query("query=hi", "/seed") == "query=hi"
+
+
+def test_force_directory_query_noop_without_a_work_dir():
+    """Before the work dir exists the query is passed through verbatim."""
+    assert ocw.force_directory_query("directory=%2Fx", "") == "directory=%2Fx"
+    assert ocw.force_directory_query("directory=%2Fx", None) == "directory=%2Fx"
+
+
 # --- Key handling ---------------------------------------------------------------
 
 
@@ -489,6 +521,7 @@ import http.server
 import json
 import os
 import sys
+import urllib.parse
 
 args = sys.argv[1:]
 port = int(args[args.index("--port") + 1])
@@ -553,7 +586,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        if self.path == "/global/event":
+        parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path == "/global/event":
             payload = b'data: {"type":"server.connected"}\\n\\n'
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -564,7 +598,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(payload + b"\\r\\n0\\r\\n\\r\\n")
             self.wfile.flush()
             return
-        content_type, body = PAGES.get(self.path, ("text/plain", "fallback"))
+        if parsed.path == "/neurodesk-echo-directory":
+            query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+            payload = json.dumps(
+                {"directory": query.get("directory", [""])[0]}
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        content_type, body = PAGES.get(parsed.path, ("text/plain", "fallback"))
         payload = body.encode()
         self.send_response(200)
         self.send_header("Content-Type", content_type)
@@ -820,6 +865,27 @@ def _wait_for_proxied_root(ctx, extra_headers=None, timeout=20):
             return body
         time.sleep(0.3)
     raise AssertionError("proxied opencode backend never became ready")
+
+
+def test_proxy_pins_session_directory_to_seeded_work_dir(launcher):
+    """A UI-selected directory is rewritten to the AGENTS.md-seeded work dir."""
+    status, _headers = _complete_key_setup(launcher)
+    assert status == 303
+    _wait_for_proxied_root(launcher)
+
+    backend_env = json.loads(
+        (launcher["state"] / "env.json").read_text(encoding="utf-8")
+    )
+    work_dir = backend_env["cwd"]
+    assert Path(work_dir).parent == launcher["home"] / "opencode-work"
+
+    status, _headers, body = _request(
+        launcher["port"],
+        "/neurodesk-echo-directory?directory=/home/jovyan/demo",
+        headers=launcher["auth"],
+    )
+    assert status == 200
+    assert json.loads(body)["directory"] == work_dir
 
 
 def test_requests_without_credentials_are_rejected(launcher):

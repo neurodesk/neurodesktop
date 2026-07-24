@@ -113,6 +113,13 @@ terminal wrapper's existing behavior of copying `/opt/AGENTS.md` into a new
 working directory without overwriting an existing file. Same-second launches
 receive a numeric suffix.
 
+Because OpenCode's web API takes the session directory as a `?directory=` query
+parameter derived from the SPA's base64 URL segment, the proxy pins that
+parameter to the seeded launch directory on every forwarded request. Otherwise a
+directory the user opens or picks in the web UI would run the session outside the
+`AGENTS.md`-seeded project. Requests without the parameter already default to the
+backend cwd, which is the same seeded directory.
+
 Security setup in the same script:
 
 - Generate a persistent per-user password into

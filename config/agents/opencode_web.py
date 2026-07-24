@@ -22,7 +22,10 @@ behind Neurodesktop's proxy setup:
    served from `/` and breaks behind the /opencode/ proxy prefix.
 5. Creates a unique ~/opencode-work/DATE_TIME project for each backend launch
    and runs the terminal wrapper there, which seeds the project with the
-   standard /opt/AGENTS.md instructions.
+   standard /opt/AGENTS.md instructions. Every proxied request's
+   ``?directory=`` parameter is then pinned to that seeded directory, so
+   sessions the user opens or picks in the web UI still run inside the
+   AGENTS.md-seeded project instead of an arbitrary directory.
 
 Environment overrides (mainly for tests):
   OPENCODE_WEB_WRAPPER_BIN   backend command (default /usr/local/sbin/opencode)
@@ -544,6 +547,34 @@ def create_opencode_work_dir(home_dir, timestamp=None):
     raise OSError(f"could not create a unique OpenCode work directory in {parent}")
 
 
+def force_directory_query(query, directory):
+    """Pin a backend request's ``directory`` query parameter to ``directory``.
+
+    OpenCode's web API takes the session/workspace directory as a
+    ``?directory=`` query parameter on every request; the browser derives it
+    from the base64 directory segment in the SPA URL, so a user who opens or
+    picks any other directory would run the session there. Rewriting the
+    parameter to the launcher's seeded ~/opencode-work/DATE_TIME directory
+    keeps every session, file, pty, and search operation inside the one
+    directory the terminal wrapper seeded with /opt/AGENTS.md, no matter which
+    directory the UI selects.
+
+    Requests that carry no ``directory`` parameter are returned unchanged: the
+    backend then falls back to its process cwd, which is that same seeded
+    directory. Passing an empty ``directory`` leaves the query untouched.
+    """
+    if not directory or "directory=" not in query:
+        return query
+    pairs = urllib.parse.parse_qsl(query, keep_blank_values=True)
+    if not any(key == "directory" for key, _ in pairs):
+        return query
+    forced = [
+        (key, directory if key == "directory" else value)
+        for key, value in pairs
+    ]
+    return urllib.parse.urlencode(forced)
+
+
 class OpencodeBackend:
     """Owns the `opencode web` child process and its readiness state."""
 
@@ -1039,7 +1070,8 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
         # Ask for identity encoding so body rewriting sees plain text.
         headers["Accept-Encoding"] = "identity"
 
-        target = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+        forced_query = force_directory_query(parsed.query, backend.work_dir)
+        target = parsed.path + (f"?{forced_query}" if forced_query else "")
         try:
             conn = http.client.HTTPConnection(
                 "127.0.0.1", backend.port, timeout=300
