@@ -370,8 +370,9 @@ RUN apt-install-retry \
 # in the larger Debian TeX Live package set.
 RUN HOME=/root /bin/bash -lc 'set -euo pipefail; \
     mkdir -p /root/.local/bin; \
-    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
-    https://yihui.org/tinytex/install-bin-unix.sh | sh; \
+    retry curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
+    https://raw.githubusercontent.com/rstudio/tinytex/master/tools/install-bin-unix.sh \
+    -o /tmp/install-bin-unix.sh && bash /tmp/install-bin-unix.sh; \
     mv /root/.TinyTeX /opt/TinyTeX; \
     tlmgr_path="$(echo /opt/TinyTeX/bin/*/tlmgr)"; \
     "${tlmgr_path}" option sys_bin /usr/local/bin >/dev/null; \
