@@ -187,6 +187,14 @@ Server Proxy entry that runs
   workspace. The wrapper copies `/opt/AGENTS.md` into the new launch directory
   as `AGENTS.md`, and a numeric suffix prevents collisions between launches
   occurring within the same second.
+- pins every proxied request's `?directory=` query parameter to that seeded
+  launch directory. OpenCode's web API takes the session/workspace directory as
+  a query parameter that the SPA derives from the base64 directory segment in
+  its URL, so a session the user opens or picks in the web UI would otherwise
+  run in an arbitrary directory that never received `AGENTS.md`. Rewriting the
+  parameter keeps every session, file, pty, and search operation inside the one
+  directory the wrapper seeded. Requests that omit `directory` already fall back
+  to the backend process cwd, which is that same seeded directory.
 - launches the web backend with OpenCode's ripgrep file search enabled instead
   of its native FFF indexer. OpenCode 1.18.x cannot initialize FFF when the
   workspace is the user's home directory and otherwise installs an empty
