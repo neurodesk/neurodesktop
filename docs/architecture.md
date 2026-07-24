@@ -142,6 +142,16 @@ its menu entries yet.
 - SSH: optional SSH server proxy
 - Ollama: optional local LLM service when `START_LOCAL_LLMS=1`
 
+### Claude Code
+
+Claude Code is installed into `/opt/jovyan_defaults/.local/bin/claude` when the
+image is built and is launched through `/usr/local/sbin/claude`. On each launch,
+the wrapper replaces `~/.local/bin/claude` with a symlink to that image-owned
+binary. Persistent homes therefore pick up the Claude version in a newly
+deployed image without retaining a stale per-user binary or duplicating the
+large executable. Claude's in-process auto-updater remains disabled because
+version updates are managed by the container image.
+
 ### OpenCode Web Interface
 
 The JupyterLab launcher exposes an "OpenCode AI" tile backed by a Jupyter
@@ -167,6 +177,8 @@ Server Proxy entry that runs
   the Notebook Intelligence sync stay single-sourced. Web launches default
   `OPENCODE_MODEL_PROFILE` to the Neurodesk provider independently of a model
   selected in terminal OpenCode; an explicit environment override still wins.
+  The `neurodesk` profile prefers llm.neurodesk.org's curated `neurodesk`
+  alias model and falls back to the provider's first listed model.
 - initializes `~/opencode-work/` as the dedicated Git project, creates a unique
   `YYYYMMDD_HHMMSS/` directory below it for every web backend launch, and runs
   the terminal wrapper from that directory. The Git root is required because
@@ -225,6 +237,13 @@ and rotated on use. Session sharing is disabled by default in
 [`config/agents/opencode_config.json`](../config/agents/opencode_config.json)
 (`"share": "disabled"`) so research conversations are not uploaded to the
 OpenCode share service unless a user opts in.
+
+The `/usr/local/sbin/opencode` wrapper also seeds
+`~/.local/state/opencode/kv.json` with `"sidebar": "hide"` so the TUI's
+right-hand session sidebar (context usage, LSP status) starts hidden and the
+full width goes to the conversation. OpenCode persists the `ctrl+x b` toggle
+under the same key, so the wrapper only writes it when absent and a user who
+re-enables the sidebar keeps that choice.
 
 ## Directory Structure
 

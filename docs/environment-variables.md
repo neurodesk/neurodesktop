@@ -32,7 +32,9 @@
   automatically for the separate RDP and VNC desktop entries
 - `NEURODESKTOP_VERSION`: version tag set by CI
 - `OPENCODE_MODEL_PROFILE`: set to `ollama`, `neurodesk`, `jetstream`, or
-  `provider/model` to skip the interactive OpenCode model picker
+  `provider/model` to skip the interactive OpenCode model picker. The
+  `neurodesk` profile prefers llm.neurodesk.org's curated `neurodesk` alias
+  model when it is available and otherwise uses the first listed model
 - `OPENCODE_STARTUP_VERBOSE`: set to `1` to show detailed OpenCode provider
   probe output during startup
 - `OPENCODE_WEB_STARTUP_TIMEOUT`: seconds `opencode_web.py` (the "OpenCode AI"

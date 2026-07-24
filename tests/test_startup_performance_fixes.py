@@ -6,7 +6,7 @@ Covers:
 - ensure_rdp_backend.sh: re-runs reuse the previously published RDP port
   instead of probing past their own xrdp and timing out.
 - restore_home_defaults.sh: does not copy the ~230MB claude binary into the
-  home directory (the /usr/local/sbin/claude wrapper restores it lazily).
+  home directory (the /usr/local/sbin/claude wrapper links to the image copy).
 - before_notebook.sh: the OLLAMA_HOST guard repoints an unreachable endpoint
   at 127.0.0.1 quickly instead of letting notebook_intelligence block Jupyter
   startup on it.
@@ -180,7 +180,7 @@ def test_restore_home_defaults_skips_claude_binary(tmp_path):
 
     assert not (home / ".local/bin/claude").exists(), (
         "claude binary must not be copied at boot; /usr/local/sbin/claude "
-        "restores it lazily on first use"
+        "links to the image-owned binary on first use"
     )
     # Other defaults must still be restored.
     assert (home / ".vnc/xstartup").is_file(), "other defaults were not restored"
