@@ -505,7 +505,7 @@ RUN retry conda install -c conda-forge nb_conda_kernels \
     && rm -rf /home/${NB_USER}/.cache
 
 # Install Python packages and JupyterLab extensions
-ARG BUST_CACHE_PIP=2
+ARG BUST_CACHE_PIP=3
 RUN /opt/conda/bin/pip install \
     datalad \
     nipype \
@@ -869,6 +869,9 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
 # Rebuilding MyST with --core-path pointed at RISE's app directory embeds
 # @jupyterlab/markdownviewer into MyST's own bundle, so it no longer asks the
 # host for it. See https://github.com/jupyterlab-contrib/rise/issues/46
+# Workaround for Node 24 file-open strictness: ensure safe-regex-test can resolve
+# its @ljharb/tsconfig sibling during the webpack build so the ts-loader does not
+# fail with ENOENT.
 RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
     && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
     && MYST_PACKAGE_DIR="$(/opt/conda/bin/python -c 'import jupyterlab_myst, os; print(os.path.dirname(jupyterlab_myst.__file__))')" \
@@ -878,6 +881,8 @@ RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {
     && npm_config_cache=/tmp/myst-npm-cache npm install \
     && npm run build:css \
     && npm run build:lib \
+    && mkdir -p /tmp/myst/node_modules/safe-regex-test/node_modules/@ljharb/tsconfig \
+    && cp /tmp/myst/node_modules/@ljharb/tsconfig/tsconfig.json /tmp/myst/node_modules/safe-regex-test/node_modules/@ljharb/tsconfig/tsconfig.json 2>/dev/null || true \
     && /opt/conda/bin/jupyter labextension build --core-path=/tmp/rise/app . \
     && MYST_LABEXT_DIR="${MYST_PACKAGE_DIR}/labextension" \
     && APP_MYST_DIR=/opt/conda/share/jupyter/labextensions/jupyterlab-myst \
