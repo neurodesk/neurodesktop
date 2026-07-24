@@ -460,8 +460,12 @@ RUN npm_config_cache=/tmp/npm-root-cache npm install -g @openai/codex \
     && rm -rf /home/${NB_USER}/.cache \
     && rm -rf /home/${NB_USER}/.local
 
-# Install OpenCode CLI (open source AI coding agent)
-RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash' \
+# Install OpenCode CLI (open source AI coding agent). OPENCODE_VERSION pins
+# the release so the web UI, the opencode_web.py proxy, and the default
+# config are tested as a set; override at build time to bump it, or set it
+# to an empty value to install the latest release.
+ARG OPENCODE_VERSION="1.18.4"
+RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash -s -- ${OPENCODE_VERSION:+--version "${OPENCODE_VERSION}"}' \
     && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 
@@ -528,7 +532,8 @@ RUN /opt/conda/bin/pip install \
     notebook_intelligence==5.2.1 \
     jupyterlab_rise \
     jupyterlab-niivue==0.2.7 \
-    jupyterlab_myst \
+    # Pinned: 2.7.0 requires @jupyter/ydoc 3.x, but JupyterLab 4.6 uses 4.x.
+    jupyterlab_myst==2.6.0 \
     jupyter-sshd-proxy \
     papermill \
     ipycanvas \
@@ -747,6 +752,11 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     && install -m 0755 -o root -g root /tmp/agents/claude /usr/local/sbin/claude \
     && install -m 0755 -o root -g root /tmp/agents/opencode /usr/local/sbin/opencode \
     && install -m 0755 -o root -g root /tmp/agents/codex /usr/local/sbin/codex \
+    # OpenCode web interface: launcher-tile proxy (key setup, auth, prefix
+    # rewriting) plus the desktop shortcut that opens it prefix-free.
+    && install -m 0755 -o root -g users /tmp/agents/opencode_web.py /opt/neurodesktop/opencode_web.py \
+    && install -m 0755 -o root -g users /tmp/agents/opencode_web_desktop.sh /opt/neurodesktop/opencode_web_desktop.sh \
+    && install -m 0644 /tmp/agents/opencode-web.desktop /usr/share/applications/opencode-web.desktop \
     # Anchored Notebook Intelligence patch (see patch_nbi.py): make the
     # settings panel fetch fresh capabilities on open instead of auto-saving
     # its stale client-side cache over the OpenCode model sync. The script
@@ -804,6 +814,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     install -D -m 0644 /tmp/jupyter/neurodesk_brain_logo.svg /opt/neurodesk_brain_logo.svg \
     && install -D -m 0644 /tmp/jupyter/neurodesk_brain_icon.svg /opt/neurodesk_brain_icon.svg \
     && install -D -m 0644 /tmp/jupyter/vscode_logo.svg /opt/vscode_logo.svg \
+    && install -D -m 0644 /tmp/jupyter/opencode_logo.svg /opt/opencode_logo.svg \
     && install -d -m 0755 /opt/neurodesk/icons \
     && cp -a /tmp/jupyter/webapp_icons/. /opt/neurodesk/icons/ \
     && install -D -m 0644 /tmp/jupyter/webapp_links.json /opt/config/jupyter/webapp_links.json \
@@ -868,13 +879,14 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
 # Rebuilding MyST with --core-path pointed at RISE's app directory embeds
 # @jupyterlab/markdownviewer into MyST's own bundle, so it no longer asks the
 # host for it. See https://github.com/jupyterlab-contrib/rise/issues/46
+# MyST 2.6.0 ships a package-lock, so use npm ci to reproduce its tested tree.
 RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
     && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
     && MYST_PACKAGE_DIR="$(/opt/conda/bin/python -c 'import jupyterlab_myst, os; print(os.path.dirname(jupyterlab_myst.__file__))')" \
     && retry git clone --depth 1 --branch "v${MYST_VERSION}" https://github.com/jupyter-book/jupyterlab-myst.git /tmp/myst \
     && retry git clone --depth 1 --branch "v${RISE_VERSION}" https://github.com/jupyterlab-contrib/rise.git /tmp/rise \
     && cd /tmp/myst \
-    && npm_config_cache=/tmp/myst-npm-cache npm install \
+    && npm_config_cache=/tmp/myst-npm-cache npm ci \
     && npm run build:css \
     && npm run build:lib \
     && /opt/conda/bin/jupyter labextension build --core-path=/tmp/rise/app . \

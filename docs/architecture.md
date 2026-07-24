@@ -59,9 +59,13 @@ in [`config/jupyter/webapp_links.json`](../config/jupyter/webapp_links.json) and
 applied by [`scripts/generate_jupyter_config.py`](../scripts/generate_jupyter_config.py)
 when generating Jupyter Server Proxy entries. The same merged webapp config is
 written to `/opt/neurodesktop/webapps.json` so runtime wrapper settings such as
-path rewrites use the local overrides too. Container-backed webapps launch
-through [`config/jupyter/webapp_launcher.sh`](../config/jupyter/webapp_launcher.sh)
-and use Unix sockets such as `/tmp/neurodesk_webapp_{name}.sock` to avoid port
+path rewrites use the local overrides too. The wrapper streams fixed-length
+request bodies to the backend in bounded chunks, so large uploads are not
+duplicated in wrapper memory; Jupyter Server and the hosting proxy still apply
+their own request-size and multipart limits before the wrapper receives a
+request. Container-backed webapps launch through
+[`config/jupyter/webapp_launcher.sh`](../config/jupyter/webapp_launcher.sh) and
+use Unix sockets such as `/tmp/neurodesk_webapp_{name}.sock` to avoid port
 conflicts. Entries with `direct_url` open the hosted application directly from
 the Neurodesk launcher. Launcher tile icons for those entries are checked-in
 SVG or PNG files in
@@ -137,6 +141,109 @@ its menu entries yet.
   selected launcher entry
 - SSH: optional SSH server proxy
 - Ollama: optional local LLM service when `START_LOCAL_LLMS=1`
+
+### Claude Code
+
+Claude Code is installed into `/opt/jovyan_defaults/.local/bin/claude` when the
+image is built and is launched through `/usr/local/sbin/claude`. On each launch,
+the wrapper replaces `~/.local/bin/claude` with a symlink to that image-owned
+binary. Persistent homes therefore pick up the Claude version in a newly
+deployed image without retaining a stale per-user binary or duplicating the
+large executable. Claude's in-process auto-updater remains disabled because
+version updates are managed by the container image.
+
+### OpenCode Web Interface
+
+The JupyterLab launcher exposes an "OpenCode AI" tile backed by a Jupyter
+Server Proxy entry that runs
+[`config/agents/opencode_web.py`](../config/agents/opencode_web.py)
+(installed to `/opt/neurodesktop/opencode_web.py`). The launcher script:
+
+- requires a persistent per-user credential on every request. The credential
+  lives in `~/.neurodesk/secrets/opencode_server_password` (created 0600 and
+  atomically by a shared helper, whichever of `jupyter_notebook_config.py`
+  or the script runs first); Jupyter Server Proxy injects it via
+  `request_headers_override`, so the browser never sees a login prompt.
+  Other local users on a shared host can reach the 127.0.0.1 port but
+  cannot authenticate without the credential.
+- walks first-time users through llm.neurodesk.org API key setup in the
+  browser: the pasted key is validated against the LiteLLM `/models`
+  endpoint and persisted to `~/.bashrc` in the exact format the terminal
+  wrapper writes and `nbi_setup.sh` reads, so the terminal agents and
+  Notebook Intelligence pick it up too. A "continue without a key" path
+  falls back to the other providers.
+- starts `opencode web` through the `/usr/local/sbin/opencode` wrapper
+  (non-interactive path), so provider probing, `opencode.json` refresh, and
+  the Notebook Intelligence sync stay single-sourced. Web launches default
+  `OPENCODE_MODEL_PROFILE` to the Neurodesk provider independently of a model
+  selected in terminal OpenCode; an explicit environment override still wins.
+  The `neurodesk` profile prefers llm.neurodesk.org's curated `neurodesk`
+  alias model and falls back to the provider's first listed model.
+- initializes `~/opencode-work/` as the dedicated Git project, creates a unique
+  `YYYYMMDD_HHMMSS/` directory below it for every web backend launch, and runs
+  the terminal wrapper from that directory. The Git root is required because
+  OpenCode represents non-Git directories as its global project with worktree
+  `/`; its Home tab then opens that root worktree instead of the Neurodesktop
+  workspace. The wrapper copies `/opt/AGENTS.md` into the new launch directory
+  as `AGENTS.md`, and a numeric suffix prevents collisions between launches
+  occurring within the same second.
+- launches the web backend with OpenCode's ripgrep file search enabled instead
+  of its native FFF indexer. OpenCode 1.18.x cannot initialize FFF when the
+  workspace is the user's home directory and otherwise installs an empty
+  search service, leaving the Add Project directory list blank.
+- keeps OpenCode's native model picker available in the prompt toolbar. The
+  automatically selected working model is only the initial default; users can
+  choose any model currently advertised by Neurodesk, local Ollama, or
+  JetStream and can change it again per prompt.
+- reverse-proxies to the backend with HTTP Basic auth injected
+  (`OPENCODE_SERVER_PASSWORD`) and streams SSE responses. For prefixed
+  Jupyter/JupyterHub launches it inserts a same-origin bootstrap before the
+  OpenCode module bundle; the bootstrap sets OpenCode's native default-server
+  URL to the complete `X-Forwarded-Prefix`. The proxy also rewrites the pinned
+  web bundle's canonical local-server URL to that bootstrap value, so the
+  selected default and OpenCode's server registry use the same key; its
+  permission provider rejects a selected server that is absent from that
+  registry. The pinned bundle rewrite also marks its fetch-based SSE requests
+  with `Accept: text/event-stream`, which makes Jupyter Server Proxy select
+  progressive delivery, while the Python wrapper re-chunks upstream event
+  feeds so Jupyter can flush each event instead of buffering indefinitely. The
+  same bootstrap value is supplied as the Solid router's base path. Without
+  that routing invariant, the SPA treats the first proxy segment
+  (`opencode`) as a base64-encoded project directory and creates sessions in
+  an invalid path. Together these changes keep provider, model, session,
+  event, terminal, browser-history, and future API routes below `/opencode/`.
+  The proxied bundle also makes the new-layout Home control perform a full
+  navigation to the prefixed root. OpenCode's in-memory tab toggle works at a
+  site root but does not reliably leave a server-scoped session when the app is
+  mounted below Jupyter's `/opencode` prefix.
+  Static root-absolute asset URLs and relative lazy-loaded chunk URLs in
+  HTML/CSS/JS are rewritten against the same validated prefix. The relative
+  chunk rewrite matters on the Home route because `/opencode` has no trailing
+  slash, so an unmodified `assets/*` chunk would otherwise resolve to Jupyter's
+  root `/assets/*`. Generated SDK routes such as `/api/session` remain unchanged
+  because the SDK resolves them against the already-prefixed server URL;
+  rewriting those literals would apply the proxy prefix twice.
+  This is necessary because the upstream UI otherwise uses the site origin and
+  escapes the Jupyter proxy.
+
+Inside the VNC/RDP desktop there is no URL prefix, so the "OpenCode Web"
+menu entry
+([`config/agents/opencode-web.desktop`](../config/agents/opencode-web.desktop))
+runs [`config/agents/opencode_web_desktop.sh`](../config/agents/opencode_web_desktop.sh),
+which starts the same launcher on a per-user dynamic port (reusing it only
+after verifying the recorded process is owned by the current user) and opens
+Firefox with a single-use `?auth=` login token that is swapped for a cookie
+and rotated on use. Session sharing is disabled by default in
+[`config/agents/opencode_config.json`](../config/agents/opencode_config.json)
+(`"share": "disabled"`) so research conversations are not uploaded to the
+OpenCode share service unless a user opts in.
+
+The `/usr/local/sbin/opencode` wrapper also seeds
+`~/.local/state/opencode/kv.json` with `"sidebar": "hide"` so the TUI's
+right-hand session sidebar (context usage, LSP status) starts hidden and the
+full width goes to the conversation. OpenCode persists the `ctrl+x b` toggle
+under the same key, so the wrapper only writes it when absent and a user who
+re-enables the sidebar keeps that choice.
 
 ## Directory Structure
 

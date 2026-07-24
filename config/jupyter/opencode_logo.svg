@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="OpenCode launcher icon">
+  <rect width="128" height="128" rx="20" fill="#1d2030"/>
+  <path d="M34 44 L54 64 L34 84" fill="none" stroke="#7c8cf8" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="62" y1="84" x2="94" y2="84" stroke="#e6e8ef" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="94" cy="44" r="6" fill="#7c8cf8"/>
+  <circle cx="76" cy="44" r="6" fill="#4f46e5"/>
+</svg>

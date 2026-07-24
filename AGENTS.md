@@ -11,3 +11,6 @@
   startup flow, build-time behavior, and directory layout.
 - Use [`docs/environment-variables.md`](docs/environment-variables.md) for
   supported runtime and build environment variables.
+- When changing OpenCode or its pinned version, run
+  `pytest tests/test_opencode_web.py` in the built image; its real-bundle
+  contract protects Jupyter prefix routing and the native model picker.

@@ -31,6 +31,25 @@ except OSError:
     pass
 _guac_basic = base64.b64encode(f'{_guac_user}:{_guac_pass}'.encode()).decode()
 
+# Per-user OpenCode web credential. opencode_web.py requires it on every
+# request, so other local users can reach the 127.0.0.1 port but cannot
+# authenticate; Jupyter Server Proxy injects it below via
+# request_headers_override. The credential is created atomically by the
+# shared helper in opencode_web.py (the same code the launcher runs), so
+# concurrent starters always agree on one value. If no credential can be
+# obtained, the launcher entry is disabled (fail closed).
+_opencode_secret_file = os.path.join(
+    home_dir, '.neurodesk', 'secrets', 'opencode_server_password')
+_opencode_pass = ''
+try:
+    from opencode_web import load_or_create_password as _opencode_load_password
+    _opencode_pass = _opencode_load_password(_opencode_secret_file)
+except Exception as _opencode_secret_error:
+    print(f'[WARN] OpenCode web credential unavailable; disabling the '
+          f'OpenCode launcher entry: {_opencode_secret_error}')
+_opencode_basic = base64.b64encode(
+    f'opencode:{_opencode_pass}'.encode()).decode()
+
 
 def _is_apptainer_runtime():
   return (
@@ -86,6 +105,26 @@ c.ServerProxy.servers = {
   # Preserve the historical /neurodesktop route for old links without adding a
   # third launcher tile. New launcher entries choose the backend explicitly.
   'neurodesktop': _neurodesktop_server('rdp', 'Neurodesktop', 'neurodesktop', launcher_enabled=False),
+  'opencode': {
+    # opencode_web.py handles llm.neurodesk.org key setup in the browser,
+    # starts `opencode web` through the terminal wrapper (provider probing,
+    # opencode.json refresh, and NBI sync stay single-sourced), and rewrites
+    # the upstream web UI's root-absolute URLs against X-Forwarded-Prefix.
+    'command': ['python3', '/opt/neurodesktop/opencode_web.py',
+                '--port', '{port}'],
+    'timeout': 60,
+    'new_browser_tab': True,
+    'request_headers_override': {
+        'Authorization': f'Basic {_opencode_basic}',
+    },
+    'launcher_entry': {
+      'enabled': bool(_opencode_pass),
+      'path_info': 'opencode',
+      'title': 'OpenCode AI',
+      'icon_path': '/opt/opencode_logo.svg',
+      'category': 'Neurodesk'
+    }
+  },
   'vscode': {
     'command': [
       '/usr/local/bin/code-server',

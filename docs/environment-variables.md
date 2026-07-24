@@ -32,9 +32,28 @@
   automatically for the separate RDP and VNC desktop entries
 - `NEURODESKTOP_VERSION`: version tag set by CI
 - `OPENCODE_MODEL_PROFILE`: set to `ollama`, `neurodesk`, `jetstream`, or
-  `provider/model` to skip the interactive OpenCode model picker
+  `provider/model` to skip the interactive OpenCode model picker. The
+  `neurodesk` profile prefers llm.neurodesk.org's curated `neurodesk` alias
+  model when it is available and otherwise uses the first listed model
 - `OPENCODE_STARTUP_VERBOSE`: set to `1` to show detailed OpenCode provider
   probe output during startup
+- `OPENCODE_WEB_STARTUP_TIMEOUT`: seconds `opencode_web.py` (the "OpenCode AI"
+  launcher tile) waits for the `opencode web` backend to become ready;
+  defaults to `180`
+- `OPENCODE_DISABLE_FFF`: forced to `1` for the OpenCode Web child process so
+  its Add Project dialog can search below the `/home/jovyan` startup directory.
+  The terminal OpenCode workflow is unaffected
+- `OPENCODE_WEB_DESKTOP_STATE`: state file where the desktop "OpenCode Web"
+  shortcut records its launcher's PID and dynamically allocated port;
+  defaults to `~/.neurodesk/run/opencode_web_desktop.state`
+- `OPENCODE_WEB_WRAPPER_BIN`, `OPENCODE_WEB_SECRET_FILE`,
+  `OPENCODE_WEB_LOGIN_TOKEN_FILE`, `NEURODESK_LLM_BASE_URL`: test overrides
+  for `opencode_web.py` (backend command, credential file, single-use login
+  token file, and key-validation endpoint)
+- `OPENCODE_VERSION` (build argument): the OpenCode release installed into
+  the image; defaults to the validated pin in the Dockerfile (currently
+  `1.18.4`). Override to bump the pin, or set it to an empty value to
+  install the latest release
 - `NEURODESK_API_KEY`: API key for `https://llm.neurodesk.org`. Shared by
   OpenCode and by the Notebook Intelligence JupyterLab plugin. OpenCode
   persists it to `~/.bashrc` on first setup, and `nbi_setup.sh` injects it

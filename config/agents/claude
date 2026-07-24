@@ -62,30 +62,38 @@ else
     echo "Brain Researcher MCP server: inactive (run 'opencode' to set BR_MCP_TOKEN)"
 fi
 
-# Start Claude Code from the standard user-local path when present (e.g. a
-# self-updated or user-installed copy); otherwise run the shared image copy
-# directly. Do NOT copy the ~230MB binary into the home directory: that
-# duplicates it for every user and made first use slow on network-mounted
-# homes (and notebook_intelligence invokes this wrapper on every JupyterLab
-# boot, so the copy was effectively unavoidable).
+# Keep the standard user-local path for tools that expect it, but make it a
+# symlink to the image-owned Claude binary. Replacing an old persistent copy on
+# every image upgrade ensures the wrapper cannot keep running a stale version,
+# and avoids duplicating the ~230MB binary on network-mounted homes.
 CLAUDE_BIN="${HOME}/.local/bin/claude"
 DEFAULT_CLAUDE_BIN="/opt/jovyan_defaults/.local/bin/claude"
 
-# Clean up a dangling symlink left behind by an interrupted install/update.
-if [ -L "${CLAUDE_BIN}" ] && [ ! -e "${CLAUDE_BIN}" ]; then
-    rm -f "${CLAUDE_BIN}" 2>/dev/null || true
+if [ ! -x "${DEFAULT_CLAUDE_BIN}" ]; then
+    echo "Claude binary not found at ${DEFAULT_CLAUDE_BIN}." >&2
+    exit 127
 fi
 
-if [ ! -x "${CLAUDE_BIN}" ]; then
-    if [ -x "${DEFAULT_CLAUDE_BIN}" ]; then
-        CLAUDE_BIN="${DEFAULT_CLAUDE_BIN}"
-        # The shared copy lives on a read-only path; self-updating it can
-        # only fail (and a successful update belongs in ~/.local anyway).
-        export DISABLE_AUTOUPDATER=1
-    else
-        echo "Claude binary not found at ${CLAUDE_BIN} or ${DEFAULT_CLAUDE_BIN}." >&2
-        exit 127
+CLAUDE_BIN_DIR=$(dirname "${CLAUDE_BIN}")
+CLAUDE_LINK_TMP="${CLAUDE_BIN}.tmp.$$"
+
+if mkdir -p "${CLAUDE_BIN_DIR}"; then
+    if [ ! -L "${CLAUDE_BIN}" ] || [ "$(readlink "${CLAUDE_BIN}")" != "${DEFAULT_CLAUDE_BIN}" ]; then
+        rm -f "${CLAUDE_LINK_TMP}"
+        if ln -s "${DEFAULT_CLAUDE_BIN}" "${CLAUDE_LINK_TMP}" \
+            && mv -Tf "${CLAUDE_LINK_TMP}" "${CLAUDE_BIN}"; then
+            :
+        else
+            rm -f "${CLAUDE_LINK_TMP}"
+            echo "Warning: could not link ${CLAUDE_BIN} to the image-owned Claude binary; using it directly." >&2
+        fi
     fi
+else
+    echo "Warning: could not create ${CLAUDE_BIN_DIR}; using the image-owned Claude binary directly." >&2
+fi
+
+if [ ! -L "${CLAUDE_BIN}" ] || [ "$(readlink "${CLAUDE_BIN}")" != "${DEFAULT_CLAUDE_BIN}" ]; then
+    CLAUDE_BIN="${DEFAULT_CLAUDE_BIN}"
 fi
 
 extra_args=()

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=OpenCode Web
+GenericName=AI Coding Agent
+Comment=OpenCode AI coding agent web interface (Neurodesk)
+Exec=/opt/neurodesktop/opencode_web_desktop.sh
+Icon=/opt/opencode_logo.svg
+Type=Application
+Categories=Development;
+Terminal=false
