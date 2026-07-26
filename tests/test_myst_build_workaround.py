@@ -26,23 +26,19 @@ def dockerfile() -> str:
     return text[start:end]
 
 
-def test_myst_build_has_safe_regex_test_tsconfig_fallback(dockerfile: str) -> None:
-    """Node 24 can fail to resolve @ljharb/tsconfig from safe-regex-test's nested
-    dependency tree. The build must create the sibling directory and copy the
-    tsconfig before invoking `jupyter labextension build`.
+def test_myst_build_installs_ljharb_tsconfig_dev_dependency(dockerfile: str) -> None:
+    """Node 24 / npm hoisting leaves @ljharb/tsconfig unavailable to packages that
+    extend it (e.g. safe-regex-test, for-each). The rebuild must install it as a
+    direct devDependency before invoking `jupyter labextension build`.
     """
-    assert "mkdir -p /tmp/myst/node_modules/safe-regex-test/node_modules/@ljharb/tsconfig" in dockerfile
-    assert (
-        "cp /tmp/myst/node_modules/@ljharb/tsconfig/tsconfig.json "
-        "/tmp/myst/node_modules/safe-regex-test/node_modules/@ljharb/tsconfig/tsconfig.json"
-    ) in dockerfile
+    assert "npm install --save-dev @ljharb/tsconfig@0.3.2" in dockerfile
 
 
-def test_myst_build_fallback_runs_before_labextension_build(dockerfile: str) -> None:
-    """The tsconfig fallback must precede the webpack-based labextension build."""
-    fallback_marker = "safe-regex-test/node_modules/@ljharb/tsconfig/tsconfig.json"
+def test_myst_build_labextension_build_runs_after_tsconfig_install(dockerfile: str) -> None:
+    """The @ljharb/tsconfig install must precede the webpack-based labextension build."""
+    tsconfig_marker = "npm install --save-dev @ljharb/tsconfig@0.3.2"
     build_marker = "jupyter labextension build --core-path=/tmp/rise/app"
-    assert dockerfile.find(fallback_marker) < dockerfile.find(build_marker)
+    assert dockerfile.find(tsconfig_marker) < dockerfile.find(build_marker)
 
 
 def test_myst_build_copies_rebuilt_labextension(dockerfile: str) -> None:
@@ -51,4 +47,4 @@ def test_myst_build_copies_rebuilt_labextension(dockerfile: str) -> None:
     """
     assert "cp -a /tmp/myst/jupyterlab_myst/labextension" in dockerfile
     assert "APP_MYST_DIR=/opt/conda/share/jupyter/labextensions/jupyterlab-myst" in dockerfile
-    assert "cp -a \"${MYST_LABEXT_DIR}\" \"${APP_MYST_DIR}\"" in dockerfile
+    assert 'cp -a "${MYST_LABEXT_DIR}" "${APP_MYST_DIR}"' in dockerfile

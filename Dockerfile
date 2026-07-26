@@ -869,9 +869,10 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
 # Rebuilding MyST with --core-path pointed at RISE's app directory embeds
 # @jupyterlab/markdownviewer into MyST's own bundle, so it no longer asks the
 # host for it. See https://github.com/jupyterlab-contrib/rise/issues/46
-# Workaround for Node 24 file-open strictness: ensure safe-regex-test can resolve
-# its @ljharb/tsconfig sibling during the webpack build so the ts-loader does not
-# fail with ENOENT.
+# Workaround for Node 24 / npm hoisting: packages in MyST's dependency tree
+# (e.g. safe-regex-test, for-each) extend @ljharb/tsconfig, but npm only
+# hoists it as a transitive devDependency. Install it as a direct devDependency
+# of the rebuild workspace so ts-loader can resolve the shared tsconfig.
 RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
     && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
     && MYST_PACKAGE_DIR="$(/opt/conda/bin/python -c 'import jupyterlab_myst, os; print(os.path.dirname(jupyterlab_myst.__file__))')" \
@@ -879,10 +880,9 @@ RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {
     && retry git clone --depth 1 --branch "v${RISE_VERSION}" https://github.com/jupyterlab-contrib/rise.git /tmp/rise \
     && cd /tmp/myst \
     && npm_config_cache=/tmp/myst-npm-cache npm install \
+    && npm_config_cache=/tmp/myst-npm-cache npm install --save-dev @ljharb/tsconfig@0.3.2 \
     && npm run build:css \
     && npm run build:lib \
-    && mkdir -p /tmp/myst/node_modules/safe-regex-test/node_modules/@ljharb/tsconfig \
-    && cp /tmp/myst/node_modules/@ljharb/tsconfig/tsconfig.json /tmp/myst/node_modules/safe-regex-test/node_modules/@ljharb/tsconfig/tsconfig.json 2>/dev/null || true \
     && /opt/conda/bin/jupyter labextension build --core-path=/tmp/rise/app . \
     && MYST_LABEXT_DIR="${MYST_PACKAGE_DIR}/labextension" \
     && APP_MYST_DIR=/opt/conda/share/jupyter/labextensions/jupyterlab-myst \
