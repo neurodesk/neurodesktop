@@ -882,7 +882,16 @@ RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {
     && npm run build:css \
     && npm run build:lib \
     && mkdir -p /tmp/myst/node_modules/safe-regex-test/node_modules/@ljharb/tsconfig \
-    && cp /tmp/myst/node_modules/@ljharb/tsconfig/tsconfig.json /tmp/myst/node_modules/safe-regex-test/node_modules/@ljharb/tsconfig/tsconfig.json 2>/dev/null || true \
+    && ( \
+         TS_CONFIG_SRC="/tmp/myst/node_modules/@ljharb/tsconfig/tsconfig.json"; \
+         if [ ! -f "$TS_CONFIG_SRC" ]; then \
+           npm pack --pack-destination /tmp/myst-tsconfig-pack @ljharb/tsconfig@0.3.2 >/dev/null 2>&1 \
+           && mkdir -p /tmp/myst/node_modules/@ljharb/tsconfig \
+           && tar -xzf /tmp/myst-tsconfig-pack/ljharb-tsconfig-*.tgz -C /tmp/myst/node_modules/@ljharb/tsconfig --strip-components=1 \
+           && rm -rf /tmp/myst-tsconfig-pack; \
+         fi; \
+         cp /tmp/myst/node_modules/@ljharb/tsconfig/tsconfig.json /tmp/myst/node_modules/safe-regex-test/node_modules/@ljharb/tsconfig/tsconfig.json 2>/dev/null || true \
+       ) \
     && /opt/conda/bin/jupyter labextension build --core-path=/tmp/rise/app . \
     && MYST_LABEXT_DIR="${MYST_PACKAGE_DIR}/labextension" \
     && APP_MYST_DIR=/opt/conda/share/jupyter/labextensions/jupyterlab-myst \

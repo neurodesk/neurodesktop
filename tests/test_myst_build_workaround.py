@@ -29,13 +29,15 @@ def dockerfile() -> str:
 def test_myst_build_has_safe_regex_test_tsconfig_fallback(dockerfile: str) -> None:
     """Node 24 can fail to resolve @ljharb/tsconfig from safe-regex-test's nested
     dependency tree. The build must create the sibling directory and copy the
-    tsconfig before invoking `jupyter labextension build`.
+    tsconfig before invoking `jupyter labextension build`. The fallback also
+    re-hydrates @ljharb/tsconfig from the registry when npm install omits it.
     """
     assert "mkdir -p /tmp/myst/node_modules/safe-regex-test/node_modules/@ljharb/tsconfig" in dockerfile
     assert (
         "cp /tmp/myst/node_modules/@ljharb/tsconfig/tsconfig.json "
         "/tmp/myst/node_modules/safe-regex-test/node_modules/@ljharb/tsconfig/tsconfig.json"
     ) in dockerfile
+    assert "npm pack --pack-destination /tmp/myst-tsconfig-pack @ljharb/tsconfig@" in dockerfile
 
 
 def test_myst_build_fallback_runs_before_labextension_build(dockerfile: str) -> None:
