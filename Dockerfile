@@ -869,20 +869,19 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
 # Rebuilding MyST with --core-path pointed at RISE's app directory embeds
 # @jupyterlab/markdownviewer into MyST's own bundle, so it no longer asks the
 # host for it. See https://github.com/jupyterlab-contrib/rise/issues/46
-# Workaround for Node 24 file-open strictness: ensure safe-regex-test can resolve
-# its @ljharb/tsconfig sibling during the webpack build so the ts-loader does not
-# fail with ENOENT.
+# jupyterlab-myst declares pnpm and ships only a pnpm lockfile. Using npm here
+# ignores that lockfile and can omit development packages referenced by shipped
+# dependency tsconfigs, which makes the Node 24 webpack build fail with ENOENT.
+ARG MYST_PNPM_VERSION="11.17.0"
 RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
     && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
     && MYST_PACKAGE_DIR="$(/opt/conda/bin/python -c 'import jupyterlab_myst, os; print(os.path.dirname(jupyterlab_myst.__file__))')" \
     && retry git clone --depth 1 --branch "v${MYST_VERSION}" https://github.com/jupyter-book/jupyterlab-myst.git /tmp/myst \
     && retry git clone --depth 1 --branch "v${RISE_VERSION}" https://github.com/jupyterlab-contrib/rise.git /tmp/rise \
     && cd /tmp/myst \
-    && npm_config_cache=/tmp/myst-npm-cache npm install \
+    && COREPACK_HOME=/tmp/myst-corepack corepack "pnpm@${MYST_PNPM_VERSION}" install --frozen-lockfile --store-dir /tmp/myst-pnpm-store \
     && npm run build:css \
     && npm run build:lib \
-    && mkdir -p /tmp/myst/node_modules/safe-regex-test/node_modules/@ljharb/tsconfig \
-    && cp /tmp/myst/node_modules/@ljharb/tsconfig/tsconfig.json /tmp/myst/node_modules/safe-regex-test/node_modules/@ljharb/tsconfig/tsconfig.json 2>/dev/null || true \
     && /opt/conda/bin/jupyter labextension build --core-path=/tmp/rise/app . \
     && MYST_LABEXT_DIR="${MYST_PACKAGE_DIR}/labextension" \
     && APP_MYST_DIR=/opt/conda/share/jupyter/labextensions/jupyterlab-myst \
@@ -890,7 +889,7 @@ RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {
     && cp -a /tmp/myst/jupyterlab_myst/labextension "${MYST_LABEXT_DIR}" \
     && rm -rf "${APP_MYST_DIR}" \
     && cp -a "${MYST_LABEXT_DIR}" "${APP_MYST_DIR}" \
-    && rm -rf /tmp/myst /tmp/rise /tmp/myst-npm-cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
+    && rm -rf /tmp/myst /tmp/rise /tmp/myst-corepack /tmp/myst-pnpm-store /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
 
 # Patch both nested tar copies after all npm-based build steps. Updating
 # code-server's top-level dependency graph does not reach either scanner path.

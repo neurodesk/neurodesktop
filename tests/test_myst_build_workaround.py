@@ -11,14 +11,17 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DOCKERFILE = REPO_ROOT / "Dockerfile"
+PACKAGED_DOCKERFILE = Path(__file__).with_name("Dockerfile")
+DOCKERFILE = (
+    PACKAGED_DOCKERFILE if PACKAGED_DOCKERFILE.exists() else REPO_ROOT / "Dockerfile"
+)
 
 
 @pytest.fixture
 def dockerfile() -> str:
     text = DOCKERFILE.read_text()
-    # Locate the MyST rebuild RUN
-    start = text.find("RUN MYST_VERSION=")
+    # Locate the complete MyST rebuild block, including its package-manager pin.
+    start = text.find("ARG MYST_PNPM_VERSION=")
     if start == -1:
         pytest.fail("MyST rebuild RUN not found in Dockerfile")
     # Dockerfile RUNs are backslash-continued lines; stop at the next blank line.
@@ -26,23 +29,40 @@ def dockerfile() -> str:
     return text[start:end]
 
 
-def test_myst_build_has_safe_regex_test_tsconfig_fallback(dockerfile: str) -> None:
-    """Node 24 can fail to resolve @ljharb/tsconfig from safe-regex-test's nested
-    dependency tree. The build must create the sibling directory and copy the
-    tsconfig before invoking `jupyter labextension build`.
+def test_myst_build_uses_pinned_pnpm_and_frozen_lockfile(dockerfile: str) -> None:
+    """MyST declares pnpm and ships a pnpm lockfile, so its dependency tree must
+    not be reconstructed by an unlocked npm install.
     """
-    assert "mkdir -p /tmp/myst/node_modules/safe-regex-test/node_modules/@ljharb/tsconfig" in dockerfile
+    assert 'ARG MYST_PNPM_VERSION="11.17.0"' in dockerfile
     assert (
-        "cp /tmp/myst/node_modules/@ljharb/tsconfig/tsconfig.json "
-        "/tmp/myst/node_modules/safe-regex-test/node_modules/@ljharb/tsconfig/tsconfig.json"
+        'COREPACK_HOME=/tmp/myst-corepack corepack "pnpm@${MYST_PNPM_VERSION}" '
+        "install --frozen-lockfile "
+        "--store-dir /tmp/myst-pnpm-store"
     ) in dockerfile
+    assert "npm_config_cache=/tmp/myst-npm-cache npm install" not in dockerfile
+    assert "npx --yes" not in dockerfile
 
 
-def test_myst_build_fallback_runs_before_labextension_build(dockerfile: str) -> None:
-    """The tsconfig fallback must precede the webpack-based labextension build."""
-    fallback_marker = "safe-regex-test/node_modules/@ljharb/tsconfig/tsconfig.json"
+def test_myst_build_install_runs_before_labextension_build(dockerfile: str) -> None:
+    """The frozen dependency install must precede the webpack-based build."""
+    install_marker = 'corepack "pnpm@${MYST_PNPM_VERSION}" install --frozen-lockfile'
     build_marker = "jupyter labextension build --core-path=/tmp/rise/app"
-    assert dockerfile.find(fallback_marker) < dockerfile.find(build_marker)
+    assert dockerfile.find(install_marker) < dockerfile.find(build_marker)
+
+
+def test_myst_build_does_not_copy_transitive_tsconfigs(dockerfile: str) -> None:
+    """The build must not return to package-specific tsconfig workarounds."""
+    assert "safe-regex-test/node_modules/@ljharb/tsconfig" not in dockerfile
+    assert "khroma/node_modules/tsex" not in dockerfile
+
+
+def test_myst_build_removes_temporary_package_manager_state(dockerfile: str) -> None:
+    """The temporary Corepack and pnpm state must not remain in the image."""
+    assert "/tmp/myst-corepack" in dockerfile
+    assert "/tmp/myst-pnpm-store" in dockerfile
+    cleanup = dockerfile.rsplit("rm -rf", maxsplit=1)[-1]
+    assert "/tmp/myst-corepack" in cleanup
+    assert "/tmp/myst-pnpm-store" in cleanup
 
 
 def test_myst_build_copies_rebuilt_labextension(dockerfile: str) -> None:
