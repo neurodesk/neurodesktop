@@ -188,28 +188,34 @@ def test_preview_content_type_keeps_compressed_volumes_compressed():
     assert ocw.preview_content_type("plot.svg") == "image/svg+xml"
 
 
-def test_resolve_preview_file_finds_files_inside_the_session_project(tmp_path):
-    """An exact relative path resolves; so does a unique basename."""
+def _read_preview(work_dir, rel_path, **kwargs):
+    """Open and read a preview request through the production confinement API."""
+    parts = ocw.safe_preview_path_parts(rel_path)
+    handle = ocw.open_preview_file(work_dir, parts, **kwargs)
+    if handle is None:
+        return None
+    with handle:
+        return handle.read()
+
+
+def test_open_preview_file_finds_files_inside_the_session_project(tmp_path):
+    """An exact relative path opens; so does a unique basename."""
     work_dir = tmp_path / "20260727_101500"
     (work_dir / "derivatives" / "bet").mkdir(parents=True)
     volume = work_dir / "derivatives" / "bet" / "sub-01_brain.nii.gz"
     volume.write_bytes(b"volume")
     (work_dir / "qc.png").write_bytes(b"image")
 
-    assert ocw.resolve_preview_file(
+    assert _read_preview(
         work_dir, "derivatives/bet/sub-01_brain.nii.gz"
-    ) == str(volume)
+    ) == b"volume"
     # The changed-files list often yields only a suffix of the real path.
-    assert ocw.resolve_preview_file(work_dir, "sub-01_brain.nii.gz") == str(
-        volume
-    )
-    assert ocw.resolve_preview_file(work_dir, "bet/sub-01_brain.nii.gz") == str(
-        volume
-    )
-    assert ocw.resolve_preview_file(work_dir, "qc.png") == str(work_dir / "qc.png")
+    assert _read_preview(work_dir, "sub-01_brain.nii.gz") == b"volume"
+    assert _read_preview(work_dir, "bet/sub-01_brain.nii.gz") == b"volume"
+    assert _read_preview(work_dir, "qc.png") == b"image"
 
 
-def test_resolve_preview_file_refuses_to_leave_the_session_project(tmp_path):
+def test_open_preview_file_refuses_to_leave_the_session_project(tmp_path):
     """Traversal, absolute paths, and symlinked escapes must all fail."""
     work_dir = tmp_path / "20260727_101500"
     work_dir.mkdir()
@@ -217,37 +223,68 @@ def test_resolve_preview_file_refuses_to_leave_the_session_project(tmp_path):
     outside.write_bytes(b"secret")
     (work_dir / "link.png").symlink_to(outside)
 
-    assert ocw.resolve_preview_file(work_dir, "../secret.png") == ""
-    assert ocw.resolve_preview_file(work_dir, str(outside)) == ""
-    assert ocw.resolve_preview_file(work_dir, "link.png") == ""
+    assert _read_preview(work_dir, "../secret.png") is None
+    assert _read_preview(work_dir, str(outside)) is None
+    assert _read_preview(work_dir, "link.png") is None
     # Unsupported types are rejected before the filesystem is touched.
     (work_dir / "notes.txt").write_text("x", encoding="utf-8")
-    assert ocw.resolve_preview_file(work_dir, "notes.txt") == ""
-    assert ocw.resolve_preview_file("", "qc.png") == ""
+    assert _read_preview(work_dir, "notes.txt") is None
+    assert _read_preview("", "qc.png") is None
 
 
-def test_resolve_preview_file_refuses_ambiguous_and_bounded_searches(tmp_path):
+def test_open_preview_file_rejects_noncanonical_request_paths(tmp_path):
+    """Only the preview hook's strict relative-path alphabet reaches open()."""
+    work_dir = tmp_path / "20260727_101500"
+    work_dir.mkdir()
+    (work_dir / "qc.png").write_bytes(b"image")
+
+    for rel_path in (
+        "/qc.png", "./qc.png", "nested//qc.png", "nested/../qc.png",
+        "nested\\qc.png", "qc image.png", "qc%2fimage.png", "qc\x00.png",
+    ):
+        assert ocw.safe_preview_path_parts(rel_path) == ()
+        assert _read_preview(work_dir, rel_path) is None
+
+
+def test_open_preview_file_pins_validated_descriptor_across_path_swap(tmp_path):
+    """Replacing a validated name cannot redirect an already-open preview."""
+    work_dir = tmp_path / "20260727_101500"
+    work_dir.mkdir()
+    preview = work_dir / "qc.png"
+    preview.write_bytes(b"session image")
+    outside = tmp_path / "secret.png"
+    outside.write_bytes(b"private")
+
+    handle = ocw.open_preview_file(
+        work_dir, ocw.safe_preview_path_parts("qc.png")
+    )
+    assert handle is not None
+    preview.rename(work_dir / "original.png")
+    preview.symlink_to(outside)
+    with handle:
+        assert handle.read() == b"session image"
+
+
+def test_open_preview_file_refuses_ambiguous_and_bounded_searches(tmp_path):
     """Two candidates named alike must not be guessed between."""
     work_dir = tmp_path / "20260727_101500"
     (work_dir / "run-1").mkdir(parents=True)
     (work_dir / "run-2").mkdir(parents=True)
     (work_dir / "run-1" / "qc.png").write_bytes(b"a")
     (work_dir / "run-2" / "qc.png").write_bytes(b"b")
-    assert ocw.resolve_preview_file(work_dir, "qc.png") == ""
+    assert _read_preview(work_dir, "qc.png") is None
     # The distinguishing prefix resolves it again.
-    assert ocw.resolve_preview_file(work_dir, "run-2/qc.png") == str(
-        work_dir / "run-2" / "qc.png"
-    )
+    assert _read_preview(work_dir, "run-2/qc.png") == b"b"
     # The walk is bounded so a huge project cannot stall the proxy.
-    assert ocw.find_preview_file(str(work_dir), "qc.png", max_entries=1) == ""
+    assert _read_preview(work_dir, "qc.png", max_entries=1) is None
 
 
-def test_find_preview_file_matches_on_a_path_boundary(tmp_path):
+def test_open_preview_file_matches_on_a_path_boundary(tmp_path):
     """A name suffix must not match a longer, unrelated file name."""
     work_dir = tmp_path / "20260727_101500"
     work_dir.mkdir()
     (work_dir / "extra_qc.png").write_bytes(b"a")
-    assert ocw.find_preview_file(str(work_dir), "qc.png") == ""
+    assert _read_preview(work_dir, "qc.png") is None
 
 
 def test_niivue_bundle_version_tracks_content(tmp_path, monkeypatch):

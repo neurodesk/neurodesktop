@@ -61,6 +61,7 @@ import secrets
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -181,9 +182,10 @@ PREVIEW_VOLUME_SUFFIXES = (
     ".mhd",
 )
 DEFAULT_PREVIEW_MAX_BYTES = 512 * 1024 * 1024
-# Bounds for the basename fallback search (see find_preview_file).
+# Bounds for the basename fallback search (see open_preview_file).
 PREVIEW_SEARCH_MAX_ENTRIES = 20000
 PREVIEW_SEARCH_SKIP_DIRS = {".git", ".opencode", "node_modules", "__pycache__"}
+_SAFE_PREVIEW_COMPONENT_RE = re.compile(r"^[A-Za-z0-9._@+~-]+$")
 
 
 def sanitize_header_value(value):
@@ -570,69 +572,163 @@ def preview_content_type(name):
     return PREVIEW_IMAGE_CONTENT_TYPES.get(extension, "application/octet-stream")
 
 
-def _is_inside(root, candidate):
-    """Return whether a resolved path is ``root`` itself or below it."""
-    return candidate == root or candidate.startswith(root + os.sep)
+def safe_preview_path_parts(rel_path):
+    """Return allow-listed path components for a preview request, or ``()``.
 
-
-def find_preview_file(root, rel_path, max_entries=PREVIEW_SEARCH_MAX_ENTRIES):
-    """Find the unique file under ``root`` whose path ends with ``rel_path``.
-
-    The changed-files list splits a path across DOM nodes, so the injected
-    previewer often recovers only a suffix of it (frequently just the
-    basename). Searching keeps previews working without trusting the value:
-    the walk starts at the session project, never follows symlinks, matches
-    only on a path-separator boundary, and refuses an ambiguous result.
+    OpenCode's preview hook only emits this portable filename alphabet. The
+    server enforces the same contract before touching the filesystem and
+    rejects absolute paths, empty/dot components, backslashes, and controls.
     """
-    target = "/" + rel_path.strip("/")
-    match = ""
-    seen = 0
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        dirnames[:] = [
-            name for name in dirnames if name not in PREVIEW_SEARCH_SKIP_DIRS
-        ]
-        # Directories count too, so a wide, mostly empty tree is bounded as
-        # tightly as a deep one.
-        seen += len(dirnames)
-        if seen > max_entries:
-            return ""
-        for filename in filenames:
-            seen += 1
-            if seen > max_entries:
-                return ""
-            full = os.path.join(dirpath, filename)
-            if not ("/" + os.path.relpath(full, root)).endswith(target):
-                continue
-            if match:
-                return ""  # ambiguous: refuse to guess which file was meant
-            match = full
-    if not match:
-        return ""
-    resolved = os.path.realpath(match)
-    if _is_inside(root, resolved) and os.path.isfile(resolved):
-        return resolved
+    if not isinstance(rel_path, str) or not rel_path or "\x00" in rel_path:
+        return ()
+    if rel_path.startswith("/") or "\\" in rel_path:
+        return ()
+    parts = tuple(rel_path.split("/"))
+    if any(
+        part in ("", ".", "..") or not _SAFE_PREVIEW_COMPONENT_RE.fullmatch(part)
+        for part in parts
+    ):
+        return ()
+    return parts if preview_kind(parts[-1]) else ()
+
+
+def _preview_open_flags(directory=False):
+    """Return flags for a non-following, non-blocking descriptor open."""
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
+    if directory:
+        flags |= getattr(os, "O_DIRECTORY", 0)
+    return flags
+
+
+def _listed_entry(dir_fd, requested):
+    """Return the filesystem-owned spelling of ``requested`` in ``dir_fd``."""
+    try:
+        for entry in os.listdir(dir_fd):
+            if entry == requested:
+                return entry
+    except OSError:
+        pass
     return ""
 
 
-def resolve_preview_file(work_dir, rel_path):
-    """Resolve a UI-supplied path to a previewable file inside ``work_dir``.
+def _regular_file_handle(dir_fd, entry):
+    """Open one listed entry without following symlinks, returning a handle."""
+    try:
+        file_fd = os.open(entry, _preview_open_flags(), dir_fd=dir_fd)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(file_fd).st_mode):
+            os.close(file_fd)
+            return None
+        return os.fdopen(file_fd, "rb")
+    except Exception:
+        os.close(file_fd)
+        raise
 
-    Returns "" for anything that is not a supported preview type, escapes the
-    session project (``..`` segments, absolute paths, symlinks out), or does
-    not resolve to exactly one existing file.
+
+def _open_exact_preview_file(root_fd, parts):
+    """Open ``parts`` relative to ``root_fd`` without following any symlink."""
+    current_fd = os.dup(root_fd)
+    try:
+        for requested in parts[:-1]:
+            entry = _listed_entry(current_fd, requested)
+            if not entry:
+                return None
+            try:
+                next_fd = os.open(
+                    entry, _preview_open_flags(directory=True), dir_fd=current_fd
+                )
+            except OSError:
+                return None
+            os.close(current_fd)
+            current_fd = next_fd
+        entry = _listed_entry(current_fd, parts[-1])
+        return _regular_file_handle(current_fd, entry) if entry else None
+    finally:
+        os.close(current_fd)
+
+
+def _find_preview_file(root_fd, parts, max_entries):
+    """Open the unique regular file below ``root_fd`` ending in ``parts``."""
+    match = None
+    seen = 0
+    walker = None
+    try:
+        walker = os.fwalk(
+            ".", topdown=True, follow_symlinks=False, dir_fd=root_fd
+        )
+        for dirpath, dirnames, filenames, dir_fd in walker:
+            dirnames[:] = [
+                name for name in dirnames
+                if name not in PREVIEW_SEARCH_SKIP_DIRS
+            ]
+            # Directories count too, so a wide, mostly empty tree is bounded as
+            # tightly as a deep one.
+            seen += len(dirnames)
+            if seen > max_entries:
+                break
+            parent_parts = tuple(
+                part for part in dirpath.split(os.sep) if part not in ("", ".")
+            )
+            for filename in filenames:
+                seen += 1
+                if seen > max_entries:
+                    break
+                candidate_parts = parent_parts + (filename,)
+                if len(candidate_parts) < len(parts) or (
+                    candidate_parts[-len(parts):] != parts
+                ):
+                    continue
+                candidate = _regular_file_handle(dir_fd, filename)
+                if candidate is None:
+                    continue
+                if match is not None:
+                    candidate.close()
+                    match.close()
+                    return None  # ambiguous: refuse to guess
+                match = candidate
+            if seen > max_entries:
+                break
+    except OSError:
+        if match is not None:
+            match.close()
+        return None
+    finally:
+        if walker is not None:
+            walker.close()
+    if seen > max_entries and match is not None:
+        match.close()
+        return None
+    return match
+
+
+def open_preview_file(work_dir, parts, max_entries=PREVIEW_SEARCH_MAX_ENTRIES):
+    """Open one confined preview file and return its pinned binary handle.
+
+    ``parts`` must come from :func:`safe_preview_path_parts`. The session root
+    is opened once, every descendant is selected from a directory listing and
+    opened relative to its parent descriptor with ``O_NOFOLLOW``, and the
+    returned regular-file descriptor is the object later sized and streamed.
+    This removes both path injection and validation/open race windows.
     """
-    if not work_dir or not rel_path or "\x00" in rel_path:
-        return ""
-    rel_path = rel_path.replace("\\", "/").strip("/")
-    if not rel_path or not preview_kind(rel_path):
-        return ""
+    if not work_dir or not parts or tuple(parts) != parts:
+        return None
     root = os.path.realpath(os.fspath(work_dir))
-    if not os.path.isdir(root):
-        return ""
-    candidate = os.path.realpath(os.path.join(root, rel_path))
-    if _is_inside(root, candidate) and os.path.isfile(candidate):
-        return candidate
-    return find_preview_file(root, rel_path)
+    try:
+        root_fd = os.open(root, _preview_open_flags(directory=True))
+    except OSError:
+        return None
+    try:
+        exact = _open_exact_preview_file(root_fd, parts)
+        if exact is not None:
+            return exact
+        return _find_preview_file(root_fd, parts, max_entries)
+    finally:
+        os.close(root_fd)
 
 
 # The previewer never inserts nodes into OpenCode's own DOM: it listens for
@@ -1633,33 +1729,37 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
 
     # -- file previews --
 
-    def send_file(self, path, content_type, cache_control, size, etag=""):
-        """Stream a local file as the response body."""
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(size))
-        self.send_header("Cache-Control", cache_control)
-        if etag:
-            self.send_header("ETag", f'"{etag}"')
-        # Previewed bytes are user data: never let a browser sniff them into
-        # something executable, and never let them frame the desktop.
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Disposition", "inline")
-        self.end_headers()
-        if self.command == "HEAD":
-            return
+    def send_open_file(self, handle, content_type, cache_control, size, etag=""):
+        """Stream an already-open regular file and close it afterwards."""
         try:
-            with open(path, "rb") as handle:
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(size))
+            self.send_header("Cache-Control", cache_control)
+            if etag:
+                self.send_header("ETag", f'"{etag}"')
+            # Previewed bytes are user data: never let a browser sniff them
+            # into something executable, and never let them frame the desktop.
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Disposition", "inline")
+            self.end_headers()
+            if self.command != "HEAD":
                 shutil.copyfileobj(handle, self.wfile, STREAM_CHUNK_SIZE)
         except (BrokenPipeError, ConnectionResetError):
             pass
+        finally:
+            handle.close()
 
     def send_niivue_bundle(self):
         """Serve the NiiVue viewer vendored into the image at build time."""
         path = niivue_bundle_path()
+        handle = None
         try:
-            size = os.path.getsize(path)
+            handle = open(path, "rb")
+            size = os.fstat(handle.fileno()).st_size
         except OSError:
+            if handle is not None:
+                handle.close()
             self.send_page(
                 404,
                 "<h1>404</h1><p>The NiiVue viewer bundle is not installed in "
@@ -1668,8 +1768,8 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
             return
         # Cached hard, but only ever requested through the content-versioned
         # URL the previewer builds, so a bundle upgrade is picked up at once.
-        self.send_file(
-            path,
+        self.send_open_file(
+            handle,
             "text/javascript; charset=utf-8",
             "public, max-age=31536000, immutable",
             size,
@@ -1679,9 +1779,10 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
     def send_preview_file(self, parsed, query):
         """Serve one previewable file from the requesting session's project."""
         backend = type(self).backend
-        rel_path = urllib.parse.unquote(
-            parsed.path[len(FILE_PREVIEW_PATH):].lstrip("/")
-        )
+        encoded_path = parsed.path[len(FILE_PREVIEW_PATH):]
+        rel_path = urllib.parse.unquote(encoded_path[1:]) if (
+            encoded_path.startswith("/")
+        ) else ""
         if not preview_kind(rel_path):
             self.send_page(
                 415,
@@ -1690,11 +1791,8 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
             )
             return
 
-        work_dir = backend.preview_work_dir(
-            query.get("session", [""])[0], query.get("dir", [""])[0]
-        ) if backend else ""
-        resolved = resolve_preview_file(work_dir, rel_path)
-        if not resolved:
+        parts = safe_preview_path_parts(rel_path)
+        if not parts:
             self.send_page(
                 404,
                 "<h1>404</h1><p>No single file matching that name exists in "
@@ -1702,9 +1800,31 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
             )
             return
 
-        size = os.path.getsize(resolved)
+        work_dir = backend.preview_work_dir(
+            query.get("session", [""])[0], query.get("dir", [""])[0]
+        ) if backend else ""
+        handle = open_preview_file(work_dir, parts)
+        if handle is None:
+            self.send_page(
+                404,
+                "<h1>404</h1><p>No single file matching that name exists in "
+                "this session's project.</p>",
+            )
+            return
+
+        try:
+            size = os.fstat(handle.fileno()).st_size
+        except OSError:
+            handle.close()
+            self.send_page(
+                404,
+                "<h1>404</h1><p>No single file matching that name exists in "
+                "this session's project.</p>",
+            )
+            return
         limit = preview_size_limit()
         if size > limit:
+            handle.close()
             self.send_page(
                 413,
                 f"<h1>413</h1><p>This file is {size} bytes; the preview limit "
@@ -1713,8 +1833,8 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
             return
         # Agents rewrite their outputs in place, so a preview must always show
         # the current bytes.
-        self.send_file(
-            resolved, preview_content_type(resolved), "no-store", size
+        self.send_open_file(
+            handle, preview_content_type(parts[-1]), "no-store", size
         )
 
     # -- request routing --
