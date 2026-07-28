@@ -20,6 +20,24 @@ The startup sequence follows this order:
 
 ## Core Components
 
+### Daily agentic maintenance
+
+Seven independently scattered daily workflows inspect test redundancy, missing
+coverage, available updates, duplicate abstractions, dead code, documentation
+drift, and recurring test flakes. They share the bounded pull-request contract
+in
+[`maintenance-base.md`](../.github/workflows/shared/maintenance-base.md): each
+category allows one open draft PR, one evidence-backed change per run, and no PR
+when the candidate cannot be validated.
+
+All maintenance PRs use the `[maintenance] ` title prefix and
+`agentic-workflow` label. CodeRabbit reviews them as drafts, then
+[`maintenance-review.md`](../.github/workflows/maintenance-review.md) validates
+and batches actionable feedback, pushes once to the existing branch, and asks
+CodeRabbit for another incremental review. See
+[`agentic-maintenance.md`](agentic-maintenance.md) for the workflow catalog,
+guardrails, and operating contract.
+
 ### CVMFS
 
 CVMFS, the CernVM File System, distributes neuroimaging software containers

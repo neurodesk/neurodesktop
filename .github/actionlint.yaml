@@ -9,3 +9,9 @@ paths:
     ignore:
       - 'unknown permission scope "copilot-requests"'
       - 'unexpected key "queue" for "concurrency" section'
+  .github/workflows/maintenance-*.lock.yml:
+    ignore:
+      # gh-aw v0.80.9 emits both constructs in generated safe-output plumbing.
+      # Keep the exceptions scoped to the generated maintenance lock files.
+      - 'shellcheck reported issue in this script: SC2016'
+      - 'unexpected key "queue" for "concurrency" section'
