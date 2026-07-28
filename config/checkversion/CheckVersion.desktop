@@ -1,9 +1,0 @@
-[Desktop Entry]
-Name=Check Version
-GenericName=Check Version
-Comment=Check Version 20220128
-Exec=/bin/bash -i /usr/share/checkversion.sh
-Icon=/neurocommand/local/icons/aedapt.png
-Type=Application
-Categories=Any
-Terminal=true
