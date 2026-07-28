@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """OpenCode web launcher for Neurodesktop.
 
-Started by Jupyter Server Proxy (the "OpenCode AI" launcher tile) or by the
+Started by Jupyter Server Proxy (the "Scigent.ai" launcher tile) or by the
 desktop shortcut. It provides what the bare `opencode web` server cannot do
 behind Neurodesktop's proxy setup:
 

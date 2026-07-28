@@ -20,7 +20,7 @@ design. Two deviations from the plan below, both simplifications:
 
 Give Neurodesktop users a first-class, browser-based OpenCode experience:
 
-1. An **"OpenCode" tile on the JupyterLab start page** (the launcher) that opens
+1. A **"Scigent.ai" tile on the JupyterLab start page** (the launcher) that opens
    a nice web interface for OpenCode in a new browser tab.
 2. **Guided, one-time setup of the `llm.neurodesk.org` API key** in the browser
    (no terminal prompts), reusing the key handling that the terminal wrapper
@@ -159,7 +159,7 @@ Add an `opencode` entry to `c.ServerProxy.servers` in
     # Fail closed: the tile only shows when the credential exists.
     'enabled': bool(_opencode_pass),
     'path_info': 'opencode',
-    'title': 'OpenCode AI',
+    'title': 'Scigent.ai',
     'icon_path': '/opt/neurodesk/icons/opencode.svg',
     'category': 'Neurodesk',
   },
@@ -231,7 +231,7 @@ Move the first-run key setup out of the terminal and into JupyterLab:
     `opencode.json`, and runs `nbi_setup.sh` so Notebook Intelligence follows.
     Implementation shells out to the Phase-1 shared library (or a thin Python
     port with the shell behavior as the reference tests).
-- Extend the **neurodesk-launcher frontend**: intercept the OpenCode tile's
+- Extend the **neurodesk-launcher frontend**: intercept the Scigent.ai tile's
   command; if `key-status` says unconfigured, show a JupyterLab dialog with
   the exact instructions the terminal wrapper prints today ("open
   https://llm.neurodesk.org -> avatar -> Settings -> Account -> API Keys ->

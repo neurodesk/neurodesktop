@@ -37,7 +37,7 @@
   model when it is available and otherwise uses the first listed model
 - `OPENCODE_STARTUP_VERBOSE`: set to `1` to show detailed OpenCode provider
   probe output during startup
-- `OPENCODE_WEB_STARTUP_TIMEOUT`: seconds `opencode_web.py` (the "OpenCode AI"
+- `OPENCODE_WEB_STARTUP_TIMEOUT`: seconds `opencode_web.py` (the "Scigent.ai"
   launcher tile) waits for the `opencode web` backend to become ready;
   defaults to `180`
 - `OPENCODE_DISABLE_FFF`: forced to `1` for the OpenCode Web child process so

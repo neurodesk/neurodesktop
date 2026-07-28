@@ -194,7 +194,7 @@ version updates are managed by the container image.
 
 ### OpenCode Web Interface
 
-The JupyterLab launcher exposes an "OpenCode AI" tile backed by a Jupyter
+The JupyterLab launcher exposes a "Scigent.ai" tile backed by a Jupyter
 Server Proxy entry that runs
 [`config/agents/opencode_web.py`](../config/agents/opencode_web.py)
 (installed to `/opt/neurodesktop/opencode_web.py`). The launcher script:

@@ -1,6 +1,6 @@
 """Tests for the OpenCode web launcher (config/agents/opencode_web.py).
 
-Covers the pieces that make the JupyterLab "OpenCode AI" tile work: the
+Covers the pieces that make the JupyterLab "Scigent.ai" tile work: the
 prefix rewriting for the upstream web UI, the browser-based
 llm.neurodesk.org key setup (persisted in the same ~/.bashrc format the
 terminal wrapper and nbi_setup.sh read), the per-user credential handling,
@@ -664,7 +664,7 @@ def test_jupyter_template_defines_opencode_proxy_entry():
     assert "/opt/neurodesktop/opencode_web.py" in template_text
     assert "opencode_server_password" in template_text
     assert "_opencode_basic" in template_text
-    assert "'title': 'OpenCode AI'" in template_text
+    assert "'title': 'Scigent.ai'" in template_text
     assert "'enabled': bool(_opencode_pass)" in template_text
     assert "'icon_path': '/opt/opencode_logo.svg'" in template_text
 
