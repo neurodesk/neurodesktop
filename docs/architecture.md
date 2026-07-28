@@ -78,10 +78,16 @@ abandons a degraded server at runtime via the failover settings
 [`config/cvmfs/default.local`](../config/cvmfs/default.local). A successful
 ranking is cached in `~/.cache/neurodesktop/cvmfs-selection.env` for seven days
 and reused while its primary server passes a health check; a failed mount
-triggers a forced re-probe.
+triggers a forced re-probe. Eager Docker startup runs the selector as root, so
+after writing this cache it restores ownership of the cache path to the
+remapped notebook UID/GID; otherwise Jupyter cannot create its own sibling
+cache directories.
 
 Configuration lives in [`config/cvmfs/`](../config/cvmfs/). CVMFS can be
-disabled with `CVMFS_DISABLE=true`.
+disabled with `CVMFS_DISABLE=true`. The Dockerfile pins both the CVMFS client
+package and the repository bootstrap package; the bootstrap download is also
+verified by SHA-256 so the `latest` URL cannot silently change a reproducible
+build.
 
 ### Neurocommand
 
@@ -267,7 +273,10 @@ Server Proxy entry that runs
   same bootstrap value is supplied as the Solid router's base path. Without
   that routing invariant, the SPA treats the first proxy segment
   (`opencode`) as a base64-encoded project directory and creates sessions in
-  an invalid path. Together these changes keep provider, model, session,
+  an invalid path. The router rewrite matches and preserves the bundle's
+  minified component identifier because that identifier can change between
+  otherwise compatible OpenCode patch releases. Together these changes keep
+  provider, model, session,
   event, terminal, browser-history, and future API routes below `/opencode/`.
   The proxied bundle also makes the new-layout Home control perform a full
   navigation to the prefixed root. OpenCode's in-memory tab toggle works at a
@@ -429,6 +438,24 @@ rebuilds the panel from that fresh state. The patcher is anchored on the
 exact minified code and fails the image build when a `notebook_intelligence`
 upgrade changes the bundle, so the workaround cannot silently regress;
 re-verify and update (or drop) the patch when bumping the pin.
+
+Notebook Intelligence 5.3.0's published Python wheel omits its compiled
+JupyterLab frontend. The Dockerfile therefore rebuilds the matching source tag,
+refreshes its JupyterLab/Lumino build dependencies as one set, installs the
+resulting federated extension, and only then applies the settings patch. The
+build asserts that a `remoteEntry` bundle exists before continuing.
+
+### MyST and RISE Extension Build
+
+MyST is rebuilt against RISE's JupyterLab application so its markdown viewer is
+available in presentation mode. MyST 2.7.0's published shared-package metadata
+requests Jupyter YDoc 3.x, while the base image's JupyterLab 4.6 uses YDoc 4.x;
+the source build compiles against an exact YDoc 4 release and records a broad
+4.x compatibility range in the federated extension metadata. RISE also retains
+a Python dependency on the legacy `jupyterlab-mathjax3` package. Its JupyterLab
+3-only frontend is not exposed in the final application; JupyterLab 4.6 and
+RISE's standalone application both provide the current built-in MathJax
+extension.
 
 ### Apptainer
 

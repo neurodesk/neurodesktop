@@ -32,7 +32,8 @@ def load_patcher_module():
     return module
 
 
-# Verbatim excerpts from the notebook_intelligence 5.2.1 labextension bundle:
+# Verbatim excerpts matching the notebook_intelligence 5.3.0 source-built
+# labextension bundle:
 # the NBI API class holding fetchCapabilities, and the settings command whose
 # execute callback shows a panel built from the stale client-side cache.
 BUNDLE_FIXTURE = (
@@ -135,6 +136,32 @@ def test_main_patches_and_reruns_cleanly(tmp_path):
         assert patcher.main() == 0
     finally:
         sys.argv = argv
+
+
+def test_dockerfile_rebuilds_the_nbi_530_frontend():
+    """The 5.3.0 wheel omits the executable frontend chunks, so the image must
+    rebuild the tagged source before applying the settings patch.
+    """
+    dockerfile = first_existing_path(
+        Path(__file__).resolve().parents[1] / "Dockerfile",
+        "/opt/tests/Dockerfile",
+    ).read_text(encoding="utf-8")
+
+    assert "notebook_intelligence==5.3.0" in dockerfile
+    assert 'ARG NBI_JUPYTERLAB_BUILDER_VERSION="4.5.10"' in dockerfile
+    assert 'branch "v${NBI_VERSION}"' in dockerfile
+    assert "jlpm install --immutable" in dockerfile
+    assert 'npm pkg set "dependencies.@jupyterlab/launcher=^4.0.0"' in dockerfile
+    assert 'jlpm up -R "@jupyterlab/*" "@lumino/*"' in dockerfile
+    assert 'jlpm add --dev --exact "@jupyterlab/builder@${NBI_JUPYTERLAB_BUILDER_VERSION}"' in dockerfile
+    assert "cp -a /tmp/notebook-intelligence/notebook_intelligence/labextension" in dockerfile
+    assert dockerfile.index("NBI_PACKAGE_DIR=") < dockerfile.index(
+        "&& cd /tmp/notebook-intelligence"
+    )
+
+    rebuild = dockerfile.index("# Rebuild Notebook Intelligence's frontend")
+    patch = dockerfile.index("/opt/neurodesktop/patch_nbi.py", rebuild)
+    assert rebuild < patch
 
 
 def test_installed_labextension_is_patched():

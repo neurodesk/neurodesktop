@@ -95,13 +95,9 @@ OPENCODE_PREFIXED_WEB_ORIGIN_EXPRESSION = (
     '"http://localhost:4096":'
     f"window.{OPENCODE_PREFIX_SERVER_GLOBAL}||location.origin"
 )
-OPENCODE_WEB_ROUTER_COMPONENT_EXPRESSION = (
-    "get component(){return e.router??Epe},root:n=>"
-)
-OPENCODE_PREFIXED_WEB_ROUTER_COMPONENT_EXPRESSION = (
-    "get component(){return e.router??Epe},"
-    f"get base(){{return window.{OPENCODE_PREFIX_ROUTER_GLOBAL}||\"\"}},"
-    "root:n=>"
+OPENCODE_WEB_ROUTER_COMPONENT_RE = re.compile(
+    r"get component\(\)\{return e\.router\?\?"
+    r"(?P<router>[A-Za-z_$][A-Za-z0-9_$]*)\},root:n=>"
 )
 OPENCODE_WEB_ROUTE_PARSER_EXPRESSION = (
     '=(e,t)=>{const n=e.split("/").filter(Boolean);'
@@ -1121,6 +1117,15 @@ def rewrite_js(body, prefix):
             f'{groups["current"]}()}}):location.assign({home_url})'
         )
 
+    def rewrite_router_component(match):
+        return (
+            "get component(){return e.router??"
+            f'{match.group("router")}'
+            "},"
+            f"get base(){{return window.{OPENCODE_PREFIX_ROUTER_GLOBAL}||\"\"}},"
+            "root:n=>"
+        )
+
     # Linear prefilter: the possessive quantifiers stop per-position
     # backtracking, but an unanchored scan over a long identifier-character
     # run would still cost O(n^2). Bodies without the literal cannot match.
@@ -1130,9 +1135,8 @@ def rewrite_js(body, prefix):
         OPENCODE_WEB_ORIGIN_EXPRESSION,
         OPENCODE_PREFIXED_WEB_ORIGIN_EXPRESSION,
     )
-    body = body.replace(
-        OPENCODE_WEB_ROUTER_COMPONENT_EXPRESSION,
-        OPENCODE_PREFIXED_WEB_ROUTER_COMPONENT_EXPRESSION,
+    body = OPENCODE_WEB_ROUTER_COMPONENT_RE.sub(
+        rewrite_router_component, body
     )
     body = body.replace(
         OPENCODE_WEB_ROUTE_PARSER_EXPRESSION,

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 
@@ -19,7 +20,22 @@ def test_myst_rise_build_uses_pinned_compatible_release():
     end = dockerfile.index("# Patch both nested tar copies", start)
     myst_build = dockerfile[start:end]
 
-    assert dockerfile.count("jupyterlab_myst==2.6.0") == 1
-    assert "npm_config_cache=/tmp/myst-npm-cache npm ci" in myst_build
+    assert dockerfile.count("jupyterlab_myst==2.7.0") == 1
+    assert "pnpm@${MYST_PNPM_VERSION} install --frozen-lockfile" in myst_build
+    assert 'npm pkg set "dependencies.@jupyter/ydoc=^4.0.0"' in myst_build
     assert "npm install" not in myst_build
-    assert "pnpm" not in myst_build
+
+
+def test_legacy_mathjax3_frontend_is_not_exposed_to_jupyterlab():
+    dockerfile = _dockerfile_path().read_text(encoding="utf-8")
+    legacy_extension = (
+        "/opt/conda/share/jupyter/labextensions/"
+        "@jupyterlab/mathjax3-extension"
+    )
+    assert f'rm -rf "{legacy_extension}"' in dockerfile
+
+    app_package = Path("/opt/conda/share/jupyter/lab/static/package.json")
+    if app_package.exists():
+        assert not Path(legacy_extension).exists()
+        dependencies = json.loads(app_package.read_text())["dependencies"]
+        assert "@jupyterlab/mathjax-extension" in dependencies

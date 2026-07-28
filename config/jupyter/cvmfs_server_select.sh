@@ -87,6 +87,33 @@ fi
 
 log() { echo "[cvmfs-select] $*"; }
 
+# The selector runs as root during Docker startup, after start.sh has already
+# remapped and chowned the notebook home. Creating the default cache path here
+# would otherwise make ~/.cache root-owned and prevent the notebook user from
+# creating unrelated runtime state such as ~/.cache/run-one.
+restore_home_cache_ownership() {
+    local cache_path home_uid
+
+    [ "$(id -u)" -eq 0 ] || return 0
+    case "${NB_UID:-}" in ''|*[!0-9]*) return 0 ;; esac
+    case "${NB_GID:-}" in ''|*[!0-9]*) return 0 ;; esac
+    [ -d "${HOME}" ] || return 0
+    home_uid=$(stat -c "%u" "${HOME}" 2>/dev/null || true)
+    [ "${home_uid}" = "${NB_UID}" ] || return 0
+    case "${CACHE_FILE}" in
+        "${HOME}"/*) ;;
+        *) return 0 ;;
+    esac
+
+    cache_path="${CACHE_FILE}"
+    while [ "${cache_path}" != "${HOME}" ]; do
+        if [ -e "${cache_path}" ] && ! chown "${NB_UID}:${NB_GID}" "$cache_path"; then
+            log "WARNING: could not restore notebook-user ownership of ${cache_path}"
+        fi
+        cache_path=$(dirname "${cache_path}")
+    done
+}
+
 # Cache-busting query value: forces a cache MISS on CDN edges so probes
 # measure the cold path. The caller-supplied tag makes values unique within a
 # run (RANDOM alone can repeat across forked subshells on older bash); epoch,
@@ -290,5 +317,6 @@ cat > "$CACHE_FILE" <<EOF
 CACHED_CVMFS_SERVER_URL="${SERVER_URL}"
 CACHED_TIMESTAMP=$(date +%s)
 EOF
+restore_home_cache_ownership
 log "Saved CVMFS server selection to cache: ${CACHE_FILE}"
 exit 0

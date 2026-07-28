@@ -369,9 +369,14 @@ def test_rewrite_js_registers_the_prefixed_server_used_for_permissions():
     assert "window.__NEURODESK_OPENCODE_SERVER_URL__" in rewritten
 
 
-def test_rewrite_js_configures_the_spa_router_with_the_proxy_base_path():
+@pytest.mark.parametrize("router_identifier", ["Epe", "Tye"])
+def test_rewrite_js_configures_the_spa_router_with_the_proxy_base_path(
+    router_identifier,
+):
     """The browser must not decode the proxy name as a project directory."""
-    router_component = 'get component(){return e.router??Epe},root:n=>'
+    router_component = (
+        f"get component(){{return e.router??{router_identifier}}},root:n=>"
+    )
 
     rewritten = ocw.rewrite_js(router_component, PREFIX)
 
@@ -1045,8 +1050,17 @@ def test_pinned_opencode_bundle_supports_native_prefixed_model_picker(tmp_path):
             '"http://localhost:4096":location.origin'
         )
         assert bundle.count(canonical_origin) == 1
-        router_component = 'get component(){return e.router??Epe},root:n=>'
-        assert bundle.count(router_component) == 1
+        router_matches = re.findall(
+            r"get component\(\)\{return e\.router\?\?"
+            r"([A-Za-z_$][A-Za-z0-9_$]*)\},root:n=>",
+            bundle,
+        )
+        assert len(router_matches) == 1
+        router_component = (
+            "get component(){return e.router??"
+            f"{router_matches[0]}"
+            "},root:n=>"
+        )
         route_parser = (
             '=(e,t)=>{const n=e.split("/").filter(Boolean);'
             'if(n.length===0)return{type:"home"}'
