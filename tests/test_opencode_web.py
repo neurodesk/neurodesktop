@@ -273,7 +273,7 @@ def test_redact_auth_params_hides_login_tokens():
 
 
 def test_create_opencode_work_dir_uses_timestamp_and_avoids_collisions(tmp_path):
-    """Every web launch gets a new project below ~/opencode-work."""
+    """Every session gets a new project below ~/opencode-work."""
     home = tmp_path / "home"
     home.mkdir()
 
@@ -297,11 +297,11 @@ def _git_toplevel(directory):
 
 
 def test_create_opencode_work_dir_makes_the_launch_dir_a_git_project(tmp_path):
-    """The launch directory itself must be the Git worktree root.
+    """The session directory itself must be the Git worktree root.
 
     OpenCode resolves a request's directory to the enclosing ``git rev-parse
-    --show-toplevel``. A worktree at the ``opencode-work`` parent would pull
-    every session up into the shared parent, away from the seeded AGENTS.md.
+    --show-toplevel``. The nested session root must outrank the backend's
+    ``opencode-work`` parent project so artifacts do not mix there.
     """
     home = tmp_path / "home"
     home.mkdir()
@@ -311,6 +311,25 @@ def test_create_opencode_work_dir_makes_the_launch_dir_a_git_project(tmp_path):
     assert work_dir.parent == home / "opencode-work"
     assert (work_dir / ".git").is_dir()
     assert _git_toplevel(work_dir) == str(work_dir)
+
+
+def test_create_opencode_work_dir_seeds_editable_agents_file(tmp_path):
+    """Each session project gets its own editable Neurodesk instructions."""
+    home = tmp_path / "home"
+    home.mkdir()
+    agents_file = tmp_path / "AGENTS.md"
+    agents_file.write_text("# Session instructions\n", encoding="utf-8")
+
+    work_dir = Path(
+        ocw.create_opencode_work_dir(
+            home, "20260721_203001", agents_file=agents_file
+        )
+    )
+
+    seeded = work_dir / "AGENTS.md"
+    assert seeded.read_bytes() == agents_file.read_bytes()
+    seeded.write_text("# User-edited instructions\n", encoding="utf-8")
+    assert agents_file.read_text(encoding="utf-8") == "# Session instructions\n"
 
 
 def test_create_opencode_work_dir_outranks_a_legacy_parent_repo(tmp_path):
@@ -561,6 +580,7 @@ import base64
 import http.server
 import json
 import os
+import re
 import sys
 import urllib.parse
 
@@ -570,6 +590,7 @@ password = os.environ.get("OPENCODE_SERVER_PASSWORD", "")
 expected = "Basic " + base64.b64encode(f"opencode:{password}".encode()).decode()
 
 state_dir = os.environ["FAKE_BACKEND_STATE_DIR"]
+session_counter = 0
 with open(os.path.join(state_dir, "env.json"), "w") as fh:
     json.dump(
         {
@@ -621,27 +642,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def echo_directory(self, parsed):
+    def request_directory(self, parsed):
         # Mirror how OpenCode resolves a request directory: the query
         # parameter first, then the x-opencode-directory header (which its
         # client percent-encodes and only mirrors into the query for
         # GET/HEAD), then the backend process cwd.
         query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
         header = self.headers.get("x-opencode-directory", "")
-        directory = (
+        return (
             query.get("directory", [""])[0]
             or query.get("location[directory]", [""])[0]
             or (urllib.parse.unquote(header) if header else "")
             or os.getcwd()
         )
-        payload = json.dumps({"directory": directory}).encode()
+
+    def send_json(self, value):
+        payload = json.dumps(value).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
 
+    def echo_directory(self, parsed):
+        self.send_json({"directory": self.request_directory(parsed)})
+
     def do_POST(self):
+        global session_counter
         if self.headers.get("Authorization") != expected:
             self.send_response(401)
             self.send_header("Content-Length", "0")
@@ -651,6 +678,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if length:
             self.rfile.read(length)
         parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path == "/session":
+            session_counter += 1
+            session_id = f"ses_test_{session_counter}"
+            directory = self.request_directory(parsed)
+            self.send_json({"id": session_id, "directory": directory})
+            return
+        if re.fullmatch(r"/session/ses_test_\\d+/prompt_async", parsed.path):
+            self.echo_directory(parsed)
+            return
         if parsed.path == "/neurodesk-echo-directory":
             self.echo_directory(parsed)
             return
@@ -716,11 +752,12 @@ def _wait_for_port(port, timeout=20):
     reason="the pinned OpenCode bundle is only present inside the image",
 )
 def test_pinned_opencode_bundle_supports_native_prefixed_model_picker(tmp_path):
-    """The image's real pinned UI must honor the server URL we bootstrap.
+    """The image's real pinned UI and session API must honor proxy contracts.
 
     This is the version-coupled contract that the fake-backend tests cannot
     prove: OpenCode must still read the default-server localStorage key and
-    ship the provider route plus its native model-selection interface.
+    ship the provider route plus its native model-selection interface, and its
+    session API must preserve the distinct directory selected by the proxy.
     """
     port = _free_port()
     password = "bundle-contract-password"
@@ -759,6 +796,36 @@ def test_pinned_opencode_bundle_supports_native_prefixed_model_picker(tmp_path):
                     break
             time.sleep(0.2)
         assert status == 200
+
+        created_sessions = []
+        for name in ("session-a", "session-b"):
+            session_dir = tmp_path / name
+            session_dir.mkdir()
+            subprocess.run(
+                ["git", "init", "--quiet", str(session_dir)], check=True
+            )
+            status, _headers, body = _request(
+                port,
+                "/session",
+                headers={
+                    **auth,
+                    "Content-Type": "application/json",
+                    "x-opencode-directory": urllib.parse.quote(
+                        str(session_dir), safe=""
+                    ),
+                },
+                data=b"{}",
+            )
+            assert status == 200
+            session = json.loads(body)
+            assert session["id"].startswith("ses_")
+            assert session["directory"] == str(session_dir)
+            created_sessions.append(session)
+        assert (
+            created_sessions[0]["directory"]
+            != created_sessions[1]["directory"]
+        )
+
         match = re.search(r'src="([^"]+/index-[^"]+\.js)"', root)
         assert match, root
 
@@ -841,6 +908,8 @@ def launcher(tmp_path):
     home_dir.mkdir()
     state_dir = tmp_path / "state"
     state_dir.mkdir()
+    agents_file = tmp_path / "AGENTS.md"
+    agents_file.write_text("# Per-session Neurodesk instructions\n", encoding="utf-8")
 
     fake_backend = tmp_path / "fake-opencode"
     fake_backend.write_text(FAKE_BACKEND_SOURCE, encoding="utf-8")
@@ -861,6 +930,7 @@ def launcher(tmp_path):
         "OPENCODE_WEB_STARTUP_TIMEOUT": "30",
         "NEURODESK_LLM_BASE_URL": f"http://127.0.0.1:{llm_port}/openai",
         "FAKE_BACKEND_STATE_DIR": str(state_dir),
+        "OPENCODE_WEB_AGENTS_FILE": str(agents_file),
     }
     env.pop("NEURODESK_API_KEY", None)
     env.pop("OPENCODE_MODEL_PROFILE", None)
@@ -895,6 +965,7 @@ def launcher(tmp_path):
             "password": password,
             "auth": auth_header,
             "token_file": token_file,
+            "agents_file": agents_file,
         }
     finally:
         process.terminate()
@@ -937,8 +1008,8 @@ def _wait_for_proxied_root(ctx, extra_headers=None, timeout=20):
     raise AssertionError("proxied opencode backend never became ready")
 
 
-def test_proxy_pins_session_directory_to_seeded_work_dir(launcher):
-    """A UI-selected directory is rewritten to the AGENTS.md-seeded work dir."""
+def test_proxy_pins_untrusted_directory_to_backend_work_root(launcher):
+    """An arbitrary UI directory cannot escape the managed work root."""
     status, _headers = _complete_key_setup(launcher)
     assert status == 303
     _wait_for_proxied_root(launcher)
@@ -947,7 +1018,7 @@ def test_proxy_pins_session_directory_to_seeded_work_dir(launcher):
         (launcher["state"] / "env.json").read_text(encoding="utf-8")
     )
     work_dir = backend_env["cwd"]
-    assert Path(work_dir).parent == launcher["home"] / "opencode-work"
+    assert Path(work_dir) == launcher["home"] / "opencode-work"
 
     status, _headers, body = _request(
         launcher["port"],
@@ -966,7 +1037,7 @@ def test_proxy_pins_the_directory_header_on_non_get_requests(launcher):
     the header alone. Pinning just the query therefore left the two calls that
     decide where a session lives and where its tools run free to point at any
     directory the SPA held -- which is how sessions ended up writing to the
-    shared ``~/opencode-work`` parent instead of the seeded launch directory.
+    shared ``~/opencode-work`` parent instead of a seeded session directory.
     """
     status, _headers = _complete_key_setup(launcher)
     assert status == 303
@@ -992,6 +1063,63 @@ def test_proxy_pins_the_directory_header_on_non_get_requests(launcher):
     )
     assert status == 200
     assert json.loads(body)["directory"] == work_dir
+
+
+def test_each_created_session_gets_a_distinct_seeded_work_directory(launcher):
+    """Every POST /session creates and remains pinned to its own project."""
+    status, _headers = _complete_key_setup(launcher)
+    assert status == 303
+    _wait_for_proxied_root(launcher)
+
+    sessions = []
+    for selected_directory in ("/home/jovyan/demo-a", "/home/jovyan/demo-b"):
+        status, _headers, body = _request(
+            launcher["port"],
+            "/session",
+            method="POST",
+            data=b"{}",
+            headers={
+                **launcher["auth"],
+                "Content-Type": "application/json",
+                "x-opencode-directory": urllib.parse.quote(
+                    selected_directory, safe=""
+                ),
+            },
+        )
+        assert status == 200
+        sessions.append(json.loads(body))
+
+    first, second = sessions
+    first_dir = Path(first["directory"])
+    second_dir = Path(second["directory"])
+    work_root = launcher["home"] / "opencode-work"
+
+    assert first_dir != second_dir
+    assert first_dir.parent == work_root
+    assert second_dir.parent == work_root
+    assert re.fullmatch(r"\d{8}_\d{6}(?:_\d+)?", first_dir.name)
+    assert re.fullmatch(r"\d{8}_\d{6}(?:_\d+)?", second_dir.name)
+    for directory in (first_dir, second_dir):
+        assert (directory / ".git").is_dir()
+        assert (directory / "AGENTS.md").read_bytes() == launcher[
+            "agents_file"
+        ].read_bytes()
+
+    # A stale or incorrect browser header must not move an existing session
+    # into another session's project after the proxy has recorded its mapping.
+    status, _headers, body = _request(
+        launcher["port"],
+        f"/session/{first['id']}/prompt_async",
+        method="POST",
+        data=b"{}",
+        headers={
+            **launcher["auth"],
+            "Content-Type": "application/json",
+            "x-opencode-directory": urllib.parse.quote(str(second_dir), safe=""),
+        },
+    )
+    assert status == 200
+    assert json.loads(body)["directory"] == str(first_dir)
 
 
 def test_force_directory_header_pins_and_encodes_like_opencodes_client():
@@ -1124,8 +1252,8 @@ def test_valid_key_persists_starts_backend_and_proxies_with_rewrite(launcher):
     assert backend_env["OPENCODE_DISABLE_FFF"] == "1"
     assert backend_env["OPENCODE_MODEL_PROFILE"] == "neurodesk"
     work_dir = Path(backend_env["cwd"])
-    assert work_dir.parent == launcher["home"] / "opencode-work"
-    assert re.fullmatch(r"\d{8}_\d{6}(?:_\d+)?", work_dir.name)
+    assert work_dir == launcher["home"] / "opencode-work"
+    assert (work_dir / ".git").is_dir()
     assert backend_env["argv"][0] == "web"
     assert "--hostname" in backend_env["argv"]
 

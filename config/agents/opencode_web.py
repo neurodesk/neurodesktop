@@ -20,15 +20,13 @@ behind Neurodesktop's proxy setup:
 4. Rewrites root-absolute URLs in HTML/CSS/JS responses against the
    X-Forwarded-Prefix header, because the upstream web UI assumes it is
    served from `/` and breaks behind the /opencode/ proxy prefix.
-5. Creates a unique ~/opencode-work/DATE_TIME Git project for each backend
-   launch and runs the terminal wrapper there, which seeds the project with the
-   standard /opt/AGENTS.md instructions. Every proxied request's
-   ``?directory=`` parameter *and* ``x-opencode-directory`` header are then
-   pinned to that seeded directory, so sessions the user opens or picks in the
-   web UI still run inside the AGENTS.md-seeded project instead of an
-   arbitrary directory. Both are required: OpenCode's client only puts the
-   directory in the query for GET/HEAD, so POSTs such as session creation and
-   message send carry it in the header alone.
+5. Runs the backend from ~/opencode-work, then creates a unique
+   ~/opencode-work/DATE_TIME Git project for every ``POST /session`` and seeds
+   it with /opt/AGENTS.md. The proxy records the returned session id and pins
+   later requests for that session to its project. Both the ``?directory=``
+   parameter and ``x-opencode-directory`` header are enforced because
+   OpenCode's client only puts the directory in the query for GET/HEAD; POSTs
+   such as session creation and message send carry it in the header alone.
 
 Environment overrides (mainly for tests):
   OPENCODE_WEB_WRAPPER_BIN   backend command (default /usr/local/sbin/opencode)
@@ -37,6 +35,7 @@ Environment overrides (mainly for tests):
   NEURODESK_LLM_BASE_URL     key-validation endpoint base
                              (default https://llm.neurodesk.org/openai)
   OPENCODE_WEB_STARTUP_TIMEOUT  seconds to wait for the backend (default 180)
+  OPENCODE_WEB_AGENTS_FILE    session instruction seed (default /opt/AGENTS.md)
 """
 
 import argparse
@@ -50,6 +49,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import signal
 import socket
 import subprocess
@@ -62,6 +62,7 @@ import urllib.request
 
 DEFAULT_WRAPPER_BIN = "/usr/local/sbin/opencode"
 DEFAULT_LLM_BASE_URL = "https://llm.neurodesk.org/openai"
+DEFAULT_AGENTS_FILE = "/opt/AGENTS.md"
 BACKEND_USERNAME = "opencode"
 AUTH_COOKIE_NAME = "neurodesk_opencode_auth"
 SETUP_PATH = "/neurodesk-setup"
@@ -118,6 +119,7 @@ OPENCODE_DIRECTORY_QUERY_KEYS = ("directory", "location[directory]")
 OPENCODE_DIRECTORY_HEADER = "x-opencode-directory"
 OPENCODE_WORK_DIR_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
 OPENCODE_WEB_DEFAULT_MODEL_PROFILE = "neurodesk"
+OPENCODE_SESSION_PATH_RE = re.compile(r"^/(?:api/)?session/(ses_[^/]+)(?:/|$)")
 
 # Hop-by-hop headers must not be forwarded in either direction.
 HOP_BY_HOP_HEADERS = {
@@ -523,23 +525,49 @@ def rewrite_body(body, content_type, prefix):
 # --- Backend process management ----------------------------------------------
 
 
-def create_opencode_work_dir(home_dir, timestamp=None):
-    """Create a unique ~/opencode-work/DATE_TIME directory as its own Git repo.
+def initialize_git_project(directory):
+    """Make ``directory`` a Git worktree root, including legacy directories."""
+    try:
+        subprocess.run(
+            ["git", "init", "--quiet", os.fspath(directory)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        detail = getattr(exc, "stderr", "") or str(exc)
+        raise OSError(
+            f"could not initialize OpenCode project in {directory}: "
+            f"{detail.strip()}"
+        ) from exc
 
-    The launch directory itself must be the Git worktree root. OpenCode
+
+def create_opencode_work_root(home_dir):
+    """Create the stable backend cwd above all per-session projects."""
+    parent = os.path.join(os.fspath(home_dir), OPENCODE_WORK_DIR_PARENT)
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    initialize_git_project(parent)
+    return parent
+
+
+def create_opencode_work_dir(home_dir, timestamp=None, agents_file=None):
+    """Create and seed one unique ~/opencode-work/DATE_TIME session project.
+
+    The session directory itself must be the Git worktree root. OpenCode
     resolves a request's ``directory`` to a project by walking up for ``.git``
     and running ``git rev-parse --show-toplevel``, then uses that worktree as
     the session directory and tool cwd. When only the ``~/opencode-work``
-    parent was a repository, every launch directory below it resolved back up
+    parent was the only repository, every session directory below it resolved up
     to the parent, so sessions ran in the shared parent, wrote their outputs
-    there, and never saw the ``AGENTS.md`` seeded into the launch directory.
+    there, and never saw the ``AGENTS.md`` intended for that session.
 
-    ``git init`` on the launch directory keeps it its own worktree even when a
+    ``git init`` on the session directory keeps it its own worktree even when a
     legacy ``~/opencode-work/.git`` from an earlier release still exists: the
-    upward walk stops at the nearest ``.git``.
+    upward walk stops at the nearest ``.git``. ``agents_file`` is copied only
+    into the newly-created project and is never used to overwrite user edits.
     """
-    parent = os.path.join(os.fspath(home_dir), OPENCODE_WORK_DIR_PARENT)
-    os.makedirs(parent, mode=0o700, exist_ok=True)
+    parent = create_opencode_work_root(home_dir)
     timestamp = timestamp or time.strftime(OPENCODE_WORK_DIR_TIMESTAMP_FORMAT)
     work_dir = None
     for sequence in range(1, 1001):
@@ -556,21 +584,52 @@ def create_opencode_work_dir(home_dir, timestamp=None):
             f"could not create a unique OpenCode work directory in {parent}"
         )
 
-    try:
-        subprocess.run(
-            ["git", "init", "--quiet", work_dir],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as exc:
-        detail = getattr(exc, "stderr", "") or str(exc)
-        raise OSError(
-            f"could not initialize OpenCode project in {work_dir}: "
-            f"{detail.strip()}"
-        ) from exc
+    initialize_git_project(work_dir)
+    if agents_file:
+        try:
+            shutil.copy2(
+                os.fspath(agents_file), os.path.join(work_dir, "AGENTS.md")
+            )
+        except OSError as exc:
+            raise OSError(
+                f"could not seed OpenCode project {work_dir} from "
+                f"{agents_file}: {exc}"
+            ) from exc
     return work_dir
+
+
+def requested_opencode_directory(query, header):
+    """Decode the directory context supplied by OpenCode's browser client."""
+    for key, value in urllib.parse.parse_qsl(query or "", keep_blank_values=True):
+        if key in OPENCODE_DIRECTORY_QUERY_KEYS and value:
+            return value
+    return urllib.parse.unquote(header) if header else ""
+
+
+def is_opencode_session_work_dir(directory, home_dir):
+    """Return whether ``directory`` is an existing direct session project."""
+    if not directory:
+        return False
+    parent = os.path.realpath(
+        os.path.join(os.fspath(home_dir), OPENCODE_WORK_DIR_PARENT)
+    )
+    candidate = os.path.realpath(os.fspath(directory))
+    return (
+        os.path.dirname(candidate) == parent
+        and os.path.isdir(candidate)
+        and os.path.isdir(os.path.join(candidate, ".git"))
+    )
+
+
+def session_id_from_path(path):
+    """Extract a concrete OpenCode session id from an API path, if present."""
+    match = OPENCODE_SESSION_PATH_RE.match(path)
+    return match.group(1) if match else ""
+
+
+def is_session_creation_request(method, path):
+    """Recognize the finite API call that creates a top-level UI session."""
+    return method == "POST" and path.rstrip("/") in ("/session", "/api/session")
 
 
 def force_directory_query(query, directory):
@@ -578,18 +637,14 @@ def force_directory_query(query, directory):
 
     OpenCode's web API takes the session/workspace directory as a
     ``?directory=`` query parameter (``?location[directory]=`` on its /api/
-    routes); the browser derives it from the base64 directory segment in the
-    SPA URL, so a user who opens or picks any other directory would run the
-    session there. Rewriting the parameter to the launcher's seeded
-    ~/opencode-work/DATE_TIME directory keeps every session, file, pty, and
-    search operation inside the one directory the terminal wrapper seeded with
-    /opt/AGENTS.md, no matter which directory the UI selects.
+    routes). Rewriting that value to the directory selected by the proxy keeps
+    each session, file, pty, and search operation inside its own seeded
+    ~/opencode-work/DATE_TIME project.
 
     Requests that carry no directory parameter are returned unchanged: the
     backend then falls back to the ``x-opencode-directory`` header (pinned by
-    ``force_directory_header``) and finally to its process cwd, which is that
-    same seeded directory. Passing an empty ``directory`` leaves the query
-    untouched.
+    ``force_directory_header``) and finally to its process cwd. Passing an
+    empty ``directory`` leaves the query untouched.
     """
     if not directory or not query:
         return query
@@ -627,17 +682,70 @@ def force_directory_header(value, directory):
 class OpencodeBackend:
     """Owns the `opencode web` child process and its readiness state."""
 
-    def __init__(self, wrapper_bin, startup_timeout, home_dir):
+    def __init__(self, wrapper_bin, startup_timeout, home_dir, agents_file):
         self.wrapper_bin = wrapper_bin
         self.startup_timeout = startup_timeout
         self.home_dir = home_dir
+        self.agents_file = agents_file
         self.work_dir = None
         self.port = None
         self.process = None
         self.state = "not_started"  # not_started | starting | ready | failed
         self.log_tail = collections.deque(maxlen=100)
         self._lock = threading.Lock()
+        self._session_lock = threading.Lock()
+        self.session_work_dirs = {}
         self.backend_password = ""
+
+    def create_session_work_dir(self):
+        """Allocate a fresh seeded project for one POST /session request."""
+        return create_opencode_work_dir(
+            self.home_dir, agents_file=self.agents_file
+        )
+
+    def remember_session_work_dir(self, session_id, directory):
+        """Pin ``session_id`` to a validated per-session project directory."""
+        if not session_id or not is_opencode_session_work_dir(
+            directory, self.home_dir
+        ):
+            return False
+        canonical = os.path.realpath(directory)
+        with self._session_lock:
+            self.session_work_dirs[session_id] = canonical
+        return True
+
+    def work_dir_for_request(self, path, query, directory_header):
+        """Resolve a request to its recorded or validated session project."""
+        session_id = session_id_from_path(path)
+        if session_id:
+            with self._session_lock:
+                recorded = self.session_work_dirs.get(session_id, "")
+            if is_opencode_session_work_dir(recorded, self.home_dir):
+                return recorded
+
+        requested = requested_opencode_directory(query, directory_header)
+        if is_opencode_session_work_dir(requested, self.home_dir):
+            canonical = os.path.realpath(requested)
+            if session_id:
+                self.remember_session_work_dir(session_id, canonical)
+            return canonical
+        return self.work_dir
+
+    def remember_created_session(self, payload, directory):
+        """Record the session id returned by a successful creation response."""
+        try:
+            session = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return False
+        if not isinstance(session, dict):
+            return False
+        session_id = session.get("id", "")
+        returned_directory = session.get("directory", "")
+        if returned_directory and os.path.realpath(returned_directory) != (
+            os.path.realpath(directory)
+        ):
+            return False
+        return self.remember_session_work_dir(session_id, directory)
 
     def start(self, backend_password):
         """Spawn `opencode web` via the terminal wrapper (idempotent)."""
@@ -668,7 +776,7 @@ class OpencodeBackend:
 
         try:
             if self.work_dir is None:
-                self.work_dir = create_opencode_work_dir(self.home_dir)
+                self.work_dir = create_opencode_work_root(self.home_dir)
             self.process = subprocess.Popen(
                 [
                     self.wrapper_bin,
@@ -1088,9 +1196,43 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
 
     # -- reverse proxy --
 
+    def send_upstream_payload(self, response, payload):
+        """Forward one finite upstream response with deterministic framing."""
+        self.send_response(response.status)
+        for name, value in response.getheaders():
+            if name.lower() in HOP_BY_HOP_HEADERS or name.lower() == (
+                "content-length"
+            ):
+                continue
+            self.send_header(
+                sanitize_header_value(name), sanitize_header_value(value)
+            )
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(payload)
+
     def proxy_request(self, parsed):
         """Forward the request to `opencode web`, rewriting text bodies."""
         backend = type(self).backend
+        creates_session = is_session_creation_request(self.command, parsed.path)
+        try:
+            if creates_session:
+                request_work_dir = backend.create_session_work_dir()
+            else:
+                request_work_dir = backend.work_dir_for_request(
+                    parsed.path,
+                    parsed.query,
+                    self.headers.get(OPENCODE_DIRECTORY_HEADER, ""),
+                )
+        except OSError as exc:
+            self.send_page(
+                500,
+                "<h1>500</h1><p>Could not create the OpenCode session "
+                f"workspace: {html.escape(str(exc))}</p>",
+            )
+            return
+
         body = None
         length = self.headers.get("Content-Length")
         if length:
@@ -1111,8 +1253,24 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
                 if not value:
                     continue
             if lowered == OPENCODE_DIRECTORY_HEADER:
-                value = force_directory_header(value, backend.work_dir)
+                continue
             headers[name] = value
+        session_id = session_id_from_path(parsed.path)
+        carries_directory = (
+            creates_session
+            or bool(session_id)
+            or bool(self.headers.get(OPENCODE_DIRECTORY_HEADER))
+            or any(
+                key in OPENCODE_DIRECTORY_QUERY_KEYS
+                for key, _value in urllib.parse.parse_qsl(
+                    parsed.query, keep_blank_values=True
+                )
+            )
+        )
+        if carries_directory:
+            headers[OPENCODE_DIRECTORY_HEADER] = force_directory_header(
+                "", request_work_dir
+            )
         headers["Host"] = f"127.0.0.1:{backend.port}"
         credentials = base64.b64encode(
             f"{BACKEND_USERNAME}:{backend.backend_password}".encode()
@@ -1121,7 +1279,7 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
         # Ask for identity encoding so body rewriting sees plain text.
         headers["Accept-Encoding"] = "identity"
 
-        forced_query = force_directory_query(parsed.query, backend.work_dir)
+        forced_query = force_directory_query(parsed.query, request_work_dir)
         target = parsed.path + (f"?{forced_query}" if forced_query else "")
         try:
             conn = http.client.HTTPConnection(
@@ -1144,6 +1302,18 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
         )
 
         try:
+            if creates_session:
+                payload = response.read()
+                if 200 <= response.status < 300 and not (
+                    backend.remember_created_session(payload, request_work_dir)
+                ):
+                    self.log_message(
+                        "OpenCode session response did not preserve allocated "
+                        "workspace %s", request_work_dir,
+                    )
+                self.send_upstream_payload(response, payload)
+                return
+
             if rewritable:
                 raw = response.read()
                 text = rewrite_body(
@@ -1245,6 +1415,9 @@ def serve(argv=None):
             os.environ.get("OPENCODE_WEB_STARTUP_TIMEOUT", "180")
         ),
         home_dir=home_dir,
+        agents_file=os.environ.get(
+            "OPENCODE_WEB_AGENTS_FILE", DEFAULT_AGENTS_FILE
+        ),
     )
 
     OpencodeWebHandler.proxy_password = password

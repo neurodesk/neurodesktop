@@ -219,42 +219,31 @@ Server Proxy entry that runs
   selected in terminal OpenCode; an explicit environment override still wins.
   The `neurodesk` profile prefers llm.neurodesk.org's curated `neurodesk`
   alias model and falls back to the provider's first listed model.
-- creates a unique `~/opencode-work/YYYYMMDD_HHMMSS/` directory for every web
-  backend launch, runs `git init` **on that launch directory itself**, and runs
-  the terminal wrapper from it. A Git root is required because OpenCode
-  represents non-Git directories as its global project with worktree `/`; its
-  Home tab then opens that root worktree instead of the Neurodesktop workspace.
-  The root must be the launch directory and not the `~/opencode-work` parent:
-  OpenCode resolves a request's directory to the enclosing `git rev-parse
-  --show-toplevel`, so a worktree at the parent silently pulls every session up
-  into the shared parent — outputs land one level too high and the launch
-  directory's seeded `AGENTS.md` is never in scope. Initializing the launch
-  directory also outranks a legacy `~/opencode-work/.git` left by an earlier
-  release, because the upward walk stops at the nearest `.git`. The wrapper
-  copies `/opt/AGENTS.md` into the new launch directory as `AGENTS.md`, and a
-  numeric suffix prevents collisions between launches occurring within the same
-  second. That copy is the **only** source of the Neurodesk guidance, so users
-  can edit it for their own project: the shipped `opencode.json` no longer
-  pins `/opt/AGENTS.md` into `instructions`, and the wrapper strips that entry
-  from configs written by earlier releases (user-added instructions survive).
-  A global entry would have layered a read-only second copy on top of every
-  prompt, so local edits could never take effect.
-- pins every proxied request's `?directory=` query parameter **and its
-  `x-opencode-directory` header** to that seeded launch directory. OpenCode's
-  web API takes the session/workspace directory as a query parameter that the
-  SPA derives from the base64 directory segment in its URL, so a session the
-  user opens or picks in the web UI would otherwise run in an arbitrary
-  directory that never received `AGENTS.md`. Both channels must be rewritten:
-  OpenCode's client mirrors the directory into the query string only for GET
-  and HEAD requests, so `POST /session` and `POST /session/:id/message` — the
-  calls that decide where a session lives and where its tools run — carry it in
-  the header alone. The server resolves `?directory=` → `x-opencode-directory`
-  → process cwd, so pinning only the query left those POSTs unpinned and
-  sessions ran in whatever directory the SPA held. The header is rewritten
-  percent-encoded, matching what OpenCode's own client sends. `/api/` routes
-  use the `location[directory]` query key, which is pinned the same way.
-  Requests that carry neither still fall back to the backend process cwd, which
-  is that same seeded directory.
+- runs the long-lived web backend from the stable `~/opencode-work` parent, then
+  creates a unique `~/opencode-work/YYYYMMDD_HHMMSS/` project for every
+  `POST /session`. The session directory is created before forwarding the
+  request, initialized as its own Git worktree, and seeded with an editable
+  copy of `/opt/AGENTS.md`; a numeric suffix prevents collisions between
+  concurrent or same-second session creations. A separate Git root on every
+  dated child is required because OpenCode resolves the request directory with
+  `git rev-parse --show-toplevel`. Without the nested root, the parent worktree
+  silently pulls every session into the shared parent and their artifacts mix.
+  The local `AGENTS.md` remains the **only** source of Neurodesk guidance: the
+  shipped `opencode.json` does not pin the read-only `/opt/AGENTS.md` into
+  `instructions`, and the wrapper strips that legacy entry from configs written
+  by earlier releases (user-added instructions survive).
+- records the session id returned by each successful creation response and pins
+  every later request for that id to its dated project. After a launcher restart,
+  a dated directory supplied by the browser is accepted only when it is an
+  existing direct Git-project child of `~/opencode-work`, then remembered for
+  that session; arbitrary paths fall back to the managed backend root. Both the
+  `?directory=` query parameter **and** `x-opencode-directory` header are
+  enforced: OpenCode's client mirrors the directory into the query string only
+  for GET and HEAD requests, so `POST /session` and
+  `POST /session/:id/message` carry it in the header alone. The server resolves
+  `?directory=` → `x-opencode-directory` → process cwd. The header is rewritten
+  percent-encoded, matching OpenCode's client, and `/api/` routes use the
+  `location[directory]` query key, which is pinned the same way.
 - launches the web backend with OpenCode's ripgrep file search enabled instead
   of its native FFF indexer. OpenCode 1.18.x cannot initialize FFF when the
   workspace is the user's home directory and otherwise installs an empty

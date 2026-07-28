@@ -58,9 +58,10 @@
   The previous database is kept as a single rolling
   `opencode.db.prune-backup`
 - `OPENCODE_WEB_WRAPPER_BIN`, `OPENCODE_WEB_SECRET_FILE`,
-  `OPENCODE_WEB_LOGIN_TOKEN_FILE`, `NEURODESK_LLM_BASE_URL`: test overrides
-  for `opencode_web.py` (backend command, credential file, single-use login
-  token file, and key-validation endpoint)
+  `OPENCODE_WEB_LOGIN_TOKEN_FILE`, `OPENCODE_WEB_AGENTS_FILE`,
+  `NEURODESK_LLM_BASE_URL`: test overrides for `opencode_web.py` (backend
+  command, credential file, single-use login token file, per-session
+  `AGENTS.md` seed, and key-validation endpoint)
 - `OPENCODE_VERSION` (build argument): the OpenCode release installed into
   the image; defaults to the validated pin in the Dockerfile (currently
   `1.18.4`). Override to bump the pin, or set it to an empty value to
