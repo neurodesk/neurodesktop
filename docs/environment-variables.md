@@ -46,6 +46,17 @@
 - `OPENCODE_WEB_DESKTOP_STATE`: state file where the desktop "OpenCode Web"
   shortcut records its launcher's PID and dynamically allocated port;
   defaults to `~/.neurodesk/run/opencode_web_desktop.state`
+- `NEURODESKTOP_OPENCODE_PRUNE_SESSIONS`: set to `0` (or `false`/`no`/`off`)
+  to keep OpenCode sessions whose working directory has been deleted. By
+  default `jupyterlab_startup.sh` runs
+  `/opt/neurodesktop/opencode_prune_sessions.py --apply` once per container
+  start, which drops those sessions from
+  `~/.local/share/opencode/opencode.db` (OpenCode itself never prunes them, so
+  they otherwise stay on its Home page pointing at paths that no longer
+  exist). Sessions whose whole parent tree is missing are left alone, so a
+  volume that is not mounted yet is never mistaken for a deleted directory.
+  The previous database is kept as a single rolling
+  `opencode.db.prune-backup`
 - `OPENCODE_WEB_WRAPPER_BIN`, `OPENCODE_WEB_SECRET_FILE`,
   `OPENCODE_WEB_LOGIN_TOKEN_FILE`, `NEURODESK_LLM_BASE_URL`: test overrides
   for `opencode_web.py` (backend command, credential file, single-use login

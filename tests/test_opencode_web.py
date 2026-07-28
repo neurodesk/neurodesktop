@@ -286,22 +286,48 @@ def test_create_opencode_work_dir_uses_timestamp_and_avoids_collisions(tmp_path)
     assert second.is_dir()
 
 
-def test_create_opencode_work_dir_makes_parent_a_git_project(tmp_path):
-    """OpenCode Home must receive a workspace worktree instead of ``/``."""
+def _git_toplevel(directory):
+    """Return what OpenCode's worktree probe resolves ``directory`` to."""
+    return subprocess.run(
+        ["git", "-C", directory, "rev-parse", "--show-toplevel"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def test_create_opencode_work_dir_makes_the_launch_dir_a_git_project(tmp_path):
+    """The launch directory itself must be the Git worktree root.
+
+    OpenCode resolves a request's directory to the enclosing ``git rev-parse
+    --show-toplevel``. A worktree at the ``opencode-work`` parent would pull
+    every session up into the shared parent, away from the seeded AGENTS.md.
+    """
     home = tmp_path / "home"
     home.mkdir()
 
     work_dir = Path(ocw.create_opencode_work_dir(home, "20260721_203001"))
 
-    project_root = home / "opencode-work"
-    assert work_dir.parent == project_root
-    assert (project_root / ".git").is_dir()
-    assert subprocess.run(
-        ["git", "-C", project_root, "rev-parse", "--show-toplevel"],
+    assert work_dir.parent == home / "opencode-work"
+    assert (work_dir / ".git").is_dir()
+    assert _git_toplevel(work_dir) == str(work_dir)
+
+
+def test_create_opencode_work_dir_outranks_a_legacy_parent_repo(tmp_path):
+    """A pre-existing ``~/opencode-work/.git`` must not capture new launches."""
+    home = tmp_path / "home"
+    home.mkdir()
+    legacy_root = home / "opencode-work"
+    legacy_root.mkdir()
+    subprocess.run(
+        ["git", "init", "--quiet", str(legacy_root)],
         check=True,
         capture_output=True,
-        text=True,
-    ).stdout.strip() == str(project_root)
+    )
+
+    work_dir = Path(ocw.create_opencode_work_dir(home, "20260721_203001"))
+
+    assert _git_toplevel(work_dir) == str(work_dir)
 
 
 def test_force_directory_query_overrides_selected_directory():
@@ -468,6 +494,21 @@ def test_opencode_default_config_disables_sharing():
     assert config["autoupdate"] is False
 
 
+def test_opencode_default_config_pins_no_global_agents_md():
+    """Neurodesk guidance comes from the editable per-project AGENTS.md only.
+
+    A global ``instructions`` entry for the read-only /opt/AGENTS.md would put
+    a second, uneditable copy into every prompt, so a user's edits to the
+    AGENTS.md in their working directory could never take effect.
+    """
+    config_path = first_existing_path(
+        "/opt/jovyan_defaults/.config/opencode/opencode.json",
+        REPO_ROOT / "config/agents/opencode_config.json",
+    )
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "/opt/AGENTS.md" not in config.get("instructions", [])
+
+
 def test_desktop_launcher_script_and_entry():
     """The desktop script parses and the menu entry points at it."""
     script = first_existing_path(
@@ -580,6 +621,43 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def echo_directory(self, parsed):
+        # Mirror how OpenCode resolves a request directory: the query
+        # parameter first, then the x-opencode-directory header (which its
+        # client percent-encodes and only mirrors into the query for
+        # GET/HEAD), then the backend process cwd.
+        query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+        header = self.headers.get("x-opencode-directory", "")
+        directory = (
+            query.get("directory", [""])[0]
+            or query.get("location[directory]", [""])[0]
+            or (urllib.parse.unquote(header) if header else "")
+            or os.getcwd()
+        )
+        payload = json.dumps({"directory": directory}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_POST(self):
+        if self.headers.get("Authorization") != expected:
+            self.send_response(401)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        if length:
+            self.rfile.read(length)
+        parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path == "/neurodesk-echo-directory":
+            self.echo_directory(parsed)
+            return
+        self.send_response(404)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_GET(self):
         if self.headers.get("Authorization") != expected:
             self.send_response(401)
@@ -599,15 +677,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.flush()
             return
         if parsed.path == "/neurodesk-echo-directory":
-            query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
-            payload = json.dumps(
-                {"directory": query.get("directory", [""])[0]}
-            ).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+            self.echo_directory(parsed)
             return
         content_type, body = PAGES.get(parsed.path, ("text/plain", "fallback"))
         payload = body.encode()
@@ -886,6 +956,66 @@ def test_proxy_pins_session_directory_to_seeded_work_dir(launcher):
     )
     assert status == 200
     assert json.loads(body)["directory"] == work_dir
+
+
+def test_proxy_pins_the_directory_header_on_non_get_requests(launcher):
+    """A POST carrying only ``x-opencode-directory`` must still be pinned.
+
+    OpenCode's web client mirrors the directory into the query string only for
+    GET/HEAD; ``POST /session`` and ``POST /session/:id/message`` send it in
+    the header alone. Pinning just the query therefore left the two calls that
+    decide where a session lives and where its tools run free to point at any
+    directory the SPA held -- which is how sessions ended up writing to the
+    shared ``~/opencode-work`` parent instead of the seeded launch directory.
+    """
+    status, _headers = _complete_key_setup(launcher)
+    assert status == 303
+    _wait_for_proxied_root(launcher)
+
+    backend_env = json.loads(
+        (launcher["state"] / "env.json").read_text(encoding="utf-8")
+    )
+    work_dir = backend_env["cwd"]
+
+    status, _headers, body = _request(
+        launcher["port"],
+        "/neurodesk-echo-directory",
+        method="POST",
+        data=b"{}",
+        headers={
+            **launcher["auth"],
+            "Content-Type": "application/json",
+            "x-opencode-directory": urllib.parse.quote(
+                "/home/jovyan/opencode-work", safe=""
+            ),
+        },
+    )
+    assert status == 200
+    assert json.loads(body)["directory"] == work_dir
+
+
+def test_force_directory_header_pins_and_encodes_like_opencodes_client():
+    """The header is rewritten percent-encoded, as OpenCode's client sends it."""
+    forced = ocw.force_directory_header(
+        urllib.parse.quote("/home/jovyan/demo", safe=""), "/seed/work dir"
+    )
+    assert forced == "%2Fseed%2Fwork%20dir"
+    assert urllib.parse.unquote(forced) == "/seed/work dir"
+
+
+def test_force_directory_header_without_a_work_dir_is_a_no_op():
+    """Before the backend has a work dir the header passes through unchanged."""
+    assert ocw.force_directory_header("%2Fhome%2Fjovyan", "") == "%2Fhome%2Fjovyan"
+
+
+def test_force_directory_query_pins_the_bracketed_api_route_parameter():
+    """OpenCode's /api/ routes carry the directory as ``location[directory]``."""
+    forced = ocw.force_directory_query(
+        "location%5Bdirectory%5D=%2Fhome%2Fjovyan%2Fdemo&a=1", "/seed"
+    )
+    assert urllib.parse.parse_qsl(forced) == [
+        ("location[directory]", "/seed"), ("a", "1")
+    ]
 
 
 def test_requests_without_credentials_are_rejected(launcher):

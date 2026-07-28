@@ -107,18 +107,36 @@ opencode web --hostname 127.0.0.1 --port "${PORT}"    # serves UI + API
 ```
 
 Before starting that command, the web launcher creates a unique
-`~/opencode-work/YYYYMMDD_HHMMSS/` project and uses it as the wrapper's current
-directory. This gives the web UI a valid default project and reuses the
-terminal wrapper's existing behavior of copying `/opt/AGENTS.md` into a new
-working directory without overwriting an existing file. Same-second launches
-receive a numeric suffix.
+`~/opencode-work/YYYYMMDD_HHMMSS/` project, runs `git init` on that directory
+itself, and uses it as the wrapper's current directory. This gives the web UI a
+valid default project and reuses the terminal wrapper's existing behavior of
+copying `/opt/AGENTS.md` into a new working directory without overwriting an
+existing file. The Git root has to be the launch directory: OpenCode resolves a
+request's directory to the enclosing `git rev-parse --show-toplevel`, so a
+worktree at the `~/opencode-work` parent would run every session in the shared
+parent instead. Same-second launches receive a numeric suffix.
+
+That per-project copy is the single source of the Neurodesk guidance so users
+can edit it. `opencode_config.json` does not list `/opt/AGENTS.md` under
+`instructions`, and the wrapper removes that entry from configs written by
+earlier releases; instructions the user added themselves are kept.
 
 Because OpenCode's web API takes the session directory as a `?directory=` query
 parameter derived from the SPA's base64 URL segment, the proxy pins that
 parameter to the seeded launch directory on every forwarded request. Otherwise a
 directory the user opens or picks in the web UI would run the session outside the
-`AGENTS.md`-seeded project. Requests without the parameter already default to the
-backend cwd, which is the same seeded directory.
+`AGENTS.md`-seeded project.
+
+The proxy must pin the `x-opencode-directory` **header** as well. OpenCode's
+client copies the directory into the query string only for GET and HEAD
+requests; every other method sends it in that header alone, and the server
+resolves `?directory=` → `x-opencode-directory` → `process.cwd()`. Pinning only
+the query therefore left `POST /session` and `POST /session/:id/message`
+unpinned, so sessions were created in — and wrote their outputs to — whatever
+directory the SPA held. The header is rewritten percent-encoded to match
+OpenCode's own client; the `location[directory]` key used by `/api/` routes is
+pinned like `directory`. Requests carrying neither still default to the backend
+cwd, which is the same seeded directory.
 
 Security setup in the same script:
 

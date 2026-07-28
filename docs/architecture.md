@@ -16,7 +16,10 @@ The startup sequence follows this order:
    so the jupyter-lmod side panel refreshes the Jupyter server process
    `MODULEPATH` after lazy CVMFS startup.
 4. [`config/jupyter/jupyterlab_startup.sh`](../config/jupyter/jupyterlab_startup.sh)
-   starts JupyterLab and associated services.
+   starts JupyterLab and associated services. It also runs
+   [`opencode_prune_sessions.py`](../config/agents/opencode_prune_sessions.py)
+   once per container start (see
+   [OpenCode session pruning](#opencode-session-pruning)).
 
 ## Core Components
 
@@ -216,22 +219,42 @@ Server Proxy entry that runs
   selected in terminal OpenCode; an explicit environment override still wins.
   The `neurodesk` profile prefers llm.neurodesk.org's curated `neurodesk`
   alias model and falls back to the provider's first listed model.
-- initializes `~/opencode-work/` as the dedicated Git project, creates a unique
-  `YYYYMMDD_HHMMSS/` directory below it for every web backend launch, and runs
-  the terminal wrapper from that directory. The Git root is required because
-  OpenCode represents non-Git directories as its global project with worktree
-  `/`; its Home tab then opens that root worktree instead of the Neurodesktop
-  workspace. The wrapper copies `/opt/AGENTS.md` into the new launch directory
-  as `AGENTS.md`, and a numeric suffix prevents collisions between launches
-  occurring within the same second.
-- pins every proxied request's `?directory=` query parameter to that seeded
-  launch directory. OpenCode's web API takes the session/workspace directory as
-  a query parameter that the SPA derives from the base64 directory segment in
-  its URL, so a session the user opens or picks in the web UI would otherwise
-  run in an arbitrary directory that never received `AGENTS.md`. Rewriting the
-  parameter keeps every session, file, pty, and search operation inside the one
-  directory the wrapper seeded. Requests that omit `directory` already fall back
-  to the backend process cwd, which is that same seeded directory.
+- creates a unique `~/opencode-work/YYYYMMDD_HHMMSS/` directory for every web
+  backend launch, runs `git init` **on that launch directory itself**, and runs
+  the terminal wrapper from it. A Git root is required because OpenCode
+  represents non-Git directories as its global project with worktree `/`; its
+  Home tab then opens that root worktree instead of the Neurodesktop workspace.
+  The root must be the launch directory and not the `~/opencode-work` parent:
+  OpenCode resolves a request's directory to the enclosing `git rev-parse
+  --show-toplevel`, so a worktree at the parent silently pulls every session up
+  into the shared parent — outputs land one level too high and the launch
+  directory's seeded `AGENTS.md` is never in scope. Initializing the launch
+  directory also outranks a legacy `~/opencode-work/.git` left by an earlier
+  release, because the upward walk stops at the nearest `.git`. The wrapper
+  copies `/opt/AGENTS.md` into the new launch directory as `AGENTS.md`, and a
+  numeric suffix prevents collisions between launches occurring within the same
+  second. That copy is the **only** source of the Neurodesk guidance, so users
+  can edit it for their own project: the shipped `opencode.json` no longer
+  pins `/opt/AGENTS.md` into `instructions`, and the wrapper strips that entry
+  from configs written by earlier releases (user-added instructions survive).
+  A global entry would have layered a read-only second copy on top of every
+  prompt, so local edits could never take effect.
+- pins every proxied request's `?directory=` query parameter **and its
+  `x-opencode-directory` header** to that seeded launch directory. OpenCode's
+  web API takes the session/workspace directory as a query parameter that the
+  SPA derives from the base64 directory segment in its URL, so a session the
+  user opens or picks in the web UI would otherwise run in an arbitrary
+  directory that never received `AGENTS.md`. Both channels must be rewritten:
+  OpenCode's client mirrors the directory into the query string only for GET
+  and HEAD requests, so `POST /session` and `POST /session/:id/message` — the
+  calls that decide where a session lives and where its tools run — carry it in
+  the header alone. The server resolves `?directory=` → `x-opencode-directory`
+  → process cwd, so pinning only the query left those POSTs unpinned and
+  sessions ran in whatever directory the SPA held. The header is rewritten
+  percent-encoded, matching what OpenCode's own client sends. `/api/` routes
+  use the `location[directory]` query key, which is pinned the same way.
+  Requests that carry neither still fall back to the backend process cwd, which
+  is that same seeded directory.
 - launches the web backend with OpenCode's ripgrep file search enabled instead
   of its native FFF indexer. OpenCode 1.18.x cannot initialize FFF when the
   workspace is the user's home directory and otherwise installs an empty
@@ -289,6 +312,39 @@ right-hand session sidebar (context usage, LSP status) starts hidden and the
 full width goes to the conversation. OpenCode persists the `ctrl+x b` toggle
 under the same key, so the wrapper only writes it when absent and a user who
 re-enables the sidebar keeps that choice.
+
+### OpenCode session pruning
+
+OpenCode keeps session history in `~/.local/share/opencode/opencode.db`, not in
+the working directory, and never prunes it. Deleting a project directory
+therefore leaves its sessions on the Home page forever, pointing at paths that
+are gone — and opening one replays that dead directory back into the API,
+because the SPA encodes the session's stored directory into its URL and into
+the `x-opencode-directory` header.
+
+[`config/agents/opencode_prune_sessions.py`](../config/agents/opencode_prune_sessions.py)
+(installed as `/opt/neurodesktop/opencode_prune_sessions.py`) removes sessions
+whose working directory no longer exists.
+[`jupyterlab_startup.sh`](../config/jupyter/jupyterlab_startup.sh) runs it with
+`--apply` once per container start; run it by hand without `--apply` for a dry
+run. `NEURODESKTOP_OPENCODE_PRUNE_SESSIONS=0` disables it.
+
+Three details make the deletion safe and complete:
+
+- **A missing directory is not enough.** The parent must still exist, which
+  proves the filesystem is mounted and the directory really was removed. A
+  session under a volume that is not mounted yet keeps its whole subtree
+  missing and is left alone — startup ordering must never be able to destroy
+  live history.
+- **`PRAGMA foreign_keys` must be on.** SQLite leaves it off by default, so a
+  plain `DELETE FROM session` orphans every cascading table (`message`,
+  `todo`, `session_share`, `session_message`, `session_input`,
+  `session_context_epoch`, and `part` via `message`).
+- **`event` and `event_sequence` never cascade.** They key off the session id
+  but declare no foreign key, so they are swept explicitly.
+
+The pre-prune database is kept as a single rolling `opencode.db.prune-backup`
+so an unattended startup cleanup cannot grow the home directory without bound.
 
 ## Directory Structure
 

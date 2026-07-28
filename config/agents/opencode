@@ -967,6 +967,22 @@ config_path, default_path, selected_model = sys.argv[1:4]
 with open(config_path, "r", encoding="utf-8") as f:
     cfg = json.load(f)
 
+# The Neurodesk guidance is delivered as the AGENTS.md this wrapper copies into
+# the working directory, so users can edit it for their own project. Earlier
+# releases also pinned the read-only /opt/AGENTS.md into "instructions", which
+# put a second, uneditable copy into every prompt and overrode local edits.
+# Drop that legacy entry while keeping any instruction the user added.
+instructions = cfg.get("instructions")
+if isinstance(instructions, list):
+    kept = [
+        entry for entry in instructions
+        if not (isinstance(entry, str) and entry.strip() == "/opt/AGENTS.md")
+    ]
+    if kept:
+        cfg["instructions"] = kept
+    else:
+        cfg.pop("instructions", None)
+
 default_cfg = {}
 if os.path.exists(default_path):
     with open(default_path, "r", encoding="utf-8") as f:

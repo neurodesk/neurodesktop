@@ -757,6 +757,8 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     # rewriting) plus the desktop shortcut that opens it prefix-free.
     && install -m 0755 -o root -g users /tmp/agents/opencode_web.py /opt/neurodesktop/opencode_web.py \
     && install -m 0755 -o root -g users /tmp/agents/opencode_web_desktop.sh /opt/neurodesktop/opencode_web_desktop.sh \
+    # Startup cleanup: drop sessions whose working directory has been deleted.
+    && install -m 0755 -o root -g users /tmp/agents/opencode_prune_sessions.py /opt/neurodesktop/opencode_prune_sessions.py \
     && install -m 0644 /tmp/agents/opencode-web.desktop /usr/share/applications/opencode-web.desktop \
     # Anchored Notebook Intelligence patch (see patch_nbi.py): make the
     # settings panel fetch fresh capabilities on open instead of auto-saving

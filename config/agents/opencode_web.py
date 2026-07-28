@@ -20,12 +20,15 @@ behind Neurodesktop's proxy setup:
 4. Rewrites root-absolute URLs in HTML/CSS/JS responses against the
    X-Forwarded-Prefix header, because the upstream web UI assumes it is
    served from `/` and breaks behind the /opencode/ proxy prefix.
-5. Creates a unique ~/opencode-work/DATE_TIME project for each backend launch
-   and runs the terminal wrapper there, which seeds the project with the
+5. Creates a unique ~/opencode-work/DATE_TIME Git project for each backend
+   launch and runs the terminal wrapper there, which seeds the project with the
    standard /opt/AGENTS.md instructions. Every proxied request's
-   ``?directory=`` parameter is then pinned to that seeded directory, so
-   sessions the user opens or picks in the web UI still run inside the
-   AGENTS.md-seeded project instead of an arbitrary directory.
+   ``?directory=`` parameter *and* ``x-opencode-directory`` header are then
+   pinned to that seeded directory, so sessions the user opens or picks in the
+   web UI still run inside the AGENTS.md-seeded project instead of an
+   arbitrary directory. Both are required: OpenCode's client only puts the
+   directory in the query for GET/HEAD, so POSTs such as session creation and
+   message send carry it in the header alone.
 
 Environment overrides (mainly for tests):
   OPENCODE_WEB_WRAPPER_BIN   backend command (default /usr/local/sbin/opencode)
@@ -108,6 +111,11 @@ OPENCODE_STREAMING_SSE_HEADERS_EXPRESSION = (
 BASHRC_KEY_COMMENT = "# Neurodesk API key for OpenCode"
 STREAM_CHUNK_SIZE = 65536
 OPENCODE_WORK_DIR_PARENT = "opencode-work"
+# OpenCode carries the request directory in these query parameters (the
+# bracketed form is used by its /api/ routes) and, for every non-GET/HEAD
+# request, in this header instead.
+OPENCODE_DIRECTORY_QUERY_KEYS = ("directory", "location[directory]")
+OPENCODE_DIRECTORY_HEADER = "x-opencode-directory"
 OPENCODE_WORK_DIR_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
 OPENCODE_WEB_DEFAULT_MODEL_PROFILE = "neurodesk"
 
@@ -516,63 +524,104 @@ def rewrite_body(body, content_type, prefix):
 
 
 def create_opencode_work_dir(home_dir, timestamp=None):
-    """Create and return a unique directory in the OpenCode Git project."""
+    """Create a unique ~/opencode-work/DATE_TIME directory as its own Git repo.
+
+    The launch directory itself must be the Git worktree root. OpenCode
+    resolves a request's ``directory`` to a project by walking up for ``.git``
+    and running ``git rev-parse --show-toplevel``, then uses that worktree as
+    the session directory and tool cwd. When only the ``~/opencode-work``
+    parent was a repository, every launch directory below it resolved back up
+    to the parent, so sessions ran in the shared parent, wrote their outputs
+    there, and never saw the ``AGENTS.md`` seeded into the launch directory.
+
+    ``git init`` on the launch directory keeps it its own worktree even when a
+    legacy ``~/opencode-work/.git`` from an earlier release still exists: the
+    upward walk stops at the nearest ``.git``.
+    """
     parent = os.path.join(os.fspath(home_dir), OPENCODE_WORK_DIR_PARENT)
     os.makedirs(parent, mode=0o700, exist_ok=True)
-    git_dir = os.path.join(parent, ".git")
-    if not os.path.exists(git_dir):
-        try:
-            subprocess.run(
-                ["git", "init", "--quiet", parent],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-        except (OSError, subprocess.CalledProcessError) as exc:
-            detail = getattr(exc, "stderr", "") or str(exc)
-            raise OSError(
-                f"could not initialize OpenCode project in {parent}: "
-                f"{detail.strip()}"
-            ) from exc
     timestamp = timestamp or time.strftime(OPENCODE_WORK_DIR_TIMESTAMP_FORMAT)
+    work_dir = None
     for sequence in range(1, 1001):
         name = timestamp if sequence == 1 else f"{timestamp}_{sequence}"
         candidate = os.path.join(parent, name)
         try:
             os.mkdir(candidate, mode=0o700)
-            return candidate
+            work_dir = candidate
+            break
         except FileExistsError:
             continue
-    raise OSError(f"could not create a unique OpenCode work directory in {parent}")
+    if work_dir is None:
+        raise OSError(
+            f"could not create a unique OpenCode work directory in {parent}"
+        )
+
+    try:
+        subprocess.run(
+            ["git", "init", "--quiet", work_dir],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        detail = getattr(exc, "stderr", "") or str(exc)
+        raise OSError(
+            f"could not initialize OpenCode project in {work_dir}: "
+            f"{detail.strip()}"
+        ) from exc
+    return work_dir
 
 
 def force_directory_query(query, directory):
-    """Pin a backend request's ``directory`` query parameter to ``directory``.
+    """Pin a backend request's directory query parameters to ``directory``.
 
     OpenCode's web API takes the session/workspace directory as a
-    ``?directory=`` query parameter on every request; the browser derives it
-    from the base64 directory segment in the SPA URL, so a user who opens or
-    picks any other directory would run the session there. Rewriting the
-    parameter to the launcher's seeded ~/opencode-work/DATE_TIME directory
-    keeps every session, file, pty, and search operation inside the one
-    directory the terminal wrapper seeded with /opt/AGENTS.md, no matter which
-    directory the UI selects.
+    ``?directory=`` query parameter (``?location[directory]=`` on its /api/
+    routes); the browser derives it from the base64 directory segment in the
+    SPA URL, so a user who opens or picks any other directory would run the
+    session there. Rewriting the parameter to the launcher's seeded
+    ~/opencode-work/DATE_TIME directory keeps every session, file, pty, and
+    search operation inside the one directory the terminal wrapper seeded with
+    /opt/AGENTS.md, no matter which directory the UI selects.
 
-    Requests that carry no ``directory`` parameter are returned unchanged: the
-    backend then falls back to its process cwd, which is that same seeded
-    directory. Passing an empty ``directory`` leaves the query untouched.
+    Requests that carry no directory parameter are returned unchanged: the
+    backend then falls back to the ``x-opencode-directory`` header (pinned by
+    ``force_directory_header``) and finally to its process cwd, which is that
+    same seeded directory. Passing an empty ``directory`` leaves the query
+    untouched.
     """
-    if not directory or "directory=" not in query:
+    if not directory or not query:
         return query
     pairs = urllib.parse.parse_qsl(query, keep_blank_values=True)
-    if not any(key == "directory" for key, _ in pairs):
+    if not any(key in OPENCODE_DIRECTORY_QUERY_KEYS for key, _ in pairs):
         return query
     forced = [
-        (key, directory if key == "directory" else value)
+        (key, directory if key in OPENCODE_DIRECTORY_QUERY_KEYS else value)
         for key, value in pairs
     ]
     return urllib.parse.urlencode(forced)
+
+
+def force_directory_header(value, directory):
+    """Pin the ``x-opencode-directory`` request header to ``directory``.
+
+    The query parameter alone does not pin anything that matters. OpenCode's
+    web client only mirrors its directory into the query string for GET and
+    HEAD requests; for every other method it travels *solely* in the
+    ``x-opencode-directory`` header, and the server resolves the request
+    directory as ``?directory=`` -> that header -> ``process.cwd()``. So
+    ``POST /session`` and ``POST /session/:id/message`` -- the calls that
+    decide where a session lives and where its tools run -- bypassed the query
+    rewrite entirely and ran in whatever directory the SPA happened to hold.
+
+    The value is percent-encoded because that is what OpenCode's own client
+    sends (``encodeURIComponent(directory)``) and what its header-reading path
+    decodes. An empty ``directory`` leaves the header untouched.
+    """
+    if not directory:
+        return value
+    return urllib.parse.quote(directory, safe="")
 
 
 class OpencodeBackend:
@@ -1061,6 +1110,8 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
                 )
                 if not value:
                     continue
+            if lowered == OPENCODE_DIRECTORY_HEADER:
+                value = force_directory_header(value, backend.work_dir)
             headers[name] = value
         headers["Host"] = f"127.0.0.1:{backend.port}"
         credentials = base64.b64encode(

@@ -329,6 +329,61 @@ def test_opencode_shows_litellm_models_after_api_key_creation(tmp_path):
     )
     assert list(neurodesk_provider["models"]) == ["model-alpha", "openai/gpt-4.1-mini"]
 
+def test_opencode_drops_the_legacy_global_agents_md_instruction(tmp_path):
+    """An existing config keeps only the editable per-project AGENTS.md.
+
+    Earlier releases wrote "instructions": ["/opt/AGENTS.md"] into
+    ~/.config/opencode/opencode.json. That read-only copy shadowed the
+    AGENTS.md the wrapper seeds into the working directory, so a user editing
+    it saw no effect. The wrapper must strip that entry from configs already
+    on disk while preserving instructions the user added themselves.
+    """
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    config_path = home_dir / ".config" / "opencode" / "opencode.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps({
+            "model": "neurodesk/gpt-oss",
+            "instructions": ["/opt/AGENTS.md", "./docs/my-rules.md"],
+            "provider": {},
+        }),
+        encoding="utf-8",
+    )
+    env["NEURODESK_API_KEY"] = "neurodesk-test-key"
+    env["OPENCODE_MODEL_PROFILE"] = "neurodesk"
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)], "n\n", cwd=tmp_path, env=env
+    )
+
+    assert returncode == 0, output
+    user_config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert user_config["instructions"] == ["./docs/my-rules.md"]
+
+def test_opencode_removes_an_instructions_key_left_empty(tmp_path):
+    """Stripping the only entry drops the key instead of leaving an empty list."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    config_path = home_dir / ".config" / "opencode" / "opencode.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps({
+            "model": "neurodesk/gpt-oss",
+            "instructions": ["/opt/AGENTS.md"],
+            "provider": {},
+        }),
+        encoding="utf-8",
+    )
+    env["NEURODESK_API_KEY"] = "neurodesk-test-key"
+    env["OPENCODE_MODEL_PROFILE"] = "neurodesk"
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)], "n\n", cwd=tmp_path, env=env
+    )
+
+    assert returncode == 0, output
+    user_config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "instructions" not in user_config
+
 def test_opencode_neurodesk_profile_prefers_the_curated_alias_model(tmp_path):
     """OPENCODE_MODEL_PROFILE=neurodesk must pick the "neurodesk" alias model.
 
