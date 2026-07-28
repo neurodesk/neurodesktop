@@ -6,12 +6,16 @@
 OPENCODE_CONFIG_DIR="${HOME}/.config/opencode"
 OPENCODE_CONFIG_FILE="${OPENCODE_CONFIG_DIR}/opencode.json"
 OPENCODE_DEFAULT_CONFIG_FILE="/opt/jovyan_defaults/.config/opencode/opencode.json"
+OPENCODE_STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/opencode"
+OPENCODE_TUI_KV_FILE="${OPENCODE_STATE_DIR}/kv.json"
 
 JETSTREAM_BASE_URL="https://llm.jetstream-cloud.org/v1"
 JETSTREAM_MODEL_ID="gpt-oss-120b"
 NEURODESK_BASE_URL="https://llm.neurodesk.org/openai"
 NEURODESK_BASE_URL="${NEURODESK_BASE_URL%/}"
-NEURODESK_DEFAULT_MODEL_ID="gpt-oss"
+# llm.neurodesk.org's curated default alias. Preferred when the "neurodesk"
+# profile is requested, and assumed to exist when the model listing is hidden.
+NEURODESK_DEFAULT_MODEL_ID="neurodesk"
 BRAIN_RESEARCHER_MCP_URL="https://brain-researcher.com/mcp"
 BRAIN_RESEARCHER_SIGNUP_URL="https://brain-researcher.com/settings"
 NBI_SETUP_SCRIPT="${NBI_SETUP_SCRIPT:-/opt/neurodesktop/nbi_setup.sh}"
@@ -55,6 +59,44 @@ ensure_opencode_config_file() {
     if [ ! -f "${OPENCODE_CONFIG_FILE}" ] && [ -f "${OPENCODE_DEFAULT_CONFIG_FILE}" ]; then
         cp "${OPENCODE_DEFAULT_CONFIG_FILE}" "${OPENCODE_CONFIG_FILE}"
     fi
+}
+
+# Hide the TUI sidebar until the user asks for it: it costs 42 columns on
+# wide terminals. OpenCode persists the ctrl+x b toggle under the "sidebar"
+# key of kv.json, so only seed the key when it is absent and never touch a
+# choice the user has already made.
+ensure_opencode_tui_defaults() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        return 0
+    fi
+    mkdir -p "${OPENCODE_STATE_DIR}" 2>/dev/null || return 0
+    python3 - "${OPENCODE_TUI_KV_FILE}" <<'PY'
+import json
+import os
+import sys
+
+kv_path = sys.argv[1]
+
+kv = {}
+try:
+    with open(kv_path, "r", encoding="utf-8") as f:
+        kv = json.load(f)
+except (OSError, json.JSONDecodeError):
+    kv = {}
+
+if not isinstance(kv, dict):
+    kv = {}
+
+if "sidebar" in kv:
+    sys.exit(0)
+
+kv["sidebar"] = "hide"
+
+tmp_path = f"{kv_path}.tmp"
+with open(tmp_path, "w", encoding="utf-8") as f:
+    json.dump(kv, f)
+os.replace(tmp_path, kv_path)
+PY
 }
 
 array_contains() {
@@ -925,6 +967,22 @@ config_path, default_path, selected_model = sys.argv[1:4]
 with open(config_path, "r", encoding="utf-8") as f:
     cfg = json.load(f)
 
+# The Neurodesk guidance is delivered as the AGENTS.md this wrapper copies into
+# the working directory, so users can edit it for their own project. Earlier
+# releases also pinned the read-only /opt/AGENTS.md into "instructions", which
+# put a second, uneditable copy into every prompt and overrode local edits.
+# Drop that legacy entry while keeping any instruction the user added.
+instructions = cfg.get("instructions")
+if isinstance(instructions, list):
+    kept = [
+        entry for entry in instructions
+        if not (isinstance(entry, str) and entry.strip() == "/opt/AGENTS.md")
+    ]
+    if kept:
+        cfg["instructions"] = kept
+    else:
+        cfg.pop("instructions", None)
+
 default_cfg = {}
 if os.path.exists(default_path):
     with open(default_path, "r", encoding="utf-8") as f:
@@ -1137,6 +1195,16 @@ resolve_requested_model_override() {
 
     case "${requested}" in
         neurodesk|jetstream|ollama)
+            # Prefer the provider's curated default alias over the listing
+            # order: llm.neurodesk.org publishes a "neurodesk" model that is
+            # its recommended default, but /models returns it last.
+            if [ "${requested}" = "neurodesk" ] \
+                && array_contains "neurodesk/${NEURODESK_DEFAULT_MODEL_ID}" \
+                    "${WORKING_MODELS[@]}"; then
+                SELECTED_MODEL="neurodesk/${NEURODESK_DEFAULT_MODEL_ID}"
+                echo "OPENCODE_MODEL_PROFILE=${requested} requested; using ${SELECTED_MODEL}."
+                return 0
+            fi
             for model_ref in "${WORKING_MODELS[@]}"; do
                 case "${model_ref}" in
                     "${requested}/"*)
@@ -1574,6 +1642,7 @@ ensure_opencode_model_selection
 prompt_brain_researcher_mcp_setup
 apply_brain_researcher_mcp_to_opencode_config
 sync_notebook_intelligence_config
+ensure_opencode_tui_defaults
 
 if [ -n "${BR_MCP_TOKEN:-}" ]; then
     echo "Brain Researcher MCP server: ACTIVE (using BR_MCP_TOKEN from env/~/.bashrc)"

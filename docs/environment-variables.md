@@ -32,9 +32,50 @@
   automatically for the separate RDP and VNC desktop entries
 - `NEURODESKTOP_VERSION`: version tag set by CI
 - `OPENCODE_MODEL_PROFILE`: set to `ollama`, `neurodesk`, `jetstream`, or
-  `provider/model` to skip the interactive OpenCode model picker
+  `provider/model` to skip the interactive OpenCode model picker. The
+  `neurodesk` profile prefers llm.neurodesk.org's curated `neurodesk` alias
+  model when it is available and otherwise uses the first listed model
 - `OPENCODE_STARTUP_VERBOSE`: set to `1` to show detailed OpenCode provider
   probe output during startup
+- `OPENCODE_WEB_STARTUP_TIMEOUT`: seconds `opencode_web.py` (the "Scigent.ai"
+  launcher tile) waits for the `opencode web` backend to become ready;
+  defaults to `180`
+- `OPENCODE_DISABLE_FFF`: forced to `1` for the OpenCode Web child process so
+  its Add Project dialog can search below the `/home/jovyan` startup directory.
+  The terminal OpenCode workflow is unaffected
+- `OPENCODE_WEB_DESKTOP_STATE`: state file where the desktop "OpenCode Web"
+  shortcut records its launcher's PID and dynamically allocated port;
+  defaults to `~/.neurodesk/run/opencode_web_desktop.state`
+- `NEURODESKTOP_OPENCODE_PRUNE_SESSIONS`: set to `0` (or `false`/`no`/`off`)
+  to keep OpenCode sessions whose working directory has been deleted. By
+  default `jupyterlab_startup.sh` runs
+  `/opt/neurodesktop/opencode_prune_sessions.py --apply` once per container
+  start, which drops those sessions from
+  `~/.local/share/opencode/opencode.db` (OpenCode itself never prunes them, so
+  they otherwise stay on its Home page pointing at paths that no longer
+  exist). Sessions whose whole parent tree is missing are left alone, so a
+  volume that is not mounted yet is never mistaken for a deleted directory.
+  The previous database is kept as a single rolling
+  `opencode.db.prune-backup`
+- `OPENCODE_WEB_NIIVUE_BUNDLE`: NiiVue bundle the OpenCode Web file previewer
+  loads for NIfTI/MGZ volumes; defaults to
+  `/opt/neurodesktop/vendor/niivue.js` (vendored at build time by
+  `NIIVUE_VERSION`). When the file is missing, image previews still work and
+  volume previews report that the viewer is unavailable
+- `OPENCODE_WEB_PREVIEW_MAX_BYTES`: largest file the OpenCode Web preview
+  endpoint will stream to the browser; defaults to `536870912` (512 MiB)
+- `OPENCODE_WEB_WRAPPER_BIN`, `OPENCODE_WEB_SECRET_FILE`,
+  `OPENCODE_WEB_LOGIN_TOKEN_FILE`, `OPENCODE_WEB_AGENTS_FILE`,
+  `NEURODESK_LLM_BASE_URL`: test overrides for `opencode_web.py` (backend
+  command, credential file, single-use login token file, per-session
+  `AGENTS.md` seed, and key-validation endpoint)
+- `OPENCODE_VERSION` (build argument): the OpenCode release installed into
+  the image; defaults to the validated pin in the Dockerfile (currently
+  `1.18.4`). Override to bump the pin, or set it to an empty value to
+  install the latest release
+- `NIIVUE_VERSION` (build argument): the `@niivue/niivue` release vendored to
+  `/opt/neurodesktop/vendor/niivue.js` for the OpenCode Web volume
+  previews; defaults to the pin in the Dockerfile (currently `0.69.0`)
 - `NEURODESK_API_KEY`: API key for `https://llm.neurodesk.org`. Shared by
   OpenCode and by the Notebook Intelligence JupyterLab plugin. OpenCode
   persists it to `~/.bashrc` on first setup, and `nbi_setup.sh` injects it
