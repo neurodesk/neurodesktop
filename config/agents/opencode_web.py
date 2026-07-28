@@ -27,6 +27,11 @@ behind Neurodesktop's proxy setup:
    parameter and ``x-opencode-directory`` header are enforced because
    OpenCode's client only puts the directory in the query for GET/HEAD; POSTs
    such as session creation and message send carry it in the header alone.
+6. Previews the files an agent produced. The upstream changed-files list
+   renders every non-text file as an unreadable binary diff, so a small
+   injected script turns a click on a screenshot or a NIfTI volume into an
+   overlay viewer, served from this proxy's own file endpoint and rendered
+   with the NiiVue bundle vendored into the image.
 
 Environment overrides (mainly for tests):
   OPENCODE_WEB_WRAPPER_BIN   backend command (default /usr/local/sbin/opencode)
@@ -36,11 +41,15 @@ Environment overrides (mainly for tests):
                              (default https://llm.neurodesk.org/openai)
   OPENCODE_WEB_STARTUP_TIMEOUT  seconds to wait for the backend (default 180)
   OPENCODE_WEB_AGENTS_FILE    session instruction seed (default /opt/AGENTS.md)
+  OPENCODE_WEB_NIIVUE_BUNDLE  NiiVue viewer bundle for volume previews
+                              (default /opt/neurodesktop/vendor/niivue.js)
+  OPENCODE_WEB_PREVIEW_MAX_BYTES  largest previewable file (default 512 MiB)
 """
 
 import argparse
 import base64
 import collections
+import hashlib
 import hmac
 import html
 import http.client
@@ -67,6 +76,10 @@ BACKEND_USERNAME = "opencode"
 AUTH_COOKIE_NAME = "neurodesk_opencode_auth"
 SETUP_PATH = "/neurodesk-setup"
 PREFIX_BOOTSTRAP_PATH = "/neurodesk-prefix.js"
+PREVIEW_BOOTSTRAP_PATH = "/neurodesk-preview.js"
+NIIVUE_ASSET_PATH = "/neurodesk-niivue.js"
+FILE_PREVIEW_PATH = "/neurodesk-file"
+DEFAULT_NIIVUE_BUNDLE = "/opt/neurodesktop/vendor/niivue.js"
 OPENCODE_DEFAULT_SERVER_STORAGE_KEY = (
     "opencode.settings.dat:defaultServerUrl"
 )
@@ -140,6 +153,37 @@ REWRITABLE_CONTENT_TYPES = (
     "application/javascript",
     "application/x-javascript",
 )
+
+# File previews. Only these extensions are served by the preview endpoint, so
+# it can never be used as a general file-read API for the session project.
+PREVIEW_IMAGE_CONTENT_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    # Rendered inside <img>, where scripts embedded in an SVG never execute.
+    ".svg": "image/svg+xml",
+}
+# Volume formats NiiVue reads. Longest suffixes first so ".nii.gz" wins over
+# a bare ".gz"-style match.
+PREVIEW_VOLUME_SUFFIXES = (
+    ".nii.gz",
+    ".nii",
+    ".mgz",
+    ".mgh",
+    ".mif.gz",
+    ".mif",
+    ".nrrd",
+    ".nhdr",
+    ".mha",
+    ".mhd",
+)
+DEFAULT_PREVIEW_MAX_BYTES = 512 * 1024 * 1024
+# Bounds for the basename fallback search (see find_preview_file).
+PREVIEW_SEARCH_MAX_ENTRIES = 20000
+PREVIEW_SEARCH_SKIP_DIRS = {".git", ".opencode", "node_modules", "__pycache__"}
 
 
 def sanitize_header_value(value):
@@ -442,14 +486,507 @@ def prefix_bootstrap_script(prefix):
 """
 
 
+# --- File previews -------------------------------------------------------------
+
+
+def niivue_bundle_path():
+    """Return the vendored NiiVue bundle path (env-overridable for tests)."""
+    return os.environ.get("OPENCODE_WEB_NIIVUE_BUNDLE", DEFAULT_NIIVUE_BUNDLE)
+
+
+_NIIVUE_VERSION_CACHE = {}
+_NIIVUE_VERSION_LOCK = threading.Lock()
+
+
+def niivue_bundle_version(path=None):
+    """Return a content token for the vendored bundle ("" when missing).
+
+    The bundle is served ``immutable`` for a year, so its URL has to change
+    when the image ships a different NiiVue. Hashing the bytes (rather than
+    stamping the pinned version) also covers a rebuilt or hand-patched
+    bundle. The digest is computed once per file identity and reused; the
+    previewer that carries the token is never cached.
+    """
+    path = path or niivue_bundle_path()
+    try:
+        info = os.stat(path)
+    except OSError:
+        return ""
+    key = (path, info.st_size, info.st_mtime_ns)
+    with _NIIVUE_VERSION_LOCK:
+        cached = _NIIVUE_VERSION_CACHE.get(key)
+    if cached:
+        return cached
+
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(STREAM_CHUNK_SIZE), b""):
+                digest.update(chunk)
+    except OSError:
+        return ""
+    token = digest.hexdigest()[:16]
+    with _NIIVUE_VERSION_LOCK:
+        # Only one bundle identity is ever live; never grow this cache.
+        _NIIVUE_VERSION_CACHE.clear()
+        _NIIVUE_VERSION_CACHE[key] = token
+    return token
+
+
+def preview_size_limit():
+    """Return the largest file the preview endpoint will serve."""
+    try:
+        limit = int(os.environ.get("OPENCODE_WEB_PREVIEW_MAX_BYTES", "") or 0)
+    except ValueError:
+        limit = 0
+    return limit if limit > 0 else DEFAULT_PREVIEW_MAX_BYTES
+
+
+def preview_kind(name):
+    """Classify a file name as ``image``, ``volume``, or unsupported ("")."""
+    lowered = os.path.basename(str(name or "")).lower()
+    if any(lowered.endswith(suffix) for suffix in PREVIEW_VOLUME_SUFFIXES):
+        return "volume"
+    _root, extension = os.path.splitext(lowered)
+    if extension in PREVIEW_IMAGE_CONTENT_TYPES:
+        return "image"
+    return ""
+
+
+def preview_content_type(name):
+    """Return the Content-Type a previewable file must be served with.
+
+    Compressed volumes are labelled application/gzip rather than being sent
+    with Content-Encoding: gzip: NiiVue decompresses .nii.gz itself, and a
+    transport-level encoding would hand it an already-inflated stream whose
+    name still promises gzip.
+    """
+    lowered = os.path.basename(str(name or "")).lower()
+    if preview_kind(lowered) == "volume":
+        return "application/gzip" if lowered.endswith(".gz") else (
+            "application/octet-stream"
+        )
+    _root, extension = os.path.splitext(lowered)
+    return PREVIEW_IMAGE_CONTENT_TYPES.get(extension, "application/octet-stream")
+
+
+def _is_inside(root, candidate):
+    """Return whether a resolved path is ``root`` itself or below it."""
+    return candidate == root or candidate.startswith(root + os.sep)
+
+
+def find_preview_file(root, rel_path, max_entries=PREVIEW_SEARCH_MAX_ENTRIES):
+    """Find the unique file under ``root`` whose path ends with ``rel_path``.
+
+    The changed-files list splits a path across DOM nodes, so the injected
+    previewer often recovers only a suffix of it (frequently just the
+    basename). Searching keeps previews working without trusting the value:
+    the walk starts at the session project, never follows symlinks, matches
+    only on a path-separator boundary, and refuses an ambiguous result.
+    """
+    target = "/" + rel_path.strip("/")
+    match = ""
+    seen = 0
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = [
+            name for name in dirnames if name not in PREVIEW_SEARCH_SKIP_DIRS
+        ]
+        # Directories count too, so a wide, mostly empty tree is bounded as
+        # tightly as a deep one.
+        seen += len(dirnames)
+        if seen > max_entries:
+            return ""
+        for filename in filenames:
+            seen += 1
+            if seen > max_entries:
+                return ""
+            full = os.path.join(dirpath, filename)
+            if not ("/" + os.path.relpath(full, root)).endswith(target):
+                continue
+            if match:
+                return ""  # ambiguous: refuse to guess which file was meant
+            match = full
+    if not match:
+        return ""
+    resolved = os.path.realpath(match)
+    if _is_inside(root, resolved) and os.path.isfile(resolved):
+        return resolved
+    return ""
+
+
+def resolve_preview_file(work_dir, rel_path):
+    """Resolve a UI-supplied path to a previewable file inside ``work_dir``.
+
+    Returns "" for anything that is not a supported preview type, escapes the
+    session project (``..`` segments, absolute paths, symlinks out), or does
+    not resolve to exactly one existing file.
+    """
+    if not work_dir or not rel_path or "\x00" in rel_path:
+        return ""
+    rel_path = rel_path.replace("\\", "/").strip("/")
+    if not rel_path or not preview_kind(rel_path):
+        return ""
+    root = os.path.realpath(os.fspath(work_dir))
+    if not os.path.isdir(root):
+        return ""
+    candidate = os.path.realpath(os.path.join(root, rel_path))
+    if _is_inside(root, candidate) and os.path.isfile(candidate):
+        return candidate
+    return find_preview_file(root, rel_path)
+
+
+# The previewer never inserts nodes into OpenCode's own DOM: it listens for
+# clicks in the capture phase and renders its overlay under <body>. That keeps
+# it independent of the minified markup, which changes with every upstream
+# release, and makes a failed hook cost only the preview - never the UI.
+PREVIEW_BOOTSTRAP_TEMPLATE = """(() => {
+  "use strict";
+  const CONFIG = __NEURODESK_PREVIEW_CONFIG__;
+  const OVERLAY_ID = "neurodesk-preview-overlay";
+  const IMAGE_RE = /\\.(?:png|jpe?g|gif|webp|bmp|svg)$/i;
+  const VOLUME_RE =
+    /\\.(?:nii(?:\\.gz)?|mgz|mgh|mif(?:\\.gz)?|nrrd|nhdr|mha|mhd)$/i;
+  // A previewable label is a bare path token: rows that also carry diff
+  // counts, prose, or code never match.
+  const TOKEN_RE = /^[A-Za-z0-9._@+~/-]+$/;
+  const PATH_CHAR_RE = /[A-Za-z0-9._@+~/-]/;
+
+  const kindOf = (name) =>
+    IMAGE_RE.test(name) ? "image" : VOLUME_RE.test(name) ? "volume" : "";
+
+  // OpenCode's client sends the active project directory on every backend
+  // call. Observing it costs nothing and gives the preview endpoint the same
+  // directory context the session itself runs in; the server still validates
+  // it against ~/opencode-work before reading anything.
+  let lastDirectory = "";
+  const nativeFetch = window.fetch;
+  if (typeof nativeFetch === "function") {
+    window.fetch = function (input, init) {
+      try {
+        const source =
+          (init && init.headers) || (input && input.headers) || undefined;
+        const directory = new Headers(source).get("x-opencode-directory");
+        if (directory) {
+          lastDirectory = decodeURIComponent(directory);
+        } else {
+          const url = new URL(
+            typeof input === "string" ? input : input.url,
+            location.href
+          );
+          const fromQuery =
+            url.searchParams.get("directory") ||
+            url.searchParams.get("location[directory]");
+          if (fromQuery) lastDirectory = fromQuery;
+        }
+      } catch (_error) {
+        // Never let preview bookkeeping break an OpenCode request.
+      }
+      return nativeFetch.apply(this, arguments);
+    };
+  }
+
+  const sessionId = () => {
+    const match = /ses_[A-Za-z0-9_-]+/.exec(location.pathname);
+    return match ? match[0] : "";
+  };
+
+  const fileUrl = (relPath) => {
+    // Path-style so the URL still ends in the real extension: viewers that
+    // sniff the type from the URL get the answer the file name gives.
+    const encoded = relPath
+      .split("/")
+      .filter(Boolean)
+      .map(encodeURIComponent)
+      .join("/");
+    const params = new URLSearchParams();
+    const session = sessionId();
+    if (session) params.set("session", session);
+    if (lastDirectory) params.set("dir", lastDirectory);
+    const query = params.toString();
+    return (
+      CONFIG.prefix + CONFIG.filePath + "/" + encoded +
+      (query ? "?" + query : "")
+    );
+  };
+
+  // Cache-busted: the bundle is served immutable, so a NIIVUE_VERSION bump
+  // has to reach browsers through a different URL.
+  const niivueUrl = () =>
+    CONFIG.prefix + CONFIG.niivuePath +
+    (CONFIG.niivueVersion ? "?v=" + CONFIG.niivueVersion : "");
+
+  const relativePathFor = (element, name) => {
+    // The directory prefix and the file name are separate nodes; read the
+    // row's text backwards from the name to recover as much of the path as
+    // the markup preserved. The server resolves what is left.
+    const row =
+      (element.closest && element.closest("a,li,tr,div,section")) || element;
+    const text = row.textContent || "";
+    const end = text.lastIndexOf(name);
+    if (end < 0) return name;
+    let start = end;
+    while (start > 0 && PATH_CHAR_RE.test(text.charAt(start - 1))) start -= 1;
+    return text.slice(start, end + name.length);
+  };
+
+  const labelOf = (element) => {
+    if (!element || !element.textContent) return "";
+    const text = element.textContent.trim();
+    if (!text || text.length > 512 || !TOKEN_RE.test(text)) return "";
+    return kindOf(text) ? text : "";
+  };
+
+  // Places where a file name is an input value rather than a result: the
+  // prompt box, the file-mention autocomplete, and any listbox option. A
+  // click there belongs to OpenCode.
+  const INTERACTIVE = "input,textarea,[contenteditable],[role=combobox]," +
+    "[role=listbox],[role=option],[role=menu],[role=menuitem]";
+
+  const previewTargetFrom = (node) => {
+    let element = node instanceof Element ? node : node && node.parentElement;
+    if (!element || !element.closest) return null;
+    if (element.closest("#" + OVERLAY_ID) || element.closest(INTERACTIVE)) {
+      return null;
+    }
+    const direct = labelOf(element);
+    if (direct) {
+      return {
+        element,
+        name: direct,
+        path: relativePathFor(element, direct),
+        kind: kindOf(direct),
+      };
+    }
+    // Clicking anywhere on a row still previews, as long as the row names
+    // exactly one previewable file.
+    for (let depth = 0; depth < 3 && element; depth += 1) {
+      const matches = [];
+      element.querySelectorAll("*").forEach((child) => {
+        if (child.children.length === 0 && labelOf(child)) matches.push(child);
+      });
+      if (matches.length === 1) {
+        const name = labelOf(matches[0]);
+        return {
+          element: matches[0],
+          name,
+          path: relativePathFor(matches[0], name),
+          kind: kindOf(name),
+        };
+      }
+      if (matches.length > 1) return null;
+      element = element.parentElement;
+    }
+    return null;
+  };
+
+  const STYLE = `
+#${OVERLAY_ID} { position: fixed; inset: 0; z-index: 2147483000;
+  background: rgba(0,0,0,.82); display: flex; flex-direction: column;
+  font: 13px/1.5 system-ui, sans-serif; color: #e6e6e6; }
+#${OVERLAY_ID} header { display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; background: #16161a; border-bottom: 1px solid #2a2a30; }
+#${OVERLAY_ID} .neurodesk-preview-name { flex: 1; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace,
+  monospace; }
+#${OVERLAY_ID} button { background: #2a2a30; color: inherit; border: 0;
+  border-radius: 6px; padding: 6px 12px; cursor: pointer; font: inherit; }
+#${OVERLAY_ID} button:hover { background: #3a3a44; }
+#${OVERLAY_ID} .neurodesk-preview-body { flex: 1; display: flex;
+  align-items: center; justify-content: center; overflow: auto; padding: 16px; }
+#${OVERLAY_ID} img { max-width: 100%; max-height: 100%;
+  background: #fff; box-shadow: 0 0 0 1px #2a2a30; }
+#${OVERLAY_ID} canvas { width: 100%; height: 100%; }
+#${OVERLAY_ID} .neurodesk-preview-canvas-wrap { width: 100%; height: 100%; }
+#${OVERLAY_ID} .neurodesk-preview-message { max-width: 60ch; text-align: center;
+  color: #b9b9c0; }
+`;
+
+  const ensureStyle = () => {
+    if (document.getElementById("neurodesk-preview-style")) return;
+    const style = document.createElement("style");
+    style.id = "neurodesk-preview-style";
+    style.textContent = STYLE;
+    document.head.appendChild(style);
+  };
+
+  let closeCurrent = null;
+
+  const openPreview = (relPath, kind) => {
+    ensureStyle();
+    if (closeCurrent) closeCurrent();
+
+    const overlay = document.createElement("div");
+    overlay.id = OVERLAY_ID;
+    const header = document.createElement("header");
+    const name = document.createElement("span");
+    name.className = "neurodesk-preview-name";
+    name.textContent = relPath;
+    const close = document.createElement("button");
+    close.type = "button";
+    close.textContent = "Close";
+    header.appendChild(name);
+    header.appendChild(close);
+    const body = document.createElement("div");
+    body.className = "neurodesk-preview-body";
+    overlay.appendChild(header);
+    overlay.appendChild(body);
+
+    const message = (text) => {
+      body.textContent = "";
+      const paragraph = document.createElement("p");
+      paragraph.className = "neurodesk-preview-message";
+      paragraph.textContent = text;
+      body.appendChild(paragraph);
+    };
+
+    // NiiVue attaches directly to the canvas, so its own removal observer
+    // never fires when an ancestor is removed. Without an explicit cleanup()
+    // every preview would leak its listeners, observers, and WebGL context -
+    // and browsers hand out only a handful of contexts.
+    let viewer = null;
+    let dismissed = false;
+
+    const releaseViewer = () => {
+      if (!viewer) return;
+      try {
+        viewer.cleanup();
+      } catch (_error) {
+        // A viewer that failed to initialize has nothing to release.
+      }
+      viewer = null;
+    };
+
+    const dismiss = () => {
+      dismissed = true;
+      releaseViewer();
+      document.removeEventListener("keydown", onKey, true);
+      overlay.remove();
+      closeCurrent = null;
+    };
+    const onKey = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        dismiss();
+      }
+    };
+    close.addEventListener("click", dismiss);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) dismiss();
+    });
+    document.addEventListener("keydown", onKey, true);
+    closeCurrent = dismiss;
+    document.body.appendChild(overlay);
+
+    const url = fileUrl(relPath);
+    if (kind === "image") {
+      const image = document.createElement("img");
+      image.alt = relPath;
+      image.addEventListener("error", () => {
+        message("Could not load " + relPath + " from this session's project.");
+      });
+      image.src = url;
+      body.appendChild(image);
+      return;
+    }
+
+    message("Loading " + relPath + " ...");
+    const wrap = document.createElement("div");
+    wrap.className = "neurodesk-preview-canvas-wrap";
+    const canvas = document.createElement("canvas");
+    wrap.appendChild(canvas);
+    import(niivueUrl())
+      .then((module) => {
+        // The overlay may already be gone: closing during a 3 MB import or a
+        // slow volume load must not attach a viewer nobody can dismiss.
+        if (dismissed) return undefined;
+        body.textContent = "";
+        body.appendChild(wrap);
+        viewer = new module.Niivue({
+          backColor: [0, 0, 0, 1],
+          dragAndDropEnabled: false,
+          show3Dcrosshair: true,
+        });
+        viewer.attachToCanvas(canvas);
+        return viewer.loadVolumes([
+          { url, name: relPath.split("/").pop() },
+        ]).then(() => {
+          if (dismissed) releaseViewer();
+        });
+      })
+      .catch((error) => {
+        releaseViewer();
+        if (dismissed) return;
+        message(
+          "Could not render " + relPath + " with NiiVue: " +
+          (error && error.message ? error.message : String(error))
+        );
+      });
+  };
+
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (
+        event.button !== 0 || event.defaultPrevented || event.metaKey ||
+        event.ctrlKey || event.shiftKey || event.altKey
+      ) {
+        return;
+      }
+      const target = previewTargetFrom(event.target);
+      if (!target) return;
+      event.preventDefault();
+      event.stopPropagation();
+      openPreview(target.path, target.kind);
+    },
+    true
+  );
+
+  document.addEventListener(
+    "mouseover",
+    (event) => {
+      const target = previewTargetFrom(event.target);
+      if (!target || !target.element.dataset) return;
+      if (target.element.dataset.neurodeskPreview) return;
+      target.element.dataset.neurodeskPreview = target.kind;
+      target.element.style.cursor = "zoom-in";
+      if (!target.element.title) target.element.title = "Preview " + target.path;
+    },
+    true
+  );
+})();
+"""
+
+
+def preview_bootstrap_script(prefix):
+    """Return the injected previewer, bound to this request's proxy prefix."""
+    config = json.dumps({
+        "prefix": safe_forwarded_prefix(prefix),
+        "filePath": FILE_PREVIEW_PATH,
+        "niivuePath": NIIVUE_ASSET_PATH,
+        "niivueVersion": niivue_bundle_version(),
+    })
+    return PREVIEW_BOOTSTRAP_TEMPLATE.replace(
+        "__NEURODESK_PREVIEW_CONFIG__", config
+    )
+
+
 def rewrite_html(body, prefix):
     """Prefix root-absolute attribute, CSS, and JS asset URLs in HTML."""
     body = _HTML_ATTR_RE.sub(rf"\g<1>\g<2>{prefix}/", body)
     body = _CSS_URL_RE.sub(rf"\g<1>\g<2>{prefix}/", body)
     body = _JS_STRING_ASSET_PATH_RE.sub(rf"\g<1>{prefix}/assets/", body)
-    bootstrap = f'<script src="{prefix}{PREFIX_BOOTSTRAP_PATH}"></script>'
+    scripts = ""
     if PREFIX_BOOTSTRAP_PATH not in body:
-        body = _inject_after_head(body, bootstrap)
+        scripts += f'<script src="{prefix}{PREFIX_BOOTSTRAP_PATH}"></script>'
+    if PREVIEW_BOOTSTRAP_PATH not in body:
+        # Deferred: the previewer only needs a parsed document, and must never
+        # delay the bootstrap the SPA itself depends on.
+        scripts += (
+            f'<script defer src="{prefix}{PREVIEW_BOOTSTRAP_PATH}"></script>'
+        )
+    if scripts:
+        body = _inject_after_head(body, scripts)
     return body
 
 
@@ -730,6 +1267,36 @@ class OpencodeBackend:
                 self.remember_session_work_dir(session_id, canonical)
             return canonical
         return self.work_dir
+
+    def preview_work_dir(self, session_id, directory):
+        """Resolve the project a file preview may be read from, or "".
+
+        Fails closed: only a validated ``~/opencode-work/DATE_TIME`` project is
+        ever returned, never the shared parent. Falling back to the parent
+        would widen the preview lookup across every session, so a stale or
+        unknown session id could surface a uniquely named artifact belonging
+        to a different one. A request that names a session must resolve to
+        that session; a request that names none is only answered when exactly
+        one session is known and therefore unambiguous.
+        """
+        query = urllib.parse.urlencode(
+            {"directory": directory}
+        ) if directory else ""
+        if session_id:
+            path = f"/session/{session_id}"
+            if not session_id_from_path(path):
+                return ""
+            resolved = self.work_dir_for_request(path, query, "")
+            return resolved if is_opencode_session_work_dir(
+                resolved, self.home_dir
+            ) else ""
+
+        resolved = self.work_dir_for_request("", query, "")
+        if is_opencode_session_work_dir(resolved, self.home_dir):
+            return resolved
+        with self._session_lock:
+            known = sorted(set(self.session_work_dirs.values()))
+        return known[0] if len(known) == 1 else ""
 
     def remember_created_session(self, payload, directory):
         """Record the session id returned by a successful creation response."""
@@ -1064,6 +1631,92 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
             self.send_header(name, sanitize_header_value(value))
         self.end_headers()
 
+    # -- file previews --
+
+    def send_file(self, path, content_type, cache_control, size, etag=""):
+        """Stream a local file as the response body."""
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(size))
+        self.send_header("Cache-Control", cache_control)
+        if etag:
+            self.send_header("ETag", f'"{etag}"')
+        # Previewed bytes are user data: never let a browser sniff them into
+        # something executable, and never let them frame the desktop.
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Disposition", "inline")
+        self.end_headers()
+        if self.command == "HEAD":
+            return
+        try:
+            with open(path, "rb") as handle:
+                shutil.copyfileobj(handle, self.wfile, STREAM_CHUNK_SIZE)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def send_niivue_bundle(self):
+        """Serve the NiiVue viewer vendored into the image at build time."""
+        path = niivue_bundle_path()
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            self.send_page(
+                404,
+                "<h1>404</h1><p>The NiiVue viewer bundle is not installed in "
+                "this image.</p>",
+            )
+            return
+        # Cached hard, but only ever requested through the content-versioned
+        # URL the previewer builds, so a bundle upgrade is picked up at once.
+        self.send_file(
+            path,
+            "text/javascript; charset=utf-8",
+            "public, max-age=31536000, immutable",
+            size,
+            etag=niivue_bundle_version(path),
+        )
+
+    def send_preview_file(self, parsed, query):
+        """Serve one previewable file from the requesting session's project."""
+        backend = type(self).backend
+        rel_path = urllib.parse.unquote(
+            parsed.path[len(FILE_PREVIEW_PATH):].lstrip("/")
+        )
+        if not preview_kind(rel_path):
+            self.send_page(
+                415,
+                "<h1>415</h1><p>Only image and volume files can be "
+                "previewed.</p>",
+            )
+            return
+
+        work_dir = backend.preview_work_dir(
+            query.get("session", [""])[0], query.get("dir", [""])[0]
+        ) if backend else ""
+        resolved = resolve_preview_file(work_dir, rel_path)
+        if not resolved:
+            self.send_page(
+                404,
+                "<h1>404</h1><p>No single file matching that name exists in "
+                "this session's project.</p>",
+            )
+            return
+
+        size = os.path.getsize(resolved)
+        limit = preview_size_limit()
+        if size > limit:
+            self.send_page(
+                413,
+                f"<h1>413</h1><p>This file is {size} bytes; the preview limit "
+                f"is {limit} bytes.</p>",
+            )
+            return
+        # Agents rewrite their outputs in place, so a preview must always show
+        # the current bytes.
+        self.send_file(
+            resolved, preview_content_type(resolved), "no-store", size
+        )
+
     # -- request routing --
 
     def handle_any(self):
@@ -1117,6 +1770,25 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
             self.send_javascript(
                 200, prefix_bootstrap_script(self.external_prefix())
             )
+            return
+
+        if parsed.path == PREVIEW_BOOTSTRAP_PATH and self.command in (
+            "GET", "HEAD"
+        ):
+            self.send_javascript(
+                200, preview_bootstrap_script(self.external_prefix())
+            )
+            return
+
+        if parsed.path == NIIVUE_ASSET_PATH and self.command in ("GET", "HEAD"):
+            self.send_niivue_bundle()
+            return
+
+        if self.command in ("GET", "HEAD") and (
+            parsed.path == FILE_PREVIEW_PATH
+            or parsed.path.startswith(FILE_PREVIEW_PATH + "/")
+        ):
+            self.send_preview_file(parsed, query)
             return
 
         if parsed.path == SETUP_PATH and self.command == "POST":

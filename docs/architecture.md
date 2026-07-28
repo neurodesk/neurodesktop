@@ -282,6 +282,42 @@ Server Proxy entry that runs
   rewriting those literals would apply the proxy prefix twice.
   This is necessary because the upstream UI otherwise uses the site origin and
   escapes the Jupyter proxy.
+- previews the files an agent produced. OpenCode's changed-files list renders
+  every non-text file as an unreadable binary diff, which hides exactly the
+  outputs neuroimaging work produces: QC screenshots and NIfTI volumes. A
+  second injected script (`/neurodesk-preview.js`) opens an overlay viewer
+  when a previewable file name is clicked — `<img>` for
+  png/jpg/gif/webp/bmp/svg, NiiVue for nii/nii.gz/mgz/mgh/mif/nrrd/mha/mhd.
+  Bytes come from the proxy's own `/neurodesk-file/<path>` route, which sits
+  behind the same credential as the UI and resolves the path *inside* one
+  validated `~/opencode-work/YYYYMMDD_HHMMSS/` project. Resolution fails
+  closed: a request naming a session must resolve to that session (a stale
+  or unknown id is a 404, never a widened search), and a request naming none
+  is answered only from the directory OpenCode's own client reports or when
+  exactly one session exists. The shared `~/opencode-work` parent is never
+  searched, so a uniquely named artifact cannot leak between sessions.
+  Absolute paths, `..` segments, and symlinks leaving the project are
+  refused, only the previewable extensions above are served, an ambiguous
+  name match is refused rather than guessed, and files above
+  `OPENCODE_WEB_PREVIEW_MAX_BYTES` are rejected. Compressed volumes are sent
+  as `application/gzip` with no `Content-Encoding`, because NiiVue inflates
+  `.nii.gz` itself. The viewer is the `@niivue/niivue` `dist/index.js`
+  ESM bundle vendored into `/opt/neurodesktop/vendor/niivue.js` at build
+  time (`NIIVUE_VERSION`) and served from `/neurodesk-niivue.js`, so previews
+  work offline and load no CDN; a missing bundle only costs volume previews.
+  That bundle is cached `immutable` for a year, so the previewer requests it
+  through a `?v=<content hash>` URL: a `NIIVUE_VERSION` bump changes the URL
+  and browsers holding the old bundle fetch the new one. Closing a volume
+  preview calls NiiVue's `cleanup()`. NiiVue attaches directly to the canvas,
+  so removing the overlay does not trigger its own teardown, and without the
+  explicit call every preview would retain listeners, observers, and a WebGL
+  context — of which browsers grant only a handful.
+  The previewer never inserts nodes into OpenCode's DOM — it listens for
+  clicks in the capture phase and mounts its overlay under `<body>` — so an
+  upstream markup change can cost the preview but never the UI. It recovers
+  the file's path from the row's text and falls back to a unique-suffix
+  search under the session project when the markup separates the directory
+  from the base name.
 
 Inside the VNC/RDP desktop there is no URL prefix, so the "OpenCode Web"
 menu entry

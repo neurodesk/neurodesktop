@@ -14,6 +14,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import socket
 import stat
 import subprocess
@@ -121,6 +122,172 @@ def test_prefix_bootstrap_sets_opencode_server_to_proxy_path():
     assert "window.__NEURODESK_OPENCODE_BASE_PATH__ = prefix" in script
     assert json.dumps(PREFIX) in script
     assert "/provider" not in script
+
+
+def test_rewrite_html_injects_the_file_previewer_after_the_bootstrap():
+    """Both injected scripts land in <head>, prefix bootstrap first."""
+    rewritten = ocw.rewrite_html("<html><head></head><body></body></html>", PREFIX)
+    bootstrap = f'<script src="{PREFIX}/neurodesk-prefix.js"></script>'
+    previewer = f'<script defer src="{PREFIX}/neurodesk-preview.js"></script>'
+    assert bootstrap in rewritten
+    assert previewer in rewritten
+    assert rewritten.index(bootstrap) < rewritten.index(previewer)
+    # A body that already references the previewer keeps exactly one copy.
+    already = ocw.rewrite_html(
+        '<html><head><script defer src="/neurodesk-preview.js"></script>'
+        "</head><body></body></html>",
+        PREFIX,
+    )
+    assert already.count("neurodesk-preview.js") == 1
+
+
+def test_preview_bootstrap_is_bound_to_the_proxy_prefix_and_endpoints():
+    """The previewer must address this proxy's own routes, not the SPA's."""
+    script = ocw.preview_bootstrap_script(PREFIX)
+    assert f'"prefix": "{PREFIX}"' in script
+    assert '"filePath": "/neurodesk-file"' in script
+    assert '"niivuePath": "/neurodesk-niivue.js"' in script
+    # The hook must stay passive: OpenCode's own markup is only read.
+    assert "appendChild(overlay)" in script
+    assert "insertBefore" not in script
+
+
+@pytest.mark.skipif(
+    shutil.which("node") is None, reason="node is needed to parse the previewer"
+)
+def test_preview_bootstrap_is_valid_javascript(tmp_path):
+    """The previewer ships as a Python string; keep it syntactically valid."""
+    script = tmp_path / "preview.js"
+    script.write_text(ocw.preview_bootstrap_script(PREFIX), encoding="utf-8")
+    subprocess.run(
+        ["node", "--check", str(script)], check=True, capture_output=True
+    )
+
+
+# --- File previews -------------------------------------------------------------
+
+
+def test_preview_kind_recognizes_images_and_volumes():
+    """Only viewer-backed formats are previewable, case-insensitively."""
+    assert ocw.preview_kind("qc_bet_sub01.png") == "image"
+    assert ocw.preview_kind("QC.PNG") == "image"
+    assert ocw.preview_kind("figure.svg") == "image"
+    assert ocw.preview_kind("sub-01_T1w_brain_mask.nii.gz") == "volume"
+    assert ocw.preview_kind("brain.nii") == "volume"
+    assert ocw.preview_kind("aseg.mgz") == "volume"
+    assert ocw.preview_kind("analysis.sh") == ""
+    assert ocw.preview_kind("archive.gz") == ""
+    assert ocw.preview_kind("") == ""
+
+
+def test_preview_content_type_keeps_compressed_volumes_compressed():
+    """NiiVue inflates .nii.gz itself, so the transport must not."""
+    assert ocw.preview_content_type("brain.nii.gz") == "application/gzip"
+    assert ocw.preview_content_type("brain.nii") == "application/octet-stream"
+    assert ocw.preview_content_type("qc.png") == "image/png"
+    assert ocw.preview_content_type("plot.svg") == "image/svg+xml"
+
+
+def test_resolve_preview_file_finds_files_inside_the_session_project(tmp_path):
+    """An exact relative path resolves; so does a unique basename."""
+    work_dir = tmp_path / "20260727_101500"
+    (work_dir / "derivatives" / "bet").mkdir(parents=True)
+    volume = work_dir / "derivatives" / "bet" / "sub-01_brain.nii.gz"
+    volume.write_bytes(b"volume")
+    (work_dir / "qc.png").write_bytes(b"image")
+
+    assert ocw.resolve_preview_file(
+        work_dir, "derivatives/bet/sub-01_brain.nii.gz"
+    ) == str(volume)
+    # The changed-files list often yields only a suffix of the real path.
+    assert ocw.resolve_preview_file(work_dir, "sub-01_brain.nii.gz") == str(
+        volume
+    )
+    assert ocw.resolve_preview_file(work_dir, "bet/sub-01_brain.nii.gz") == str(
+        volume
+    )
+    assert ocw.resolve_preview_file(work_dir, "qc.png") == str(work_dir / "qc.png")
+
+
+def test_resolve_preview_file_refuses_to_leave_the_session_project(tmp_path):
+    """Traversal, absolute paths, and symlinked escapes must all fail."""
+    work_dir = tmp_path / "20260727_101500"
+    work_dir.mkdir()
+    outside = tmp_path / "secret.png"
+    outside.write_bytes(b"secret")
+    (work_dir / "link.png").symlink_to(outside)
+
+    assert ocw.resolve_preview_file(work_dir, "../secret.png") == ""
+    assert ocw.resolve_preview_file(work_dir, str(outside)) == ""
+    assert ocw.resolve_preview_file(work_dir, "link.png") == ""
+    # Unsupported types are rejected before the filesystem is touched.
+    (work_dir / "notes.txt").write_text("x", encoding="utf-8")
+    assert ocw.resolve_preview_file(work_dir, "notes.txt") == ""
+    assert ocw.resolve_preview_file("", "qc.png") == ""
+
+
+def test_resolve_preview_file_refuses_ambiguous_and_bounded_searches(tmp_path):
+    """Two candidates named alike must not be guessed between."""
+    work_dir = tmp_path / "20260727_101500"
+    (work_dir / "run-1").mkdir(parents=True)
+    (work_dir / "run-2").mkdir(parents=True)
+    (work_dir / "run-1" / "qc.png").write_bytes(b"a")
+    (work_dir / "run-2" / "qc.png").write_bytes(b"b")
+    assert ocw.resolve_preview_file(work_dir, "qc.png") == ""
+    # The distinguishing prefix resolves it again.
+    assert ocw.resolve_preview_file(work_dir, "run-2/qc.png") == str(
+        work_dir / "run-2" / "qc.png"
+    )
+    # The walk is bounded so a huge project cannot stall the proxy.
+    assert ocw.find_preview_file(str(work_dir), "qc.png", max_entries=1) == ""
+
+
+def test_find_preview_file_matches_on_a_path_boundary(tmp_path):
+    """A name suffix must not match a longer, unrelated file name."""
+    work_dir = tmp_path / "20260727_101500"
+    work_dir.mkdir()
+    (work_dir / "extra_qc.png").write_bytes(b"a")
+    assert ocw.find_preview_file(str(work_dir), "qc.png") == ""
+
+
+def test_niivue_bundle_version_tracks_content(tmp_path, monkeypatch):
+    """The immutable bundle URL must change when the bundle does."""
+    bundle = tmp_path / "niivue.js"
+    bundle.write_text("export const Niivue = class {};\n", encoding="utf-8")
+    monkeypatch.setenv("OPENCODE_WEB_NIIVUE_BUNDLE", str(bundle))
+
+    first = ocw.niivue_bundle_version()
+    assert first and len(first) == 16
+    assert ocw.niivue_bundle_version() == first  # cached, still stable
+
+    bundle.write_text("export const Niivue = class { v2() {} };\n", encoding="utf-8")
+    os.utime(bundle, (0, 0))  # a rebuilt image also restamps the file
+    assert ocw.niivue_bundle_version() != first
+
+    bundle.unlink()
+    assert ocw.niivue_bundle_version() == ""
+
+
+def test_preview_bootstrap_requests_a_versioned_bundle_url(tmp_path, monkeypatch):
+    """The previewer carries the token; it is itself served no-store."""
+    bundle = tmp_path / "niivue.js"
+    bundle.write_text("export const Niivue = class {};\n", encoding="utf-8")
+    monkeypatch.setenv("OPENCODE_WEB_NIIVUE_BUNDLE", str(bundle))
+
+    script = ocw.preview_bootstrap_script(PREFIX)
+    assert f'"niivueVersion": "{ocw.niivue_bundle_version()}"' in script
+    assert 'CONFIG.niivuePath +' in script
+    assert '"?v=" + CONFIG.niivueVersion' in script
+
+
+def test_preview_size_limit_falls_back_on_unusable_overrides(monkeypatch):
+    """A malformed override must not disable the cap."""
+    monkeypatch.setenv("OPENCODE_WEB_PREVIEW_MAX_BYTES", "4096")
+    assert ocw.preview_size_limit() == 4096
+    monkeypatch.setenv("OPENCODE_WEB_PREVIEW_MAX_BYTES", "not-a-number")
+    assert ocw.preview_size_limit() == ocw.DEFAULT_PREVIEW_MAX_BYTES
+    monkeypatch.setenv("OPENCODE_WEB_PREVIEW_MAX_BYTES", "0")
+    assert ocw.preview_size_limit() == ocw.DEFAULT_PREVIEW_MAX_BYTES
 
 
 def test_rewrite_css_prefixes_url_references():
@@ -921,6 +1088,9 @@ def launcher(tmp_path):
     threading.Thread(target=llm_server.serve_forever, daemon=True).start()
     llm_port = llm_server.server_address[1]
 
+    niivue_bundle = tmp_path / "niivue.min.js"
+    niivue_bundle.write_text("export const Niivue = class {};\n", encoding="utf-8")
+
     port = _free_port()
     secret_file = home_dir / ".neurodesk" / "secrets" / "opencode_server_password"
     env = {
@@ -931,6 +1101,7 @@ def launcher(tmp_path):
         "NEURODESK_LLM_BASE_URL": f"http://127.0.0.1:{llm_port}/openai",
         "FAKE_BACKEND_STATE_DIR": str(state_dir),
         "OPENCODE_WEB_AGENTS_FILE": str(agents_file),
+        "OPENCODE_WEB_NIIVUE_BUNDLE": str(niivue_bundle),
     }
     env.pop("NEURODESK_API_KEY", None)
     env.pop("OPENCODE_MODEL_PROFILE", None)
@@ -966,6 +1137,7 @@ def launcher(tmp_path):
             "auth": auth_header,
             "token_file": token_file,
             "agents_file": agents_file,
+            "niivue_bundle": niivue_bundle,
         }
     finally:
         process.terminate()
@@ -1120,6 +1292,190 @@ def test_each_created_session_gets_a_distinct_seeded_work_directory(launcher):
     )
     assert status == 200
     assert json.loads(body)["directory"] == str(first_dir)
+
+
+def _request_bytes(port, path, headers=None, timeout=15):
+    """HTTP GET helper that keeps the response body binary."""
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}", headers=headers or {}
+    )
+    try:
+        response = _OPENER.open(request, timeout=timeout)
+        status = response.status
+    except urllib.error.HTTPError as exc:
+        response = exc
+        status = exc.code
+    return status, dict(response.headers), response.read()
+
+
+def _session_with_files(ctx):
+    """Create a session and populate its project the way an agent would."""
+    status, _headers, body = _request(
+        ctx["port"],
+        "/session",
+        method="POST",
+        data=b"{}",
+        headers={**ctx["auth"], "Content-Type": "application/json"},
+    )
+    assert status == 200
+    session = json.loads(body)
+    directory = Path(session["directory"])
+    (directory / "qc_bet_sub01.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    nested = directory / "derivatives" / "bet" / "sub-01" / "anat"
+    nested.mkdir(parents=True)
+    (nested / "sub-01_T1w_brain_mask.nii.gz").write_bytes(b"\x1f\x8bfake-volume")
+    (directory / "analysis_01_brain_extraction.sh").write_text(
+        "#!/bin/bash\n", encoding="utf-8"
+    )
+    return session, directory
+
+
+def test_preview_serves_session_images_and_volumes(launcher):
+    """Files an agent wrote are previewable from their own session project."""
+    status, _headers = _complete_key_setup(launcher)
+    assert status == 303
+    _wait_for_proxied_root(launcher)
+    session, _directory = _session_with_files(launcher)
+    query = f"?session={session['id']}"
+
+    status, headers, body = _request_bytes(
+        launcher["port"], f"/neurodesk-file/qc_bet_sub01.png{query}",
+        headers=launcher["auth"],
+    )
+    assert status == 200
+    assert headers["Content-Type"] == "image/png"
+    assert headers["X-Content-Type-Options"] == "nosniff"
+    assert headers["Cache-Control"] == "no-store"
+    assert body == b"\x89PNG\r\n\x1a\nfake"
+
+    # The full relative path the changed-files list shows.
+    status, headers, body = _request_bytes(
+        launcher["port"],
+        "/neurodesk-file/derivatives/bet/sub-01/anat/"
+        f"sub-01_T1w_brain_mask.nii.gz{query}",
+        headers=launcher["auth"],
+    )
+    assert status == 200
+    # Compressed volumes must reach NiiVue still compressed.
+    assert headers["Content-Type"] == "application/gzip"
+    assert "Content-Encoding" not in headers
+    assert body == b"\x1f\x8bfake-volume"
+
+    # Only the basename survives when the markup separates the directory.
+    status, _headers, body = _request_bytes(
+        launcher["port"],
+        f"/neurodesk-file/sub-01_T1w_brain_mask.nii.gz{query}",
+        headers=launcher["auth"],
+    )
+    assert status == 200
+    assert body == b"\x1f\x8bfake-volume"
+
+
+def test_preview_endpoint_is_credentialed_and_confined(launcher):
+    """The preview route is neither anonymous nor a general file reader."""
+    status, _headers = _complete_key_setup(launcher)
+    assert status == 303
+    _wait_for_proxied_root(launcher)
+    session, directory = _session_with_files(launcher)
+    query = f"?session={session['id']}"
+
+    escape = launcher["home"] / "private.png"
+    escape.write_bytes(b"private")
+
+    status, _headers, _body = _request_bytes(
+        launcher["port"], f"/neurodesk-file/qc_bet_sub01.png{query}"
+    )
+    assert status == 401
+
+    # Percent-encoded traversal out of the session project.
+    status, _headers, _body = _request_bytes(
+        launcher["port"],
+        f"/neurodesk-file/%2e%2e%2f%2e%2e%2fprivate.png{query}",
+        headers=launcher["auth"],
+    )
+    assert status == 404
+
+    # Text files stay with the diff view; the endpoint refuses them outright.
+    status, _headers, _body = _request_bytes(
+        launcher["port"],
+        f"/neurodesk-file/analysis_01_brain_extraction.sh{query}",
+        headers=launcher["auth"],
+    )
+    assert status == 415
+
+    # One session cannot read another session's files, even by exact name.
+    (directory / "only_in_first_session.png").write_bytes(b"first")
+    other, other_directory = _session_with_files(launcher)
+    assert other_directory != directory
+    status, _headers, _body = _request_bytes(
+        launcher["port"],
+        f"/neurodesk-file/only_in_first_session.png?session={other['id']}",
+        headers=launcher["auth"],
+    )
+    assert status == 404
+
+    # A name that exists nowhere in the project is a plain miss.
+    status, _headers, _body = _request_bytes(
+        launcher["port"], f"/neurodesk-file/missing.png{query}",
+        headers=launcher["auth"],
+    )
+    assert status == 404
+
+    # An unknown or stale session must fail closed rather than widen the
+    # lookup to the shared ~/opencode-work parent, where the unique name
+    # would resolve to another session's file.
+    for unknown in ("ses_does_not_exist", "not-a-session-id"):
+        status, _headers, _body = _request_bytes(
+            launcher["port"],
+            f"/neurodesk-file/only_in_first_session.png?session={unknown}",
+            headers=launcher["auth"],
+        )
+        assert status == 404
+
+
+def test_niivue_bundle_is_served_and_degrades_when_absent(launcher):
+    """The vendored viewer is cacheable; a missing bundle is a plain 404."""
+    status, _headers = _complete_key_setup(launcher)
+    assert status == 303
+    _wait_for_proxied_root(launcher)
+
+    status, _headers, script = _request(
+        launcher["port"], "/neurodesk-preview.js", headers=launcher["auth"]
+    )
+    assert status == 200
+    version = re.search(r'"niivueVersion": "([0-9a-f]+)"', script).group(1)
+
+    status, headers, body = _request_bytes(
+        launcher["port"], f"/neurodesk-niivue.js?v={version}",
+        headers=launcher["auth"],
+    )
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/javascript")
+    # Cached hard, but only ever reached through the content-versioned URL.
+    assert "immutable" in headers["Cache-Control"]
+    assert headers["ETag"] == f'"{version}"'
+    assert b"Niivue" in body
+
+    launcher["niivue_bundle"].unlink()
+    status, _headers, _body = _request_bytes(
+        launcher["port"], "/neurodesk-niivue.js", headers=launcher["auth"]
+    )
+    assert status == 404
+
+
+def test_previewer_script_is_served_with_the_forwarded_prefix(launcher):
+    """The injected previewer addresses the proxy under Jupyter's prefix."""
+    status, _headers = _complete_key_setup(launcher)
+    assert status == 303
+    _wait_for_proxied_root(launcher)
+
+    status, _headers, body = _request(
+        launcher["port"],
+        "/neurodesk-preview.js",
+        headers={**launcher["auth"], "X-Forwarded-Prefix": "/user/alice/opencode"},
+    )
+    assert status == 200
+    assert '"prefix": "/user/alice/opencode"' in body
 
 
 def test_force_directory_header_pins_and_encodes_like_opencodes_client():

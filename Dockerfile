@@ -470,6 +470,22 @@ RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash -s 
     && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 
+# Vendor the NiiVue viewer that opencode_web.py serves for volume previews of
+# the files an agent produced. dist/index.js is the self-contained ESM bundle
+# (no bare imports, wasm inlined), so the preview works offline and needs no
+# CDN. Its sibling dist/index.min.js is NOT this module - it exports only a
+# percent-encoded worker source - so the build asserts the installed file
+# really exports the Niivue class rather than trusting the file name.
+ARG NIIVUE_VERSION="0.69.0"
+RUN mkdir -p /tmp/niivue \
+    && retry bash -o pipefail -c 'npm_config_cache=/tmp/npm-niivue-cache npm pack --silent "@niivue/niivue@${NIIVUE_VERSION}" --pack-destination /tmp/niivue' \
+    && tar -xzf /tmp/niivue/*.tgz -C /tmp/niivue package/dist/index.js \
+    && install -D -m 0644 /tmp/niivue/package/dist/index.js /opt/neurodesktop/vendor/niivue.js \
+    # The .map is not shipped; drop the reference so devtools never chases it.
+    && sed -i '/^\/\/# sourceMappingURL=/d' /opt/neurodesktop/vendor/niivue.js \
+    && node --input-type=module -e "const m = await import('/opt/neurodesktop/vendor/niivue.js'); if (typeof m.Niivue !== 'function') { throw new Error('vendored NiiVue bundle does not export Niivue'); }" \
+    && rm -rf /tmp/niivue /tmp/npm-niivue-cache /root/.npm
+
 # Install Firefox from Mozilla's official apt repository. This avoids both the
 # Launchpad API and Ubuntu's snap-backed firefox package.
 RUN --mount=type=bind,source=config/firefox,target=/tmp/firefox,ro \
