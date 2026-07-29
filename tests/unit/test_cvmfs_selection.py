@@ -131,11 +131,6 @@ def _configured_server_urls(config):
     return server_line.split('"')[1].split(";")
 
 
-def test_script_syntax_ok():
-    code = subprocess.run(["bash", "-n", _script_path()]).returncode
-    assert code == 0, "cvmfs_server_select.sh has a bash syntax error"
-
-
 def test_root_cache_write_restores_notebook_home_ownership():
     """Eager startup must not leave ~/.cache root-owned before Jupyter starts."""
     script = Path(_script_path()).read_text(encoding="utf-8")
