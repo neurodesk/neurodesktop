@@ -209,7 +209,7 @@ Alternatives that were considered, kept here for context:
 **Zero-prefix escape hatch that can ship immediately:** inside the Neurodesktop
 VNC/RDP desktop there is no prefix - Firefox can open
 `http://127.0.0.1:<port>/` at root. Add an "OpenCode Web" desktop entry
-(pattern: [config/checkversion/CheckVersion.desktop](../config/checkversion/CheckVersion.desktop))
+(pattern: [config/agents/opencode-web.desktop](../config/agents/opencode-web.desktop))
 that runs the Phase-1 script and opens the official web UI in
 `neurodesktop-firefox`. Local Docker users can alternatively publish the port
 (`-p 4096:4096`) - document both in the user docs.
