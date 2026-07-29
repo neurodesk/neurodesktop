@@ -58,7 +58,7 @@ in
 category allows one open draft PR, one evidence-backed change per run, and no PR
 when the candidate cannot be validated.
 
-All maintenance PRs use the `[maintenance] ` title prefix and
+All maintenance PRs use the `[maintenance]` title prefix and
 `agentic-workflow` label. CodeRabbit reviews them as drafts, then
 [`maintenance-review.md`](../.github/workflows/maintenance-review.md) validates
 and batches actionable feedback, pushes once to the existing branch, and asks
