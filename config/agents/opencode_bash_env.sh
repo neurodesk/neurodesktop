@@ -1,16 +1,16 @@
 #!/bin/bash
-# OpenCode runs agent commands with non-interactive ``bash -c`` shells. Bash
-# does not read ~/.bashrc for those shells, so use BASH_ENV to refresh the
-# lazily-mounted Neurodesk module catalogue and define Lmod's ``module`` shell
-# function before every command. Keep this file quiet: its output would be
-# prepended to every OpenCode Bash tool result.
+# OpenCode runs tool commands through non-interactive Bash. Those shells do
+# not read ~/.bashrc, and the long-lived Jupyter process may still carry the
+# local-only MODULEPATH it inherited before lazy CVMFS startup completed.
+# BASH_ENV makes every OpenCode Bash tool refresh the current Neurodesktop
+# environment and initialize Lmod before running the requested command.
 
 if [ -r /opt/neurodesktop/environment_variables.sh ]; then
-    . /opt/neurodesktop/environment_variables.sh >/dev/null 2>&1
+    source /opt/neurodesktop/environment_variables.sh >/dev/null 2>&1
 fi
 
-if [ -r /usr/share/module.sh ]; then
-    . /usr/share/module.sh
+if [ -r /etc/profile.d/lmod.sh ]; then
+    source /etc/profile.d/lmod.sh >/dev/null 2>&1
 elif [ -r /usr/share/lmod/lmod/init/bash ]; then
-    . /usr/share/lmod/lmod/init/bash
+    source /usr/share/lmod/lmod/init/bash >/dev/null 2>&1
 fi

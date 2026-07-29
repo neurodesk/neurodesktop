@@ -1,9 +1,9 @@
 ---
-name: Daily Maintenance - Test Pruning
+name: Weekly Maintenance - Test Pruning
 description: Remove redundant or obsolete tests without reducing behavioral protection.
 labels: [automation, maintenance, tests]
 on:
-  schedule: daily
+  schedule: weekly
   workflow_dispatch:
 
 permissions:
@@ -35,6 +35,7 @@ max-turn-cache-misses: 2000
 timeout-minutes: 30
 
 imports:
+  - uses: .github/workflows/shared/agentic-models.md
   - uses: .github/workflows/shared/maintenance-base.md
     with:
       category: test-pruning

@@ -6,9 +6,13 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_DIR = REPO_ROOT / ".github/workflows"
 SHARED_WORKFLOW = WORKFLOW_DIR / "shared/maintenance-base.md"
+SHARED_MODELS_WORKFLOW = WORKFLOW_DIR / "shared/agentic-models.md"
 REVIEW_WORKFLOW = WORKFLOW_DIR / "maintenance-review.md"
 REVIEW_LOCK = WORKFLOW_DIR / "maintenance-review.lock.yml"
 CODERABBIT_CONFIG = REPO_ROOT / ".coderabbit.yaml"
+ACTIONLINT_CONFIG = REPO_ROOT / ".github/actionlint.yaml"
+MODEL_ALIAS_JSON = '"neurodesk":["openai/glm-5.2","openai/kimi-k2.7"]'
+RADAR_WORKFLOW = "package-update-radar"
 
 MAINTENANCE_WORKFLOWS = {
     "maintenance-test-pruning": "test-pruning",
@@ -29,7 +33,7 @@ def _read_repo_file(path: Path) -> str:
     return path.read_text()
 
 
-def test_daily_maintenance_workflows_share_the_bounded_pr_contract():
+def test_weekly_maintenance_workflows_share_the_bounded_pr_contract():
     shared_workflow = _read_repo_file(SHARED_WORKFLOW)
 
     assert "Search open pull requests" in shared_workflow
@@ -46,19 +50,21 @@ def test_daily_maintenance_workflows_share_the_bounded_pr_contract():
     assert '".github/workflows/**"' not in shared_workflow
 
 
-def test_daily_maintenance_sources_are_scheduled_scoped_and_compiled():
+def test_weekly_maintenance_sources_are_scheduled_scoped_and_compiled():
     compiled_crons = set()
 
     for workflow_id, category in MAINTENANCE_WORKFLOWS.items():
         source = _read_repo_file(WORKFLOW_DIR / f"{workflow_id}.md")
         lock = _read_repo_file(WORKFLOW_DIR / f"{workflow_id}.lock.yml")
 
-        assert "schedule: daily" in source
+        assert "schedule: weekly" in source
+        assert "schedule: daily" not in source
         assert "workflow_dispatch:" in source
         assert "actions: read" in source
         assert "id: codex" in source
         assert "max-daily-ai-credits: -1" in source
         assert 'OPENAI_BASE_URL: "https://llm.neurodesk.org/openai"' in source
+        assert "uses: .github/workflows/shared/agentic-models.md" in source
         assert "uses: .github/workflows/shared/maintenance-base.md" in source
         assert f"category: {category}" in source
 
@@ -68,6 +74,7 @@ def test_daily_maintenance_sources_are_scheduled_scoped_and_compiled():
         assert "[maintenance] " in lock
         assert f"agentic/maintenance-{category}-" in lock
         assert "agentic-workflow" in lock
+        assert MODEL_ALIAS_JSON in lock
 
         cron_lines = [
             line.strip()
@@ -75,10 +82,71 @@ def test_daily_maintenance_sources_are_scheduled_scoped_and_compiled():
             if line.strip().startswith("- cron:")
         ]
         assert len(cron_lines) == 1
-        assert cron_lines[0].endswith('* * *"')
+        cron_fields = cron_lines[0].split('"', maxsplit=2)[1].split()
+        assert len(cron_fields) == 5
+        assert cron_fields[2:4] == ["*", "*"]
+        assert cron_fields[4] != "*"
         compiled_crons.add(cron_lines[0])
 
     assert len(compiled_crons) == len(MAINTENANCE_WORKFLOWS)
+
+
+def test_package_update_radar_reports_without_write_access():
+    source = _read_repo_file(WORKFLOW_DIR / f"{RADAR_WORKFLOW}.md")
+    lock = _read_repo_file(WORKFLOW_DIR / f"{RADAR_WORKFLOW}.lock.yml")
+
+    assert "schedule: weekly" in source
+    assert "schedule: daily" not in source
+    assert "workflow_dispatch:" in source
+    assert "actions: read" in source
+    assert "id: codex" in source
+    assert "max-daily-ai-credits: -1" in source
+    assert 'OPENAI_BASE_URL: "https://llm.neurodesk.org/openai"' in source
+    assert "uses: .github/workflows/shared/agentic-models.md" in source
+    assert MODEL_ALIAS_JSON in lock
+
+    # The radar only surveys. `maintenance-updates` is the workflow allowed to
+    # apply an upgrade, so the radar must carry no code-write path at all.
+    assert "uses: .github/workflows/shared/maintenance-base.md" not in source
+    assert "create-pull-request" not in source
+    assert "create_pull_request" not in lock
+    assert "push_to_pull_request_branch" not in lock
+
+    assert 'title-prefix: "[package-updates] "' in source
+    assert "labels: [agentic-workflow, dependencies]" in source
+    assert "hide-older-comments: true" in source
+    assert "create_issue" in lock
+    assert "add_comment" in lock
+    assert "[package-updates] " in lock
+    assert "agentic-workflow" in lock
+
+
+def test_package_update_radar_keeps_a_distinct_weekly_slot():
+    crons = {}
+
+    for workflow_id in (*MAINTENANCE_WORKFLOWS, RADAR_WORKFLOW):
+        lock = _read_repo_file(WORKFLOW_DIR / f"{workflow_id}.lock.yml")
+        cron_lines = [
+            line.strip()
+            for line in lock.splitlines()
+            if line.strip().startswith("- cron:")
+        ]
+        assert len(cron_lines) == 1
+        crons[workflow_id] = cron_lines[0]
+
+    assert len(set(crons.values())) == len(crons)
+
+
+def test_package_update_radar_lock_has_scoped_actionlint_exceptions():
+    config = _read_repo_file(ACTIONLINT_CONFIG)
+
+    assert f".github/workflows/{RADAR_WORKFLOW}.lock.yml:" in config
+
+
+def test_agentic_model_alias_prefers_glm_then_falls_back_to_kimi():
+    models_workflow = _read_repo_file(SHARED_MODELS_WORKFLOW)
+
+    assert "neurodesk:\n    - openai/glm-5.2\n    - openai/kimi-k2.7" in models_workflow
 
 
 def test_maintenance_review_loop_consumes_coderabbit_and_requests_rereview():
@@ -99,8 +167,10 @@ def test_maintenance_review_loop_consumes_coderabbit_and_requests_rereview():
     assert 'required-title-prefix: "[maintenance] "' in workflow
     assert "policy: fallback-to-issue" in workflow
     assert '- "package-lock.json"' in workflow
+    assert "uses: .github/workflows/shared/agentic-models.md" in workflow
 
     assert "issue_comment:" in lock
     assert "coderabbitai[bot]" in lock
     assert "push_to_pull_request_branch" in lock
     assert "[maintenance] " in lock
+    assert MODEL_ALIAS_JSON in lock

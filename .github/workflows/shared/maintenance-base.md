@@ -55,7 +55,7 @@ safe-outputs:
     report-as-issue: false
 ---
 
-# Shared Daily Maintenance Contract
+# Shared Weekly Maintenance Contract
 
 Work only on maintenance category `${{ github.aw.import-inputs.category }}`.
 

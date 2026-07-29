@@ -1,6 +1,6 @@
 ---
-name: Daily Maintenance Review Loop
-description: Apply CodeRabbit feedback to draft pull requests created by daily maintenance workflows.
+name: Weekly Maintenance Review Loop
+description: Apply CodeRabbit feedback to draft pull requests created by weekly maintenance workflows.
 labels: [automation, maintenance]
 on:
   issue_comment:
@@ -42,6 +42,8 @@ max-ai-credits: -1
 max-daily-ai-credits: -1
 max-turn-cache-misses: 2000
 timeout-minutes: 35
+imports:
+  - uses: .github/workflows/shared/agentic-models.md
 network:
   allowed:
     - defaults

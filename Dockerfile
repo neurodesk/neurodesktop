@@ -2,10 +2,13 @@
 
 # Pin to a specific jupyter/base-notebook date for reproducibility.
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
-ARG BASE_IMAGE_TAG=2026-06-29
-ARG APPTAINER_VERSION=1.5.2
-ARG APPTAINER_GO_VERSION=1.26.4
-ARG APPTAINER_GRPC_VERSION=1.82.0
+ARG BASE_IMAGE_TAG=2026-07-28
+ARG APPTAINER_VERSION=1.5.3
+ARG APPTAINER_GO_VERSION=1.26.5
+ARG APPTAINER_GRPC_VERSION=1.82.1
+ARG CVMFS_VERSION=2.13.3+ubuntu24.04
+ARG CVMFS_RELEASE_VERSION=4.9
+ARG CVMFS_RELEASE_SHA256=88f4bb658c2c85e77aec39181f61dea8ab641b3481a0db2b00f453beabb05395
 
 FROM golang:${APPTAINER_GO_VERSION}-bookworm AS apptainer
 
@@ -81,7 +84,7 @@ USER root
 
 ARG BUILD_ONLY_APT_PACKAGES="build-essential libcairo2-dev libjpeg-turbo8-dev libpng-dev libtool-bin freerdp2-dev libvncserver-dev libssl-dev libwebp-dev libssh2-1-dev libpango1.0-dev"
 ARG GUACAMOLE_VERSION="1.6.0"
-ARG CODE_SERVER_VERSION="4.126.0"
+ARG CODE_SERVER_VERSION="4.130.0"
 
 COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
 
@@ -221,7 +224,7 @@ RUN mkdir -p /opt/strace \
     && chmod +x /opt/strace
 
 ARG TOMCAT_REL="11"
-ARG TOMCAT_VERSION="11.0.23"
+ARG TOMCAT_VERSION="11.0.24"
 ARG TOMCAT_MIGRATION_VERSION="1.0.12"
 ARG GUACAMOLE_VERSION="1.6.0"
 ENV LANG=""
@@ -295,12 +298,17 @@ RUN mv /usr/bin/systemctl /usr/bin/systemctl.orig \
     && chmod +x /usr/bin/systemctl
 
 # Install CVMFS
+ARG CVMFS_VERSION
+ARG CVMFS_RELEASE_VERSION
+ARG CVMFS_RELEASE_SHA256
 RUN retry wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb -P /tmp \
+    && echo "${CVMFS_RELEASE_SHA256}  /tmp/cvmfs-release-latest_all.deb" | sha256sum -c - \
     && dpkg -i /tmp/cvmfs-release-latest_all.deb \
+    && test "$(dpkg-query -W -f='${Version}' cvmfs-release)" = "${CVMFS_RELEASE_VERSION}" \
     && rm /tmp/cvmfs-release-latest_all.deb \
     && apt-install-retry \
     autofs \
-    cvmfs \
+    cvmfs="${CVMFS_VERSION}" \
     uuid-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -465,7 +473,7 @@ RUN npm_config_cache=/tmp/npm-root-cache npm install -g @openai/codex \
 # the release so the web UI, the opencode_web.py proxy, and the default
 # config are tested as a set; override at build time to bump it, or set it
 # to an empty value to install the latest release.
-ARG OPENCODE_VERSION="1.18.4"
+ARG OPENCODE_VERSION="1.18.7"
 RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash -s -- ${OPENCODE_VERSION:+--version "${OPENCODE_VERSION}"}' \
     && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
@@ -524,7 +532,11 @@ RUN retry conda install -c conda-forge nb_conda_kernels \
     && conda config --system --prepend envs_dirs '~/conda-environments' \
     && rm -rf /home/${NB_USER}/.cache
 
-# Install Python packages and JupyterLab extensions
+# Install Python packages and JupyterLab extensions. RISE still declares the
+# legacy jupyterlab-mathjax3 Python dependency, whose frontend supports only
+# JupyterLab 3. Keep its distribution for dependency integrity but remove the
+# exposed labextension; JupyterLab 4.6 and RISE both bundle the current
+# @jupyterlab/mathjax-extension instead.
 ARG BUST_CACHE_PIP=3
 RUN /opt/conda/bin/pip install \
     datalad \
@@ -544,13 +556,12 @@ RUN /opt/conda/bin/pip install \
     jupyter-server-proxy \
     jupyterlmod \
     jupyterlab-git \
-    # Pinned: patch_nbi.py rewrites this exact release's labextension bundle;
-    # bump both together after re-verifying the patch.
-    notebook_intelligence==5.2.1 \
+    # The 5.3.0 wheel omits its compiled frontend. A source rebuild below
+    # installs and patches the matching labextension bundle.
+    notebook_intelligence==5.3.0 \
     jupyterlab_rise \
     jupyterlab-niivue==0.2.7 \
-    # Pinned: 2.7.0 requires @jupyter/ydoc 3.x, but JupyterLab 4.6 uses 4.x.
-    jupyterlab_myst==2.6.0 \
+    jupyterlab_myst==2.7.0 \
     jupyter-sshd-proxy \
     papermill \
     ipycanvas \
@@ -571,6 +582,7 @@ RUN /opt/conda/bin/pip install \
     && /opt/conda/bin/pip install --upgrade "litellm>=1.85.0" \
     && /opt/conda/bin/python -m bash_kernel.install --sys-prefix \
     && /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
+    && rm -rf "/opt/conda/share/jupyter/labextensions/@jupyterlab/mathjax3-extension" \
     && rm -rf /home/${NB_USER}/.cache
 
 # Build and install neurodesk-launcher JupyterLab extension
@@ -781,8 +793,7 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     # settings panel fetch fresh capabilities on open instead of auto-saving
     # its stale client-side cache over the OpenCode model sync. The script
     # fails the build when the anchor no longer matches.
-    && install -m 0755 -o root -g users /tmp/agents/patch_nbi.py /opt/neurodesktop/patch_nbi.py \
-    && /opt/conda/bin/python3 /opt/neurodesktop/patch_nbi.py
+    && install -m 0755 -o root -g users /tmp/agents/patch_nbi.py /opt/neurodesktop/patch_nbi.py
 
 #========================================#
 # Finalise build
@@ -891,6 +902,33 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && chown -R root:users /opt/config /opt/neurodesktop /opt/tests
 
 
+# Rebuild Notebook Intelligence's frontend because the 5.3.0 PyPI wheel
+# contains only style.js. Build from the matching tag.
+# Its lockfile also pins the JupyterLab 4.2 builder stack: refresh
+# Jupyter/Lumino together before selecting a current
+# builder, otherwise webpack's old license plugin crashes and launcher tokens
+# are compiled from incompatible package instances. Patch only after the real
+# bundle is installed so a changed upstream anchor fails the image build.
+ARG NBI_JUPYTERLAB_BUILDER_VERSION="4.5.10"
+RUN NBI_PACKAGE_DIR="$(/opt/conda/bin/pip show notebook_intelligence | awk '/^Location:/ {print $2 "/notebook_intelligence"}')" \
+    && test -d "${NBI_PACKAGE_DIR}" \
+    && NBI_VERSION="$(/opt/conda/bin/pip show notebook_intelligence | awk '/^Version:/ {print $2}')" \
+    && retry git clone --depth 1 --branch "v${NBI_VERSION}" https://github.com/notebook-intelligence/notebook-intelligence.git /tmp/notebook-intelligence \
+    && cd /tmp/notebook-intelligence \
+    && retry jlpm install --immutable \
+    && npm pkg set "dependencies.@jupyterlab/launcher=^4.0.0" \
+    && retry jlpm up -R "@jupyterlab/*" "@lumino/*" \
+    && retry jlpm add --dev --exact "@jupyterlab/builder@${NBI_JUPYTERLAB_BUILDER_VERSION}" \
+    && jlpm build:prod \
+    && NBI_LABEXT_DIR="${NBI_PACKAGE_DIR}/labextension" \
+    && APP_NBI_DIR=/opt/conda/share/jupyter/labextensions/@plmbr/notebook-intelligence \
+    && rm -rf "${NBI_LABEXT_DIR}" "${APP_NBI_DIR}" \
+    && cp -a /tmp/notebook-intelligence/notebook_intelligence/labextension "${NBI_LABEXT_DIR}" \
+    && cp -a "${NBI_LABEXT_DIR}" "${APP_NBI_DIR}" \
+    && find "${NBI_LABEXT_DIR}/static" -type f -name 'remoteEntry*.js' | grep -q . \
+    && /opt/conda/bin/python3 /opt/neurodesktop/patch_nbi.py \
+    && rm -rf /tmp/notebook-intelligence /root/.cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
+
 # Workaround for jupyterlab-rise + jupyterlab-myst incompatibility:
 # jupyterlab-myst's federated bundle declares @jupyterlab/markdownviewer as a
 # shared module it consumes from the host. RISE's bundle does not include that
@@ -899,16 +937,23 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
 # Rebuilding MyST with --core-path pointed at RISE's app directory embeds
 # @jupyterlab/markdownviewer into MyST's own bundle, so it no longer asks the
 # host for it. See https://github.com/jupyterlab-contrib/rise/issues/46
-# MyST 2.6.0 ships a package-lock, so use npm ci to reproduce its tested tree.
+# MyST 2.7.0 uses pnpm. Its published metadata requests @jupyter/ydoc 3.x,
+# while JupyterLab 4.6 provides 4.x, so compile against an exact current YDoc
+# and retain the broad 4.x shared-package range in the federated metadata.
+ARG MYST_PNPM_VERSION="11.17.0"
+ARG MYST_YDOC_VERSION="4.1.1"
 RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
     && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
     && MYST_PACKAGE_DIR="$(/opt/conda/bin/python -c 'import jupyterlab_myst, os; print(os.path.dirname(jupyterlab_myst.__file__))')" \
     && retry git clone --depth 1 --branch "v${MYST_VERSION}" https://github.com/jupyter-book/jupyterlab-myst.git /tmp/myst \
     && retry git clone --depth 1 --branch "v${RISE_VERSION}" https://github.com/jupyterlab-contrib/rise.git /tmp/rise \
     && cd /tmp/myst \
-    && npm_config_cache=/tmp/myst-npm-cache npm ci \
-    && npm run build:css \
-    && npm run build:lib \
+    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} install --frozen-lockfile --store-dir /tmp/myst-pnpm-store \
+    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} add --save-exact "@jupyter/ydoc@${MYST_YDOC_VERSION}" --store-dir /tmp/myst-pnpm-store \
+    && npm pkg set "dependencies.@jupyter/ydoc=^4.0.0" \
+    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} install --no-frozen-lockfile --store-dir /tmp/myst-pnpm-store \
+    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} run build:css \
+    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} run build:lib \
     && /opt/conda/bin/jupyter labextension build --core-path=/tmp/rise/app . \
     && MYST_LABEXT_DIR="${MYST_PACKAGE_DIR}/labextension" \
     && APP_MYST_DIR=/opt/conda/share/jupyter/labextensions/jupyterlab-myst \
@@ -916,11 +961,11 @@ RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {
     && cp -a /tmp/myst/jupyterlab_myst/labextension "${MYST_LABEXT_DIR}" \
     && rm -rf "${APP_MYST_DIR}" \
     && cp -a "${MYST_LABEXT_DIR}" "${APP_MYST_DIR}" \
-    && rm -rf /tmp/myst /tmp/rise /tmp/myst-npm-cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
+    && rm -rf /tmp/myst /tmp/rise /tmp/myst-corepack /tmp/myst-pnpm-store /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
 
 # Patch both nested tar copies after all npm-based build steps. Updating
 # code-server's top-level dependency graph does not reach either scanner path.
-ARG NODE_TAR_VERSION="7.5.19"
+ARG NODE_TAR_VERSION="7.5.22"
 RUN set -eux; \
     node_tar_package="$(npm pack --silent "tar@${NODE_TAR_VERSION}")"; \
     for node_tar_dir in \

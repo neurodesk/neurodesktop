@@ -1,9 +1,9 @@
 ---
-name: Daily Maintenance - Dead Code
+name: Weekly Maintenance - Dead Code
 description: Remove one proven unused code path or artifact and its stale references.
 labels: [automation, maintenance, cleanup]
 on:
-  schedule: daily
+  schedule: weekly
   workflow_dispatch:
 
 permissions:
@@ -35,6 +35,7 @@ max-turn-cache-misses: 2000
 timeout-minutes: 30
 
 imports:
+  - uses: .github/workflows/shared/agentic-models.md
   - uses: .github/workflows/shared/maintenance-base.md
     with:
       category: dead-code

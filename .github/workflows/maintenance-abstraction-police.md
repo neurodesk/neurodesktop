@@ -1,9 +1,9 @@
 ---
-name: Daily Maintenance - Abstraction Police
+name: Weekly Maintenance - Abstraction Police
 description: Consolidate one proven duplicate abstraction while preserving behavior.
 labels: [automation, maintenance, architecture]
 on:
-  schedule: daily
+  schedule: weekly
   workflow_dispatch:
 
 permissions:
@@ -35,6 +35,7 @@ max-turn-cache-misses: 2000
 timeout-minutes: 35
 
 imports:
+  - uses: .github/workflows/shared/agentic-models.md
   - uses: .github/workflows/shared/maintenance-base.md
     with:
       category: abstraction-police

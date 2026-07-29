@@ -40,6 +40,10 @@
 - `OPENCODE_WEB_STARTUP_TIMEOUT`: seconds `opencode_web.py` (the "Scigent.ai"
   launcher tile) waits for the `opencode web` backend to become ready;
   defaults to `180`
+- `OPENCODE_WEB_BASH_ENV`: non-interactive Bash initializer used by OpenCode
+  Web tool commands; defaults to
+  `/opt/neurodesktop/opencode_bash_env.sh`, which refreshes the lazy-CVMFS
+  `MODULEPATH` and initializes Lmod (mainly overridable for testing)
 - `OPENCODE_DISABLE_FFF`: forced to `1` for the OpenCode Web child process so
   its Add Project dialog can search below the `/home/jovyan` startup directory.
   The terminal OpenCode workflow is unaffected
@@ -71,8 +75,19 @@
   `AGENTS.md` seed, and key-validation endpoint)
 - `OPENCODE_VERSION` (build argument): the OpenCode release installed into
   the image; defaults to the validated pin in the Dockerfile (currently
-  `1.18.4`). Override to bump the pin, or set it to an empty value to
+  `1.18.7`). Override to bump the pin, or set it to an empty value to
   install the latest release
+- `CVMFS_VERSION` (build argument): exact Ubuntu CVMFS client package version;
+  defaults to `2.13.3+ubuntu24.04`
+- `CVMFS_RELEASE_VERSION`, `CVMFS_RELEASE_SHA256` (build arguments): expected
+  version and SHA-256 digest of the CVMFS apt repository bootstrap package;
+  defaults to release `4.9` and its validated digest
+- `NBI_JUPYTERLAB_BUILDER_VERSION` (build argument): JupyterLab builder used
+  to reconstruct Notebook Intelligence's missing frontend; defaults to
+  `4.5.10`
+- `MYST_PNPM_VERSION`, `MYST_YDOC_VERSION` (build arguments): pnpm and Jupyter
+  YDoc releases used for the MyST/RISE compatibility rebuild; defaults to
+  `11.17.0` and `4.1.1`
 - `NIIVUE_VERSION` (build argument): the `@niivue/niivue` release vendored to
   `/opt/neurodesktop/vendor/niivue.js` for the OpenCode Web volume
   previews; defaults to the pin in the Dockerfile (currently `0.69.0`)

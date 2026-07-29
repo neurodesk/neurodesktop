@@ -1,9 +1,9 @@
 ---
-name: Daily Maintenance - Updates
+name: Weekly Maintenance - Updates
 description: Apply one verified low-risk dependency, action, tool, or base-image update.
 labels: [automation, maintenance, dependencies]
 on:
-  schedule: daily
+  schedule: weekly
   workflow_dispatch:
 
 permissions:
@@ -35,6 +35,7 @@ max-turn-cache-misses: 2000
 timeout-minutes: 40
 
 imports:
+  - uses: .github/workflows/shared/agentic-models.md
   - uses: .github/workflows/shared/maintenance-base.md
     with:
       category: updates

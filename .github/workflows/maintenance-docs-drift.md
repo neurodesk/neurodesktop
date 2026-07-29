@@ -1,9 +1,9 @@
 ---
-name: Daily Maintenance - Documentation Drift
+name: Weekly Maintenance - Documentation Drift
 description: Reconcile one verified mismatch between documentation and current behavior.
 labels: [automation, maintenance, documentation]
 on:
-  schedule: daily
+  schedule: weekly
   workflow_dispatch:
 
 permissions:
@@ -35,6 +35,7 @@ max-turn-cache-misses: 2000
 timeout-minutes: 25
 
 imports:
+  - uses: .github/workflows/shared/agentic-models.md
   - uses: .github/workflows/shared/maintenance-base.md
     with:
       category: docs-drift
