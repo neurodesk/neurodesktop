@@ -14,8 +14,9 @@
 - When changing OpenCode, its Web proxy/session-workspace behavior, its file
   previewer, or its pinned version, run
   `pytest tests/test_opencode_web.py` in the built image; its real-bundle
-  contract protects per-session directories, Jupyter prefix routing, the
-  native model picker, and the confinement of the preview file endpoint.
+  contract protects distinct durable project identities for per-session
+  directories, Jupyter prefix routing, the native model picker, and the
+  confinement of the preview file endpoint.
 - When changing Notebook Intelligence or MyST pins or their frontend rebuilds,
   run `pytest tests/test_nbi_settings_patch.py tests/test_myst_build_workaround.py
   tests/test_myst_rise_build.py` in the built image and verify both extensions

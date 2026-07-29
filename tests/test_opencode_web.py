@@ -1243,13 +1243,14 @@ def _wait_for_port(port, timeout=20):
     not Path("/usr/bin/opencode").is_file(),
     reason="the pinned OpenCode bundle is only present inside the image",
 )
-def test_pinned_opencode_bundle_supports_native_prefixed_model_picker(tmp_path):
+def test_pinned_opencode_bundle_supports_model_picker_and_home_sessions(tmp_path):
     """The image's real pinned UI and session API must honor proxy contracts.
 
     This is the version-coupled contract that the fake-backend tests cannot
     prove: OpenCode must still read the default-server localStorage key and
     ship the provider route plus its native model-selection interface, and its
-    session API must preserve the distinct directory selected by the proxy.
+    session API must preserve the distinct directory and project identity
+    selected by the proxy so every workspace remains visible on Home.
     """
     port = _free_port()
     password = "bundle-contract-password"
@@ -1289,13 +1290,20 @@ def test_pinned_opencode_bundle_supports_native_prefixed_model_picker(tmp_path):
             time.sleep(0.2)
         assert status == 200
 
-        created_sessions = []
-        for name in ("session-a", "session-b"):
-            session_dir = tmp_path / name
-            session_dir.mkdir()
-            subprocess.run(
-                ["git", "init", "--quiet", str(session_dir)], check=True
+        agents_file = tmp_path / "AGENTS.md"
+        agents_file.write_text("# Session instructions\n", encoding="utf-8")
+        session_dirs = [
+            Path(
+                ocw.create_opencode_work_dir(
+                    tmp_path,
+                    "20260728_120000",
+                    agents_file=agents_file,
+                )
             )
+            for _ in range(2)
+        ]
+        created_sessions = []
+        for session_dir in session_dirs:
             status, _headers, body = _request(
                 port,
                 "/session",
@@ -1317,6 +1325,36 @@ def test_pinned_opencode_bundle_supports_native_prefixed_model_picker(tmp_path):
             created_sessions[0]["directory"]
             != created_sessions[1]["directory"]
         )
+
+        status, _headers, body = _request(port, "/project", headers=auth)
+        assert status == 200
+        projects = json.loads(body)
+        expected_worktrees = {str(directory) for directory in session_dirs}
+        session_projects = [
+            project
+            for project in projects
+            if project["worktree"] in expected_worktrees
+        ]
+        assert len(session_projects) == 2
+        assert len({project["id"] for project in session_projects}) == 2
+        assert all(project["id"] != "global" for project in session_projects)
+
+        status, _headers, body = _request(
+            port, "/api/session?limit=5000&order=desc", headers=auth
+        )
+        assert status == 200
+        indexed_sessions = json.loads(body)["data"]
+        project_directories = {
+            directory
+            for project in projects
+            for directory in [project["worktree"], *project.get("sandboxes", [])]
+        }
+        home_session_ids = {
+            session["id"]
+            for session in indexed_sessions
+            if session["location"]["directory"] in project_directories
+        }
+        assert {session["id"] for session in created_sessions} <= home_session_ids
 
         match = re.search(r'src="([^"]+/index-[^"]+\.js)"', root)
         assert match, root
