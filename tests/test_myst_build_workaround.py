@@ -49,17 +49,16 @@ def test_myst_build_updates_ydoc_for_jupyterlab_46(dockerfile: str) -> None:
     """MyST 2.7's ydoc 3 dependency must be rebuilt for JupyterLab's ydoc 4."""
     assert 'ARG MYST_YDOC_VERSION="4.1.1"' in dockerfile
     assert 'pnpm@${MYST_PNPM_VERSION} add --save-exact "@jupyter/ydoc@${MYST_YDOC_VERSION}"' in dockerfile
-    assert 'npm pkg set "dependencies.@jupyter/ydoc=^4.0.0"' in dockerfile
+    assert 'dependencies.@jupyter/ydoc=^4.0.0' not in dockerfile
 
 
-def test_myst_build_allows_noninteractive_dependency_refresh(dockerfile: str) -> None:
-    """Refresh pnpm's lockfile explicitly after changing package.json."""
-    manifest_marker = 'npm pkg set "dependencies.@jupyter/ydoc=^4.0.0"'
-    refresh_marker = "pnpm@${MYST_PNPM_VERSION} install --no-frozen-lockfile"
+def test_myst_build_keeps_ydoc_exact_during_dependency_refresh(dockerfile: str) -> None:
+    """The exact add must update the manifest and lockfile before the build."""
+    exact_add_marker = 'pnpm@${MYST_PNPM_VERSION} add --save-exact "@jupyter/ydoc@${MYST_YDOC_VERSION}"'
     build_marker = "pnpm@${MYST_PNPM_VERSION} run build:css"
     assert "CI=true COREPACK_HOME=/tmp/myst-corepack" in dockerfile
-    assert dockerfile.find(manifest_marker) < dockerfile.find(refresh_marker)
-    assert dockerfile.find(refresh_marker) < dockerfile.find(build_marker)
+    assert dockerfile.find(exact_add_marker) < dockerfile.find(build_marker)
+    assert "install --no-frozen-lockfile" not in dockerfile
 
 
 def test_myst_build_does_not_copy_transitive_tsconfigs(dockerfile: str) -> None:

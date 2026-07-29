@@ -150,10 +150,12 @@ def test_dockerfile_rebuilds_the_nbi_530_frontend():
     assert "notebook_intelligence==5.3.0" in dockerfile
     assert 'ARG NBI_JUPYTERLAB_BUILDER_VERSION="4.5.10"' in dockerfile
     assert 'branch "v${NBI_VERSION}"' in dockerfile
+    assert "source=config/jupyter/notebook-intelligence-5.3.0.yarn.lock" in dockerfile
+    assert "install -m 0644 /tmp/nbi-yarn.lock yarn.lock" in dockerfile
     assert "jlpm install --immutable" in dockerfile
     assert 'npm pkg set "dependencies.@jupyterlab/launcher=^4.0.0"' in dockerfile
-    assert 'jlpm up -R "@jupyterlab/*" "@lumino/*"' in dockerfile
-    assert 'jlpm add --dev --exact "@jupyterlab/builder@${NBI_JUPYTERLAB_BUILDER_VERSION}"' in dockerfile
+    assert 'npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}"' in dockerfile
+    assert "jlpm up" not in dockerfile
     assert "cp -a /tmp/notebook-intelligence/notebook_intelligence/labextension" in dockerfile
     assert dockerfile.index("NBI_PACKAGE_DIR=") < dockerfile.index(
         "&& cd /tmp/notebook-intelligence"

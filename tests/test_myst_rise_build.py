@@ -22,7 +22,8 @@ def test_myst_rise_build_uses_pinned_compatible_release():
 
     assert dockerfile.count("jupyterlab_myst==2.7.0") == 1
     assert "pnpm@${MYST_PNPM_VERSION} install --frozen-lockfile" in myst_build
-    assert 'npm pkg set "dependencies.@jupyter/ydoc=^4.0.0"' in myst_build
+    assert 'pnpm@${MYST_PNPM_VERSION} add --save-exact "@jupyter/ydoc@${MYST_YDOC_VERSION}"' in myst_build
+    assert 'dependencies.@jupyter/ydoc=^4.0.0' not in myst_build
     assert "npm install" not in myst_build
 
 

@@ -907,21 +907,22 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
 
 # Rebuild Notebook Intelligence's frontend because the 5.3.0 PyPI wheel
 # contains only style.js. Build from the matching tag.
-# Its lockfile also pins the JupyterLab 4.2 builder stack: refresh
-# Jupyter/Lumino together before selecting a current
-# builder, otherwise webpack's old license plugin crashes and launcher tokens
-# are compiled from incompatible package instances. Patch only after the real
-# bundle is installed so a changed upstream anchor fails the image build.
+# Its upstream lockfile pins the JupyterLab 4.2 builder stack. Use the checked-in
+# JupyterLab 4.6-compatible lockfile before selecting the current builder;
+# otherwise webpack's old license plugin crashes and launcher tokens are
+# compiled from incompatible package instances. Patch only after the real bundle
+# is installed so a changed upstream anchor fails the image build.
 ARG NBI_JUPYTERLAB_BUILDER_VERSION="4.5.10"
-RUN NBI_PACKAGE_DIR="$(/opt/conda/bin/pip show notebook_intelligence | awk '/^Location:/ {print $2 "/notebook_intelligence"}')" \
+RUN --mount=type=bind,source=config/jupyter/notebook-intelligence-5.3.0.yarn.lock,target=/tmp/nbi-yarn.lock,ro \
+    NBI_PACKAGE_DIR="$(/opt/conda/bin/pip show notebook_intelligence | awk '/^Location:/ {print $2 "/notebook_intelligence"}')" \
     && test -d "${NBI_PACKAGE_DIR}" \
     && NBI_VERSION="$(/opt/conda/bin/pip show notebook_intelligence | awk '/^Version:/ {print $2}')" \
     && retry git clone --depth 1 --branch "v${NBI_VERSION}" https://github.com/notebook-intelligence/notebook-intelligence.git /tmp/notebook-intelligence \
     && cd /tmp/notebook-intelligence \
-    && retry jlpm install --immutable \
     && npm pkg set "dependencies.@jupyterlab/launcher=^4.0.0" \
-    && retry jlpm up -R "@jupyterlab/*" "@lumino/*" \
-    && retry jlpm add --dev --exact "@jupyterlab/builder@${NBI_JUPYTERLAB_BUILDER_VERSION}" \
+    && npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}" \
+    && install -m 0644 /tmp/nbi-yarn.lock yarn.lock \
+    && retry jlpm install --immutable \
     && jlpm build:prod \
     && NBI_LABEXT_DIR="${NBI_PACKAGE_DIR}/labextension" \
     && APP_NBI_DIR=/opt/conda/share/jupyter/labextensions/@plmbr/notebook-intelligence \
@@ -942,7 +943,7 @@ RUN NBI_PACKAGE_DIR="$(/opt/conda/bin/pip show notebook_intelligence | awk '/^Lo
 # host for it. See https://github.com/jupyterlab-contrib/rise/issues/46
 # MyST 2.7.0 uses pnpm. Its published metadata requests @jupyter/ydoc 3.x,
 # while JupyterLab 4.6 provides 4.x, so compile against an exact current YDoc
-# and retain the broad 4.x shared-package range in the federated metadata.
+# and retain that exact version in both the manifest and lockfile.
 ARG MYST_PNPM_VERSION="11.17.0"
 ARG MYST_YDOC_VERSION="4.1.1"
 RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
@@ -953,8 +954,6 @@ RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {
     && cd /tmp/myst \
     && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} install --frozen-lockfile --store-dir /tmp/myst-pnpm-store \
     && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} add --save-exact "@jupyter/ydoc@${MYST_YDOC_VERSION}" --store-dir /tmp/myst-pnpm-store \
-    && npm pkg set "dependencies.@jupyter/ydoc=^4.0.0" \
-    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} install --no-frozen-lockfile --store-dir /tmp/myst-pnpm-store \
     && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} run build:css \
     && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} run build:lib \
     && /opt/conda/bin/jupyter labextension build --core-path=/tmp/rise/app . \
