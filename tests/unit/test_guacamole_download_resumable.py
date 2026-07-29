@@ -23,53 +23,47 @@ MIGRATION_JAR_URL = (
 )
 
 
+def _download_command(dockerfile, url):
+    """Return the single ``&&``-delimited shell command that fetches *url*.
+
+    The slice runs from the command boundary that owns the URL (the nearest
+    ``&&`` or the ``RUN`` that opens the statement) up to the next ``&&``, so one
+    archive's ``retry``/``--continue-at`` flags cannot satisfy the check for a
+    different archive's download.
+    """
+    idx = dockerfile.find(url)
+    assert idx != -1, f"{url} download step was removed"
+    start = max(dockerfile.rfind("&& ", 0, idx), dockerfile.rfind("RUN ", 0, idx))
+    end = dockerfile.find("&&", idx)
+    return dockerfile[start : end if end != -1 else len(dockerfile)]
+
+
 def test_guacamole_war_download_is_resumable_and_retried():
     dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
 
-    assert GUACAMOLE_WAR_URL in dockerfile, "Guacamole WAR download URL was removed"
-    assert MIGRATION_JAR_URL in dockerfile, (
-        "Jakarta EE migration jar download URL was removed"
-    )
-
-    # The download must be wrapped in the `retry` helper (outer attempt loop) so
-    # a single slow transfer does not fail the whole build.
-    assert dockerfile.count("retry curl -fsSL") >= 2, (
-        "both archive.apache.org downloads must run under the `retry` wrapper"
-    )
-
-    # Each curl must resume from the partial file so a timed-out attempt picks
-    # up where it stopped instead of restarting from byte 0.
-    assert dockerfile.count("--continue-at -") >= 2, (
-        "both archive.apache.org downloads must use `curl --continue-at -` to "
-        "resume after a timeout"
-    )
+    for url in (GUACAMOLE_WAR_URL, MIGRATION_JAR_URL):
+        command = _download_command(dockerfile, url)
+        assert "retry curl -fsSL" in command, (
+            f"{url} must be downloaded under the `retry` wrapper so a single "
+            "slow transfer does not fail the whole build"
+        )
+        assert "--continue-at -" in command, (
+            f"{url} must use `curl --continue-at -` so a timed-out attempt "
+            "resumes from the partial file instead of restarting from byte 0"
+        )
 
 
 def test_guacamole_war_download_does_not_use_bare_curl_retry():
     """The original non-resumable pattern must not be re-introduced.
 
-    A bare ``curl --retry ... --max-time`` (without the `retry` wrapper and
-    `--continue-at`) restarts from byte 0 on every timeout and cannot recover
-    from a slow archive.apache.org mirror.
+    A bare ``curl`` (without the `retry` wrapper and ``--continue-at``) restarts
+    from byte 0 on every timeout and cannot recover from a slow archive mirror.
     """
     dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
 
-    # The Guacamole WAR / migration jar block is the only place these two
-    # archive.apache.org URLs appear; neither may be fetched with a bare curl.
-    for url_fragment in (
-        "guacamole-${GUACAMOLE_VERSION}.war",
-        "jakartaee-migration-${TOMCAT_MIGRATION_VERSION}-shaded.jar",
-    ):
-        idx = dockerfile.find(url_fragment)
-        assert idx != -1, f"{url_fragment} download step was removed"
-        # Walk back to the start of the RUN line that owns this URL.
-        run_start = dockerfile.rfind("RUN ", 0, idx)
-        block = dockerfile[run_start:idx]
-        assert "retry curl -fsSL" in block, (
-            f"{url_fragment} must be downloaded under the `retry` wrapper, not a "
-            "bare curl"
-        )
-        assert "--continue-at -" in block, (
-            f"{url_fragment} must use `curl --continue-at -` so its download "
-            "resumes after a timeout"
+    for url in (GUACAMOLE_WAR_URL, MIGRATION_JAR_URL):
+        command = _download_command(dockerfile, url)
+        assert "retry curl" in command, (
+            f"{url} must not be fetched with a bare `curl`; use the `retry` "
+            "wrapper with `--continue-at -` so the download resumes after a timeout"
         )
