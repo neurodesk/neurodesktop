@@ -748,6 +748,54 @@ def test_desktop_launcher_script_and_entry():
     assert "Icon=/opt/opencode_logo.svg" in desktop_entry
 
 
+@pytest.mark.skipif(
+    not Path("/opt/neurodesktop/opencode_bash_env.sh").is_file(),
+    reason="the OpenCode Bash initializer is only installed inside the image",
+)
+def test_opencode_bash_env_initializes_modules_for_noninteractive_shell(tmp_path):
+    """OpenCode's ``bash -c`` tools must inherit a working Lmod function."""
+    bash_env = "/opt/neurodesktop/opencode_bash_env.sh"
+    local_containers = tmp_path / "containers"
+    expected_modulepath = local_containers / "modules"
+    expected_modulepath.mkdir(parents=True)
+    env = {
+        **os.environ,
+        "BASH_ENV": bash_env,
+        "HOME": str(tmp_path),
+        "NEURODESKTOP_LOCAL_CONTAINERS": str(local_containers),
+        "NEURODESK_EXPECTED_MODULEPATH": f"{expected_modulepath}/",
+    }
+
+    available = subprocess.run(
+        [
+            "/bin/bash",
+            "-c",
+            'type module >/dev/null && '
+            'test "$MODULEPATH" = "$NEURODESK_EXPECTED_MODULEPATH" && '
+            "module avail >/dev/null",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert available.returncode == 0, available.stderr
+
+    unexpected_output = tmp_path / "funny-name-tool-loaded"
+    env["NEURODESK_TEST_MODULE_OUTPUT"] = str(unexpected_output)
+    missing = subprocess.run(
+        [
+            "/bin/bash",
+            "-c",
+            'module load funny-name-tool && : > "$NEURODESK_TEST_MODULE_OUTPUT"',
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert missing.returncode != 0
+    assert not unexpected_output.exists()
+
+
 # --- End-to-end: setup page, key validation, proxying ----------------------------
 
 
@@ -802,6 +850,7 @@ with open(os.path.join(state_dir, "env.json"), "w") as fh:
             "cwd": os.getcwd(),
             "OPENCODE_DISABLE_FFF": os.environ.get("OPENCODE_DISABLE_FFF", ""),
             "OPENCODE_MODEL_PROFILE": os.environ.get("OPENCODE_MODEL_PROFILE", ""),
+            "BASH_ENV": os.environ.get("BASH_ENV", ""),
             "NEURODESK_API_KEY": os.environ.get("NEURODESK_API_KEY", ""),
             "OPENCODE_SERVER_PASSWORD": password,
         },
@@ -1644,6 +1693,7 @@ def test_valid_key_persists_starts_backend_and_proxies_with_rewrite(launcher):
     assert backend_env["OPENCODE_SERVER_PASSWORD"] == launcher["password"]
     assert backend_env["OPENCODE_DISABLE_FFF"] == "1"
     assert backend_env["OPENCODE_MODEL_PROFILE"] == "neurodesk"
+    assert backend_env["BASH_ENV"] == "/opt/neurodesktop/opencode_bash_env.sh"
     work_dir = Path(backend_env["cwd"])
     assert work_dir == launcher["home"] / "opencode-work"
     assert (work_dir / ".git").is_dir()

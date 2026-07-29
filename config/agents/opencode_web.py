@@ -73,6 +73,7 @@ import urllib.request
 DEFAULT_WRAPPER_BIN = "/usr/local/sbin/opencode"
 DEFAULT_LLM_BASE_URL = "https://llm.neurodesk.org/openai"
 DEFAULT_AGENTS_FILE = "/opt/AGENTS.md"
+OPENCODE_BASH_ENV = "/opt/neurodesktop/opencode_bash_env.sh"
 BACKEND_USERNAME = "opencode"
 AUTH_COOKIE_NAME = "neurodesk_opencode_auth"
 SETUP_PATH = "/neurodesk-setup"
@@ -1424,6 +1425,12 @@ class OpencodeBackend:
 
         env = dict(os.environ)
         env["OPENCODE_SERVER_PASSWORD"] = backend_password
+        # OpenCode executes agent tools with non-interactive ``bash -c``
+        # shells, which do not read ~/.bashrc and therefore lack Lmod's
+        # ``module`` function. BASH_ENV is Bash's supported initialization
+        # hook for these shells. The dedicated file also refreshes MODULEPATH
+        # so a CVMFS mount that completed after Jupyter startup is visible.
+        env["BASH_ENV"] = OPENCODE_BASH_ENV
         # OpenCode 1.18.x's native FFF indexer refuses to initialize when its
         # workspace is a filesystem root or the user's home directory. The
         # web launcher intentionally starts in HOME so users can choose any

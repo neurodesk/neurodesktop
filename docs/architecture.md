@@ -219,6 +219,12 @@ Server Proxy entry that runs
   selected in terminal OpenCode; an explicit environment override still wins.
   The `neurodesk` profile prefers llm.neurodesk.org's curated `neurodesk`
   alias model and falls back to the provider's first listed model.
+- exports `BASH_ENV=/opt/neurodesktop/opencode_bash_env.sh` for the Web backend.
+  OpenCode runs agent commands through non-interactive `bash -c` shells, which
+  do not read `~/.bashrc`; the initializer refreshes the lazy-CVMFS
+  `MODULEPATH` and defines Lmod's `module` function before every command. This
+  also carries into SLURM jobs submitted by the agent through Slurm's default
+  environment export.
 - runs the long-lived web backend from the stable `~/opencode-work` parent, then
   creates a unique `~/opencode-work/YYYYMMDD_HHMMSS/` project for every
   `POST /session`. The session directory is created before forwarding the
