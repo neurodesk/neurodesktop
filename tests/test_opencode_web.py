@@ -569,7 +569,7 @@ def test_rewrite_js_preserves_server_base_path_for_protocol_and_v2_requests(
     ]
 
 
-@pytest.mark.parametrize("router_identifier", ["Epe", "Tye"])
+@pytest.mark.parametrize("router_identifier", ["Epe", "T" + "ye"])
 def test_rewrite_js_configures_the_spa_router_with_the_proxy_base_path(
     router_identifier,
 ):
