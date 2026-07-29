@@ -36,9 +36,9 @@ jobs:
         run: |
           # httpx: imported by config/jupyter/webapp_wrapper/webapp_wrapper.py
           # traitlets: imported by the real Jupyter config template
-          # jsonschema: validates versioned pilot execution receipt fixtures
+          # jsonschema/rfc8785: validate and hash pilot execution receipts
           python -m pip install --upgrade pip
-          python -m pip install pytest httpx traitlets jsonschema
+          python -m pip install pytest httpx traitlets jsonschema rfc8785==0.1.4
           # ssh-keygen, for the ensure_ssh_keys.sh tests
           sudo apt-get update -qq
           sudo apt-get install -y -qq openssh-client

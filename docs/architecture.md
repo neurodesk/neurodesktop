@@ -200,8 +200,10 @@ The provisional ASTRA/Lightcone module pilot records its evidence through the
 versioned contract in
 [`schemas/neurodesktop-pilot-execution-receipt-v1.0.0.schema.json`](../schemas/neurodesktop-pilot-execution-receipt-v1.0.0.schema.json).
 The schema is the public document seam; filesystem confinement, hash
-recomputation, evidence reconciliation, and atomic publication are separate
-semantic-validator responsibilities documented in
+recomputation, evidence reconciliation, derived trust, and atomic publication
+are implemented by the `neurodesktop-pilot-receipt` CLI installed from
+[`scripts/neurodesktop_pilot_receipt.py`](../scripts/neurodesktop_pilot_receipt.py).
+Its full contract is documented in
 [`docs/pilot-execution-receipt.md`](pilot-execution-receipt.md). A schema-valid
 receipt remains amber because the transparent module wrapper does not attest
 the actual tool-container identity.
@@ -434,7 +436,7 @@ so an unattended startup cleanup cannot grow the home directory without bound.
 - [`config/lxde/`](../config/lxde/): desktop environment customization
 - [`config/firefox/`](../config/firefox/), [`config/vscode/`](../config/vscode/),
   and [`config/itksnap/`](../config/itksnap/): application-specific configs
-- [`scripts/`](../scripts/): build-time utilities
+- [`scripts/`](../scripts/): build-time utilities and installed runtime CLIs
 - [`schemas/`](../schemas/): immutable machine-readable integration contracts
 - [`.github/workflows/`](../.github/workflows/): CI/CD pipelines
 - [`.github/workflows/build-neurodesktop.yml`](../.github/workflows/build-neurodesktop.yml):

@@ -13,6 +13,46 @@ Illustrative success and timeout receipts plus negative scenarios live under
 Their hashes and paths exercise the document contract; they are not captured
 pilot-run evidence.
 
+The built image installs the public CLI as
+`/usr/local/bin/neurodesktop-pilot-receipt` and the immutable schema under
+`/opt/neurodesktop/schemas/`.
+
+## Command-line interface
+
+Validate a finalized receipt against its persistent workspace and one or more
+read-only module roots:
+
+```bash
+neurodesktop-pilot-receipt validate receipt.json \
+  --workspace-root /neurodesktop-storage/astra-lightcone-demo \
+  --allowed-module-root /cvmfs/neurodesk.ardc.edu.au
+```
+
+Generate a final receipt from post-job source facts:
+
+```bash
+neurodesktop-pilot-receipt generate candidate.json \
+  --receipt-directory /neurodesktop-storage/astra-lightcone-demo/runs/RUN_ID/receipt \
+  --workspace-root /neurodesktop-storage/astra-lightcone-demo \
+  --allowed-module-root /cvmfs/neurodesk.ardc.edu.au
+```
+
+The candidate has the final receipt's field layout, except that the generator
+owns and derives the following fields:
+
+- the complete `trust` and `generation` objects;
+- every workspace artifact and resolved module file's `sha256` and
+  `sizeBytes`;
+- each universe's RFC 8785 `canonicalSha256`;
+- each verification result's `manifestSha256`; and
+- the RO-Crate inventory bytes and `treeSha256`.
+
+The caller supplies scientific, scheduler, and Lightcone facts plus confined
+paths. The generator does not repair contradictory facts. It derives the
+fields above, validates the complete temporary receipt, and publishes only a
+fully valid final document. Both commands return exit status 2 and an
+`invalid:` diagnostic for an untrusted document or filesystem state.
+
 ## Evidence groups
 
 | Group | Required evidence |
@@ -79,7 +119,7 @@ not an authenticity or provenance claim.
 
 All `relativePath` values are relative to `workspaceRoot`; absolute paths,
 empty segments, and `.` or `..` segments are rejected by the schema. The
-semantic validator must additionally:
+The CLI semantic validator must additionally:
 
 1. require the configured workspace root to equal the receipt's root;
 2. resolve every existing component and reject a path whose final target or
@@ -90,11 +130,13 @@ semantic validator must additionally:
 5. reject missing files, special files, unresolved links, duplicate targets,
    shell expansion, or a hash/size mismatch.
 
-The v1 schema deliberately cannot express filesystem or symlink checks.
+The v1 schema deliberately cannot express filesystem or symlink checks. The
+CLI resolves and hashes the named regular files and rejects missing targets,
+escapes, special files, and duplicate workspace targets.
 
 ## Semantic validation
 
-After schema and path validation, a receipt validator must fail closed unless:
+After schema and path validation, the receipt validator fails closed unless:
 
 - `exactSpecifier` equals `name + "/" + version` and every command actually
   resolves through the recorded module command surface;
@@ -118,6 +160,19 @@ Unknown fields, unknown schema versions, missing evidence, inconsistent facts,
 or partial success evidence invalidate the receipt. Consumers must not fall
 back to an older or incomplete interpretation.
 
+For Lightcone 0.4.0, the validator parses each canonical schema-v1 manifest,
+the saved unversioned status snapshot, and Neurodesktop's supplemental fresh
+verification JSON. A successful receipt requires identical output-key sets,
+`ok` status for every output, exactly one passing verification result per
+manifest, and matching manifest hashes. The validator does not reinterpret an
+`lc verify` exit code as evidence.
+
+For Slurm, the retained script must be the target of the recorded
+`sbatch --parsable` argv. `scontrol` and `sacct` must agree with the receipt's
+job ID, partition, requested resources, state, exit code, node, timestamps, and
+elapsed duration. Manifest and verification completion must fall inside the
+allocation, and receipt creation/finalization must follow terminal state.
+
 ## Atomic publication
 
 The generator writes a complete receipt only after Slurm reaches a terminal
@@ -130,6 +185,10 @@ state:
 5. atomically rename it to `receipt.json` without replacing an existing final
    receipt; and
 6. `fsync` the parent directory.
+
+The implementation uses Linux `renameat2(RENAME_NOREPLACE)` or macOS
+`renamex_np(RENAME_EXCL)` and fails closed on platforms without an atomic
+no-replace rename primitive.
 
 Readers ignore temporary files and consume only `receipt.json`. Generation
 failure leaves no final receipt. Atomic publication prevents partial reads; it

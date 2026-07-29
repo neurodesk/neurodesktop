@@ -24,7 +24,8 @@ pytest tests/unit          # from a checkout, no container needed
 pytest /opt/tests/         # inside the built image
 ```
 
-Running `tests/unit` needs `pytest`, `httpx`, `traitlets`, `jsonschema`, and `ssh-keygen`
+Running `tests/unit` needs `pytest`, `httpx`, `traitlets`, `jsonschema`,
+`rfc8785==0.1.4`, and `ssh-keygen`
 (`openssh-client`); see `.github/workflows/unit-tests.yml`.
 
 ## Shared helpers

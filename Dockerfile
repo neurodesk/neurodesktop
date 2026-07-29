@@ -572,6 +572,8 @@ RUN /opt/conda/bin/pip install \
     jupyter_scheduler \
     jupyterlab-slurm@git+https://github.com/NERSC/jupyterlab-slurm.git@main \
     httpx \
+    jsonschema \
+    rfc8785==0.1.4 \
     ipywidgets==8.1.8 \
     ipyvolume \
     jupyterlab_widgets \
@@ -843,6 +845,8 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     --mount=type=bind,source=config/lxde,target=/tmp/lxde,ro \
     --mount=type=bind,source=config/lmod,target=/tmp/lmod,ro \
     --mount=type=bind,source=scripts/generate_jupyter_config.py,target=/tmp/generate_jupyter_config.py,ro \
+    --mount=type=bind,source=scripts/neurodesktop_pilot_receipt.py,target=/tmp/neurodesktop_pilot_receipt.py,ro \
+    --mount=type=bind,source=schemas,target=/tmp/schemas,ro \
     --mount=type=bind,source=tests,target=/tmp/tests,ro \
     install -D -m 0644 /tmp/jupyter/neurodesk_brain_logo.svg /opt/neurodesk_brain_logo.svg \
     && install -D -m 0644 /tmp/jupyter/neurodesk_brain_icon.svg /opt/neurodesk_brain_icon.svg \
@@ -883,6 +887,8 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0644 /tmp/tests/conftest.py /opt/tests/conftest.py \
     && install -m 0644 /tmp/tests/testlib.py /opt/tests/testlib.py \
     && install -m 0644 /tmp/tests/pytest.ini /opt/tests/pytest.ini \
+    && install -m 0755 /tmp/neurodesktop_pilot_receipt.py /usr/local/bin/neurodesktop-pilot-receipt \
+    && install -D -m 0644 /tmp/schemas/neurodesktop-pilot-execution-receipt-v1.0.0.schema.json /opt/neurodesktop/schemas/neurodesktop-pilot-execution-receipt-v1.0.0.schema.json \
     && install -m 0755 /tmp/generate_jupyter_config.py /opt/neurodesktop/scripts/generate_jupyter_config.py \
     && cp -a /tmp/jupyter/webapp_wrapper/. /opt/neurodesktop/webapp_wrapper/ \
     && install -m 0755 /tmp/jupyter/webapp_launcher.sh /opt/neurodesktop/webapp_launcher.sh \
