@@ -1,9 +1,9 @@
 ---
-name: Daily Maintenance - Flaky Tests
+name: Weekly Maintenance - Flaky Tests
 description: Stabilize one recurring test failure by fixing its proven root cause.
 labels: [automation, maintenance, tests, ci]
 on:
-  schedule: daily
+  schedule: weekly
   workflow_dispatch:
 
 permissions:
@@ -35,6 +35,7 @@ max-turn-cache-misses: 2000
 timeout-minutes: 35
 
 imports:
+  - uses: .github/workflows/shared/agentic-models.md
   - uses: .github/workflows/shared/maintenance-base.md
     with:
       category: flaky-tests

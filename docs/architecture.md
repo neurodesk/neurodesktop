@@ -42,9 +42,15 @@ incremental CodeRabbit review. The loop stops without changing or merging the PR
 when no actionable findings remain; marking the draft ready and merging remain
 human decisions.
 
-### Daily agentic maintenance
+Every Codex agentic workflow imports
+[`agentic-models.md`](../.github/workflows/shared/agentic-models.md). Its
+`neurodesk` model alias lists GLM 5.2 first and Kimi 2.7 second, giving the
+workflow firewall an ordered secondary candidate when resolving the model from
+the available-model catalog.
 
-Seven independently scattered daily workflows inspect test redundancy, missing
+### Weekly agentic maintenance
+
+Seven independently scattered weekly workflows inspect test redundancy, missing
 coverage, available updates, duplicate abstractions, dead code, documentation
 drift, and recurring test flakes. They share the bounded pull-request contract
 in
@@ -225,6 +231,14 @@ Server Proxy entry that runs
   selected in terminal OpenCode; an explicit environment override still wins.
   The `neurodesk` profile prefers llm.neurodesk.org's curated `neurodesk`
   alias model and falls back to the provider's first listed model.
+- sets the Web backend's `BASH_ENV` to
+  [`opencode_bash_env.sh`](../config/agents/opencode_bash_env.sh). OpenCode
+  runs tool commands in non-interactive Bash shells, which do not read
+  `~/.bashrc`; in lazy CVMFS mode the parent Jupyter process can also retain
+  the local-only `MODULEPATH` it inherited before CVMFS mounted. The hook
+  re-sources the current Neurodesktop environment and initializes Lmod for
+  every Bash tool command, so `module load <tool>/<version>` works without
+  per-command setup. The terminal OpenCode workflow is unaffected.
 - runs the long-lived web backend from the stable `~/opencode-work` parent, then
   creates a unique `~/opencode-work/YYYYMMDD_HHMMSS/` project for every
   `POST /session`. The session directory is created before forwarding the
@@ -262,16 +276,30 @@ Server Proxy entry that runs
   (`OPENCODE_SERVER_PASSWORD`) and streams SSE responses. For prefixed
   Jupyter/JupyterHub launches it inserts a same-origin bootstrap before the
   OpenCode module bundle; the bootstrap sets OpenCode's native default-server
-  URL to the complete `X-Forwarded-Prefix`. The proxy also rewrites the pinned
-  web bundle's canonical local-server URL to that bootstrap value, so the
-  selected default and OpenCode's server registry use the same key; its
-  permission provider rejects a selected server that is absent from that
-  registry. The pinned bundle rewrite also marks its fetch-based SSE requests
-  with `Accept: text/event-stream`, which makes Jupyter Server Proxy select
-  progressive delivery, while the Python wrapper re-chunks upstream event
-  feeds so Jupyter can flush each event instead of buffering indefinitely. The
-  same bootstrap value is supplied as the Solid router's base path. Without
-  that routing invariant, the SPA treats the first proxy segment
+  URL to the complete `X-Forwarded-Prefix`. Before the bundle hydrates, it also
+  migrates same-origin server references in OpenCode's server, Home, layout,
+  draft-tab, and closed-tab browser state to that prefixed URL. Both the
+  current namespaced stores and the legacy `server.v3`, `home.servers.v1`, and
+  `layout.v6` stores are handled before OpenCode can hydrate the latter into
+  current state. This preserves drafts and sessions across upgrades without
+  leaving a second server that sends `/api/*` requests to Jupyter's root;
+  unrelated external servers and user-authored history are untouched. The
+  pinned 1.18.7 bundle also needs its protocol-probe and v2 SDK URL
+  constructors rewritten: their `new URL("/api/...", serverUrl)` form discards
+  a path such as `/opencode` from `serverUrl`, misclassifies the backend after
+  probing Jupyter's root, and then retries root `/api/event`. Neurodesktop
+  makes those SDK paths relative to the configured server base, preserving
+  both Jupyter prefixes and the behavior of ordinary root-hosted servers. The
+  proxy also rewrites the pinned web
+  bundle's canonical local-server URL to that bootstrap value, so the selected
+  default and OpenCode's server registry use the same key; its permission
+  provider rejects a selected server that is absent from that registry. The
+  pinned bundle rewrite also marks its fetch-based SSE requests with `Accept:
+  text/event-stream`, which makes Jupyter Server Proxy select progressive
+  delivery, while the Python wrapper re-chunks upstream event feeds so Jupyter
+  can flush each event instead of buffering indefinitely. The same bootstrap
+  value is supplied as the Solid router's base path. Without that routing
+  invariant, the SPA treats the first proxy segment
   (`opencode`) as a base64-encoded project directory and creates sessions in
   an invalid path. The router rewrite matches and preserves the bundle's
   minified component identifier because that identifier can change between

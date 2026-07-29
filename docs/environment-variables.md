@@ -40,6 +40,10 @@
 - `OPENCODE_WEB_STARTUP_TIMEOUT`: seconds `opencode_web.py` (the "Scigent.ai"
   launcher tile) waits for the `opencode web` backend to become ready;
   defaults to `180`
+- `OPENCODE_WEB_BASH_ENV`: non-interactive Bash initializer used by OpenCode
+  Web tool commands; defaults to
+  `/opt/neurodesktop/opencode_bash_env.sh`, which refreshes the lazy-CVMFS
+  `MODULEPATH` and initializes Lmod (mainly overridable for testing)
 - `OPENCODE_DISABLE_FFF`: forced to `1` for the OpenCode Web child process so
   its Add Project dialog can search below the `/home/jovyan` startup directory.
   The terminal OpenCode workflow is unaffected

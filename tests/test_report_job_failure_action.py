@@ -15,6 +15,11 @@ REVIEW_LOCK = (
     / ".github/workflows/issue-investigator-review.lock.yml"
 )
 CODERABBIT_CONFIG = Path(__file__).resolve().parents[1] / ".coderabbit.yaml"
+SHARED_MODELS_WORKFLOW = (
+    Path(__file__).resolve().parents[1]
+    / ".github/workflows/shared/agentic-models.md"
+)
+MODEL_ALIAS_JSON = '"neurodesk":["openai/glm-5.2","openai/kimi-k2.7"]'
 
 
 def _read_repo_file(path: Path) -> str:
@@ -50,13 +55,19 @@ def test_report_job_failure_dispatch_uses_canonical_issue_number():
 def test_issue_investigator_routes_codex_through_neurodesk_gateway():
     workflow = _read_repo_file(WORKFLOW)
     lock = _read_repo_file(LOCK)
+    review_workflow = _read_repo_file(REVIEW_WORKFLOW)
+    review_lock = _read_repo_file(REVIEW_LOCK)
+    shared_models = _read_repo_file(SHARED_MODELS_WORKFLOW)
     model = "${{ vars.GH_AW_MODEL_AGENT_CODEX || vars.GH_AW_DEFAULT_MODEL_CODEX || 'neurodesk' }}"
     model_costs = '{"providers":{"openai":{"models":{"neurodesk":{"cost":{"input":"3e-06","output":"1.5e-05"}}}}}}'
 
     assert f"model: {model}" in workflow
     assert model in lock
-    assert "kimi-k2.7" not in workflow
-    assert "kimi-k2.7" not in lock
+    assert "neurodesk:\n    - openai/glm-5.2\n    - openai/kimi-k2.7" in shared_models
+    assert "uses: .github/workflows/shared/agentic-models.md" in workflow
+    assert "uses: .github/workflows/shared/agentic-models.md" in review_workflow
+    assert MODEL_ALIAS_JSON in lock
+    assert MODEL_ALIAS_JSON in review_lock
     assert 'OPENAI_BASE_URL: "https://llm.neurodesk.org/openai"' in workflow
     assert "OPENAI_API_KEY: ${{ secrets.CODEX_API_KEY || secrets.OPENAI_API_KEY }}" in workflow
     assert "models:\n  providers:\n    openai:\n      models:\n        neurodesk:" in workflow

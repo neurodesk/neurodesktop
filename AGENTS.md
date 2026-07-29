@@ -23,8 +23,18 @@
 - When changing an agentic workflow under `.github/workflows/*.md`, regenerate
   its `.lock.yml` with `gh aw compile`, then run
   `pytest tests/test_report_job_failure_action.py`.
-- Daily code-maintenance workflows use the shared contract in
+- Weekly code-maintenance workflows use the shared contract in
   `.github/workflows/shared/maintenance-base.md` and the CodeRabbit loop in
   `.github/workflows/maintenance-review.md`. Keep their `[maintenance] ` title
   prefix and `agentic-workflow` label aligned, compile every affected workflow,
   and run `pytest tests/test_agentic_maintenance_workflows.py`.
+- `.github/workflows/package-update-radar.md` is the read-only weekly package
+  survey. It must keep its `[package-updates] ` title prefix, stay free of any
+  `create-pull-request` safe output, and keep a weekly cron distinct from the
+  maintenance workflows. `maintenance-updates` remains the only workflow that
+  applies an upgrade. Compile it with `gh aw compile` and run
+  `pytest tests/test_agentic_maintenance_workflows.py`.
+- Codex agentic workflows import the ordered model fallback in
+  `.github/workflows/shared/agentic-models.md`. Keep GLM 5.2 ahead of Kimi 2.7,
+  compile every affected workflow, and verify the generated model map in the
+  focused agentic workflow tests.
