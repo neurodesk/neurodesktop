@@ -1,9 +1,14 @@
 # Agentic Maintenance Workflows
 
-Neurodesktop runs seven agentic maintenance checks every day. Each source
-workflow uses gh-aw's fuzzy `daily` schedule, which gives it a stable scattered
-run time instead of launching the whole suite at once. Every workflow also
-supports manual dispatch.
+Neurodesktop runs seven agentic maintenance checks and one read-only package
+survey once per week. Each source workflow uses gh-aw's fuzzy `weekly`
+schedule, which gives it a stable scattered day and run time instead of
+launching the whole suite at once. Every workflow also supports manual
+dispatch.
+
+All maintenance, package-survey, and issue-investigation workflows import the
+shared `.github/workflows/shared/agentic-models.md` alias. The ordered
+`neurodesk` candidates prefer GLM 5.2 and use Kimi 2.7 as the secondary model.
 
 | Workflow | Focus | Non-negotiable guardrail |
 | --- | --- | --- |
@@ -14,6 +19,29 @@ supports manual dispatch.
 | `maintenance-dead-code` | Unused code, configuration, assets, or dependencies | Check dynamic, build, workflow, and runtime callers before deletion. |
 | `maintenance-docs-drift` | Documentation that disagrees with current behavior | Change documentation only when the implementation is authoritative. |
 | `maintenance-flaky-tests` | Recurrent nondeterministic failures | Require repeated evidence and fix the cause without retries or weaker tests. |
+
+## Package Update Radar
+
+`package-update-radar` is the only weekly agentic workflow that produces no
+code. It inventories every pinned third-party version — `Dockerfile` build
+arguments and base image tag, pip/npm/conda/apt pins, the version-sensitive
+JupyterLab extensions, the launcher extension manifests, composite actions, and
+pinned tool versions under `scripts/` and `config/` — probes each component's
+upstream release once, and classifies the gap as security, ready, needs review,
+or blocked.
+
+The report lands in a single tracking issue titled
+`[package-updates] Pinned dependency radar` and labeled `agentic-workflow`.
+Later runs add a comment with the complete current report and collapse the
+previous ones, so the issue never fans out into a new issue per week. The
+workflow has no `create-pull-request` safe output at all, so it cannot edit
+files even if a run misbehaves.
+
+The radar and `maintenance-updates` are deliberately split: the radar keeps a
+ranked candidate list across the whole inventory, and `maintenance-updates`
+applies at most one of those candidates per week with its own upstream
+verification and container validation. A radar entry is a lead, not an
+approval — `maintenance-updates` still has to prove the update independently.
 
 ## Pull Request and Review Loop
 
@@ -44,10 +72,13 @@ no actionable findings remain. It never marks a PR ready or merges it.
   workaround.
 - Generated `.lock.yml` files are changed only by `gh aw compile` during
   workflow development.
+- `package-update-radar` permits one open tracking issue and no code changes.
+  Its upstream probes are capped per run; a truncated survey must say so in the
+  report's `Coverage` section rather than silently narrowing.
 
 ## Further Candidates
 
-Two additional checks would be useful if the daily PR volume remains
+Two additional checks would be useful if the weekly PR volume remains
 manageable:
 
 - **Security-exception expiry:** verify that Trivy allowlist and ignore entries

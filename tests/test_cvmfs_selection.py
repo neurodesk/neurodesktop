@@ -137,6 +137,16 @@ def test_script_syntax_ok():
     assert code == 0, "cvmfs_server_select.sh has a bash syntax error"
 
 
+def test_root_cache_write_restores_notebook_home_ownership():
+    """Eager startup must not leave ~/.cache root-owned before Jupyter starts."""
+    script = Path(_script_path()).read_text(encoding="utf-8")
+    assert "restore_home_cache_ownership" in script
+    assert 'chown "${NB_UID}:${NB_GID}" "$cache_path"' in script
+    cache_write = script.index('cat > "$CACHE_FILE"')
+    ownership_fix = script.index("restore_home_cache_ownership", cache_write)
+    assert cache_write < ownership_fix
+
+
 def test_ranked_config_written(tmp_path, fast_server):
     proc, config = run_select(tmp_path, fast_server)
 

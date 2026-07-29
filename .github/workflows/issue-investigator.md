@@ -44,6 +44,8 @@ strict: true
 # Retain the pricing above for reporting, but disable enforcement for this alias.
 max-ai-credits: -1
 max-turn-cache-misses: 2000
+imports:
+  - uses: .github/workflows/shared/agentic-models.md
 network:
   allowed:
     - defaults

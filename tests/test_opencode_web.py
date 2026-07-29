@@ -47,6 +47,14 @@ def opencode_web_module_path():
     )
 
 
+def opencode_bash_env_path():
+    """Locate the non-interactive OpenCode Bash initializer."""
+    return first_existing_path(
+        "/opt/neurodesktop/opencode_bash_env.sh",
+        REPO_ROOT / "config/agents/opencode_bash_env.sh",
+    )
+
+
 def load_opencode_web():
     """Import opencode_web.py from its file path."""
     spec = importlib.util.spec_from_file_location(
@@ -122,6 +130,166 @@ def test_prefix_bootstrap_sets_opencode_server_to_proxy_path():
     assert "window.__NEURODESK_OPENCODE_BASE_PATH__ = prefix" in script
     assert json.dumps(PREFIX) in script
     assert "/provider" not in script
+
+
+@pytest.mark.skipif(
+    shutil.which("node") is None,
+    reason="node is needed to execute the prefix bootstrap",
+)
+def test_prefix_bootstrap_migrates_stale_browser_server_state(tmp_path):
+    """A pre-prefix server and its drafts must stay usable after an upgrade."""
+    origin = "http://127.0.0.1:8888"
+    server = origin + PREFIX
+    external_server = "http://127.0.0.1:4096"
+    scoped_session = origin + "\0session-1"
+    initial_storage = {
+        "opencode.settings.dat:defaultServerUrl": origin,
+        # OpenCode imports these legacy keys into the namespaced stores during
+        # hydration. They must be migrated before that import can recreate a
+        # second, unprefixed server context.
+        "server.v3": json.dumps(
+            {
+                "list": [
+                    {"type": "http", "http": {"url": origin}},
+                    {"type": "http", "http": {"url": external_server}},
+                ],
+                "projects": {origin: [{"worktree": "/legacy-work"}]},
+                "lastProject": {origin: "/legacy-work"},
+            }
+        ),
+        "home.servers.v1": json.dumps(
+            {"collapsed": {origin: True, external_server: False}}
+        ),
+        "layout.v6": json.dumps(
+            {
+                "home": {"selection": {"server": origin}},
+                "sessionTabs": {scoped_session: {"all": ["legacy"]}},
+            }
+        ),
+        "opencode.global.dat:server": json.dumps(
+            {
+                "list": [
+                    {"type": "http", "http": {"url": origin}},
+                    {"type": "http", "http": {"url": external_server}},
+                ],
+                # Exercise a collision in the least convenient order: the
+                # valid prefixed state exists before the stale origin state.
+                "projects": {
+                    server: [{"worktree": "/prefixed-work"}],
+                    origin: [{"worktree": "/work"}],
+                },
+                "lastProject": {
+                    server: "/prefixed-work",
+                    origin: "/work",
+                },
+            }
+        ),
+        "opencode.global.dat:layout": json.dumps(
+            {
+                "home": {"selection": {"server": origin}},
+                "sessionTabs": {scoped_session: {"all": ["review"]}},
+            }
+        ),
+        "opencode.window.browser.dat:tabs": json.dumps(
+            [
+                {
+                    "type": "draft",
+                    "draftID": "draft-1",
+                    "server": origin,
+                    "directory": "/work",
+                },
+                {
+                    "type": "draft",
+                    "draftID": "external-draft",
+                    "server": external_server,
+                    "directory": "/external",
+                },
+            ]
+        ),
+        "opencode.window.browser.dat:tabs.closed": json.dumps(
+            [
+                {
+                    "tab": {
+                        "type": "session",
+                        "server": origin,
+                        "sessionId": "ses_1",
+                    }
+                }
+            ]
+        ),
+        # State outside the routing stores must not be rewritten merely
+        # because user-authored text contains the Jupyter origin.
+        "opencode.global.dat:prompt-history": json.dumps(
+            {"items": [f"Explain {origin}"]}
+        ),
+        # One corrupt state entry must not prevent the remaining migration.
+        "opencode.window.browser.dat:tabs.info": "not-json",
+    }
+    harness = tmp_path / "prefix-bootstrap.js"
+    harness.write_text(
+        "const values = new Map(Object.entries("
+        + json.dumps(initial_storage)
+        + "));\n"
+        "const localStorage = {\n"
+        "  get length() { return values.size; },\n"
+        "  key(index) { return [...values.keys()][index] ?? null; },\n"
+        "  getItem(key) { return values.get(key) ?? null; },\n"
+        "  setItem(key, value) { values.set(key, String(value)); },\n"
+        "  removeItem(key) { values.delete(key); },\n"
+        "};\n"
+        f"global.window = {{ location: {{ origin: {json.dumps(origin)} }}, "
+        "localStorage };\n"
+        + ocw.prefix_bootstrap_script(PREFIX)
+        + ocw.prefix_bootstrap_script(PREFIX)
+        + "\nprocess.stdout.write(JSON.stringify(Object.fromEntries(values)));\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["node", str(harness)], check=True, capture_output=True, text=True
+    )
+    migrated = json.loads(result.stdout)
+
+    assert migrated["opencode.settings.dat:defaultServerUrl"] == server
+
+    legacy_server = json.loads(migrated["server.v3"])
+    assert legacy_server["list"][0]["http"]["url"] == server
+    assert legacy_server["list"][1]["http"]["url"] == external_server
+    assert server in legacy_server["projects"]
+    assert legacy_server["lastProject"][server] == "/legacy-work"
+    legacy_home = json.loads(migrated["home.servers.v1"])
+    assert legacy_home["collapsed"] == {
+        server: True,
+        external_server: False,
+    }
+    legacy_layout = json.loads(migrated["layout.v6"])
+    assert legacy_layout["home"]["selection"]["server"] == server
+    assert server + "\0session-1" in legacy_layout["sessionTabs"]
+
+    server_state = json.loads(migrated["opencode.global.dat:server"])
+    assert server_state["list"][0]["http"]["url"] == server
+    assert server_state["list"][1]["http"]["url"] == external_server
+    assert {item["worktree"] for item in server_state["projects"][server]} == {
+        "/prefixed-work",
+        "/work",
+    }
+    assert server_state["lastProject"][server] == "/prefixed-work"
+
+    layout = json.loads(migrated["opencode.global.dat:layout"])
+    assert layout["home"]["selection"]["server"] == server
+    assert server + "\0session-1" in layout["sessionTabs"]
+
+    tabs = json.loads(migrated["opencode.window.browser.dat:tabs"])
+    assert tabs[0]["server"] == server
+    assert tabs[1]["server"] == external_server
+    closed = json.loads(
+        migrated["opencode.window.browser.dat:tabs.closed"]
+    )
+    assert closed[0]["tab"]["server"] == server
+
+    assert json.loads(
+        migrated["opencode.global.dat:prompt-history"]
+    ) == {"items": [f"Explain {origin}"]}
+    assert migrated["opencode.window.browser.dat:tabs.info"] == "not-json"
 
 
 def test_rewrite_html_injects_the_file_previewer_after_the_bootstrap():
@@ -369,9 +537,46 @@ def test_rewrite_js_registers_the_prefixed_server_used_for_permissions():
     assert "window.__NEURODESK_OPENCODE_SERVER_URL__" in rewritten
 
 
-def test_rewrite_js_configures_the_spa_router_with_the_proxy_base_path():
+@pytest.mark.skipif(
+    shutil.which("node") is None,
+    reason="node is needed to execute the rewritten URL constructors",
+)
+def test_rewrite_js_preserves_server_base_path_for_protocol_and_v2_requests(
+    tmp_path,
+):
+    """Root-absolute SDK paths must not discard the Jupyter proxy prefix."""
+    server = f"http://127.0.0.1:8888{PREFIX}"
+    bundle_fragment = (
+        f'const e={{url:{json.dumps(server)},baseUrl:{json.dumps(server)}}};'
+        'const n="/global/health",a={path:"/api/event"};'
+        "process.stdout.write(JSON.stringify(["
+        "new URL(n,e.url).pathname,"
+        "new URL(a.path,e.baseUrl).pathname"
+        "]));"
+    )
+    harness = tmp_path / "server-relative-urls.js"
+    harness.write_text(
+        ocw.rewrite_js(bundle_fragment, PREFIX), encoding="utf-8"
+    )
+
+    result = subprocess.run(
+        ["node", str(harness)], check=True, capture_output=True, text=True
+    )
+
+    assert json.loads(result.stdout) == [
+        f"{PREFIX}/global/health",
+        f"{PREFIX}/api/event",
+    ]
+
+
+@pytest.mark.parametrize("router_identifier", ["Epe", "T" + "ye"])
+def test_rewrite_js_configures_the_spa_router_with_the_proxy_base_path(
+    router_identifier,
+):
     """The browser must not decode the proxy name as a project directory."""
-    router_component = 'get component(){return e.router??Epe},root:n=>'
+    router_component = (
+        f"get component(){{return e.router??{router_identifier}}},root:n=>"
+    )
 
     rewritten = ocw.rewrite_js(router_component, PREFIX)
 
@@ -748,52 +953,86 @@ def test_desktop_launcher_script_and_entry():
     assert "Icon=/opt/opencode_logo.svg" in desktop_entry
 
 
-@pytest.mark.skipif(
-    not Path("/opt/neurodesktop/opencode_bash_env.sh").is_file(),
-    reason="the OpenCode Bash initializer is only installed inside the image",
-)
-def test_opencode_bash_env_initializes_modules_for_noninteractive_shell(tmp_path):
-    """OpenCode's ``bash -c`` tools must inherit a working Lmod function."""
-    bash_env = "/opt/neurodesktop/opencode_bash_env.sh"
-    local_containers = tmp_path / "containers"
-    expected_modulepath = local_containers / "modules"
-    expected_modulepath.mkdir(parents=True)
-    env = {
+def test_opencode_bash_env_is_valid_and_installed_by_the_image():
+    """The BASH_ENV hook parses and is copied into the production image."""
+    script = opencode_bash_env_path()
+    subprocess.run(["bash", "-n", str(script)], check=True)
+    dockerfile = first_existing_path(
+        "/opt/tests/Dockerfile", REPO_ROOT / "Dockerfile"
+    ).read_text(encoding="utf-8")
+    assert (
+        "/tmp/agents/opencode_bash_env.sh "
+        "/opt/neurodesktop/opencode_bash_env.sh"
+    ) in dockerfile
+
+
+def _require_lmod_image():
+    """Skip host-only runs that lack the image's Lmod installation."""
+    if not Path("/etc/profile.d/lmod.sh").is_file():
+        pytest.skip("the Lmod runtime is only present inside the image")
+
+
+def _write_test_module(module_root):
+    """Create a small local module for the OpenCode shell contract tests."""
+    module_file = module_root / "modules" / "opencode-test" / "1.0.lua"
+    module_file.parent.mkdir(parents=True)
+    module_file.write_text(
+        'setenv("NEURODESKTOP_OPENCODE_MODULE_TEST", "loaded")\n',
+        encoding="utf-8",
+    )
+
+
+def _opencode_shell_test_env(tmp_path):
+    """Model the stale environment inherited from lazy-started Jupyter."""
+    _require_lmod_image()
+    local_containers = tmp_path / "local-containers"
+    _write_test_module(local_containers)
+    return {
         **os.environ,
-        "BASH_ENV": bash_env,
-        "HOME": str(tmp_path),
+        "BASH_ENV": str(opencode_bash_env_path()),
         "NEURODESKTOP_LOCAL_CONTAINERS": str(local_containers),
-        "NEURODESK_EXPECTED_MODULEPATH": f"{expected_modulepath}/",
+        "NEURODESKTOP_ENV_SOURCED": "1",
+        "CVMFS_DISABLE": "true",
+        "MODULEPATH": str(tmp_path / "stale-modulepath"),
     }
 
-    available = subprocess.run(
-        [
-            "/bin/bash",
-            "-c",
-            'type module >/dev/null && '
-            'test "$MODULEPATH" = "$NEURODESK_EXPECTED_MODULEPATH" && '
-            "module avail >/dev/null",
-        ],
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-    assert available.returncode == 0, available.stderr
 
-    unexpected_output = tmp_path / "funny-name-tool-loaded"
-    env["NEURODESK_TEST_MODULE_OUTPUT"] = str(unexpected_output)
-    missing = subprocess.run(
+def test_opencode_bash_env_loads_modules_in_noninteractive_shell(tmp_path):
+    """Every OpenCode Bash tool refreshes MODULEPATH and initializes Lmod."""
+    result = subprocess.run(
         [
-            "/bin/bash",
+            "bash",
             "-c",
-            'module load funny-name-tool && : > "$NEURODESK_TEST_MODULE_OUTPUT"',
+            "module load opencode-test/1.0 && "
+            'test "$NEURODESKTOP_OPENCODE_MODULE_TEST" = loaded',
+        ],
+        env=_opencode_shell_test_env(tmp_path),
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_opencode_bash_env_rejects_missing_modules(tmp_path):
+    """A failed module load remains fatal and cannot produce downstream output."""
+    marker = tmp_path / "must-not-exist"
+    env = _opencode_shell_test_env(tmp_path)
+    env["OPENCODE_MODULE_TEST_MARKER"] = str(marker)
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "module load funny-name-tool && "
+            'printf created > "$OPENCODE_MODULE_TEST_MARKER"',
         ],
         env=env,
         capture_output=True,
         text=True,
     )
-    assert missing.returncode != 0
-    assert not unexpected_output.exists()
+
+    assert result.returncode != 0
+    assert not marker.exists()
 
 
 # --- End-to-end: setup page, key validation, proxying ----------------------------
@@ -850,9 +1089,9 @@ with open(os.path.join(state_dir, "env.json"), "w") as fh:
             "cwd": os.getcwd(),
             "OPENCODE_DISABLE_FFF": os.environ.get("OPENCODE_DISABLE_FFF", ""),
             "OPENCODE_MODEL_PROFILE": os.environ.get("OPENCODE_MODEL_PROFILE", ""),
-            "BASH_ENV": os.environ.get("BASH_ENV", ""),
             "NEURODESK_API_KEY": os.environ.get("NEURODESK_API_KEY", ""),
             "OPENCODE_SERVER_PASSWORD": password,
+            "BASH_ENV": os.environ.get("BASH_ENV", ""),
         },
         fh,
     )
@@ -1132,8 +1371,21 @@ def test_pinned_opencode_bundle_supports_model_picker_and_home_sessions(tmp_path
             '"http://localhost:4096":location.origin'
         )
         assert bundle.count(canonical_origin) == 1
-        router_component = 'get component(){return e.router??Epe},root:n=>'
-        assert bundle.count(router_component) == 1
+        protocol_probe_url = "new URL(n,e.url)"
+        v2_request_url = "new URL(a.path,e.baseUrl)"
+        assert bundle.count(protocol_probe_url) == 1
+        assert bundle.count(v2_request_url) == 1
+        router_matches = re.findall(
+            r"get component\(\)\{return e\.router\?\?"
+            r"([A-Za-z_$][A-Za-z0-9_$]*)\},root:n=>",
+            bundle,
+        )
+        assert len(router_matches) == 1
+        router_component = (
+            "get component(){return e.router??"
+            f"{router_matches[0]}"
+            "},root:n=>"
+        )
         route_parser = (
             '=(e,t)=>{const n=e.split("/").filter(Boolean);'
             'if(n.length===0)return{type:"home"}'
@@ -1142,6 +1394,8 @@ def test_pinned_opencode_bundle_supports_model_picker_and_home_sessions(tmp_path
         proxy_prefix = "/opencode"
         proxied_bundle = ocw.rewrite_js(bundle, proxy_prefix)
         assert canonical_origin not in proxied_bundle
+        assert protocol_probe_url not in proxied_bundle
+        assert v2_request_url not in proxied_bundle
         assert "window.__NEURODESK_OPENCODE_SERVER_URL__" in proxied_bundle
         assert router_component not in proxied_bundle
         assert "window.__NEURODESK_OPENCODE_BASE_PATH__" in proxied_bundle
@@ -1731,7 +1985,7 @@ def test_valid_key_persists_starts_backend_and_proxies_with_rewrite(launcher):
     assert backend_env["OPENCODE_SERVER_PASSWORD"] == launcher["password"]
     assert backend_env["OPENCODE_DISABLE_FFF"] == "1"
     assert backend_env["OPENCODE_MODEL_PROFILE"] == "neurodesk"
-    assert backend_env["BASH_ENV"] == "/opt/neurodesktop/opencode_bash_env.sh"
+    assert backend_env["BASH_ENV"] == ocw.DEFAULT_BASH_ENV
     work_dir = Path(backend_env["cwd"])
     assert work_dir == launcher["home"] / "opencode-work"
     assert (work_dir / ".git").is_dir()

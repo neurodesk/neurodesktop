@@ -30,19 +30,35 @@ def dockerfile() -> str:
 
 
 def test_myst_build_uses_pinned_release_and_frozen_lockfile(dockerfile: str) -> None:
-    """MyST 2.6.0 ships package-lock.json, so reproduce it with npm ci."""
-    assert "jupyterlab_myst==2.6.0" in DOCKERFILE.read_text()
-    assert "npm_config_cache=/tmp/myst-npm-cache npm ci" in dockerfile
+    """MyST 2.7.0 ships pnpm-lock.yaml, so reproduce it with pinned pnpm."""
+    assert "jupyterlab_myst==2.7.0" in DOCKERFILE.read_text()
+    assert 'ARG MYST_PNPM_VERSION="11.17.0"' in dockerfile
+    assert "pnpm@${MYST_PNPM_VERSION} install --frozen-lockfile" in dockerfile
     assert "npm install" not in dockerfile
-    assert "pnpm" not in dockerfile
     assert "npx --yes" not in dockerfile
 
 
 def test_myst_build_install_runs_before_labextension_build(dockerfile: str) -> None:
     """The frozen dependency install must precede the webpack-based build."""
-    install_marker = "npm_config_cache=/tmp/myst-npm-cache npm ci"
+    install_marker = "pnpm@${MYST_PNPM_VERSION} install --frozen-lockfile"
     build_marker = "jupyter labextension build --core-path=/tmp/rise/app"
     assert dockerfile.find(install_marker) < dockerfile.find(build_marker)
+
+
+def test_myst_build_updates_ydoc_for_jupyterlab_46(dockerfile: str) -> None:
+    """MyST 2.7's ydoc 3 dependency must be rebuilt for JupyterLab's ydoc 4."""
+    assert 'ARG MYST_YDOC_VERSION="4.1.1"' in dockerfile
+    assert 'pnpm@${MYST_PNPM_VERSION} add --save-exact "@jupyter/ydoc@${MYST_YDOC_VERSION}"' in dockerfile
+    assert 'dependencies.@jupyter/ydoc=^4.0.0' not in dockerfile
+
+
+def test_myst_build_keeps_ydoc_exact_during_dependency_refresh(dockerfile: str) -> None:
+    """The exact add must update the manifest and lockfile before the build."""
+    exact_add_marker = 'pnpm@${MYST_PNPM_VERSION} add --save-exact "@jupyter/ydoc@${MYST_YDOC_VERSION}"'
+    build_marker = "pnpm@${MYST_PNPM_VERSION} run build:css"
+    assert "CI=true COREPACK_HOME=/tmp/myst-corepack" in dockerfile
+    assert dockerfile.find(exact_add_marker) < dockerfile.find(build_marker)
+    assert "install --no-frozen-lockfile" not in dockerfile
 
 
 def test_myst_build_does_not_copy_transitive_tsconfigs(dockerfile: str) -> None:
@@ -52,10 +68,12 @@ def test_myst_build_does_not_copy_transitive_tsconfigs(dockerfile: str) -> None:
 
 
 def test_myst_build_removes_temporary_package_manager_state(dockerfile: str) -> None:
-    """The temporary npm cache must not remain in the image."""
-    assert "/tmp/myst-npm-cache" in dockerfile
+    """The temporary pnpm and Corepack state must not remain in the image."""
+    assert "/tmp/myst-corepack" in dockerfile
+    assert "/tmp/myst-pnpm-store" in dockerfile
     cleanup = dockerfile.rsplit("rm -rf", maxsplit=1)[-1]
-    assert "/tmp/myst-npm-cache" in cleanup
+    assert "/tmp/myst-corepack" in cleanup
+    assert "/tmp/myst-pnpm-store" in cleanup
 
 
 def test_myst_build_copies_rebuilt_labextension(dockerfile: str) -> None:

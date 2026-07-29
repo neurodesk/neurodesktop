@@ -42,9 +42,15 @@ incremental CodeRabbit review. The loop stops without changing or merging the PR
 when no actionable findings remain; marking the draft ready and merging remain
 human decisions.
 
-### Daily agentic maintenance
+Every Codex agentic workflow imports
+[`agentic-models.md`](../.github/workflows/shared/agentic-models.md). Its
+`neurodesk` model alias lists GLM 5.2 first and Kimi 2.7 second, giving the
+workflow firewall an ordered secondary candidate when resolving the model from
+the available-model catalog.
 
-Seven independently scattered daily workflows inspect test redundancy, missing
+### Weekly agentic maintenance
+
+Seven independently scattered weekly workflows inspect test redundancy, missing
 coverage, available updates, duplicate abstractions, dead code, documentation
 drift, and recurring test flakes. They share the bounded pull-request contract
 in
@@ -52,7 +58,7 @@ in
 category allows one open draft PR, one evidence-backed change per run, and no PR
 when the candidate cannot be validated.
 
-All maintenance PRs use the `[maintenance] ` title prefix and
+All maintenance PRs use the `[maintenance]` title prefix and
 `agentic-workflow` label. CodeRabbit reviews them as drafts, then
 [`maintenance-review.md`](../.github/workflows/maintenance-review.md) validates
 and batches actionable feedback, pushes once to the existing branch, and asks
@@ -78,10 +84,16 @@ abandons a degraded server at runtime via the failover settings
 [`config/cvmfs/default.local`](../config/cvmfs/default.local). A successful
 ranking is cached in `~/.cache/neurodesktop/cvmfs-selection.env` for seven days
 and reused while its primary server passes a health check; a failed mount
-triggers a forced re-probe.
+triggers a forced re-probe. Eager Docker startup runs the selector as root, so
+after writing this cache it restores ownership of the cache path to the
+remapped notebook UID/GID; otherwise Jupyter cannot create its own sibling
+cache directories.
 
 Configuration lives in [`config/cvmfs/`](../config/cvmfs/). CVMFS can be
-disabled with `CVMFS_DISABLE=true`.
+disabled with `CVMFS_DISABLE=true`. The Dockerfile pins both the CVMFS client
+package and the repository bootstrap package; the bootstrap download is also
+verified by SHA-256 so the `latest` URL cannot silently change a reproducible
+build.
 
 ### Neurocommand
 
@@ -219,12 +231,14 @@ Server Proxy entry that runs
   selected in terminal OpenCode; an explicit environment override still wins.
   The `neurodesk` profile prefers llm.neurodesk.org's curated `neurodesk`
   alias model and falls back to the provider's first listed model.
-- exports `BASH_ENV=/opt/neurodesktop/opencode_bash_env.sh` for the Web backend.
-  OpenCode runs agent commands through non-interactive `bash -c` shells, which
-  do not read `~/.bashrc`; the initializer refreshes the lazy-CVMFS
-  `MODULEPATH` and defines Lmod's `module` function before every command. This
-  also carries into SLURM jobs submitted by the agent through Slurm's default
-  environment export.
+- sets the Web backend's `BASH_ENV` to
+  [`opencode_bash_env.sh`](../config/agents/opencode_bash_env.sh). OpenCode
+  runs tool commands in non-interactive Bash shells, which do not read
+  `~/.bashrc`; in lazy CVMFS mode the parent Jupyter process can also retain
+  the local-only `MODULEPATH` it inherited before CVMFS mounted. The hook
+  re-sources the current Neurodesktop environment and initializes Lmod for
+  every Bash tool command, so `module load <tool>/<version>` works without
+  per-command setup. The terminal OpenCode workflow is unaffected.
 - runs the long-lived web backend from the stable `~/opencode-work` parent, then
   creates a unique `~/opencode-work/YYYYMMDD_HHMMSS/` project for every
   `POST /session`. The session directory is created before forwarding the
@@ -266,18 +280,35 @@ Server Proxy entry that runs
   (`OPENCODE_SERVER_PASSWORD`) and streams SSE responses. For prefixed
   Jupyter/JupyterHub launches it inserts a same-origin bootstrap before the
   OpenCode module bundle; the bootstrap sets OpenCode's native default-server
-  URL to the complete `X-Forwarded-Prefix`. The proxy also rewrites the pinned
-  web bundle's canonical local-server URL to that bootstrap value, so the
-  selected default and OpenCode's server registry use the same key; its
-  permission provider rejects a selected server that is absent from that
-  registry. The pinned bundle rewrite also marks its fetch-based SSE requests
-  with `Accept: text/event-stream`, which makes Jupyter Server Proxy select
-  progressive delivery, while the Python wrapper re-chunks upstream event
-  feeds so Jupyter can flush each event instead of buffering indefinitely. The
-  same bootstrap value is supplied as the Solid router's base path. Without
-  that routing invariant, the SPA treats the first proxy segment
+  URL to the complete `X-Forwarded-Prefix`. Before the bundle hydrates, it also
+  migrates same-origin server references in OpenCode's server, Home, layout,
+  draft-tab, and closed-tab browser state to that prefixed URL. Both the
+  current namespaced stores and the legacy `server.v3`, `home.servers.v1`, and
+  `layout.v6` stores are handled before OpenCode can hydrate the latter into
+  current state. This preserves drafts and sessions across upgrades without
+  leaving a second server that sends `/api/*` requests to Jupyter's root;
+  unrelated external servers and user-authored history are untouched. The
+  pinned 1.18.7 bundle also needs its protocol-probe and v2 SDK URL
+  constructors rewritten: their `new URL("/api/...", serverUrl)` form discards
+  a path such as `/opencode` from `serverUrl`, misclassifies the backend after
+  probing Jupyter's root, and then retries root `/api/event`. Neurodesktop
+  makes those SDK paths relative to the configured server base, preserving
+  both Jupyter prefixes and the behavior of ordinary root-hosted servers. The
+  proxy also rewrites the pinned web
+  bundle's canonical local-server URL to that bootstrap value, so the selected
+  default and OpenCode's server registry use the same key; its permission
+  provider rejects a selected server that is absent from that registry. The
+  pinned bundle rewrite also marks its fetch-based SSE requests with `Accept:
+  text/event-stream`, which makes Jupyter Server Proxy select progressive
+  delivery, while the Python wrapper re-chunks upstream event feeds so Jupyter
+  can flush each event instead of buffering indefinitely. The same bootstrap
+  value is supplied as the Solid router's base path. Without that routing
+  invariant, the SPA treats the first proxy segment
   (`opencode`) as a base64-encoded project directory and creates sessions in
-  an invalid path. Together these changes keep provider, model, session,
+  an invalid path. The router rewrite matches and preserves the bundle's
+  minified component identifier because that identifier can change between
+  otherwise compatible OpenCode patch releases. Together these changes keep
+  provider, model, session,
   event, terminal, browser-history, and future API routes below `/opencode/`.
   The proxied bundle also makes the new-layout Home control perform a full
   navigation to the prefixed root. OpenCode's in-memory tab toggle works at a
@@ -439,6 +470,27 @@ rebuilds the panel from that fresh state. The patcher is anchored on the
 exact minified code and fails the image build when a `notebook_intelligence`
 upgrade changes the bundle, so the workaround cannot silently regress;
 re-verify and update (or drop) the patch when bumping the pin.
+
+Notebook Intelligence 5.3.0's published Python wheel omits its compiled
+JupyterLab frontend. The Dockerfile therefore rebuilds the matching source tag,
+replaces its older dependency graph with the checked-in, JupyterLab
+4.6-compatible Yarn lockfile, installs that graph immutably, installs the
+resulting federated extension, and only then applies the settings patch. The
+build asserts that a `remoteEntry` bundle exists before continuing. Regenerate
+`config/jupyter/notebook-intelligence-5.3.0.yarn.lock` when changing the NBI or
+JupyterLab builder pins.
+
+### MyST and RISE Extension Build
+
+MyST is rebuilt against RISE's JupyterLab application so its markdown viewer is
+available in presentation mode. MyST 2.7.0's published shared-package metadata
+requests Jupyter YDoc 3.x, while the base image's JupyterLab 4.6 uses YDoc 4.x;
+the source build pins that exact YDoc 4 release in both the package manifest and
+the generated lockfile. RISE also retains
+a Python dependency on the legacy `jupyterlab-mathjax3` package. Its JupyterLab
+3-only frontend is not exposed in the final application; JupyterLab 4.6 and
+RISE's standalone application both provide the current built-in MathJax
+extension.
 
 ### Apptainer
 

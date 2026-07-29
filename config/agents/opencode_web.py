@@ -36,6 +36,8 @@ behind Neurodesktop's proxy setup:
 
 Environment overrides (mainly for tests):
   OPENCODE_WEB_WRAPPER_BIN   backend command (default /usr/local/sbin/opencode)
+  OPENCODE_WEB_BASH_ENV      non-interactive Bash initializer (default
+                             /opt/neurodesktop/opencode_bash_env.sh)
   OPENCODE_WEB_SECRET_FILE   password file (default
                              ~/.neurodesk/secrets/opencode_server_password)
   NEURODESK_LLM_BASE_URL     key-validation endpoint base
@@ -72,9 +74,9 @@ import urllib.parse
 import urllib.request
 
 DEFAULT_WRAPPER_BIN = "/usr/local/sbin/opencode"
+DEFAULT_BASH_ENV = "/opt/neurodesktop/opencode_bash_env.sh"
 DEFAULT_LLM_BASE_URL = "https://llm.neurodesk.org/openai"
 DEFAULT_AGENTS_FILE = "/opt/AGENTS.md"
-OPENCODE_BASH_ENV = "/opt/neurodesktop/opencode_bash_env.sh"
 BACKEND_USERNAME = "opencode"
 AUTH_COOKIE_NAME = "neurodesk_opencode_auth"
 SETUP_PATH = "/neurodesk-setup"
@@ -85,6 +87,20 @@ FILE_PREVIEW_PATH = "/neurodesk-file"
 DEFAULT_NIIVUE_BUNDLE = "/opt/neurodesktop/vendor/niivue.js"
 OPENCODE_DEFAULT_SERVER_STORAGE_KEY = (
     "opencode.settings.dat:defaultServerUrl"
+)
+OPENCODE_PROXY_ROUTING_STORAGE_KEYS = (
+    "opencode.global.dat:server",
+    "opencode.global.dat:home.servers",
+    "opencode.global.dat:layout",
+    "opencode.window.browser.dat:tabs",
+    "opencode.window.browser.dat:tabs.recent",
+    "opencode.window.browser.dat:tabs.info",
+    "opencode.window.browser.dat:tabs.closed",
+    # OpenCode hydrates these legacy keys into the namespaced stores. Migrate
+    # them first so they cannot reintroduce the Jupyter origin afterwards.
+    "server.v3",
+    "home.servers.v1",
+    "layout.v6",
 )
 OPENCODE_PREFIX_SERVER_GLOBAL = "__NEURODESK_OPENCODE_SERVER_URL__"
 OPENCODE_PREFIX_ROUTER_GLOBAL = "__NEURODESK_OPENCODE_BASE_PATH__"
@@ -97,13 +113,17 @@ OPENCODE_PREFIXED_WEB_ORIGIN_EXPRESSION = (
     '"http://localhost:4096":'
     f"window.{OPENCODE_PREFIX_SERVER_GLOBAL}||location.origin"
 )
-OPENCODE_WEB_ROUTER_COMPONENT_EXPRESSION = (
-    "get component(){return e.router??Epe},root:n=>"
+OPENCODE_PROTOCOL_PROBE_URL_EXPRESSION = "new URL(n,e.url)"
+OPENCODE_PREFIXED_PROTOCOL_PROBE_URL_EXPRESSION = (
+    r'new URL(n.replace(/^\//,""),e.url.replace(/\/?$/,"/"))'
 )
-OPENCODE_PREFIXED_WEB_ROUTER_COMPONENT_EXPRESSION = (
-    "get component(){return e.router??Epe},"
-    f"get base(){{return window.{OPENCODE_PREFIX_ROUTER_GLOBAL}||\"\"}},"
-    "root:n=>"
+OPENCODE_V2_REQUEST_URL_EXPRESSION = "new URL(a.path,e.baseUrl)"
+OPENCODE_PREFIXED_V2_REQUEST_URL_EXPRESSION = (
+    r'new URL(a.path.replace(/^\//,""),e.baseUrl.replace(/\/?$/,"/"))'
+)
+OPENCODE_WEB_ROUTER_COMPONENT_RE = re.compile(
+    r"get component\(\)\{return e\.router\?\?"
+    r"(?P<router>[A-Za-z_$][A-Za-z0-9_$]*)\},root:n=>"
 )
 OPENCODE_WEB_ROUTE_PARSER_EXPRESSION = (
     '=(e,t)=>{const n=e.split("/").filter(Boolean);'
@@ -471,20 +491,91 @@ def prefix_bootstrap_script(prefix):
     same-origin script before the module bundle keeps the full API (including
     the native model picker) under the validated forwarded prefix. The router
     also needs the prefix as its base; otherwise it decodes the first URL
-    segment (``opencode``) as a base64 project directory.
+    segment (``opencode``) as a base64 project directory. Newer OpenCode
+    releases persist the server URL in their server, layout, and tab stores as
+    well, and can hydrate older unnamespaced stores into them. Migrate both
+    generations of same-origin references before the bundle hydrates.
     """
     safe_prefix = safe_forwarded_prefix(prefix)
     prefix_json = json.dumps(safe_prefix)
     key_json = json.dumps(OPENCODE_DEFAULT_SERVER_STORAGE_KEY)
+    routing_keys_json = json.dumps(OPENCODE_PROXY_ROUTING_STORAGE_KEYS)
     return f"""(() => {{
   const prefix = {prefix_json};
-  const server = window.location.origin + prefix;
+  const origin = window.location.origin;
+  const server = origin + prefix;
+  const routingKeys = {routing_keys_json};
   window.{OPENCODE_PREFIX_SERVER_GLOBAL} = server;
   window.{OPENCODE_PREFIX_ROUTER_GLOBAL} = prefix;
   try {{
     window.localStorage.setItem({key_json}, server);
   }} catch (_error) {{
     // Private browsing or a locked-down browser may disable localStorage.
+  }}
+
+  const migrateString = (value) => {{
+    if (value === origin) return server;
+    if (value.startsWith(origin + "\\u0000")) {{
+      return server + value.slice(origin.length);
+    }}
+    return value;
+  }};
+  const isObject = (value) =>
+    value !== null && typeof value === "object" && !Array.isArray(value);
+  const mergeState = (left, right) => {{
+    if (Array.isArray(left) && Array.isArray(right)) {{
+      const merged = [...left];
+      const seen = new Set(merged.map((item) => JSON.stringify(item)));
+      for (const item of right) {{
+        const token = JSON.stringify(item);
+        if (!seen.has(token)) {{
+          seen.add(token);
+          merged.push(item);
+        }}
+      }}
+      return merged;
+    }}
+    if (!isObject(left) || !isObject(right)) return right;
+    const merged = Object.assign(Object.create(null), left);
+    for (const [key, value] of Object.entries(right)) {{
+      merged[key] = Object.prototype.hasOwnProperty.call(merged, key)
+        ? mergeState(merged[key], value)
+        : value;
+    }}
+    return merged;
+  }};
+  const migrateState = (value) => {{
+    if (typeof value === "string") return migrateString(value);
+    if (Array.isArray(value)) return value.map(migrateState);
+    if (!isObject(value)) return value;
+    const migrated = Object.create(null);
+    const priorities = Object.create(null);
+    for (const [key, item] of Object.entries(value)) {{
+      const migratedKey = migrateString(key);
+      const migratedItem = migrateState(item);
+      const priority = migratedKey === key ? 1 : 0;
+      if (!Object.prototype.hasOwnProperty.call(migrated, migratedKey)) {{
+        migrated[migratedKey] = migratedItem;
+        priorities[migratedKey] = priority;
+      }} else if (priority >= priorities[migratedKey]) {{
+        migrated[migratedKey] = mergeState(migrated[migratedKey], migratedItem);
+        priorities[migratedKey] = priority;
+      }} else {{
+        migrated[migratedKey] = mergeState(migratedItem, migrated[migratedKey]);
+      }}
+    }}
+    return migrated;
+  }};
+  for (const key of routingKeys) {{
+    try {{
+      const raw = window.localStorage.getItem(key);
+      if (raw === null || !raw.includes(origin)) continue;
+      window.localStorage.setItem(
+        key, JSON.stringify(migrateState(JSON.parse(raw)))
+      );
+    }} catch (_error) {{
+      // Leave malformed or unavailable state alone and migrate other stores.
+    }}
   }}
 }})();
 """
@@ -1110,6 +1201,13 @@ def rewrite_js(body, prefix):
     project directory and misclassifies every session URL as ``home`` — the
     titlebar Home button then silently re-selects the current session instead
     of navigating. The parser rewrite strips the forwarded prefix first.
+
+    OpenCode 1.18.7's protocol detector and v2 SDK use root-absolute paths
+    with ``new URL(path, serverUrl)``. That URL form intentionally discards
+    any path in ``serverUrl``, so a configured ``/opencode`` server probes
+    Jupyter's root, falls back to the wrong protocol, and retries
+    ``/api/event`` there. Treat those SDK paths as relative to the configured
+    server URL while preserving the behavior of root-hosted servers.
     """
     body = _JS_STRING_ASSET_PATH_RE.sub(rf"\g<1>{prefix}/assets/", body)
     home_url = json.dumps(f"{prefix}/")
@@ -1123,6 +1221,15 @@ def rewrite_js(body, prefix):
             f'{groups["current"]}()}}):location.assign({home_url})'
         )
 
+    def rewrite_router_component(match):
+        return (
+            "get component(){return e.router??"
+            f'{match.group("router")}'
+            "},"
+            f"get base(){{return window.{OPENCODE_PREFIX_ROUTER_GLOBAL}||\"\"}},"
+            "root:n=>"
+        )
+
     # Linear prefilter: the possessive quantifiers stop per-position
     # backtracking, but an unanchored scan over a long identifier-character
     # run would still cost O(n^2). Bodies without the literal cannot match.
@@ -1133,8 +1240,15 @@ def rewrite_js(body, prefix):
         OPENCODE_PREFIXED_WEB_ORIGIN_EXPRESSION,
     )
     body = body.replace(
-        OPENCODE_WEB_ROUTER_COMPONENT_EXPRESSION,
-        OPENCODE_PREFIXED_WEB_ROUTER_COMPONENT_EXPRESSION,
+        OPENCODE_PROTOCOL_PROBE_URL_EXPRESSION,
+        OPENCODE_PREFIXED_PROTOCOL_PROBE_URL_EXPRESSION,
+    )
+    body = body.replace(
+        OPENCODE_V2_REQUEST_URL_EXPRESSION,
+        OPENCODE_PREFIXED_V2_REQUEST_URL_EXPRESSION,
+    )
+    body = OPENCODE_WEB_ROUTER_COMPONENT_RE.sub(
+        rewrite_router_component, body
     )
     body = body.replace(
         OPENCODE_WEB_ROUTE_PARSER_EXPRESSION,
@@ -1493,12 +1607,14 @@ class OpencodeBackend:
 
         env = dict(os.environ)
         env["OPENCODE_SERVER_PASSWORD"] = backend_password
-        # OpenCode executes agent tools with non-interactive ``bash -c``
-        # shells, which do not read ~/.bashrc and therefore lack Lmod's
-        # ``module`` function. BASH_ENV is Bash's supported initialization
-        # hook for these shells. The dedicated file also refreshes MODULEPATH
-        # so a CVMFS mount that completed after Jupyter startup is visible.
-        env["BASH_ENV"] = OPENCODE_BASH_ENV
+        # OpenCode's tool runner uses non-interactive Bash, which does not
+        # read ~/.bashrc. Jupyter can also retain the local-only MODULEPATH it
+        # inherited before lazy CVMFS startup completed. BASH_ENV is sourced
+        # by every Bash tool process, so refresh the live Neurodesktop module
+        # catalogue and initialize Lmod at the actual command boundary.
+        env["BASH_ENV"] = os.environ.get(
+            "OPENCODE_WEB_BASH_ENV", DEFAULT_BASH_ENV
+        )
         # OpenCode 1.18.x's native FFF indexer refuses to initialize when its
         # workspace is a filesystem root or the user's home directory. The
         # web launcher intentionally starts in HOME so users can choose any
