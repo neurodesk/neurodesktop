@@ -359,6 +359,12 @@ def _is_sha256(value):
     )
 
 
+def _is_lightcone_sha256(value):
+    return isinstance(value, str) and value.startswith("sha256:") and _is_sha256(
+        value.removeprefix("sha256:")
+    )
+
+
 def _validate_lightcone_manifests(receipt, workspace_root):
     outputs = {output["outputKey"]: output for output in receipt["outputs"]}
     universes = {
@@ -430,7 +436,9 @@ def _validate_lightcone_manifests(receipt, workspace_root):
             )
         if not isinstance(manifest["recipe"], str) or not manifest["recipe"]:
             raise ReceiptValidationError(f"{label} recipe must be a non-empty string")
-        if not _is_sha256(manifest["code_version"]) or not _is_sha256(
+        if not _is_lightcone_sha256(
+            manifest["code_version"]
+        ) or not _is_lightcone_sha256(
             manifest["data_version"]
         ):
             raise ReceiptValidationError(
