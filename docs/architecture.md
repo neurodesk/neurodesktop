@@ -228,12 +228,16 @@ Server Proxy entry that runs
 - runs the long-lived web backend from the stable `~/opencode-work` parent, then
   creates a unique `~/opencode-work/YYYYMMDD_HHMMSS/` project for every
   `POST /session`. The session directory is created before forwarding the
-  request, initialized as its own Git worktree, and seeded with an editable
-  copy of `/opt/AGENTS.md`; a numeric suffix prevents collisions between
-  concurrent or same-second session creations. A separate Git root on every
-  dated child is required because OpenCode resolves the request directory with
-  `git rev-parse --show-toplevel`. Without the nested root, the parent worktree
-  silently pulls every session into the shared parent and their artifacts mix.
+  request, initialized as its own Git worktree, seeded with an editable copy of
+  `/opt/AGENTS.md`, and given a unique initial commit; a numeric suffix prevents
+  collisions between concurrent or same-second session creations. A separate
+  Git root on every dated child is required because OpenCode resolves the
+  request directory with `git rev-parse --show-toplevel`. The root commit is
+  also required because OpenCode uses it as the durable project identity when
+  no remote exists; an empty repository falls back to the shared `global`
+  identity, which collapses multiple workspaces in the Home session index.
+  Without the nested root, the parent worktree silently pulls every session
+  into the shared parent and their artifacts mix.
   The local `AGENTS.md` remains the **only** source of Neurodesk guidance: the
   shipped `opencode.json` does not pin the read-only `/opt/AGENTS.md` into
   `instructions`, and the wrapper strips that legacy entry from configs written

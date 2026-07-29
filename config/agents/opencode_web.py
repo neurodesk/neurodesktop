@@ -21,10 +21,11 @@ behind Neurodesktop's proxy setup:
    X-Forwarded-Prefix header, because the upstream web UI assumes it is
    served from `/` and breaks behind the /opencode/ proxy prefix.
 5. Runs the backend from ~/opencode-work, then creates a unique
-   ~/opencode-work/DATE_TIME Git project for every ``POST /session`` and seeds
-   it with /opt/AGENTS.md. The proxy records the returned session id and pins
-   later requests for that session to its project. Both the ``?directory=``
-   parameter and ``x-opencode-directory`` header are enforced because
+   ~/opencode-work/DATE_TIME Git project with a durable root commit for every
+   ``POST /session`` and seeds it with /opt/AGENTS.md. The proxy records the
+   returned session id and pins later requests for that session to its project.
+   Both the ``?directory=`` parameter and ``x-opencode-directory`` header are
+   enforced because
    OpenCode's client only puts the directory in the query for GET/HEAD; POSTs
    such as session creation and message send carry it in the header alone.
 6. Previews the files an agent produced. The upstream changed-files list
@@ -1177,6 +1178,70 @@ def initialize_git_project(directory):
         ) from exc
 
 
+def commit_opencode_project_identity(directory):
+    """Give a new session worktree a unique, durable OpenCode project id.
+
+    OpenCode identifies a Git project by its remote, cached id, or root commit.
+    A freshly initialized repository has none of those and therefore collapses
+    to the shared ``global`` project. The unique directory name in this initial
+    commit message guarantees a distinct root commit even when two otherwise
+    identical workspaces are created during the same second.
+    """
+    name = os.path.basename(os.path.normpath(os.fspath(directory)))
+    try:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                os.fspath(directory),
+                "-c",
+                "user.name=Neurodesk",
+                "-c",
+                "user.email=neurodesk@localhost",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "add",
+                "--all",
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                os.fspath(directory),
+                "-c",
+                "user.name=Neurodesk",
+                "-c",
+                "user.email=neurodesk@localhost",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "commit",
+                "--quiet",
+                "--allow-empty",
+                "-m",
+                f"Initialize OpenCode session workspace {name}",
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        detail = getattr(exc, "stderr", "") or str(exc)
+        raise OSError(
+            f"could not commit OpenCode project identity in {directory}: "
+            f"{detail.strip()}"
+        ) from exc
+
+
 def create_opencode_work_root(home_dir):
     """Create the stable backend cwd above all per-session projects."""
     parent = os.path.join(os.fspath(home_dir), OPENCODE_WORK_DIR_PARENT)
@@ -1198,8 +1263,10 @@ def create_opencode_work_dir(home_dir, timestamp=None, agents_file=None):
 
     ``git init`` on the session directory keeps it its own worktree even when a
     legacy ``~/opencode-work/.git`` from an earlier release still exists: the
-    upward walk stops at the nearest ``.git``. ``agents_file`` is copied only
-    into the newly-created project and is never used to overwrite user edits.
+    upward walk stops at the nearest ``.git``. A unique initial commit prevents
+    empty repositories from collapsing to OpenCode's shared ``global`` project
+    identity. ``agents_file`` is copied only into the newly-created project and
+    is never used to overwrite user edits.
     """
     parent = create_opencode_work_root(home_dir)
     timestamp = timestamp or time.strftime(OPENCODE_WORK_DIR_TIMESTAMP_FORMAT)
@@ -1229,6 +1296,7 @@ def create_opencode_work_dir(home_dir, timestamp=None, agents_file=None):
                 f"could not seed OpenCode project {work_dir} from "
                 f"{agents_file}: {exc}"
             ) from exc
+    commit_opencode_project_identity(work_dir)
     return work_dir
 
 
