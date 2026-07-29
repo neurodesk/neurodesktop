@@ -1,0 +1,852 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neurodesk.org/schemas/pilot-execution-receipt/v1.0.0",
+  "title": "Neurodesktop pilot execution receipt v1.0.0",
+  "description": "A fail-closed evidence record for a provisional module pilot. Schema validation checks document structure only; a receipt validator must also confine resolved paths, recompute hashes, reconcile cross-references, and verify atomic publication.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "receiptId",
+    "createdAt",
+    "workspaceRoot",
+    "outcome",
+    "trust",
+    "analysis",
+    "execution",
+    "inputs",
+    "slurm",
+    "lightcone",
+    "outputs",
+    "roCrate",
+    "generation"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "receiptId": {
+      "$ref": "#/$defs/identifier"
+    },
+    "createdAt": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "workspaceRoot": {
+      "type": "string",
+      "pattern": "^/[^\\u0000]*$"
+    },
+    "outcome": {
+      "enum": [
+        "succeeded",
+        "failed",
+        "cancelled",
+        "timed-out"
+      ]
+    },
+    "trust": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "outputIntegrity",
+        "actualContainerIdentity",
+        "actualContainerIdentityAttested",
+        "statement"
+      ],
+      "properties": {
+        "level": {
+          "enum": [
+            "spec-only",
+            "executed-unverified"
+          ]
+        },
+        "outputIntegrity": {
+          "enum": [
+            "passed",
+            "failed",
+            "not-run"
+          ]
+        },
+        "actualContainerIdentity": {
+          "type": "null"
+        },
+        "actualContainerIdentityAttested": {
+          "const": false
+        },
+        "statement": {
+          "const": "The actual tool-container identity is not attested by this receipt."
+        }
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "spec",
+        "universes"
+      ],
+      "properties": {
+        "spec": {
+          "$ref": "#/$defs/workspaceArtifact"
+        },
+        "universes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/universe"
+          }
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "retainedScript",
+        "module"
+      ],
+      "properties": {
+        "retainedScript": {
+          "$ref": "#/$defs/workspaceArtifact"
+        },
+        "module": {
+          "$ref": "#/$defs/moduleExecution"
+        }
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/input"
+      }
+    },
+    "slurm": {
+      "$ref": "#/$defs/slurmExecution"
+    },
+    "lightcone": {
+      "$ref": "#/$defs/lightconeEvidence"
+    },
+    "outputs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/output"
+      }
+    },
+    "roCrate": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/roCrate"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "finalizedAt",
+        "complete"
+      ],
+      "properties": {
+        "method": {
+          "const": "atomic-write-fsync-rename"
+        },
+        "finalizedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "complete": {
+          "const": true
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "succeeded"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "trust": {
+            "properties": {
+              "level": {
+                "const": "executed-unverified"
+              },
+              "outputIntegrity": {
+                "const": "passed"
+              }
+            }
+          },
+          "slurm": {
+            "properties": {
+              "terminal": {
+                "properties": {
+                  "state": {
+                    "const": "COMPLETED"
+                  },
+                  "exitCode": {
+                    "const": "0:0"
+                  }
+                }
+              }
+            }
+          },
+          "lightcone": {
+            "properties": {
+              "statusSnapshot": {
+                "$ref": "#/$defs/workspaceArtifact"
+              },
+              "manifests": {
+                "minItems": 1
+              },
+              "verification": {
+                "properties": {
+                  "status": {
+                    "const": "passed"
+                  },
+                  "performedAt": {
+                    "$ref": "#/$defs/timestamp"
+                  },
+                  "coverageComplete": {
+                    "const": true
+                  },
+                  "expectedOutputKeys": {
+                    "minItems": 1
+                  },
+                  "results": {
+                    "minItems": 1,
+                    "items": {
+                      "properties": {
+                        "status": {
+                          "const": "passed"
+                        },
+                        "failure": {
+                          "type": "null"
+                        }
+                      }
+                    }
+                  },
+                  "evidence": {
+                    "$ref": "#/$defs/workspaceArtifact"
+                  }
+                }
+              }
+            }
+          },
+          "outputs": {
+            "minItems": 1
+          },
+          "roCrate": {
+            "$ref": "#/$defs/roCrate"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "trust": {
+            "properties": {
+              "outputIntegrity": {
+                "enum": [
+                  "failed",
+                  "not-run"
+                ]
+              }
+            }
+          },
+          "slurm": {
+            "properties": {
+              "terminal": {
+                "properties": {
+                  "state": {
+                    "not": {
+                      "const": "COMPLETED"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "timed-out"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "slurm": {
+            "properties": {
+              "terminal": {
+                "properties": {
+                  "state": {
+                    "const": "TIMEOUT"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "cancelled"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "slurm": {
+            "properties": {
+              "terminal": {
+                "properties": {
+                  "state": {
+                    "const": "CANCELLED"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)[^\\u0000/]+(?:/[^\\u0000/]+)*$"
+    },
+    "absolutePath": {
+      "type": "string",
+      "minLength": 2,
+      "pattern": "^/(?!\\.{1,2}(?:/|$))[^/\\u0000]+(?:/(?!\\.{1,2}(?:/|$))[^/\\u0000]+)*$"
+    },
+    "workspaceArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relativePath",
+        "sha256",
+        "sizeBytes"
+      ],
+      "properties": {
+        "relativePath": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "resolvedFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "sizeBytes"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/absolutePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "universe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "universeId",
+        "definition",
+        "decisions",
+        "canonicalSha256"
+      ],
+      "properties": {
+        "universeId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "definition": {
+          "$ref": "#/$defs/workspaceArtifact"
+        },
+        "decisions": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "integer",
+              "boolean"
+            ]
+          }
+        },
+        "canonicalSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "moduleExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "exactSpecifier",
+        "modulefile",
+        "wrapper",
+        "commandSurface",
+        "wrapperContainerReference"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/identifier"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exactSpecifier": {
+          "type": "string",
+          "pattern": "^[^/\\s]+/[^/\\s]+$"
+        },
+        "modulefile": {
+          "$ref": "#/$defs/resolvedFile"
+        },
+        "wrapper": {
+          "$ref": "#/$defs/resolvedFile"
+        },
+        "commandSurface": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "resolvedFile"
+            ],
+            "properties": {
+              "name": {
+                "$ref": "#/$defs/identifier"
+              },
+              "resolvedFile": {
+                "$ref": "#/$defs/resolvedFile"
+              }
+            }
+          }
+        },
+        "wrapperContainerReference": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputId",
+        "sourceUri",
+        "sourceSnapshot",
+        "artifact"
+      ],
+      "properties": {
+        "inputId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "sourceUri": {
+          "type": "string",
+          "format": "uri"
+        },
+        "sourceSnapshot": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifact": {
+          "$ref": "#/$defs/workspaceArtifact"
+        }
+      }
+    },
+    "slurmExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clusterName",
+        "partition",
+        "jobId",
+        "submissionArgv",
+        "submittedAt",
+        "resources",
+        "terminal",
+        "evidence"
+      ],
+      "properties": {
+        "clusterName": {
+          "const": "neurodesktop"
+        },
+        "partition": {
+          "const": "neurodesktop"
+        },
+        "jobId": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "submissionArgv": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "submittedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "nodes",
+            "tasks",
+            "cpusPerTask",
+            "memoryMiB",
+            "wallTimeSeconds"
+          ],
+          "properties": {
+            "nodes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "tasks": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "cpusPerTask": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "memoryMiB": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "wallTimeSeconds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "terminal": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "exitCode",
+            "startedAt",
+            "endedAt",
+            "elapsedSeconds",
+            "node"
+          ],
+          "properties": {
+            "state": {
+              "type": "string",
+              "minLength": 1
+            },
+            "exitCode": {
+              "type": "string",
+              "pattern": "^[0-9]+:[0-9]+$"
+            },
+            "startedAt": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "endedAt": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "elapsedSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "node": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scontrol",
+            "sacct",
+            "stdout",
+            "stderr"
+          ],
+          "properties": {
+            "scontrol": {
+              "$ref": "#/$defs/workspaceArtifact"
+            },
+            "sacct": {
+              "$ref": "#/$defs/workspaceArtifact"
+            },
+            "stdout": {
+              "$ref": "#/$defs/workspaceArtifact"
+            },
+            "stderr": {
+              "$ref": "#/$defs/workspaceArtifact"
+            }
+          }
+        }
+      }
+    },
+    "lightconeEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "runtime",
+        "statusSnapshot",
+        "manifests",
+        "verification"
+      ],
+      "properties": {
+        "version": {
+          "const": "0.4.0"
+        },
+        "runtime": {
+          "const": "none"
+        },
+        "statusSnapshot": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/workspaceArtifact"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "manifests": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "outputKey",
+              "artifact"
+            ],
+            "properties": {
+              "outputKey": {
+                "$ref": "#/$defs/identifier"
+              },
+              "artifact": {
+                "$ref": "#/$defs/workspaceArtifact"
+              }
+            }
+          }
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "performedAt",
+            "coverageComplete",
+            "expectedOutputKeys",
+            "results",
+            "evidence"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "passed",
+                "failed",
+                "not-run"
+              ]
+            },
+            "performedAt": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/timestamp"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "coverageComplete": {
+              "type": "boolean"
+            },
+            "expectedOutputKeys": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/identifier"
+              }
+            },
+            "results": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "outputKey",
+                  "status",
+                  "failure",
+                  "manifestSha256"
+                ],
+                "properties": {
+                  "outputKey": {
+                    "$ref": "#/$defs/identifier"
+                  },
+                  "status": {
+                    "enum": [
+                      "passed",
+                      "failed"
+                    ]
+                  },
+                  "failure": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "manifestSha256": {
+                    "$ref": "#/$defs/sha256"
+                  }
+                }
+              }
+            },
+            "evidence": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/workspaceArtifact"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outputKey",
+        "outputId",
+        "universeId",
+        "kind",
+        "mediaType",
+        "artifact"
+      ],
+      "properties": {
+        "outputKey": {
+          "$ref": "#/$defs/identifier"
+        },
+        "outputId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "universeId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "kind": {
+          "enum": [
+            "metric",
+            "derivative-image",
+            "visual-qc"
+          ]
+        },
+        "mediaType": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$"
+        },
+        "artifact": {
+          "$ref": "#/$defs/workspaceArtifact"
+        }
+      }
+    },
+    "roCrate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootRelativePath",
+        "metadata",
+        "inventory",
+        "treeSha256"
+      ],
+      "properties": {
+        "rootRelativePath": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "metadata": {
+          "$ref": "#/$defs/workspaceArtifact"
+        },
+        "inventory": {
+          "$ref": "#/$defs/workspaceArtifact"
+        },
+        "treeSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

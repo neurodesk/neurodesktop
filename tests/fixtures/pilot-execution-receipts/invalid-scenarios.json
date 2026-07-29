@@ -1,0 +1,160 @@
+[
+  {
+    "name": "success-with-failed-slurm-state",
+    "baseFixture": "valid-success.json",
+    "mutations": [
+      {
+        "op": "replace",
+        "path": "/slurm/terminal/state",
+        "value": "FAILED"
+      }
+    ]
+  },
+  {
+    "name": "success-with-nonzero-slurm-exit",
+    "baseFixture": "valid-success.json",
+    "mutations": [
+      {
+        "op": "replace",
+        "path": "/slurm/terminal/exitCode",
+        "value": "1:0"
+      }
+    ]
+  },
+  {
+    "name": "success-with-incomplete-output-coverage",
+    "baseFixture": "valid-success.json",
+    "mutations": [
+      {
+        "op": "replace",
+        "path": "/lightcone/verification/coverageComplete",
+        "value": false
+      }
+    ]
+  },
+  {
+    "name": "success-without-ro-crate",
+    "baseFixture": "valid-success.json",
+    "mutations": [
+      {
+        "op": "replace",
+        "path": "/roCrate",
+        "value": null
+      }
+    ]
+  },
+  {
+    "name": "timeout-claiming-passed-output-integrity",
+    "baseFixture": "valid-timeout.json",
+    "mutations": [
+      {
+        "op": "replace",
+        "path": "/trust/outputIntegrity",
+        "value": "passed"
+      }
+    ]
+  },
+  {
+    "name": "timeout-claiming-completed-slurm-state",
+    "baseFixture": "valid-timeout.json",
+    "mutations": [
+      {
+        "op": "replace",
+        "path": "/slurm/terminal/state",
+        "value": "COMPLETED"
+      }
+    ]
+  },
+  {
+    "name": "missing-required-modulefile-evidence",
+    "baseFixture": "valid-success.json",
+    "mutations": [
+      {
+        "op": "remove",
+        "path": "/execution/module/modulefile"
+      }
+    ]
+  },
+  {
+    "name": "input-path-escapes-the-workspace",
+    "baseFixture": "valid-success.json",
+    "mutations": [
+      {
+        "op": "replace",
+        "path": "/inputs/1/artifact/relativePath",
+        "value": "../outside/sub-01_T1w.nii.gz"
+      }
+    ]
+  },
+  {
+    "name": "receipt-falsely-attests-an-actual-container",
+    "baseFixture": "valid-success.json",
+    "mutations": [
+      {
+        "op": "replace",
+        "path": "/trust/actualContainerIdentity",
+        "value": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "op": "replace",
+        "path": "/trust/actualContainerIdentityAttested",
+        "value": true
+      }
+    ]
+  },
+  {
+    "name": "success-without-lightcone-manifests",
+    "baseFixture": "valid-success.json",
+    "mutations": [
+      {
+        "op": "replace",
+        "path": "/lightcone/manifests",
+        "value": []
+      }
+    ]
+  },
+  {
+    "name": "unversioned-module-specifier",
+    "baseFixture": "valid-success.json",
+    "mutations": [
+      {
+        "op": "replace",
+        "path": "/execution/module/exactSpecifier",
+        "value": "fsl"
+      }
+    ]
+  },
+  {
+    "name": "modulefile-leading-parent-segment",
+    "baseFixture": "valid-success.json",
+    "mutations": [
+      {
+        "op": "replace",
+        "path": "/execution/module/modulefile/path",
+        "value": "/../outside/fsl.lua"
+      }
+    ]
+  },
+  {
+    "name": "modulefile-leading-current-segment",
+    "baseFixture": "valid-success.json",
+    "mutations": [
+      {
+        "op": "replace",
+        "path": "/execution/module/modulefile/path",
+        "value": "/./modules/fsl.lua"
+      }
+    ]
+  },
+  {
+    "name": "modulefile-empty-path-segment",
+    "baseFixture": "valid-success.json",
+    "mutations": [
+      {
+        "op": "replace",
+        "path": "/execution/module/modulefile/path",
+        "value": "//modules/fsl.lua"
+      }
+    ]
+  }
+]

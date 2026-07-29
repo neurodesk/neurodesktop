@@ -1,0 +1,188 @@
+{
+  "schemaVersion": "1.0.0",
+  "receiptId": "astra-lightcone-bet-20260729T191000Z",
+  "createdAt": "2026-07-29T19:25:30Z",
+  "workspaceRoot": "/neurodesktop-storage/astra-lightcone-demo",
+  "outcome": "timed-out",
+  "trust": {
+    "level": "spec-only",
+    "outputIntegrity": "not-run",
+    "actualContainerIdentity": null,
+    "actualContainerIdentityAttested": false,
+    "statement": "The actual tool-container identity is not attested by this receipt."
+  },
+  "analysis": {
+    "spec": {
+      "relativePath": "project/astra.yaml",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "sizeBytes": 2048
+    },
+    "universes": [
+      {
+        "universeId": "bet-f-0.5",
+        "definition": {
+          "relativePath": "project/universes/bet-f-0.5.yaml",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "sizeBytes": 128
+        },
+        "decisions": {
+          "betFractionalThreshold": 0.5
+        },
+        "canonicalSha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    ]
+  },
+  "execution": {
+    "retainedScript": {
+      "relativePath": "project/scripts/run-bet-pilot.sbatch",
+      "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+      "sizeBytes": 4096
+    },
+    "module": {
+      "name": "fsl",
+      "version": "6.0.7.22",
+      "exactSpecifier": "fsl/6.0.7.22",
+      "modulefile": {
+        "path": "/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/imaging/fsl/6.0.7.22.lua",
+        "sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+        "sizeBytes": 512
+      },
+      "wrapper": {
+        "path": "/cvmfs/neurodesk.ardc.edu.au/containers/fsl_6.0.7.22_20260416/bet",
+        "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+        "sizeBytes": 1536
+      },
+      "commandSurface": [
+        {
+          "name": "bet",
+          "resolvedFile": {
+            "path": "/cvmfs/neurodesk.ardc.edu.au/containers/fsl_6.0.7.22_20260416/bet",
+            "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+            "sizeBytes": 1536
+          }
+        },
+        {
+          "name": "fslstats",
+          "resolvedFile": {
+            "path": "/cvmfs/neurodesk.ardc.edu.au/containers/fsl_6.0.7.22_20260416/fslstats",
+            "sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+            "sizeBytes": 1536
+          }
+        },
+        {
+          "name": "slicer",
+          "resolvedFile": {
+            "path": "/cvmfs/neurodesk.ardc.edu.au/containers/fsl_6.0.7.22_20260416/slicer",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "sizeBytes": 1536
+          }
+        },
+        {
+          "name": "pngappend",
+          "resolvedFile": {
+            "path": "/cvmfs/neurodesk.ardc.edu.au/containers/fsl_6.0.7.22_20260416/pngappend",
+            "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "sizeBytes": 1536
+          }
+        }
+      ],
+      "wrapperContainerReference": "/cvmfs/neurodesk.ardc.edu.au/containers/fsl_6.0.7.22_20260416/fsl_6.0.7.22_20260416.simg"
+    }
+  },
+  "inputs": [
+    {
+      "inputId": "dataset-description",
+      "sourceUri": "https://github.com/OpenNeuroDatasets/ds000114/blob/1.0.2/dataset_description.json",
+      "sourceSnapshot": "ds000114/1.0.2",
+      "artifact": {
+        "relativePath": "inputs/openneuro/ds000114/1.0.2/dataset_description.json",
+        "sha256": "5a4b7bd031bbf57fdab310b99d2327f7338e285baad42f953a59d9c9c4d5df33",
+        "sizeBytes": 684
+      }
+    },
+    {
+      "inputId": "t1w",
+      "sourceUri": "https://s3.amazonaws.com/openneuro.org/ds000114/sub-01/ses-test/anat/sub-01_ses-test_T1w.nii.gz",
+      "sourceSnapshot": "ds000114/1.0.2",
+      "artifact": {
+        "relativePath": "inputs/openneuro/ds000114/1.0.2/sub-01/ses-test/anat/sub-01_ses-test_T1w.nii.gz",
+        "sha256": "2bbe4430223d9b9ce47d4dab3ff398a69fefbb481cbf3bd136e07f363a73919c",
+        "sizeBytes": 8677710
+      }
+    }
+  ],
+  "slurm": {
+    "clusterName": "neurodesktop",
+    "partition": "neurodesktop",
+    "jobId": "43",
+    "submissionArgv": [
+      "sbatch",
+      "--parsable",
+      "project/scripts/run-bet-pilot.sbatch"
+    ],
+    "submittedAt": "2026-07-29T19:10:00Z",
+    "resources": {
+      "nodes": 1,
+      "tasks": 1,
+      "cpusPerTask": 1,
+      "memoryMiB": 4096,
+      "wallTimeSeconds": 900
+    },
+    "terminal": {
+      "state": "TIMEOUT",
+      "exitCode": "0:15",
+      "startedAt": "2026-07-29T19:10:05Z",
+      "endedAt": "2026-07-29T19:25:05Z",
+      "elapsedSeconds": 900,
+      "node": "neurodesktop"
+    },
+    "evidence": {
+      "scontrol": {
+        "relativePath": "runs/astra-lightcone-bet-20260729T191000Z/slurm/scontrol-43.txt",
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "sizeBytes": 1024
+      },
+      "sacct": {
+        "relativePath": "runs/astra-lightcone-bet-20260729T191000Z/slurm/sacct-43.txt",
+        "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "sizeBytes": 512
+      },
+      "stdout": {
+        "relativePath": "runs/astra-lightcone-bet-20260729T191000Z/slurm/astra-lightcone-bet-43.out",
+        "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "sizeBytes": 2048
+      },
+      "stderr": {
+        "relativePath": "runs/astra-lightcone-bet-20260729T191000Z/slurm/astra-lightcone-bet-43.err",
+        "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "sizeBytes": 256
+      }
+    }
+  },
+  "lightcone": {
+    "version": "0.4.0",
+    "runtime": "none",
+    "statusSnapshot": null,
+    "manifests": [],
+    "verification": {
+      "status": "not-run",
+      "performedAt": null,
+      "coverageComplete": false,
+      "expectedOutputKeys": [
+        "bet-f-0.5:bet-brain",
+        "bet-f-0.5:bet-mask",
+        "bet-f-0.5:mask-volume",
+        "bet-f-0.5:boundary-qc"
+      ],
+      "results": [],
+      "evidence": null
+    }
+  },
+  "outputs": [],
+  "roCrate": null,
+  "generation": {
+    "method": "atomic-write-fsync-rename",
+    "finalizedAt": "2026-07-29T19:25:30Z",
+    "complete": true
+  }
+}

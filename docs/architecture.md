@@ -194,6 +194,18 @@ its menu entries yet.
 - SSH: optional SSH server proxy
 - Ollama: optional local LLM service when `START_LOCAL_LLMS=1`
 
+### Pilot execution receipts
+
+The provisional ASTRA/Lightcone module pilot records its evidence through the
+versioned contract in
+[`schemas/neurodesktop-pilot-execution-receipt-v1.0.0.schema.json`](../schemas/neurodesktop-pilot-execution-receipt-v1.0.0.schema.json).
+The schema is the public document seam; filesystem confinement, hash
+recomputation, evidence reconciliation, and atomic publication are separate
+semantic-validator responsibilities documented in
+[`docs/pilot-execution-receipt.md`](pilot-execution-receipt.md). A schema-valid
+receipt remains amber because the transparent module wrapper does not attest
+the actual tool-container identity.
+
 ### Claude Code
 
 Claude Code is installed into `/opt/jovyan_defaults/.local/bin/claude` when the
@@ -423,6 +435,7 @@ so an unattended startup cleanup cannot grow the home directory without bound.
 - [`config/firefox/`](../config/firefox/), [`config/vscode/`](../config/vscode/),
   and [`config/itksnap/`](../config/itksnap/): application-specific configs
 - [`scripts/`](../scripts/): build-time utilities
+- [`schemas/`](../schemas/): immutable machine-readable integration contracts
 - [`.github/workflows/`](../.github/workflows/): CI/CD pipelines
 - [`.github/workflows/build-neurodesktop.yml`](../.github/workflows/build-neurodesktop.yml):
   daily automated builds at 17:00 UTC

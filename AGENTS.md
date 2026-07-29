@@ -16,6 +16,10 @@
   startup flow, build-time behavior, and directory layout.
 - Use [`docs/environment-variables.md`](docs/environment-variables.md) for
   supported runtime and build environment variables.
+- When changing the pilot execution receipt schema, fixtures, hashing rules,
+  path-confinement contract, or trust conditionals, keep
+  [`docs/pilot-execution-receipt.md`](docs/pilot-execution-receipt.md) aligned
+  and run `pytest tests/unit/test_pilot_execution_receipt_schema.py`.
 - When changing OpenCode, its Web proxy/session-workspace behavior, its file
   previewer, or its pinned version, run `pytest tests/unit/test_opencode_web.py`
   from a checkout and `pytest /opt/tests/test_opencode_web_image.py` in the
