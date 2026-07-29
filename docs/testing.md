@@ -1,16 +1,49 @@
 # Testing
 
-When making changes to the project, add tests for new functionality, build the
-container, and run the tests inside the container under `/opt/tests/` to ensure
-that changes do not break existing functionality.
+The suite has two tiers, and which one a new test belongs in is decided by a
+single question: **does it need a running container to answer?**
+
+| | `tests/unit/` | `tests/container/` |
+| --- | --- | --- |
+| Runs on | a repository checkout | inside the built image |
+| Command | `pytest tests/unit` | `pytest /opt/tests/` |
+| Run by | the `Unit tests` workflow, on every push and pull request | the build workflows, once per test profile |
+| Covers | repository sources, importable Python modules, shell scripts driven against a temporary `HOME` | mounts, installed kernels, running services, CVMFS, the shipped binaries |
+
+Default to `tests/unit/`. Reach for `tests/container/` only when the assertion
+genuinely cannot be made without the image — a service must be running, a
+package must be installed, a mount must be present. A test that reads the
+`Dockerfile`, parses a config file, or drives a script against `tmp_path` is a
+unit test even when the thing it describes only exists in the image.
+
+Only `tests/container/` is copied into the image, so nothing under
+`tests/unit/` is available at `/opt/tests/`.
 
 ```bash
-pytest /opt/tests/
+pytest tests/unit          # from a checkout, no container needed
+pytest /opt/tests/         # inside the built image
 ```
 
-The image packages a copy of the build `Dockerfile` as `/opt/tests/Dockerfile`
-so source-shape regression tests under `/opt/tests/` can run in the same
-container-only layout as CI.
+Running `tests/unit` needs `pytest`, `httpx`, `traitlets` and `ssh-keygen`
+(`openssh-client`); see `.github/workflows/unit-tests.yml`.
+
+## Shared helpers
+
+`tests/testlib.py` resolves a test's subject in whichever layout it is running
+in, and is installed next to the container tier at `/opt/tests/testlib.py`:
+
+- `resolve_source(installed, relative)` — the path the image installs it to,
+  falling back to its path in the checkout. Use this for anything that ships
+  both ways.
+- `repo_path(relative)` — a repository source with no installed counterpart
+  (the `Dockerfile`, `.github/**`). Only valid in the unit tier; it raises with
+  a pointer to `tests/unit/` if called from the image.
+- `load_source_module(name, installed, relative)` — import a Python source file
+  resolved the same way.
+- `run_cmd(cmd, cwd=, env=, timeout=)` — shell out and return
+  `(exit_code, combined_output)`. `env` overlays the caller's environment.
+
+## Desktop tests
 
 Desktop smoke tests keep Guacamole, Tomcat, VNC, and credential state in
 temporary per-test homes by default. Tests that need to start the global xrdp
@@ -26,12 +59,6 @@ docker buildx build --check .
 docker buildx build --target apptainer --progress=plain .
 ```
 
-For focused CI workflow source-shape checks from a repository checkout:
-
-```bash
-pytest tests/test_github_workflows.py
-```
-
 ## Negative Test Convention
 
 When adding tests for pipeline or module-loading workflows, always include a
@@ -41,6 +68,21 @@ that the workflow fails with a non-zero exit code and does not produce output.
 
 This guards against silent failures caused by `set +euo pipefail` and `|| true`
 patterns in workflow scripts.
+
+A non-zero exit code on its own is **not** enough. `module load` also exits
+non-zero when Lmod is not installed at all, so a negative test that asserts only
+on the exit status passes on a machine with no Lmod, no CVMFS, and no pipeline
+tool — which is exactly how
+`test_nipype.py::test_nipype_nonexistent_module_fails` used to pass outside the
+container. Every negative test must therefore:
+
+1. assert the environment it is about is really present (e.g.
+   `/usr/share/lmod/lmod/init/bash` exists), and
+2. assert the pipeline produced **no output file**, not just that something
+   returned non-zero.
+
+`test_nextflow.py::test_nextflow_nonexistent_module_fails` is the reference
+shape.
 
 ## Building the Container
 

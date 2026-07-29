@@ -844,7 +844,6 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     --mount=type=bind,source=config/lmod,target=/tmp/lmod,ro \
     --mount=type=bind,source=scripts/generate_jupyter_config.py,target=/tmp/generate_jupyter_config.py,ro \
     --mount=type=bind,source=tests,target=/tmp/tests,ro \
-    --mount=type=bind,source=Dockerfile,target=/tmp/Dockerfile,ro \
     install -D -m 0644 /tmp/jupyter/neurodesk_brain_logo.svg /opt/neurodesk_brain_logo.svg \
     && install -D -m 0644 /tmp/jupyter/neurodesk_brain_icon.svg /opt/neurodesk_brain_icon.svg \
     && install -D -m 0644 /tmp/jupyter/vscode_logo.svg /opt/vscode_logo.svg \
@@ -878,8 +877,12 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh \
     && install -m 0755 /tmp/ssh/ensure_ssh_keys.sh /opt/neurodesktop/ensure_ssh_keys.sh \
     && install -m 0755 /tmp/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh \
-    && cp -a /tmp/tests /opt/tests \
-    && install -m 0644 /tmp/Dockerfile /opt/tests/Dockerfile \
+    # Only the container tier ships: tests/unit/ asserts on repository sources
+    # and runs in CI on a checkout, so it has nothing to say inside the image.
+    && cp -a /tmp/tests/container /opt/tests \
+    && install -m 0644 /tmp/tests/conftest.py /opt/tests/conftest.py \
+    && install -m 0644 /tmp/tests/testlib.py /opt/tests/testlib.py \
+    && install -m 0644 /tmp/tests/pytest.ini /opt/tests/pytest.ini \
     && install -m 0755 /tmp/generate_jupyter_config.py /opt/neurodesktop/scripts/generate_jupyter_config.py \
     && cp -a /tmp/jupyter/webapp_wrapper/. /opt/neurodesktop/webapp_wrapper/ \
     && install -m 0755 /tmp/jupyter/webapp_launcher.sh /opt/neurodesktop/webapp_launcher.sh \
