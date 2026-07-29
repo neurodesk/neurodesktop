@@ -31,5 +31,9 @@ def test_cvmfs_client_and_repository_bootstrap_are_pinned():
     assert "ARG CVMFS_RELEASE_VERSION=4.9" in dockerfile
     assert "ARG CVMFS_RELEASE_SHA256=" in dockerfile
     assert 'echo "${CVMFS_RELEASE_SHA256}  /tmp/cvmfs-release-latest_all.deb"' in dockerfile
+    assert (
+        "CVMFS release bootstrap changed; update CVMFS_RELEASE_VERSION and "
+        "CVMFS_RELEASE_SHA256 together."
+    ) in dockerfile
     assert 'dpkg-query -W -f=\'${Version}\' cvmfs-release' in dockerfile
     assert 'cvmfs="${CVMFS_VERSION}"' in dockerfile

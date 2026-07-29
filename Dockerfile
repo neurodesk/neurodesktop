@@ -302,7 +302,10 @@ ARG CVMFS_VERSION
 ARG CVMFS_RELEASE_VERSION
 ARG CVMFS_RELEASE_SHA256
 RUN retry wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb -P /tmp \
-    && echo "${CVMFS_RELEASE_SHA256}  /tmp/cvmfs-release-latest_all.deb" | sha256sum -c - \
+    && if ! echo "${CVMFS_RELEASE_SHA256}  /tmp/cvmfs-release-latest_all.deb" | sha256sum -c -; then \
+        echo "CVMFS release bootstrap changed; update CVMFS_RELEASE_VERSION and CVMFS_RELEASE_SHA256 together." >&2; \
+        exit 1; \
+    fi \
     && dpkg -i /tmp/cvmfs-release-latest_all.deb \
     && test "$(dpkg-query -W -f='${Version}' cvmfs-release)" = "${CVMFS_RELEASE_VERSION}" \
     && rm /tmp/cvmfs-release-latest_all.deb \

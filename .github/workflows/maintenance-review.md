@@ -116,7 +116,7 @@ safe-outputs:
     report-as-issue: false
 ---
 
-# Daily Maintenance Review Loop
+# Weekly Maintenance Review Loop
 
 Review the open maintenance pull request that triggered this run and keep
 iterating until no active actionable CodeRabbit findings remain.
