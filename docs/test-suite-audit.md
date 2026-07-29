@@ -1,6 +1,9 @@
 # Test suite audit and cleanup proposal
 
-Status: proposal. Nothing in this document has been applied yet.
+Status: **applied**. The two-tier split, the deletions and the documentation
+updates described below are in the tree. Where the implementation diverged from
+the original proposal, the "As applied" notes at the end of this document say
+so and why. Kept as the record of why the suite is shaped the way it is.
 
 The whole of `tests/` is copied into the image at `/opt/tests/` and executed
 with `pytest /opt/tests/` inside a running container, five times per build
@@ -305,3 +308,75 @@ Each step is independently mergeable and leaves the suite green.
   and NBI rules split across both tiers; the OpenCode rule keeps its
   "in the built image" wording only for the real-bundle contract test, which
   is one of the three staying in `tests/container/`.
+
+## As applied
+
+The migration landed in one change rather than the six staged steps, since the
+steps only made sense as separate pull requests and the split had to be
+consistent to keep both tiers green. Outcome:
+
+- `tests/unit/` — **212 tests, all passing on a bare checkout with no image**,
+  no skips. Run by the new `Unit tests` workflow
+  (`.github/workflows/unit-tests.yml`) on every push and pull request, in about
+  a minute.
+- `tests/container/` — 109 tests collected, installed at `/opt/tests`.
+- `tests/testlib.py` + `tests/conftest.py` — the shared resolution helpers,
+  installed alongside the container tier so both layouts use the same lookup.
+- The `Dockerfile` no longer bakes itself into the image as
+  `/opt/tests/Dockerfile`, and copies only `tests/container/`.
+
+### Divergences from the proposal
+
+Three items were re-decided once the code was in front of us:
+
+1. **`test_desktops.py` stays wholly in the container tier.** The proposal
+   expected ~9 `init_secrets.sh` tests to move. They cannot:
+   `config/guacamole/init_secrets.sh` hard-codes
+   `/etc/guacamole/user-mapping-*.xml` and shells out to `vncpasswd`, with no
+   environment override for either. Moving those tests would have required
+   changing production code to add test seams, which is a larger and riskier
+   change than this refactor. Left as a known follow-up.
+
+2. **`test_office_file_associations.py` stays wholly in the container tier.**
+   The proposal counted 2 movable tests, on the evidence that
+   `test_xarchiver_no_longer_claims_office_documents` passes outside the image.
+   It passes *vacuously* — nothing is registered on a bare checkout, so
+   "xarchiver is not offered" is trivially true. Both are runtime assertions.
+   `config/lxde/update_office_mimeapps.py` has no unit test at all; that is a
+   coverage gap, not something to relocate.
+
+3. **`test_coding_agents.py` gained coverage rather than just moving.** 29 of
+   its 32 tests were skipping everywhere except inside the image. Pointing the
+   wrapper lookup at `config/agents/{opencode,codex,claude}` makes all 29 run —
+   they now execute on every push instead of only in the container matrix.
+
+### Deletions applied
+
+`test_dockerfile_version_pins.py` (2) and `test_myst_rise_build.py` (2, with its
+one unique mathjax3 assertion absorbed into `test_myst_build_workaround.py`)
+were removed as whole files, along with
+`test_github_workflows.py::test_repo_only_workflow_checks_skip_in_baked_image_layout`,
+`test_slurm.py::{test_munge_socket_exists,test_slurmctld_ping}`,
+`test_cvmfs_tools.py::{TestCvmfsMount::test_cvmfs_neurodesk_mounted,TestFslMaths::test_fsl_module_loads}`,
+`test_additional_components.py::test_cvmfs_mounts` and
+`test_datalad.py::test_datalad_download`.
+
+One deletion was added beyond the proposal:
+`test_cvmfs_tools.py::TestFslMaths::test_fslmaths_runs` is a strict subset of
+`test_fslmaths_arithmetic`, which runs `fslmaths`, checks the output file *and*
+verifies the arithmetic. Dropping it removes a second full FSL container pull
+(600 s timeout, QEMU-emulated on arm64) from every CVMFS-enabled profile.
+
+The cross-file FSL consolidation sketched under "Fix rather than move" was not
+attempted: `nextflow` and `snakemake` load the module inside their own job
+scripts, in separate processes, so a session fixture cannot share it — the only
+real saving was the duplicate `fslmaths` run above, which is now gone.
+
+### Verification
+
+`pytest tests/unit` was run on the checkout (212 passed). The container tier was
+verified by collection only, against a directory laid out like `/opt/tests` —
+109 tests collect and `testlib` resolves correctly in that layout. It has **not**
+been executed inside a built image: no Docker daemon was available in the
+environment this change was made in. The first build workflow run is the real
+check on the container tier and on the `Dockerfile` edit.

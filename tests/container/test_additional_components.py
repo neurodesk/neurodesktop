@@ -1,0 +1,165 @@
+import subprocess
+import os
+import re
+import pytest
+
+
+NOTEBOOK_SUDOERS_PATH = "/etc/sudoers.d/notebook"
+
+
+def run_cmd(cmd):
+    """Utility to run a shell command and return its exit code and output."""
+    process = subprocess.run(
+        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    )
+    return process.returncode, process.stdout.strip()
+
+def test_cvmfs_runtime_packages():
+    """Verify the final image keeps the CVMFS runtime packages and helpers."""
+    code, _ = run_cmd("dpkg-query -W cvmfs autofs uuid-dev >/dev/null 2>&1")
+    assert code == 0, "cvmfs, autofs, and uuid-dev must remain installed in the runtime image"
+
+    assert os.path.exists("/etc/init.d/autofs"), "autofs init script missing"
+
+    code, output = run_cmd("command -v cvmfs_config")
+    assert code == 0, f"cvmfs_config not found in PATH: {output}"
+
+
+def test_neurocommand_setup():
+    """Verify neurocommand installation."""
+    assert os.path.exists("/neurocommand"), "/neurocommand directory missing"
+    
+def test_guacamole_webapp():
+    """Verify the Guacamole web application was unpacked into Tomcat."""
+    assert os.path.exists("/usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml"), "Guacamole webapp missing (expected extracted ROOT directory)"
+    assert os.path.exists("/usr/local/tomcat/bin/startup.sh"), "Tomcat startup script missing"
+
+
+def test_guacamole_mac_clipboard_shim():
+    """Verify the macOS Cmd+V clipboard shim is installed and loaded by the webapp."""
+    shim_path = "/usr/local/tomcat/webapps/ROOT/mac-clipboard-shim.js"
+    assert os.path.exists(shim_path), "mac-clipboard-shim.js missing from Guacamole webapp"
+
+    with open(shim_path, encoding="utf-8") as f:
+        shim = f.read()
+    assert "clipboardData" in shim, \
+        "shim must capture paste-event clipboardData (readText triggers Safari's Paste callout)"
+    assert "navigator.clipboard.writeText" in shim, \
+        "shim must flush remote copies to the local clipboard"
+    assert "guacClientManager" in shim, \
+        "shim must resolve clients through Guacamole's guacClientManager"
+
+    index_path = "/usr/local/tomcat/webapps/ROOT/index.html"
+    assert os.path.exists(index_path), "Guacamole index.html missing"
+    with open(index_path, encoding="utf-8") as f:
+        index_html = f.read()
+    assert re.search(r'<script src="mac-clipboard-shim\.js\?v=[0-9a-f]{10}"></script>', index_html), \
+        "index.html does not load mac-clipboard-shim.js with a content-hash cache buster"
+
+
+def test_rdp_clipboard_selection_sync():
+    """Verify autocutsel bridges CLIPBOARD/PRIMARY in xrdp desktop sessions."""
+    code, output = run_cmd("command -v autocutsel")
+    assert code == 0, f"autocutsel not installed: {output}"
+
+    xsession_snippet = "/etc/X11/Xsession.d/75neurodesk-clipboard-sync"
+    assert os.path.exists(xsession_snippet), \
+        "Xsession.d clipboard sync snippet missing (Shift+Insert paste breaks in RDP terminals)"
+    with open(xsession_snippet, encoding="utf-8") as f:
+        snippet = f.read()
+    assert "autocutsel -fork" in snippet
+    assert "autocutsel -selection PRIMARY -fork" in snippet
+
+
+def test_tomcat_header_size():
+    """Verify Tomcat accepts larger request headers for browser compatibility."""
+    server_xml_path = "/usr/local/tomcat/conf/server.xml"
+    assert os.path.exists(server_xml_path), "Tomcat server.xml missing"
+
+    with open(server_xml_path, "r", encoding="utf-8") as server_xml_file:
+        server_xml = server_xml_file.read()
+
+    match = re.search(r'maxHttpRequestHeaderSize="(\d+)"', server_xml)
+    assert match is not None, "Tomcat maxHttpRequestHeaderSize is not configured"
+    assert int(match.group(1)) >= 65536, "Tomcat maxHttpRequestHeaderSize should be at least 65536"
+
+
+def test_tomcat_cookie_path():
+    """Verify context.xml sets sessionCookiePath to prevent duplicate path-scoped cookies."""
+    context_xml_path = "/usr/local/tomcat/conf/context.xml"
+    assert os.path.exists(context_xml_path), "Tomcat context.xml missing"
+
+    with open(context_xml_path, "r", encoding="utf-8") as f:
+        context_xml = f.read()
+
+    assert 'sessionCookiePath="/"' in context_xml, \
+        "context.xml must set sessionCookiePath=\"/\" to prevent cookie accumulation"
+    assert "Rfc6265CookieProcessor" in context_xml, \
+        "context.xml must configure Rfc6265CookieProcessor"
+    assert 'sameSiteCookies="Lax"' in context_xml, \
+        "CookieProcessor must set sameSiteCookies to Lax"
+
+
+def test_tomcat_cookie_max_age():
+    """Verify Guacamole's web.xml sets Max-Age on session cookie so browsers auto-expire it."""
+    guac_web_xml_path = "/usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml"
+    assert os.path.exists(guac_web_xml_path), \
+        "Guacamole web.xml missing - ROOT.war should be extracted during build"
+
+    with open(guac_web_xml_path, "r", encoding="utf-8") as f:
+        web_xml = f.read()
+
+    assert "<cookie-config>" in web_xml, \
+        "Guacamole web.xml must contain <cookie-config> for session cookie settings"
+    match = re.search(r"<max-age>(\d+)</max-age>", web_xml)
+    assert match is not None, "Guacamole web.xml must set <max-age> in <cookie-config>"
+    max_age = int(match.group(1))
+    assert 0 < max_age <= 86400, \
+        f"Session cookie max-age should be between 1 and 86400 seconds, got {max_age}"
+    assert "<http-only>true</http-only>" in web_xml, \
+        "Session cookie must be HttpOnly"
+
+
+def test_desktop_storage():
+    """Verify neurodesktop-storage is accessible."""
+    assert os.path.exists("/neurodesktop-storage"), "/neurodesktop-storage is missing"
+
+
+def test_build_toolchain_removed():
+    """Verify the broad build-only toolchain is not retained in the runtime image."""
+    code, output = run_cmd("dpkg-query -W -f='${Status}' build-essential 2>/dev/null")
+    assert code != 0, (
+        "build-essential should be removed after build-only packages are purged. "
+        f"Found: {output}"
+    )
+
+
+def test_grant_sudo_no():
+    """Verify GRANT_SUDO=no removes Neurodesktop's managed passwordless sudo rule."""
+    nb_user = os.environ.get("NB_USER", "jovyan")
+    grant_sudo = os.environ.get("GRANT_SUDO", "").lower()
+
+    if grant_sudo not in {"no", "n", "false", "0"}:
+        pytest.skip("This assertion only applies when the container starts with GRANT_SUDO=no")
+
+    assert not os.path.exists(NOTEBOOK_SUDOERS_PATH), (
+        "GRANT_SUDO=no should remove Neurodesktop's managed passwordless sudo "
+        f"rule for {nb_user}, but {NOTEBOOK_SUDOERS_PATH} still exists."
+    )
+
+    code, current_user = run_cmd("id -un")
+    assert code == 0, f"Failed to determine current user: {current_user}"
+
+    if os.geteuid() == 0:
+        code, output = run_cmd(f"su -s /bin/bash -c 'sudo -n true' {nb_user}")
+    elif current_user == nb_user:
+        code, output = run_cmd("sudo -n true")
+    else:
+        pytest.skip(
+            f"Test requires root or NB_USER ({nb_user}); current user is {current_user}"
+        )
+
+    assert code != 0, (
+        "GRANT_SUDO=no should leave passwordless sudo unavailable unless the "
+        f"runtime grants it separately. Output: {output}"
+    )

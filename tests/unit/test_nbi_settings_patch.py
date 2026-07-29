@@ -1,0 +1,150 @@
+"""Tests for patch_nbi.py.
+
+The Notebook Intelligence settings panel auto-saves its client-side cache on
+open, which reverts the OpenCode -> NBI model sync (see nbi_setup.sh). The
+patcher rewrites the "open settings" command in the bundled labextension so
+the panel is rebuilt from freshly fetched capabilities instead.
+"""
+
+import pytest
+
+from testlib import load_source_module, repo_path
+
+
+def load_patcher_module():
+    return load_source_module(
+        "nbi_patch",
+        "/opt/neurodesktop/patch_nbi.py",
+        "config/agents/patch_nbi.py",
+    )
+
+
+# Verbatim excerpts matching the notebook_intelligence 5.3.0 source-built
+# labextension bundle:
+# the NBI API class holding fetchCapabilities, and the settings command whose
+# execute callback shows a panel built from the stale client-side cache.
+BUNDLE_FIXTURE = (
+    'class T{static async initialize(){await this.fetchCapabilities(),'
+    "this.updateGitHubLoginStatus()}}"
+    "const O=()=>{const t=new Qo({onSave:()=>{T.fetchCapabilities()}}),"
+    'n=new a.MainAreaWidget({content:t});return n.id="nbi-settings",n};'
+    "let U=O();"
+    "e.commands.addCommand(pe.openConfigurationDialog,"
+    '{label:"Notebook Intelligence Settings",'
+    "execute:t=>{U.isDisposed&&(U=O()),"
+    'U.isAttached||e.shell.add(U,"main"),'
+    "e.shell.activateById(U.id)}})"
+)
+
+
+def test_settings_patch_rewrites_settings_command():
+    patcher = load_patcher_module()
+
+    patched, changed = patcher.patch_settings_bundle_text(BUNDLE_FIXTURE)
+
+    assert changed
+    assert patcher.SETTINGS_MARKER in patched
+    # The panel is rebuilt after awaiting fresh capabilities.
+    assert "execute:async t=>{" in patched
+    assert "await T.fetchCapabilities()" in patched
+    assert "U.isDisposed||U.dispose();" in patched
+    # The stale-cache fast path is gone.
+    assert "U.isDisposed&&(U=O())" not in patched
+    # Everything around the command registration is untouched.
+    assert patched.startswith("class T{static async initialize()")
+    assert patched.endswith("e.shell.activateById(U.id)}})")
+
+
+def test_settings_patch_is_idempotent():
+    patcher = load_patcher_module()
+
+    patched, _ = patcher.patch_settings_bundle_text(BUNDLE_FIXTURE)
+    repatched, changed = patcher.patch_settings_bundle_text(patched)
+
+    assert not changed
+    assert repatched == patched
+
+
+def test_settings_patch_leaves_unrelated_text_alone():
+    patcher = load_patcher_module()
+
+    text = "console.log('no settings command here')"
+    patched, changed = patcher.patch_settings_bundle_text(text)
+
+    assert not changed
+    assert patched == text
+
+
+def test_settings_patch_refuses_partial_match():
+    """A settings command without a locatable API class must not be patched."""
+    patcher = load_patcher_module()
+
+    command_only = BUNDLE_FIXTURE.replace(
+        "class T{static async initialize(){await this.fetchCapabilities(),"
+        "this.updateGitHubLoginStatus()}}",
+        "",
+    )
+    with pytest.raises(ValueError):
+        patcher.patch_settings_bundle_text(command_only)
+
+
+def test_main_fails_when_bundle_anchor_missing(tmp_path):
+    """A notebook_intelligence upgrade that changes the bundle must fail the
+    image build instead of silently reintroducing the stale-save bug."""
+    patcher = load_patcher_module()
+
+    bundle = tmp_path / "chunk.js"
+    bundle.write_text("var unrelated=1;", encoding="utf-8")
+
+    import sys
+
+    argv = sys.argv
+    sys.argv = ["patch_nbi.py", str(tmp_path / "*.js")]
+    try:
+        assert patcher.main() == 1
+    finally:
+        sys.argv = argv
+
+
+def test_main_patches_and_reruns_cleanly(tmp_path):
+    patcher = load_patcher_module()
+
+    bundle = tmp_path / "chunk.js"
+    bundle.write_text(BUNDLE_FIXTURE, encoding="utf-8")
+
+    import sys
+
+    argv = sys.argv
+    sys.argv = ["patch_nbi.py", str(tmp_path / "*.js")]
+    try:
+        assert patcher.main() == 0
+        assert patcher.SETTINGS_MARKER in bundle.read_text(encoding="utf-8")
+        # Second run: already patched, still success.
+        assert patcher.main() == 0
+    finally:
+        sys.argv = argv
+
+
+def test_dockerfile_rebuilds_the_nbi_530_frontend():
+    """The 5.3.0 wheel omits the executable frontend chunks, so the image must
+    rebuild the tagged source before applying the settings patch.
+    """
+    dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
+
+    assert "notebook_intelligence==5.3.0" in dockerfile
+    assert 'ARG NBI_JUPYTERLAB_BUILDER_VERSION="4.5.10"' in dockerfile
+    assert 'branch "v${NBI_VERSION}"' in dockerfile
+    assert "source=config/jupyter/notebook-intelligence-5.3.0.yarn.lock" in dockerfile
+    assert "install -m 0644 /tmp/nbi-yarn.lock yarn.lock" in dockerfile
+    assert "jlpm install --immutable" in dockerfile
+    assert 'npm pkg set "dependencies.@jupyterlab/launcher=^4.0.0"' in dockerfile
+    assert 'npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}"' in dockerfile
+    assert "jlpm up" not in dockerfile
+    assert "cp -a /tmp/notebook-intelligence/notebook_intelligence/labextension" in dockerfile
+    assert dockerfile.index("NBI_PACKAGE_DIR=") < dockerfile.index(
+        "&& cd /tmp/notebook-intelligence"
+    )
+
+    rebuild = dockerfile.index("# Rebuild Notebook Intelligence's frontend")
+    patch = dockerfile.index("/opt/neurodesktop/patch_nbi.py", rebuild)
+    assert rebuild < patch

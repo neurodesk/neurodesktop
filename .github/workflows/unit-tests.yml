@@ -1,0 +1,46 @@
+---
+name: Unit tests
+
+# The tests under tests/unit/ assert on repository sources, importable Python
+# modules, and shell scripts driven against a temporary HOME. None of them needs
+# the built image, so they run here on every push and pull request instead of
+# five times over inside the container matrix of the build workflows.
+#
+# Everything that does need a running container lives in tests/container/ and is
+# executed as `pytest /opt/tests/` by the build workflows.
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    name: pytest tests/unit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: |
+          # httpx: imported by config/jupyter/webapp_wrapper/webapp_wrapper.py
+          # traitlets: imported by the real Jupyter config template
+          python -m pip install --upgrade pip
+          python -m pip install pytest httpx traitlets
+          # ssh-keygen, for the ensure_ssh_keys.sh tests
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq openssh-client
+
+      - name: Run unit tests
+        run: pytest tests/unit -v
