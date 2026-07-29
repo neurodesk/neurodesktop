@@ -1600,10 +1600,10 @@ def waiting_page():
 <html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="refresh" content="2">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OpenCode is starting...</title><style>{PAGE_STYLE}</style></head>
+<title>Scigent.ai starting up...</title><style>{PAGE_STYLE}</style></head>
 <body><div class="card" style="text-align:center">
 <div class="spinner" style="margin-left:auto;margin-right:auto"></div>
-<h1>OpenCode is starting&hellip;</h1>
+<h1>Scigent.ai starting up&hellip;</h1>
 <p class="muted">Checking model providers and launching the web interface.
 This page refreshes automatically.</p>
 </div></body></html>"""
