@@ -240,6 +240,31 @@ deliberately left out because its workflows drive long autonomous replication
 loops that should not be on by default in a shared scientific image. Users can
 add it themselves from the same local marketplace with no network access.
 
+### ASTRA reporting
+
+MyST reports can use the stock `myst` CLI and the locally built MySTRA bundle
+at `/opt/neurodesktop/mystra/mystra.mjs`. The bundle comes from the exact head
+of MySTRA PR 14's `prototype/astra-inventory` branch, recorded in the adjacent
+`REVISION` file. The paired ASTRA article and book themes are built from a
+commit-pinned `LightconeResearch/astra-theme` checkout and installed as compact,
+offline-capable runtime templates under `/opt/neurodesktop/astra-theme/`; their
+source revision is recorded in that directory's `REVISION` file. A project's
+`myst.yml` opts into the plugin and one local theme explicitly:
+
+```yaml
+version: 1
+project:
+  plugins:
+    - /opt/neurodesktop/mystra/mystra.mjs
+site:
+  template: /opt/neurodesktop/astra-theme/book
+# Use /opt/neurodesktop/astra-theme/article for a single-page report.
+```
+
+MySTRA projects still own their `astra.yaml`, universes, report pages, and MyST
+configuration; Neurodesktop supplies pinned authoring tools and both report
+presentation flavors without requiring MyST to download a theme at first use.
+
 ### ASTRA provenance viewer
 
 The image installs the in-repo `extensions/astra-viewer` wheel as

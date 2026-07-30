@@ -105,6 +105,13 @@
 - `MYST_PNPM_VERSION`, `MYST_YDOC_VERSION` (build arguments): pnpm and Jupyter
   YDoc releases used for the MyST/RISE compatibility rebuild; defaults to
   `11.17.0` and `4.1.1`
+- `MYSTMD_VERSION`, `MYSTRA_REF` (build arguments): stock MyST CLI release and
+  exact MySTRA inventory-PR commit used for the offline report plugin;
+  defaults to `1.10.1` and `b01be473a4be988e58aa254c3efbf10c24f4d7bd`
+- `ASTRA_THEME_VERSION`, `ASTRA_THEME_REF` (build arguments): ASTRA theme
+  release and exact source commit used to build the offline article and book
+  templates; defaults to `0.0.8` and
+  `3939ceadcbde34b509896fe1a332fdaa611d0dab`
 - `NIIVUE_VERSION` (build argument): the `@niivue/niivue` release vendored to
   `/opt/neurodesktop/vendor/niivue.js` for the OpenCode Web volume
   previews; defaults to the pin in the Dockerfile (currently `0.69.0`)

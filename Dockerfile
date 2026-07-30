@@ -1046,6 +1046,58 @@ RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {
     && cp -a "${MYST_LABEXT_DIR}" "${APP_MYST_DIR}" \
     && rm -rf /tmp/myst /tmp/rise /tmp/myst-corepack /tmp/myst-pnpm-store /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
 
+# MySTRA is a single-file MyST plugin rather than an npm package. Build the
+# requested inventory PR at its exact head and ship the bundle locally so a
+# project can reference it without following the moving branch or requiring a
+# first-use download.
+ARG MYSTMD_VERSION="1.10.1"
+ARG MYSTRA_REF="b01be473a4be988e58aa254c3efbf10c24f4d7bd"
+RUN retry npm --cache /tmp/mystmd-npm-cache install -g "mystmd@${MYSTMD_VERSION}" \
+    && retry git clone https://github.com/LightconeResearch/MySTRA.git /tmp/mystra \
+    && git -C /tmp/mystra checkout --detach "${MYSTRA_REF}" \
+    && test "$(git -C /tmp/mystra rev-parse HEAD)" = "${MYSTRA_REF}" \
+    && cd /tmp/mystra \
+    && retry npm --cache /tmp/mystra-npm-cache ci \
+    && npm test \
+    && npm run bundle \
+    && install -D -m 0644 dist/mystra.mjs /opt/neurodesktop/mystra/mystra.mjs \
+    && printf '%s\n' "${MYSTRA_REF}" > /opt/neurodesktop/mystra/REVISION \
+    && node -e "import('/opt/neurodesktop/mystra/mystra.mjs').then(m => { if (m.default?.name !== 'astra') process.exit(1) })" \
+    && myst --version \
+    && rm -rf /tmp/mystra /tmp/mystmd-npm-cache /tmp/mystra-npm-cache /root/.npm
+
+# Build both presentation flavors paired with MySTRA, then retain compact,
+# runnable template artifacts rather than the source tree and development
+# dependency graph. Each template keeps its runtime dependencies locally so a
+# project can select it without a first-use network download.
+ARG ASTRA_THEME_VERSION="0.0.8"
+ARG ASTRA_THEME_REF="3939ceadcbde34b509896fe1a332fdaa611d0dab"
+RUN retry git clone https://github.com/LightconeResearch/astra-theme.git /tmp/astra-theme \
+    && git -C /tmp/astra-theme checkout --detach "${ASTRA_THEME_REF}" \
+    && test "$(git -C /tmp/astra-theme rev-parse HEAD)" = "${ASTRA_THEME_REF}" \
+    && test "$(node -p "require('/tmp/astra-theme/package.json').version")" = "${ASTRA_THEME_VERSION}" \
+    && cd /tmp/astra-theme \
+    && retry npm --cache /tmp/astra-theme-npm-cache ci \
+    && npm test \
+    && npm run build \
+    && for theme in article book; do \
+    source_dir="/tmp/astra-theme/themes/${theme}"; \
+    destination="/opt/neurodesktop/astra-theme/${theme}"; \
+    install -d -m 0755 "${destination}"; \
+    cp -a "${source_dir}/template.yml" "${source_dir}/server.js" \
+    "${source_dir}/build" "${source_dir}/public" "${destination}/"; \
+    node -e 'const fs=require("fs"); const theme=require(process.argv[1]); const names=["@remix-run/express","@remix-run/node","compression","express","get-port","morgan"]; const pkg={name:theme.name,version:theme.version,description:theme.description,license:theme.license,private:true,scripts:{start:"node ./server.js"},dependencies:Object.fromEntries(names.map(name=>[name,theme.dependencies[name]])),engines:theme.engines}; fs.writeFileSync(process.argv[2],JSON.stringify(pkg,null,2)+"\n")' \
+    "${source_dir}/package.json" "${destination}/package.json"; \
+    cd "${destination}"; \
+    retry npm --cache /tmp/astra-theme-runtime-npm-cache install --omit=dev --ignore-scripts; \
+    test "$(node -p 'require("./package.json").version')" = "${ASTRA_THEME_VERSION}"; \
+    test -f build/index.js; \
+    test -d public/build; \
+    done \
+    && printf '%s\n' "${ASTRA_THEME_REF}" > /opt/neurodesktop/astra-theme/REVISION \
+    && rm -rf /tmp/astra-theme /tmp/astra-theme-npm-cache \
+    /tmp/astra-theme-runtime-npm-cache /root/.npm
+
 # Patch both nested tar copies after all npm-based build steps. Updating
 # code-server's top-level dependency graph does not reach either scanner path.
 ARG NODE_TAR_VERSION="7.5.22"
