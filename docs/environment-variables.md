@@ -85,6 +85,13 @@
 - `NBI_JUPYTERLAB_BUILDER_VERSION` (build argument): JupyterLab builder used
   to reconstruct Notebook Intelligence's missing frontend; defaults to
   `4.5.10`
+- `UV_VERSION`, `ASTRA_TOOLS_VERSION`, `ASTRA_SPEC_VERSION`,
+  `LIGHTCONE_CLI_VERSION` (build arguments): exact `uv`, ASTRA CLI/schema,
+  and isolated Lightcone CLI releases installed in the image; defaults to
+  `0.11.8`, `0.2.11`, `0.0.12`, and `0.4.0`
+- `AGENT_SKILLS_REF` (build argument): exact commit of
+  `LightconeResearch/agent-skills` used for the Codex and Claude ASTRA plugin;
+  defaults to `4ded682be8487d8aa05831678ef84ef12068d50d`
 - `MYST_PNPM_VERSION`, `MYST_YDOC_VERSION` (build arguments): pnpm and Jupyter
   YDoc releases used for the MyST/RISE compatibility rebuild; defaults to
   `11.17.0` and `4.1.1`

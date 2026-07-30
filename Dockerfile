@@ -330,6 +330,9 @@ RUN apt-install-retry \
     htop \
     imagemagick \
     iputils-ping \
+    # The ASTRA agent-skill hooks parse their stdin payload with jq; without it
+    # every hook exits non-zero and silently provides no validation context.
+    jq \
     less \
     libgfortran5 \
     libgpgme-dev \
@@ -541,6 +544,9 @@ RUN retry conda install -c conda-forge nb_conda_kernels \
 # exposed labextension; JupyterLab 4.6 and RISE both bundle the current
 # @jupyterlab/mathjax-extension instead.
 ARG BUST_CACHE_PIP=3
+ARG UV_VERSION="0.11.8"
+ARG ASTRA_SPEC_VERSION="0.0.12"
+ARG ASTRA_TOOLS_VERSION="0.2.11"
 RUN /opt/conda/bin/pip install \
     datalad \
     nipype \
@@ -574,6 +580,9 @@ RUN /opt/conda/bin/pip install \
     httpx \
     jsonschema \
     rfc8785==0.1.4 \
+    astra-spec==${ASTRA_SPEC_VERSION} \
+    astra-tools==${ASTRA_TOOLS_VERSION} \
+    uv==${UV_VERSION} \
     ipywidgets==8.1.8 \
     ipyvolume \
     jupyterlab_widgets \
@@ -605,6 +614,14 @@ RUN --mount=type=bind,source=extensions/neurodesk-launcher,target=/tmp/neurodesk
 #========================================#
 
 USER root
+
+# The `astra` command comes from the single conda `astra-tools` install above,
+# which the viewer already depends on. Assert that exactly one `astra` is on
+# PATH at the pinned version: a second isolated copy would shadow the one the
+# viewer imports and let the CLI and schema drift apart silently.
+RUN test "$(command -v astra)" = "/opt/conda/bin/astra" \
+    && test "$(astra --version)" = "astra, version ${ASTRA_TOOLS_VERSION}" \
+    && test "$(/opt/conda/bin/python -c 'import importlib.metadata as m; print(m.version("astra-spec"))')" = "${ASTRA_SPEC_VERSION}"
 
 # Remove build-time packages: -dev headers for pip native extensions and
 # build-essential for C extensions. nodejs stays — codex CLI needs it at
@@ -775,6 +792,49 @@ RUN --mount=type=bind,source=config/itksnap,target=/tmp/itksnap,ro \
     && /usr/bin/printf '%s\n%s\n%s\n' 'password' 'password' 'n' | vncpasswd /opt/jovyan_defaults/.vnc/passwd \
     && chown root:users /opt/jovyan_defaults/.vnc/passwd \
     && chmod 640 /opt/jovyan_defaults/.vnc/passwd
+
+# Seed the ASTRA marketplace plugin for all three bundled coding agents.
+# Register a fixed local checkout so image builds do not follow a moving
+# marketplace branch and runtime use does not require a network fetch.
+#
+# Only the `astra` plugin is enabled. The marketplace also ships `reproduction`
+# (assess-reproducibility, reproduce, figure-comparison), which is deliberately
+# left out: its workflows drive long autonomous replication loops that are not
+# appropriate to enable by default in a shared scientific image. Users can add
+# it themselves from the same local marketplace, with no network access needed.
+ARG AGENT_SKILLS_REF="4ded682be8487d8aa05831678ef84ef12068d50d"
+RUN retry git clone https://github.com/LightconeResearch/agent-skills.git /opt/neurodesktop/agent-skills \
+    && git -C /opt/neurodesktop/agent-skills checkout --detach "${AGENT_SKILLS_REF}" \
+    && test "$(git -C /opt/neurodesktop/agent-skills rev-parse HEAD)" = "${AGENT_SKILLS_REF}" \
+    && HOME=/opt/jovyan_defaults CODEX_HOME=/opt/jovyan_defaults/.codex \
+    /usr/bin/codex plugin marketplace add /opt/neurodesktop/agent-skills \
+    && HOME=/opt/jovyan_defaults CODEX_HOME=/opt/jovyan_defaults/.codex \
+    /usr/bin/codex plugin add astra@lightcone-research \
+    && HOME=/opt/jovyan_defaults DISABLE_TELEMETRY=1 \
+    /opt/jovyan_defaults/.local/bin/claude plugin marketplace add /opt/neurodesktop/agent-skills \
+    && HOME=/opt/jovyan_defaults DISABLE_TELEMETRY=1 \
+    /opt/jovyan_defaults/.local/bin/claude plugin install astra@lightcone-research \
+    # OpenCode has no marketplace client, but it discovers Claude-format skills
+    # from ~/.config/opencode/skills. Copy the skill out of the same pinned
+    # checkout so all three agents read identical guidance from one source of
+    # truth. The plugin's hooks are Claude/Codex-only and are not copied:
+    # OpenCode gets the skill, not the on-save validation hook.
+    && install -d -m 0755 /opt/jovyan_defaults/.config/opencode/skills \
+    && cp -a /opt/neurodesktop/agent-skills/plugins/astra/skills/astra \
+    /opt/jovyan_defaults/.config/opencode/skills/astra \
+    && test -f /opt/jovyan_defaults/.config/opencode/skills/astra/SKILL.md \
+    && grep -qx 'name: astra' /opt/jovyan_defaults/.config/opencode/skills/astra/SKILL.md \
+    # Plugin registration creates machine-specific onboarding state that must
+    # not be copied into every user's home.
+    && rm -f /opt/jovyan_defaults/.claude.json \
+    && rm -rf /opt/jovyan_defaults/.claude/backups \
+    && sed -i '/^last_updated = /d' /opt/jovyan_defaults/.codex/config.toml \
+    && sed -i -E \
+    's/"(installedAt|lastUpdated)": "[^"]+"/"\1": "2026-07-29T15:19:38.000Z"/g' \
+    /opt/jovyan_defaults/.claude/plugins/installed_plugins.json \
+    /opt/jovyan_defaults/.claude/plugins/known_marketplaces.json \
+    && chown -R root:users /opt/neurodesktop/agent-skills /opt/jovyan_defaults/.codex \
+    /opt/jovyan_defaults/.claude /opt/jovyan_defaults/.config/opencode
 
 # Copy restore scripts, agent metadata, and wrapper scripts.
 RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp/restore_home_defaults.sh,ro \
@@ -990,6 +1050,23 @@ RUN set -eux; \
     test "$(node -p 'require("/opt/code-server/lib/vscode/node_modules/tar/package.json").version')" = "${NODE_TAR_VERSION}"; \
     test "$(node -p 'require("/usr/lib/node_modules/npm/node_modules/tar/package.json").version')" = "${NODE_TAR_VERSION}"; \
     npm cache clean --force
+
+# Lightcone runs as a second isolated tool so its Dask/Snakemake dependency
+# graph cannot perturb JupyterLab. Keep this after all frontend rebuilds: pilot
+# dependency updates are runtime-only. The Slurm allocation prepends this
+# environment's bin directory so `lc` and its `dask worker` share one runtime.
+# ASTRA_SPEC_VERSION and ASTRA_TOOLS_VERSION are still in scope from their
+# single declaration above; do not redeclare them here.
+ARG LIGHTCONE_CLI_VERSION="0.4.0"
+RUN UV_TOOL_DIR=/opt/uv/tools UV_TOOL_BIN_DIR=/usr/local/bin \
+    /opt/conda/bin/uv tool install "lightcone-cli==${LIGHTCONE_CLI_VERSION}" \
+    --with "astra-tools==${ASTRA_TOOLS_VERSION}" \
+    --with "astra-spec==${ASTRA_SPEC_VERSION}" \
+    --python /opt/conda/bin/python --no-python-downloads \
+    && test "$(lc --version)" = "lc, version ${LIGHTCONE_CLI_VERSION}" \
+    && /opt/uv/tools/lightcone-cli/bin/python -c \
+    "import importlib.metadata as m; assert m.version('astra-tools') == '${ASTRA_TOOLS_VERSION}'; assert m.version('astra-spec') == '${ASTRA_SPEC_VERSION}'" \
+    && PATH=/opt/uv/tools/lightcone-cli/bin:${PATH} dask --version
 
 
 # Start the container as root so docker-stacks runs before-notebook hooks with

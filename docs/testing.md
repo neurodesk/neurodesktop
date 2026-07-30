@@ -60,6 +60,20 @@ docker buildx build --check .
 docker buildx build --target apptainer --progress=plain .
 ```
 
+For the `astra`/`lc` CLIs or the ASTRA agent skill in any of the three agents:
+
+```bash
+pytest tests/unit/test_astra_jupyter_ai_tooling.py
+# In the rebuilt image:
+pytest /opt/tests/test_astra_agent_skills_image.py
+```
+
+The image tier is the one that matters here: it drives the real hook scripts
+end to end (so a missing `jq` fails loudly), asserts that exactly one `astra`
+answers on `PATH`, checks that the pinned marketplace commit teaches the
+schema version the installed `astra validate` speaks, and restores a throwaway
+home to prove OpenCode's skill actually reaches a user.
+
 ## Negative Test Convention
 
 When adding tests for pipeline or module-loading workflows, always include a

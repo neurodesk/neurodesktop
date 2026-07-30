@@ -33,6 +33,14 @@
   tests/unit/test_myst_build_workaround.py` from a checkout and `pytest
   /opt/tests/test_nbi_labextension_patch.py` in the built image, and verify both
   extensions are compatible in `jupyter labextension list --verbose`.
+- When changing the `astra`/`lc` installs, `AGENT_SKILLS_REF`, or how the ASTRA
+  skill reaches Codex, Claude, or OpenCode, run `pytest
+  tests/unit/test_astra_jupyter_ai_tooling.py` from a checkout and `pytest
+  /opt/tests/test_astra_agent_skills_image.py` in the built image. Keep
+  `astra-tools` installed exactly once so the CLI cannot drift from the schema
+  the viewer imports, keep `jq` installed for the plugin hooks, and bump
+  `AGENT_SKILLS_REF` together with the ASTRA pins so the skill teaches the
+  schema `astra validate` speaks.
 - When changing an agentic workflow under `.github/workflows/*.md`, regenerate
   its `.lock.yml` with `gh aw compile`, then run
   `pytest tests/unit/test_report_job_failure_action.py`.

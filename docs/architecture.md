@@ -194,6 +194,52 @@ its menu entries yet.
 - SSH: optional SSH server proxy
 - Ollama: optional local LLM service when `START_LOCAL_LLMS=1`
 
+### ASTRA and Lightcone command-line tools
+
+`astra` comes from the single `astra-tools` install in the conda environment —
+the same one the viewer imports — so the CLI and the schema the viewer
+validates against can never drift apart. A second isolated copy is deliberately
+not installed; the build asserts that exactly `/opt/conda/bin/astra` answers on
+`PATH`.
+
+`lc` (`lightcone-cli`) is installed as an isolated `uv` tool under
+`/opt/uv/tools/lightcone-cli` and linked onto `PATH`, so its Dask and Snakemake
+dependency graph cannot perturb JupyterLab. `uv` itself is on `PATH` for that
+reason; ordinary `uv tool` operations stay user-local at runtime.
+
+### ASTRA agent skill
+
+A commit-pinned checkout of the Lightcone Research agent marketplace is stored
+at `/opt/neurodesktop/agent-skills`. All three bundled coding agents get the
+same ASTRA skill from it, without a first-run marketplace download:
+
+| Agent | Mechanism | Hooks |
+| --- | --- | --- |
+| Codex | `codex plugin add astra@lightcone-research` | yes |
+| Claude Code | `claude plugin install astra@lightcone-research` | yes |
+| OpenCode | `SKILL.md` copied to `~/.config/opencode/skills/astra` | no |
+
+OpenCode has no marketplace client, but it discovers Claude-format skills from
+`~/.config/opencode/skills`, `~/.claude/skills`, and `~/.agents/skills`. The
+skill is copied out of the same pinned checkout, so all three agents read
+identical guidance from one source of truth. The plugin's hooks are a
+Claude/Codex mechanism and are not copied — OpenCode gets the skill, not the
+on-save validation hook.
+
+Those hooks parse their payloads with `jq`, which the image installs for that
+purpose. Without it every hook exits non-zero and silently contributes no
+validation context, so `tests/container/test_astra_agent_skills_image.py`
+drives the real hook scripts end to end rather than only checking that the
+plugin is listed. That test also asserts that the pinned marketplace commit's
+`astra-pins.sh` matches the installed `astra-tools` and `astra-spec`: the skill
+must teach the schema version that `astra validate` actually speaks.
+
+Only the `astra` plugin is enabled. The marketplace also ships `reproduction`
+(`assess-reproducibility`, `reproduce`, `figure-comparison`), which is
+deliberately left out because its workflows drive long autonomous replication
+loops that should not be on by default in a shared scientific image. Users can
+add it themselves from the same local marketplace with no network access.
+
 ### Pilot execution receipts
 
 The provisional ASTRA/Lightcone module pilot records its evidence through the
