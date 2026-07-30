@@ -1068,6 +1068,15 @@ RUN UV_TOOL_DIR=/opt/uv/tools UV_TOOL_BIN_DIR=/usr/local/bin \
     "import importlib.metadata as m; assert m.version('astra-tools') == '${ASTRA_TOOLS_VERSION}'; assert m.version('astra-spec') == '${ASTRA_SPEC_VERSION}'" \
     && PATH=/opt/uv/tools/lightcone-cli/bin:${PATH} dask --version
 
+# Install the bounded pilot's public CLI and immutable project assets after
+# the runtime so the two image contracts share one narrow cache boundary.
+RUN --mount=type=bind,source=scripts/neurodesktop_astra_lightcone_pilot.py,target=/tmp/neurodesktop_astra_lightcone_pilot.py,ro \
+    --mount=type=bind,source=pilots/astra-lightcone-bet,target=/tmp/astra-lightcone-bet,ro \
+    install -m 0755 /tmp/neurodesktop_astra_lightcone_pilot.py /usr/local/bin/neurodesktop-astra-lightcone-pilot \
+    && install -d -m 0755 /opt/neurodesktop/pilots \
+    && cp -a /tmp/astra-lightcone-bet /opt/neurodesktop/pilots/ \
+    && chown -R root:users /opt/neurodesktop/pilots/astra-lightcone-bet
+
 
 # Start the container as root so docker-stacks runs before-notebook hooks with
 # the privileges needed to bootstrap local Slurm/CVMFS, then drops to NB_USER.

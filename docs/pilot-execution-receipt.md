@@ -169,9 +169,15 @@ manifest, and matching manifest hashes. The validator does not reinterpret an
 
 For Slurm, the retained script must be the target of the recorded
 `sbatch --parsable` argv. `scontrol` and `sacct` must agree with the receipt's
-job ID, partition, requested resources, state, exit code, node, timestamps, and
-elapsed duration. Manifest and verification completion must fall inside the
-allocation, and receipt creation/finalization must follow terminal state.
+job ID, partition, requested resources, normalized state, node, timestamps,
+and elapsed duration. The terminal control record is authoritative for the
+exit code. Slurm legitimately renders an allocation cancellation as, for
+example, `CANCELLED by 1000` with allocation exit `0:0` while `scontrol`
+records `CANCELLED` with the terminating signal; the validator accepts only
+that narrow `CANCELLED`/`TIMEOUT` allocation normalization and remains exact
+for successful and ordinary failed jobs. Manifest and verification completion
+must fall inside the allocation, and receipt creation/finalization must follow
+terminal state.
 
 ## Atomic publication
 

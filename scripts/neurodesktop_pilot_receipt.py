@@ -744,9 +744,26 @@ def _validate_slurm_evidence(receipt, workspace_root):
     row = next((candidate for candidate in rows if candidate.get("JobID") == slurm["jobId"]), None)
     if row is None:
         raise ReceiptValidationError("sacct evidence has no row for the receipt job ID")
+    allocation_state = (row.get("State") or "").split()[0].rstrip("+")
+    if allocation_state != terminal["state"]:
+        raise ReceiptValidationError(
+            "sacct State does not match the receipt: "
+            f"expected {terminal['state']!r}, found {row.get('State')!r}"
+        )
+    allocation_exit_code = row.get("ExitCode")
+    allocation_exit_is_normalized = (
+        terminal["state"] in {"CANCELLED", "TIMEOUT"}
+        and allocation_exit_code == "0:0"
+    )
+    if (
+        allocation_exit_code != terminal["exitCode"]
+        and not allocation_exit_is_normalized
+    ):
+        raise ReceiptValidationError(
+            "sacct ExitCode does not match the receipt: "
+            f"expected {terminal['exitCode']!r}, found {allocation_exit_code!r}"
+        )
     required_sacct = {
-        "State": terminal["state"],
-        "ExitCode": terminal["exitCode"],
         "ElapsedRaw": str(terminal["elapsedSeconds"]),
         "NodeList": terminal["node"],
     }

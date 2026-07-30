@@ -17,6 +17,15 @@
   testing)
 - `NEURODESKTOP_LOCAL_CONTAINERS`: local container root used to derive
   `OFFLINE_MODULES`; defaults to `/neurodesktop-storage/containers`
+- `NEURODESKTOP_SLURM_MODE`: selects the in-image scheduler contract. The BET
+  pilot requires `local` and fails closed for any other value; local mode uses
+  the integrated `neurodesktop` partition
+- `NEURODESKTOP_CVMFS_STARTUP_MODE`, `NEURODESKTOP_SLURM_STARTUP_MODE`: set
+  either service to `eager` for disposable runtime-acceptance containers that
+  must wait for CVMFS/module and local scheduler readiness before testing
+- `NEURODESKTOP_RUN_ASTRA_LIGHTCONE_PILOT`: set to `1` only in a privileged,
+  native-amd64 disposable image to enable the real OpenNeuro/FSL/Slurm pilot
+  acceptance test; it is unset by default
 - `OFFLINE_MODULES`: local Lmod module path derived from
   `NEURODESKTOP_LOCAL_CONTAINERS`
 - `NB_UID`, `NB_GID`: user and group IDs for permission matching

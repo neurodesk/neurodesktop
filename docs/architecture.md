@@ -254,6 +254,26 @@ Its full contract is documented in
 receipt remains amber because the transparent module wrapper does not attest
 the actual tool-container identity.
 
+The bounded BET pilot is installed at
+`/opt/neurodesktop/pilots/astra-lightcone-bet` and exposed through
+`neurodesktop-astra-lightcone-pilot`. `prepare` publishes its immutable ASTRA
+project and checksum-pinned OpenNeuro `ds000114/1.0.2` inputs into a persistent
+workspace. `run` accepts only the image's local `neurodesktop` partition,
+creates a run-scoped project/input snapshot, and submits the retained
+`run-bet-pilot.sbatch`. Inside that allocation the script loads exactly
+`fsl/6.0.7.22` through Lmod and runs the isolated `lightcone-cli==0.4.0` tool
+with Lightcone container runtime `none`; it does not invoke Apptainer or
+Singularity directly. The module's existing command wrappers remain the sole
+tool-execution seam.
+
+Each successful run retains Slurm control, accounting, and stream evidence;
+the loaded modulefile and resolved command wrappers; eight outputs and their
+Lightcone manifests; a status snapshot; fresh verification results; and a
+Workflow Run RO-Crate. `verify --run-directory` first revalidates the immutable
+receipt and then performs a fresh read-only `lc verify` against the run-scoped
+project. Failed, cancelled, and timed-out allocations receive non-success
+outcomes and can never satisfy the success receipt conditions.
+
 ### Claude Code
 
 Claude Code is installed into `/opt/jovyan_defaults/.local/bin/claude` when the

@@ -1,0 +1,79 @@
+{
+  "contractVersion": "1.0.0",
+  "pilotId": "astra-lightcone-bet",
+  "sourceSnapshot": "ds000114/1.0.2",
+  "packagePins": {
+    "astra-spec": "0.0.12",
+    "astra-tools": "0.2.11",
+    "lightcone-cli": "0.4.0"
+  },
+  "module": {
+    "specifier": "fsl/6.0.7.22",
+    "commands": [
+      "bet",
+      "fslstats",
+      "slicer",
+      "pngappend"
+    ]
+  },
+  "slurm": {
+    "partition": "neurodesktop",
+    "nodes": 1,
+    "tasks": 1,
+    "cpusPerTask": 1,
+    "memoryMiB": 4096,
+    "wallTimeSeconds": 900
+  },
+  "inputs": [
+    {
+      "id": "dataset_description",
+      "relativePath": "openneuro/ds000114/1.0.2/dataset_description.json",
+      "sha256": "5a4b7bd031bbf57fdab310b99d2327f7338e285baad42f953a59d9c9c4d5df33",
+      "sizeBytes": 684,
+      "url": "https://raw.githubusercontent.com/OpenNeuroDatasets/ds000114/1.0.2/dataset_description.json"
+    },
+    {
+      "id": "t1w",
+      "relativePath": "openneuro/ds000114/1.0.2/sub-01/ses-test/anat/sub-01_ses-test_T1w.nii.gz",
+      "sha256": "2bbe4430223d9b9ce47d4dab3ff398a69fefbb481cbf3bd136e07f363a73919c",
+      "sizeBytes": 8677710,
+      "url": "https://s3.amazonaws.com/openneuro.org/ds000114/sub-01/ses-test/anat/sub-01_ses-test_T1w.nii.gz"
+    }
+  ],
+  "universes": [
+    {
+      "id": "bet-f-0-5",
+      "decisionOption": "f_0_5",
+      "fraction": 0.5,
+      "filenameToken": "betf050"
+    },
+    {
+      "id": "bet-f-0-3",
+      "decisionOption": "f_0_3",
+      "fraction": 0.3,
+      "filenameToken": "betf030"
+    }
+  ],
+  "outputs": [
+    {
+      "id": "bet_brain",
+      "kind": "derivative-image",
+      "mediaType": "application/gzip"
+    },
+    {
+      "id": "bet_mask",
+      "kind": "derivative-image",
+      "mediaType": "application/gzip"
+    },
+    {
+      "id": "mask_volume",
+      "kind": "metric",
+      "mediaType": "application/json"
+    },
+    {
+      "id": "boundary_qc",
+      "kind": "visual-qc",
+      "mediaType": "image/png"
+    }
+  ]
+}

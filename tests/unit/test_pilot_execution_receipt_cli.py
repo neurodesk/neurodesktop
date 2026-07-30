@@ -519,6 +519,39 @@ def test_generate_derives_a_spec_only_timed_out_receipt(tmp_path):
     assert validation.returncode == 0, validation.stdout
 
 
+def test_validate_accepts_slurm_allocation_cancellation_normalization(tmp_path):
+    receipt_path, workspace, module_root = _materialize_timeout_receipt(tmp_path)
+    receipt = json.loads(receipt_path.read_text())
+    receipt["outcome"] = "cancelled"
+    receipt["slurm"]["terminal"]["state"] = "CANCELLED"
+    receipt["slurm"]["terminal"]["exitCode"] = "0:15"
+    scontrol = receipt["slurm"]["evidence"]["scontrol"]
+    scontrol_path = workspace / scontrol["relativePath"]
+    scontrol.update(
+        _write_hashed_file(
+            scontrol_path,
+            scontrol_path.read_bytes()
+            .replace(b"JobState=TIMEOUT", b"JobState=CANCELLED")
+            .replace(b"ExitCode=0:0", b"ExitCode=0:15"),
+        )
+    )
+    sacct = receipt["slurm"]["evidence"]["sacct"]
+    sacct_path = workspace / sacct["relativePath"]
+    sacct.update(
+        _write_hashed_file(
+            sacct_path,
+            sacct_path.read_bytes().replace(
+                b"|TIMEOUT|0:15|", b"|CANCELLED by 1000|0:0|"
+            ),
+        )
+    )
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    result = _validate(receipt_path, workspace, module_root)
+
+    assert result.returncode == 0, result.stdout
+
+
 def test_generate_preserves_a_scientific_decision_named_path(tmp_path):
     receipt_path, workspace, module_root = _materialize_timeout_receipt(tmp_path)
     candidate_path = tmp_path / "candidate.json"

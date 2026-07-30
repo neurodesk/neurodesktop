@@ -22,6 +22,13 @@
   and run `pytest tests/unit/test_pilot_execution_receipt_schema.py
   tests/unit/test_pilot_execution_receipt_cli.py` from a checkout and `pytest
   /opt/tests/test_pilot_execution_receipt_image.py` in the built image.
+- When changing the bounded ASTRA/Lightcone BET pilot, run `pytest
+  tests/unit/test_astra_lightcone_bet_pilot_cli.py
+  tests/unit/test_pilot_execution_receipt_cli.py` from a checkout and `pytest
+  /opt/tests/test_astra_lightcone_bet_pilot_image.py` in the built image. Run
+  its opt-in real module/Slurm acceptance only in a privileged native-amd64
+  container with CVMFS and local Slurm ready; set
+  `NEURODESKTOP_RUN_ASTRA_LIGHTCONE_PILOT=1` for that test.
 - When changing OpenCode, its Web proxy/session-workspace behavior, its file
   previewer, or its pinned version, run `pytest tests/unit/test_opencode_web.py`
   from a checkout and `pytest /opt/tests/test_opencode_web_image.py` in the

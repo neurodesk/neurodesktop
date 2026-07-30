@@ -1,0 +1,87 @@
+version: "0.0.12"
+name: "Neurodesktop BET threshold sensitivity pilot"
+description: |-
+  Compare two defensible FSL BET fractional intensity thresholds on one
+  checksum-pinned OpenNeuro ds000114 T1w image. The pilot reports both
+  universes and does not claim either threshold is universally superior.
+
+inputs:
+  - id: t1w
+    label: "OpenNeuro ds000114 T1w"
+    type: data
+    source: ../inputs/openneuro/ds000114/1.0.2/sub-01/ses-test/anat/sub-01_ses-test_T1w.nii.gz
+
+prior_insights:
+  bet_threshold_affects_boundary:
+    label: "BET threshold affects the extracted boundary"
+    claim: "BET's fractional intensity threshold changes the estimated brain boundary and should be treated as a methodological choice."
+    created_at: "2026-07-30T00:00:00Z"
+    evidence:
+      - id: bet_method_paper
+        doi: "10.1002/hbm.10062"
+
+decisions:
+  bet_fractional_threshold:
+    label: "BET fractional threshold"
+    rationale: "The fractional intensity threshold changes the extracted brain boundary."
+    default: f_0_5
+    options:
+      f_0_5:
+        label: "f = 0.5"
+        description: "FSL BET's conventional default fractional threshold."
+        insights: [bet_threshold_affects_boundary]
+      f_0_3:
+        label: "f = 0.3"
+        description: "A more permissive defensible threshold for sensitivity analysis."
+        insights: [bet_threshold_affects_boundary]
+
+outputs:
+  - id: bet_brain
+    label: "BET-extracted brain"
+    type: data
+    inputs: [t1w]
+    decisions: [bet_fractional_threshold]
+    recipe:
+      command: >-
+        bash scripts/materialize-bet-output.sh bet_brain
+        {inputs.t1w} {decisions.bet_fractional_threshold} {output}
+      resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}
+  - id: bet_mask
+    label: "BET brain mask"
+    type: data
+    inputs: [t1w]
+    decisions: [bet_fractional_threshold]
+    recipe:
+      command: >-
+        bash scripts/materialize-bet-output.sh bet_mask
+        {inputs.t1w} {decisions.bet_fractional_threshold} {output}
+      resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}
+  - id: mask_volume
+    label: "Brain-mask volume"
+    type: metric
+    inputs: [t1w]
+    decisions: [bet_fractional_threshold]
+    recipe:
+      command: >-
+        bash scripts/materialize-bet-output.sh mask_volume
+        {inputs.t1w} {decisions.bet_fractional_threshold} {output}
+      resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}
+  - id: boundary_qc
+    label: "BET boundary overlay"
+    type: figure
+    inputs: [t1w]
+    decisions: [bet_fractional_threshold]
+    recipe:
+      command: >-
+        bash scripts/materialize-bet-output.sh boundary_qc
+        {inputs.t1w} {decisions.bet_fractional_threshold} {output}
+      resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}
+
+findings:
+  boundary_is_inspectable:
+    label: "The selected BET boundary is inspectable"
+    claim: "Each universe materializes a boundary overlay that can be inspected without inferring that one threshold is universally superior."
+    created_at: "2026-07-30T00:00:00Z"
+    evidence:
+      - id: boundary_overlay_artifact
+        artifact: boundary_qc

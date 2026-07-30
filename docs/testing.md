@@ -74,6 +74,29 @@ answers on `PATH`, checks that the pinned marketplace commit teaches the
 schema version the installed `astra validate` speaks, and restores a throwaway
 home to prove OpenCode's skill actually reaches a user.
 
+For the bounded ASTRA/Lightcone BET pilot:
+
+```bash
+pytest tests/unit/test_astra_lightcone_bet_pilot_cli.py \
+  tests/unit/test_pilot_execution_receipt_cli.py
+
+# In every rebuilt image:
+pytest /opt/tests/test_astra_lightcone_bet_pilot_image.py
+
+# Explicit native-amd64 acceptance in a privileged disposable image with
+# eager CVMFS and integrated local Slurm startup:
+NEURODESKTOP_RUN_ASTRA_LIGHTCONE_PILOT=1 \
+  pytest /opt/tests/test_astra_lightcone_bet_pilot_image.py \
+  -k real_local_slurm
+```
+
+The opt-in test downloads the two checksum-pinned OpenNeuro inputs, submits a
+real job to the `neurodesktop` partition, loads `fsl/6.0.7.22`, validates the
+eight output/manifests and amber receipt, modifies one result to prove fresh
+verification fails, restores it, and verifies again. Run it on native amd64:
+the FSL module sandbox is amd64, and nested module-sandbox emulation is not a
+valid runtime proof on an Apple Silicon Docker Desktop host.
+
 ## Negative Test Convention
 
 When adding tests for pipeline or module-loading workflows, always include a
