@@ -3,6 +3,15 @@
 # Copies AGENTS.md, discovers working model backends, updates OpenCode config,
 # lets the user choose a default model, then starts OpenCode.
 
+# Jupyter AI uses both commands as machine-facing probes/transports. In
+# particular, `opencode acp` speaks JSON-RPC over stdout, so the interactive
+# model setup and status banners below would corrupt the protocol stream.
+case "${1:-}" in
+    --version|acp)
+        exec /usr/bin/opencode "$@"
+        ;;
+esac
+
 OPENCODE_CONFIG_DIR="${HOME}/.config/opencode"
 OPENCODE_CONFIG_FILE="${OPENCODE_CONFIG_DIR}/opencode.json"
 OPENCODE_DEFAULT_CONFIG_FILE="/opt/jovyan_defaults/.config/opencode/opencode.json"

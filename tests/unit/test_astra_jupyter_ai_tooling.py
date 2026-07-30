@@ -46,6 +46,22 @@ def test_only_the_astra_plugin_is_installed_by_default():
     assert "reproduction@lightcone-research" not in DOCKERFILE
 
 
+def test_jupyter_ai_optional_extras_stay_excluded():
+    """Their LiteLLM/prerelease constraints conflict with the validated stack."""
+    assert "jupyter_ai[magics]" not in DOCKERFILE
+    assert "jupyter_ai[jupyternaut]" not in DOCKERFILE
+
+
+def test_acp_adapters_are_installed_after_every_frontend_build():
+    """Adapter bumps must not invalidate the expensive labextension rebuilds."""
+    collaboration_rebuild = DOCKERFILE.index("jupyter labextension build")
+    myst_rebuild = DOCKERFILE.index("MYST_LABEXT_DIR")
+    acp_install = DOCKERFILE.index("@agentclientprotocol/codex-acp")
+
+    assert collaboration_rebuild < acp_install
+    assert myst_rebuild < acp_install
+
+
 def test_upstream_checkouts_are_pinned_to_an_exact_commit():
     """A moving branch would make the image unreproducible.
 

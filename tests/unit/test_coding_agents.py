@@ -30,6 +30,40 @@ def codex_wrapper_path():
 def claude_wrapper_path():
     return resolve_source("/usr/local/sbin/claude", "config/agents/claude")
 
+
+@pytest.mark.parametrize("args", [["--version"], ["acp"]])
+def test_opencode_machine_commands_bypass_interactive_setup(tmp_path, args):
+    """ACP discovery and stdio transport must reach the real binary directly."""
+    fake_opencode = tmp_path / "fake-opencode"
+    fake_opencode.write_text(
+        "#!/bin/sh\nprintf 'REAL_ARG:%s\\n' \"$@\"\n",
+        encoding="utf-8",
+    )
+    fake_opencode.chmod(0o755)
+
+    test_wrapper = tmp_path / "opencode-wrapper-test"
+    wrapper_contents = opencode_wrapper_path().read_text(encoding="utf-8")
+    wrapper_contents = wrapper_contents.replace("/usr/bin/opencode", str(fake_opencode))
+    test_wrapper.write_text(wrapper_contents, encoding="utf-8")
+    test_wrapper.chmod(0o755)
+
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    result = subprocess.run(
+        [str(test_wrapper), *args],
+        cwd=tmp_path,
+        env={**os.environ, "HOME": str(home_dir)},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=5,
+    )
+
+    assert result.returncode == 0, result.stdout
+    assert result.stdout.strip() == f"REAL_ARG:{args[0]}"
+    assert not (tmp_path / "AGENTS.md").exists()
+    assert not (home_dir / ".config/opencode/opencode.json").exists()
+
 def run_pty_command(args, input_text, cwd, env, timeout=15):
     """Run an interactive wrapper under a PTY and collect combined output."""
     import pty

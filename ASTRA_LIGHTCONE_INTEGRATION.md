@@ -1,8 +1,8 @@
 # ASTRA and Lightcone Integration
 
-Status: assessment complete; viewer specified and ready to implement; no code
-written yet
-Snapshot date: 2026-07-27 (assessment), 2026-07-29 (viewer specification)
+Status: assessment complete; ASTRA authoring/reporting foundation, read-only
+viewer M1–M4, and bounded amber BET module pilot implemented
+Snapshot date: 2026-07-27 (assessment), 2026-07-30 (implementation)
 
 ## Executive summary
 
@@ -16,7 +16,9 @@ integration has three layers, and they do **not** mature at the same rate:
    overlaid with a real `lc` run. **This is the primary deliverable** and is
    specified in full below.
 3. **Execution** — `lightcone-cli` (`lc`) as the production execution engine.
-   Blocked on Apptainer support and generic Slurm submission; see
+   A bounded in-image Slurm/module pilot is implemented with `runtime: none`
+   and amber receipts. General production execution remains blocked on
+   upstream Apptainer and generic Slurm support; see
    [Blockers](#blockers-and-risks).
 
 ASTRA is not another agent UI or an MCP protocol. It is a declarative YAML
@@ -36,6 +38,8 @@ contract legible in Jupyter without overstating what it proves.
 | --- | --- | --- | --- |
 | [`astra-spec`](https://astra-spec.org/latest/) | LinkML-backed schema for `astra.yaml`, universe files, insights, and evidence | Early alpha; breaking changes are expected | Excellent as a scientific contract |
 | [`astra-tools`](https://github.com/LightconeResearch/astra-tools) | `astra` CLI and Python SDK for scaffolding, validation, inspection, visualization, paper caching, and evidence verification | Alpha | Excellent; suitable for a pinned first integration |
+| [`MySTRA`](https://github.com/LightconeResearch/MySTRA) | MyST build plugin that turns ASTRA references into a resolved report data store | Prototype | Good; the requested inventory branch is built and pinned locally |
+| [`astra-theme`](https://github.com/LightconeResearch/astra-theme) | Article and book MyST themes that render the MySTRA data store as rich interactive reports | Early release | Good; both themes are built and shipped as offline local templates |
 | [`lightcone-cli`](https://github.com/LightconeResearch/lightcone-cli) | `lc` execution layer using Snakemake, Dask, containers, manifests, verification, and RO-Crate export | Beta | Promising, but its runtime assumptions need work |
 | [Lightcone documentation](https://docs.lightconeresearch.org/) | User, CLI, HPC, architecture, and skill documentation | Moving quickly with the implementation | Useful, but versions must be pinned and rechecked |
 
@@ -43,6 +47,7 @@ Versions evaluated:
 
 - `astra-spec==0.0.12`
 - `astra-tools==0.2.11`
+- `astra-theme==0.0.8`
 - `lightcone-cli==0.4.0`
 
 The upstream code and schema are permissively licensed: the Python code uses
@@ -92,7 +97,7 @@ Potential benefits include:
 
 | Neurodesktop capability | Potential ASTRA/Lightcone use |
 | --- | --- |
-| OpenCode, Claude, and Codex | Author or review `astra.yaml`, universes, recipes, and evidence using one shared contract |
+| OpenCode, Claude, and Codex | Author or review `astra.yaml`, universes, recipes, and evidence using one shared contract; all three ship the pinned upstream ASTRA skill |
 | Notebook Intelligence | Explain or inspect the same project artifacts without introducing another model or credential path |
 | `NEURODESK_API_KEY` and existing provider setup | Continue to provide model access; ASTRA and `lc` do not need a parallel LLM configuration |
 | `ipywidgets==8.1.8` and `jupyterlab_widgets` ([`Dockerfile:576`](Dockerfile#L576)) | Already installed, so an `anywidget`-based viewer needs no JupyterLab frontend build |
@@ -101,7 +106,7 @@ Potential benefits include:
 | Slurm | Run long analyses in batch allocations rather than in an agent's interactive shell |
 | Apptainer and CVMFS | Provide reproducible neuroimaging software, once Lightcone can represent their use truthfully |
 | Snakemake 9.6.2 | Satisfy a major existing `lightcone-cli` dependency |
-| JupyterLab MyST extension | Edit and display MyST content; a separate MyST CLI is still needed for the generated Lightcone report workflow |
+| JupyterLab MyST extension | Edit and display MyST content; the image also ships the pinned MyST CLI, local MySTRA inventory bundle, and offline ASTRA article/book themes for report builds |
 | NiiVue and desktop visualization tools | Support the visual QC required after outputs are materialized |
 
 The current agent and OpenCode architecture is documented in
@@ -124,8 +129,9 @@ The image contained:
 - `tmux`;
 - JupyterLab MyST 2.6.0.
 
-It did not contain `astra`, `lc`, `uv`, `jq`, a Docker or Podman client, or the
-`myst` CLI.
+That assessment image did not contain `astra`, `lc`, `uv`, `jq`, a Docker or
+Podman client, or the `myst` CLI. The implemented foundation now adds pinned
+`uv`, `astra`, `lc`, `myst`, and `jq`; Docker/Podman remain out of scope.
 
 ### Package-resolution check
 
@@ -199,7 +205,7 @@ viewer displays the decision space by default and layers real execution on top
 | Input contract | Spec + universe required; run manifest optional | Useful before `lc` execution is trustworthy; upgrades gracefully once it is |
 | Home | In-repo `extensions/astra-viewer`, importable as `neurodesk_astra_view` | Matches `extensions/neurodesk-launcher`; no squatting on the upstream `astra.*` namespace; upstreamable later |
 | Stack | `anywidget` + vendored Cytoscape.js | `ipywidgets` and `jupyterlab_widgets` are already installed, so this needs no `jupyter labextension build` and no federated-bundle rebuild |
-| Execution posture | Example runs on the host with **no declared container**, and the widget states what the manifest does and does not prove | Avoids the `runtime: none` provenance mismatch entirely instead of papering over it |
+| Execution posture | The shipped BET example uses the existing module system with `runtime: none`; the viewer consumes its fail-closed Neurodesktop receipt and never invents the hidden tool-container identity | Keeps the provisional route persistently amber while showing output-integrity evidence separately |
 
 `ipycytoscape` was considered and rejected: it ships its own JupyterLab
 frontend bundle whose JupyterLab 4.6 compatibility is unverified, and this
@@ -208,6 +214,51 @@ image already carries two federated-bundle rebuild workarounds
 [`Dockerfile:939`](Dockerfile#L939) for MyST/RISE). A third is not worth a
 faster prototype. A full TypeScript labextension was rejected for M1–M4 but
 remains the natural home for a double-click-to-open file handler later.
+
+### Released-schema reconciliation
+
+The viewer contract is reconciled to `astra-spec==0.0.12` and
+`astra-tools==0.2.11` as follows. These rules override earlier sketches in this
+document where the released schema cannot supply the sketched field.
+
+- Publication state, metric units, and artifact paths are **run evidence**, not
+  ASTRA declarations. In a spec-only graph they are `null`. With a run,
+  `published` becomes true only for a canonical stored output represented by
+  the manifest or RO-Crate, `artifact` comes only from that run record, and a
+  metric unit is displayed only when the result record supplies one. G5 is
+  therefore evaluated only for a supplied run and means "terminal output has
+  no canonical materialized artifact".
+- Preview confinement uses the directory containing `astra.yaml` for ordinary
+  manifests. For a finalized Neurodesktop receipt, the receipt-authenticated
+  `runs/<receiptId>` envelope is the root: its `project/astra.yaml`, manifests,
+  and copied canonical outputs must all hash-match the receipt, and no preview
+  may escape that run directory.
+- Prior insights, findings, and their embedded Evidence records remain distinct
+  nodes. A source Evidence supports its owning Insight; an option-linked prior
+  Insight justifies the selected decision; and an output claims a finding only
+  when the finding has `Evidence.artifact` naming that output. No relationship
+  is inferred merely from prose.
+- External `Analysis.path` children are recursively preflighted and resolved by
+  the adapter only after every real path is proven to remain below the project
+  root. Each loaded child is schema-validated, and internal IDs use fully
+  qualified analysis paths so repeated local names cannot collide.
+- `UniverseNode.universe` references are resolved by the adapter relative to
+  the universe file that contains the reference, recursively and under the same
+  project-root boundary. Reference cycles, escapes, missing files, and a child
+  universe whose selections do not validate against its resolved analysis are
+  fatal. Inline selections may refine a referenced child universe but may not
+  select the same decision twice with conflicting values.
+- A project `version` other than the installed `astra-spec` package version is
+  fatal before rendering, despite upstream treating it as a warning. An
+  Evidence record with neither or both of `doi` and `artifact` is preserved but
+  receives the stable warning `evidence-source-cardinality`, because the
+  exactly-one rule exists only in upstream prose. A missing recipe or command
+  remains valid because the released schema permits it; the adapter neither
+  invents execution metadata nor upgrades it to a validation error.
+
+`adapter.py` uses the public `astra.validation` schema and semantic validators
+over raw dictionaries. Generated LinkML/Pydantic classes are validator
+implementation details, not the viewer's internal model.
 
 ### Input contract
 
@@ -219,7 +270,7 @@ AstraView(spec, universe=..., run=None, mode="flow")
 | --- | --- | --- | --- |
 | `spec` | Yes | Path to `astra.yaml` | Error |
 | `universe` | No | Path to `universes/*.yaml` | Baseline universe is used; badge says "baseline" |
-| `run` | No | Path to an `lc` run manifest, `lc status --json` output, or an RO-Crate directory | Graph is labelled **"Selected analysis"**; all status is `unknown` |
+| `run` | No | Path to an `lc` run manifest, `lc status --json` output, an RO-Crate directory, or a finalized Neurodesktop pilot receipt | Graph is labelled **"Selected analysis"**; all status is `unknown` |
 
 Note the asymmetry, because it is the most commonly misunderstood part: the
 **YAML is the input** to Lightcone (`astra.yaml`, `universes/*.yaml`); what
@@ -259,8 +310,8 @@ Node fields: `id`, `kind`, `sub_kind`, `label`, `parent` (compound membership),
 `description`, `recipe`, `when` (conditional expression, if any),
 `when_satisfied` (bool or `null` when unevaluable), `resources`,
 `selected_decisions` (list of `{decision_id, value}` for this universe),
-`published` (bool), `status`, `artifact` (relative path + hash, run only),
-`warnings`.
+`published` (bool or `null`, run only), `status`, `artifact` (relative path +
+hash, run only), `units` (run only), `warnings`.
 
 #### Edge kinds
 
@@ -349,7 +400,7 @@ collapsible list. Each has a stable id so tests can assert on it.
 | `G2` | An analysis declares outputs but neither inputs nor decisions, so it is disconnected from the graph | warning |
 | `G3` | A declared input has no outgoing edge | info |
 | `G4` | A decision parameterizes nothing | warning |
-| `G5` | A terminal output is not marked published | info |
+| `G5` | With a run supplied, a terminal output has no canonical materialized artifact | info |
 | `G6` | A conditional output's `when` is unsatisfied in every declared universe | warning |
 | `G7` | The manifest contains a node absent from the spec, or vice versa | error |
 
@@ -470,14 +521,13 @@ checked-in fixtures:
 
 | M | Scope | Done when |
 | --- | --- | --- |
-| **M1** | ASTRA + universe → interactive provenance graph. Flow and Decisions modes, inspector without previews, `spec-only` trust badge. | The iris example renders in JupyterLab; `tests/unit/test_astra_view_graph.py` and `test_astra_view_packaging.py` pass; `docs/` and `AGENTS.md` updated with the new test command |
-| **M2** | Conditional-output evaluation, gap rules `G1`–`G6`, validation-error rendering, result previews. | Every gap rule has a passing fixture test; previews render figure/metric/table/report |
-| **M3** | Findings and evidence overlay (Evidence mode). | Evidence mode renders `supports`/`claims` edges on the shipped example |
-| **M4** | Runtime-manifest adapter: status, timing, artifact hashes, all four trust levels, `G7`. | `lc run` on the host-executed example produces a manifest the widget ingests; the `provenance-mismatch` fixture renders the red badge; `tests/container/test_astra_view_image.py` passes |
+| **M1** | ASTRA + universe → interactive provenance graph. Flow and Decisions modes, inspector without previews, `spec-only` trust badge. | Implemented in `extensions/astra-viewer`; the bounded BET project is the shipped example |
+| **M2** | Conditional-output evaluation, gap rules `G1`–`G6`, validation-error rendering, result previews. | Implemented with stable gap records and confined figure/metric/table/report previews |
+| **M3** | Findings and evidence overlay (Evidence mode). | Implemented with distinct Insight, finding, and Evidence nodes plus authoritative `supports`/`justifies`/`claims` edges |
+| **M4** | Runtime-manifest/receipt adapter: status, timing, artifact hashes, all four trust levels, `G7`. | Implemented for Lightcone records, RO-Crate, and fully revalidated Neurodesktop receipts; module receipts remain amber |
 
-M1–M3 need no `lc` execution at all and are therefore not blocked by anything
-in the next section. Only M4 touches Lightcone execution, and it is scoped to
-the host-executed, no-declared-container example.
+M1–M3 remain usable without `lc` execution. M4 adds read-only adapters; it does
+not launch Lightcone and does not turn the provisional module route green.
 
 ### Worked example
 
@@ -536,22 +586,21 @@ Cytoscape.js, whose compound nodes give the collapsible `FE`/`CL` grouping.
 These do not block starting M1, but each needs an answer before the milestone
 that depends on it:
 
-1. **Exact `astra-spec` field names** for inputs, outputs, decisions, `when`,
-   resources, findings, and evidence are not recorded in this document, because
-   they must be read from the pinned release rather than from examples. First
-   task of M1: pin the version, read the schema, and write `adapter.py` against
-   it.
-2. **`lc` manifest shape** — whether `lc status --json`, the on-disk manifest,
-   and the RO-Crate expose the same fields, and which is canonical for the
-   viewer. Answer before M4.
-3. **How `runtime: none` is recorded** in the manifest, which determines how
-   `provenance-mismatch` is detected. If it is not recorded at all, that is an
-   upstream issue to file, and the viewer must degrade to
-   `executed-unverified` rather than claim a container ran. Answer before M4.
-4. **Which pilot example ships** — the iris pipeline is a good development
-   fixture, but the shipped Neurodesktop example should be neuroimaging (see
-   [Suggested first pilot](#suggested-first-pilot)). Decide before M1 is
-   documented as complete.
+1. **Exact `astra-spec` field names** — resolved in the released-schema
+   reconciliation above and isolated in the implemented `adapter.py`; the
+   remaining graph, gap, preview, manifest, and widget modules do not import
+   ASTRA schema APIs.
+2. **`lc` manifest shape** — resolved: per-output manifests remain Lightcone's
+   canonical stored records; status and RO-Crate are accepted adapters, while
+   the provisional module route is bound by the stricter Neurodesktop receipt.
+3. **How `runtime: none` is recorded** — resolved defensively: an explicit
+   runtime/container contradiction is red. If a generic Lightcone record omits
+   actual runtime, the viewer stays amber. The Neurodesktop receipt records
+   `runtime: none` and separately proves its module and output evidence without
+   claiming the hidden tool-container identity.
+4. **Which pilot example ships** — resolved: the bounded
+   `pilots/astra-lightcone-bet` neuroimaging example is canonical. Small
+   synthetic fixtures remain appropriate for focused unit tests.
 
 ---
 
@@ -625,7 +674,7 @@ integration should capture at least:
 This should be solved upstream where possible, rather than encoded as a
 Neurodesktop-only convention that other Lightcone tools cannot understand.
 
-### 4. The released skill bundle is Claude-centric
+### 4. The earlier released skill bundle was Claude-centric
 
 The released `lc init` copies a `.claude/` plugin bundle and writes Claude Code
 permission settings. Some reference skills are mostly portable Markdown, but
@@ -636,24 +685,28 @@ The paper-reproduction workflow also includes a detached "Ralph" loop that
 starts Claude or Codex with approval and sandbox bypass flags. It should not be
 enabled by default in a shared scientific environment.
 
-Upstream
-[`lightcone-cli` PR #161](https://github.com/LightconeResearch/lightcone-cli/pull/161)
-is moving the skills into a marketplace, adding Codex registration, and
-returning permission ownership to the agent harness. This is another reason
-not to vendor the current `.claude/` tree into Neurodesktop. OpenCode support
-would still require explicit adaptation and testing.
+The standalone `LightconeResearch/agent-skills` marketplace now provides a
+harness-neutral ASTRA reference plugin for Codex and Claude. Neurodesktop pins
+that marketplace by commit and does not vendor the older `lc init` `.claude/`
+tree or its approval-bypass workflows.
 
-### 5. Supporting commands are missing
+OpenCode is covered without a marketplace client: it discovers Claude-format
+skills from `~/.config/opencode/skills`, so Neurodesktop copies the skill out
+of the same pinned checkout. The remaining asymmetry is the plugin's hooks,
+which are a Claude/Codex mechanism — OpenCode gets the skill, not the on-save
+validation hook. Upstreaming an OpenCode target in the marketplace would close
+that gap.
 
-- The bundled Claude hooks call `jq`, which is not present in the current
-  Neurodesktop image; those hooks would not provide their intended validation
-  and status context.
-- `lc init` prefers `uv` for project environments, although it can fall back to
-  Python `venv` and `pip`.
-- The generated MyST report instructions require the `myst` CLI. The existing
-  `jupyterlab_myst` package does not provide that command.
-- The generated MySTRA plugin URL follows `latest` by default. A reproducible
-  Neurodesktop template should pin a tested MySTRA release.
+### 5. Some supporting commands remain missing
+
+- The plugin's hooks call `jq`. The image now installs it, and
+  `tests/container/test_astra_agent_skills_image.py` drives the real hook
+  scripts so a future regression fails loudly instead of silently degrading
+  every hook to a no-op.
+- The image now ships `uv`, the stock `myst` CLI, a locally built MySTRA bundle
+  pinned to PR 14's inventory head, and both ASTRA theme flavors built from an
+  exact source commit. Projects reference these local plugin and theme paths
+  explicitly instead of moving URLs.
 
 ### 6. Upstream is intentionally fast-moving
 
@@ -668,9 +721,9 @@ This is the reason `adapter.py` is isolated.
 ### Phase 1: specification, validation, and the viewer
 
 1. Pin compatible `astra-spec`, `astra-tools`, and `anywidget` versions in the
-   image.
-2. Add a harness-neutral ASTRA reference skill or agent guidance shared by
-   OpenCode, Claude, and Codex.
+   image. (Implemented.)
+2. Add harness-neutral ASTRA reference guidance. (Implemented for Codex and
+   Claude through the pinned upstream marketplace; OpenCode remains.)
 3. Ship a small, realistic neuroimaging example containing:
    - BIDS-style input data;
    - one baseline universe;
@@ -678,26 +731,40 @@ This is the reason `adapter.py` is isolated.
    - versioned Lmod analysis scripts;
    - metric, derivative, and visual-QC outputs;
    - **no declared container**, so no `runtime: none` mismatch can occur.
-4. Build the viewer through M1–M3.
+4. Build the viewer through M1–M3. (Implemented.)
 5. Add tests that verify the installed versions and validate all shipped ASTRA
-   fixtures.
+   fixtures. (Implemented.)
 6. Continue to submit and monitor computation through the existing Slurm
    workflow.
 
 This phase provides immediate value for planning, review, handoff, and evidence
 without changing execution semantics.
 
-### Phase 2: host-executed `lc` demo and the runtime adapter
+### Phase 2: run-evidence adapters
 
-1. Run the shipped example end to end with `lc run` on the host.
-2. Implement M4 against the resulting manifest.
+1. Ingest canonical per-output manifests, status JSON, and Workflow Run
+   RO-Crate without invoking `lc`. (Implemented.)
+2. Revalidate and ingest the stricter Neurodesktop pilot receipt. (Implemented.)
 3. Verify all four trust levels, including the deliberately constructed
-   `provenance-mismatch` fixture.
+   `provenance-mismatch` fixture. (Implemented.)
 
 Nothing in this phase claims container-level reproducibility, and the widget
 says so.
 
 ### Phase 3: controlled production `lightcone-cli` pilot
+
+The first bounded pilot is implemented under `pilots/astra-lightcone-bet`.
+It stages checksum-pinned OpenNeuro `ds000114/1.0.2`, submits a retained job to
+the integrated `neurodesktop` partition, loads `fsl/6.0.7.22` through the
+existing module system, and compares BET thresholds `f=0.5` and `f=0.3`.
+Lightcone runs synchronously inside the allocation with `runtime: none`; no
+declared container is silently ignored and no direct Apptainer path was added.
+The receipt therefore remains `executed-unverified` and explicitly does not
+attest the hidden tool-container identity.
+
+This bounded pilot proves the Neurodesktop seam without satisfying the broader
+production-runtime conditions below. Those still require first-class upstream
+runtime identity and generic scheduler support.
 
 Pilot full execution after the following are true:
 
@@ -717,18 +784,19 @@ and operational verification bounded.
 
 ### Phase 4: agent and deeper Jupyter integration
 
-1. Adopt the upstream marketplace form of the reference skills when available.
+1. Upstream an OpenCode target in the ASTRA marketplace so its hooks, not just
+   its skill, reach OpenCode.
 2. Adapt and test the same workflows for OpenCode rather than offering a
    Claude-only experience.
 3. Keep all model and API-key handling on Neurodesktop's existing provider
    path.
-4. Add `jq` and any chosen project-environment tooling.
-5. Add a pinned MyST CLI and MySTRA plugin if reproducible report preview is in
-   scope.
-6. Promote the viewer to a JupyterLab file-type handler so `astra.yaml` opens
+4. Integrate the shipped MyST CLI, MySTRA bundle, and ASTRA themes into a
+   reproducible report preview workflow. (The CLI, plugin, and offline article
+   and book templates are implemented; a launcher-level preview remains.)
+5. Promote the viewer to a JupyterLab file-type handler so `astra.yaml` opens
    the graph on double-click, and add a launcher action such as "New
    reproducible ASTRA analysis".
-7. Add universe comparison.
+6. Add universe comparison.
 
 ## Suggested first pilot
 
@@ -775,10 +843,10 @@ all of the following are demonstrated from runtime evidence:
 
 ## Recommendation
 
-Build the viewer now. M1–M3 depend only on `astra-spec` and `astra-tools`,
-which install cleanly and validate correctly today, and they deliver the main
-scientific value — making methodological choices and their effects legible —
-without depending on any of the open execution blockers.
+Use the implemented viewer for planning, review, and honest inspection of the
+bounded module pilot. Its schema adapter is isolated for future ASTRA upgrades,
+and its persistent trust badge keeps output integrity separate from runtime
+provenance.
 
 Treat full `lightcone-cli` execution as a joint upstream integration project
 centered on Apptainer, generic Slurm submission, and truthful Neurodesk

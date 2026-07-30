@@ -102,6 +102,15 @@
 - `AGENT_SKILLS_REF` (build argument): exact commit of
   `LightconeResearch/agent-skills` used for the Codex and Claude ASTRA plugin;
   defaults to `4ded682be8487d8aa05831678ef84ef12068d50d`
+- `JUPYTER_AI_VERSION` (build argument): Jupyter AI metapackage release;
+  defaults to `3.1.1`, with its direct pre-1.0 extensions pinned alongside it
+- `CODEX_ACP_VERSION`, `CLAUDE_AGENT_ACP_VERSION` (build arguments): pinned
+  ACP adapters that expose the Codex and Claude personas in Jupyter AI;
+  defaults to `1.1.7` and `0.63.0`
+- `JUPYTER_COLLABORATION_VERSION`, `JUPYTER_COLLABORATION_REF` (build
+  arguments): release and exact source commit used to rebuild Jupyter AI's
+  collaboration frontends for JupyterLab 4.6; defaults to `4.4.1` and
+  `df6c4a325db80bed9df4cd5f768f3699adf7a6dd`
 - `MYST_PNPM_VERSION`, `MYST_YDOC_VERSION` (build arguments): pnpm and Jupyter
   YDoc releases used for the MyST/RISE compatibility rebuild; defaults to
   `11.17.0` and `4.1.1`

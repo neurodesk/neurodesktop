@@ -80,6 +80,19 @@ answers on `PATH`, checks that the pinned marketplace commit teaches the
 schema version the installed `astra validate` speaks, and restores a throwaway
 home to prove OpenCode's skill actually reaches a user.
 
+For Jupyter AI, MySTRA, or ASTRA theme changes:
+
+```bash
+pytest tests/unit/test_astra_jupyter_ai_tooling.py
+pytest tests/unit/test_jupyter_server_documents_patch.py
+pytest tests/unit/test_coding_agents.py -k opencode_machine_commands
+# In the rebuilt image:
+pytest /opt/tests/test_astra_jupyter_ai_image.py
+pip check
+jupyter server extension list
+jupyter labextension list --verbose
+```
+
 For the bounded ASTRA/Lightcone BET pilot:
 
 ```bash

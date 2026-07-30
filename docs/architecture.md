@@ -306,6 +306,35 @@ passes, the module route remains amber `executed-unverified`. Ordinary previews
 stay under the directory containing `astra.yaml`; receipt previews stay under
 the hash-authenticated `runs/<receiptId>` envelope.
 
+### Jupyter AI
+
+Jupyter AI provides a second, ACP-native JupyterLab chat surface alongside
+Notebook Intelligence. Its ACP client discovers the existing Claude, Codex,
+and OpenCode commands and registers all three personas. Neurodesktop installs
+pinned Codex and Claude ACP adapters; OpenCode uses its native `opencode acp`
+transport. Machine-facing `opencode --version` and `opencode acp` calls bypass
+the interactive terminal wrapper so their output remains protocol-safe. The
+personas reuse each user's agent credentials and configuration; they do not replace
+OpenCode Web, Notebook Intelligence, or Neurodesktop's existing model/API-key
+configuration. The optional Jupyter AI magic and Jupyternaut extras are not
+installed because their LiteLLM/prerelease constraints conflict with the
+validated Neurodesktop stack.
+
+Jupyter AI 3.1.1 resolves Jupyter Collaboration 4.4.1 bundles whose published
+metadata supports `@jupyter/ydoc` only through version 3. Neurodesktop rebuilds
+the collaboration and document-provider frontends against its JupyterLab 4.6
+YDoc 4.1.1 contract, then replaces only those two incompatible wheel artifacts.
+The image test requires both to report `OK` in `jupyter labextension list
+--verbose`.
+
+`jupyter-server-documents` 0.3.1 has an upstream stale-client race in which one
+queued update can terminate a chat room's background message processor.
+Neurodesktop applies an exact-source, build-time workaround for upstream issue
+271: missing-client lookup fails cleanly, and one rejected frame cannot stop the
+rest of the room queue. The anchored patch intentionally fails the image build
+if a future package release changes either source seam, forcing the workaround
+to be reassessed rather than silently carried forward.
+
 ### Pilot execution receipts
 
 The provisional ASTRA/Lightcone module pilot records its evidence through the

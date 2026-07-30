@@ -55,6 +55,13 @@
   the viewer imports, keep `jq` installed for the plugin hooks, and bump
   `AGENT_SKILLS_REF` together with the ASTRA pins so the skill teaches the
   schema `astra validate` speaks.
+- When changing Jupyter AI, Jupyter Collaboration, its ACP personas,
+  the Jupyter Server Documents workaround, MyST CLI, MySTRA, or ASTRA themes,
+  run `pytest tests/unit/test_astra_jupyter_ai_tooling.py
+  tests/unit/test_jupyter_server_documents_patch.py` from a checkout and `pytest
+  /opt/tests/test_astra_jupyter_ai_image.py` in the built image, then verify
+  `pip check`, `jupyter server extension list`, and `jupyter labextension list
+  --verbose` in that image.
 - When changing an agentic workflow under `.github/workflows/*.md`, regenerate
   its `.lock.yml` with `gh aw compile`, then run
   `pytest tests/unit/test_report_job_failure_action.py`.

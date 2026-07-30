@@ -461,7 +461,8 @@ RUN retry bash -o pipefail -c 'curl -fsSL https://deb.nodesource.com/setup_24.x 
     && apt-install-retry nodejs build-essential \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install AI coding assistants
+# Install AI coding assistants. The Jupyter AI ACP adapters are installed in a
+# late runtime-only layer so adapter updates do not rebuild frontend assets.
 RUN npm_config_cache=/tmp/npm-root-cache npm install -g @openai/codex \
     && rm -rf /root/.npm /tmp/npm-root-cache /home/${NB_USER}/.npm \
     && su - "${NB_USER}" -c 'retry bash -o pipefail -c "curl -fsSL https://claude.ai/install.sh | bash -s -- stable"' \
@@ -545,6 +546,7 @@ RUN retry conda install -c conda-forge nb_conda_kernels \
 # @jupyterlab/mathjax-extension instead.
 ARG BUST_CACHE_PIP=3
 ARG UV_VERSION="0.11.8"
+ARG JUPYTER_AI_VERSION="3.1.1"
 ARG ASTRA_SPEC_VERSION="0.0.12"
 ARG ASTRA_TOOLS_VERSION="0.2.11"
 ARG ANYWIDGET_VERSION="0.11.0"
@@ -569,6 +571,20 @@ RUN /opt/conda/bin/pip install \
     # The 5.3.0 wheel omits its compiled frontend. A source rebuild below
     # installs and patches the matching labextension bundle.
     notebook_intelligence==5.3.0 \
+    # Jupyter AI's ACP-native chat surface. Pin the direct extension packages
+    # because their independent pre-1.0 releases otherwise drift underneath
+    # the stable jupyter_ai metapackage.
+    jupyter_ai==${JUPYTER_AI_VERSION} \
+    jupyter-ai-acp-client==0.2.1 \
+    jupyter-ai-chat-commands==0.0.4 \
+    jupyter-ai-persona-manager==0.1.2 \
+    jupyter-ai-router==0.0.6 \
+    jupyter-ai-tools==0.6.1 \
+    jupyter-server-documents==0.3.1 \
+    jupyter-server-mcp==0.2.1 \
+    jupyterlab-chat==0.23.0 \
+    jupyterlab-commands-toolkit==0.1.6 \
+    jupyterlab-notebook-awareness==0.2.0 \
     jupyterlab_rise \
     jupyterlab-niivue==0.2.7 \
     jupyterlab_myst==2.7.0 \
@@ -1046,6 +1062,55 @@ RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {
     && cp -a "${MYST_LABEXT_DIR}" "${APP_MYST_DIR}" \
     && rm -rf /tmp/myst /tmp/rise /tmp/myst-corepack /tmp/myst-pnpm-store /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
 
+# Jupyter AI currently resolves the Jupyter Collaboration 4.4.1 frontend,
+# whose published bundles advertise @jupyter/ydoc <4 and are rejected by
+# JupyterLab 4.6. Rebuild only the two frontend packages against the exact YDoc
+# already used by the image. The two casts bridge duplicate protected
+# TypeScript identities created by the workspace; they do not change runtime
+# code or the document factory implementations.
+ARG JUPYTER_COLLABORATION_VERSION="4.4.1"
+ARG JUPYTER_COLLABORATION_REF="df6c4a325db80bed9df4cd5f768f3699adf7a6dd"
+RUN retry git clone --depth 1 --branch "v${JUPYTER_COLLABORATION_VERSION}" \
+    https://github.com/jupyterlab/jupyter-collaboration.git /tmp/jupyter-collaboration \
+    && test "$(git -C /tmp/jupyter-collaboration rev-parse HEAD)" = "${JUPYTER_COLLABORATION_REF}" \
+    && cd /tmp/jupyter-collaboration \
+    && npm pkg set "resolutions.@jupyter/ydoc=${MYST_YDOC_VERSION}" \
+    && for package_dir in \
+    packages/collaboration-extension \
+    packages/collaborative-drive \
+    packages/docprovider-extension \
+    packages/docprovider; do \
+    npm pkg set "dependencies.@jupyter/ydoc=^${MYST_YDOC_VERSION}" --prefix "${package_dir}"; \
+    done \
+    && npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}" \
+    --prefix packages/collaboration-extension \
+    && npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}" \
+    --prefix packages/docprovider-extension \
+    && sed -i \
+    -e 's/^      yFileFactory$/      yFileFactory as never/' \
+    -e 's/^      yNotebookFactory$/      yNotebookFactory as never/' \
+    packages/docprovider-extension/src/filebrowser.ts \
+    && YARN_ENABLE_IMMUTABLE_INSTALLS=0 retry jlpm install \
+    && jlpm lerna run build \
+    --scope @jupyter/collaboration \
+    --scope @jupyter/collaborative-drive \
+    --scope @jupyter/docprovider \
+    && jlpm lerna run build:lib:prod \
+    && /opt/conda/bin/jupyter labextension build \
+    --core-path=/opt/conda/share/jupyter/lab packages/collaboration-extension \
+    && /opt/conda/bin/jupyter labextension build \
+    --core-path=/opt/conda/share/jupyter/lab packages/docprovider-extension \
+    && COLLAB_SRC=/tmp/jupyter-collaboration/projects/jupyter-collaboration-ui/jupyter_collaboration_ui/labextension \
+    && DOCPROVIDER_SRC=/tmp/jupyter-collaboration/projects/jupyter-docprovider/jupyter_docprovider/labextension \
+    && COLLAB_DEST=/opt/conda/share/jupyter/labextensions/@jupyter/collaboration-extension \
+    && DOCPROVIDER_DEST=/opt/conda/share/jupyter/labextensions/@jupyter/docprovider-extension \
+    && rm -rf "${COLLAB_DEST}" "${DOCPROVIDER_DEST}" \
+    && cp -a "${COLLAB_SRC}" "${COLLAB_DEST}" \
+    && cp -a "${DOCPROVIDER_SRC}" "${DOCPROVIDER_DEST}" \
+    && test "$(node -p "require('${COLLAB_DEST}/package.json').dependencies['@jupyter/ydoc']")" = "^${MYST_YDOC_VERSION}" \
+    && test "$(node -p "require('${DOCPROVIDER_DEST}/package.json').dependencies['@jupyter/ydoc']")" = "^${MYST_YDOC_VERSION}" \
+    && rm -rf /tmp/jupyter-collaboration /root/.cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
+
 # MySTRA is a single-file MyST plugin rather than an npm package. Build the
 # requested inventory PR at its exact head and ship the bundle locally so a
 # project can reference it without following the moving branch or requiring a
@@ -1097,6 +1162,22 @@ RUN retry git clone https://github.com/LightconeResearch/astra-theme.git /tmp/as
     && printf '%s\n' "${ASTRA_THEME_REF}" > /opt/neurodesktop/astra-theme/REVISION \
     && rm -rf /tmp/astra-theme /tmp/astra-theme-npm-cache \
     /tmp/astra-theme-runtime-npm-cache /root/.npm
+
+# Expose the installed agent families as Jupyter AI ACP personas. These
+# adapters are runtime-only and deliberately live after all frontend builds.
+ARG CODEX_ACP_VERSION="1.1.7"
+ARG CLAUDE_AGENT_ACP_VERSION="0.63.0"
+RUN npm_config_cache=/tmp/npm-acp-cache retry npm install -g \
+    "@agentclientprotocol/codex-acp@${CODEX_ACP_VERSION}" \
+    "@agentclientprotocol/claude-agent-acp@${CLAUDE_AGENT_ACP_VERSION}" \
+    && rm -rf /root/.npm /tmp/npm-acp-cache /home/${NB_USER}/.npm
+
+# Upstream issue #271: a stale client frame can terminate a Jupyter AI chat
+# room's message queue. Keep this anchored workaround until a fixed
+# jupyter-server-documents release is pinned and validated.
+RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_documents.py,target=/tmp/patch_jupyter_server_documents.py,ro \
+    install -m 0755 -o root -g users /tmp/patch_jupyter_server_documents.py /opt/neurodesktop/patch_jupyter_server_documents.py \
+    && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_server_documents.py
 
 # Patch both nested tar copies after all npm-based build steps. Updating
 # code-server's top-level dependency graph does not reach either scanner path.
