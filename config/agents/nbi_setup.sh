@@ -33,15 +33,23 @@ if [ ! -f "${NBI_CONFIG_FILE}" ]; then
 fi
 
 # Read an exported VAR=value from ~/.bashrc (handles single, double, unquoted).
-read_export_from_bashrc() {
-    local var_name="$1"
-    [ -f "${HOME}/.bashrc" ] || { printf ''; return; }
-    sed -nE \
-        -e "s/^[[:space:]]*export[[:space:]]+${var_name}='([^']+)'[[:space:]]*\$/\1/p" \
-        -e "s/^[[:space:]]*export[[:space:]]+${var_name}=\"([^\"]+)\"[[:space:]]*\$/\1/p" \
-        -e "s/^[[:space:]]*export[[:space:]]+${var_name}=([^[:space:]#]+)[[:space:]]*\$/\1/p" \
-        "${HOME}/.bashrc" | tail -n 1
-}
+# The bashrc-parsing contract is shared with the opencode/codex/claude wrappers
+# and lives in bashrc_helpers.sh so all four read the same way.
+NEURODESKTOP_BASHRC_HELPERS="${NEURODESKTOP_BASHRC_HELPERS:-/opt/neurodesktop/bashrc_helpers.sh}"
+if [ -r "${NEURODESKTOP_BASHRC_HELPERS}" ]; then
+    # shellcheck source=/opt/neurodesktop/bashrc_helpers.sh
+    . "${NEURODESKTOP_BASHRC_HELPERS}"
+else
+    read_export_from_bashrc() {
+        local var_name="$1"
+        [ -f "${HOME}/.bashrc" ] || { printf ''; return; }
+        sed -nE \
+            -e "s/^[[:space:]]*export[[:space:]]+${var_name}='([^']+)'[[:space:]]*\$/\1/p" \
+            -e "s/^[[:space:]]*export[[:space:]]+${var_name}=\"([^\"]+)\"[[:space:]]*\$/\1/p" \
+            -e "s/^[[:space:]]*export[[:space:]]+${var_name}=([^[:space:]#]+)[[:space:]]*\$/\1/p" \
+            "${HOME}/.bashrc" | tail -n 1
+    }
+fi
 
 # Source the NEURODESK_API_KEY from ~/.bashrc (opencode writes it there).
 NEURODESK_API_KEY_VALUE="${NEURODESK_API_KEY:-}"

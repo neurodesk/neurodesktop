@@ -54,6 +54,26 @@ if [ ! -f ./AGENTS.md ]; then
     cp /opt/AGENTS.md ./AGENTS.md
 fi
 
+# Read an exported VAR=value from ~/.bashrc (handles single, double, unquoted).
+# Shared with the codex/claude wrappers and nbi_setup.sh via bashrc_helpers.sh
+# so every reader uses the same parsing rule. Loaded once here; the per-variable
+# loaders below keep their own sanitization and export lifecycle.
+NEURODESKTOP_BASHRC_HELPERS="${NEURODESKTOP_BASHRC_HELPERS:-/opt/neurodesktop/bashrc_helpers.sh}"
+if [ -r "${NEURODESKTOP_BASHRC_HELPERS}" ]; then
+    # shellcheck source=/opt/neurodesktop/bashrc_helpers.sh
+    . "${NEURODESKTOP_BASHRC_HELPERS}"
+else
+    read_export_from_bashrc() {
+        local var_name="$1"
+        [ -f "${HOME}/.bashrc" ] || { printf ''; return; }
+        sed -nE \
+            -e "s/^[[:space:]]*export[[:space:]]+${var_name}='([^']+)'[[:space:]]*$/\1/p" \
+            -e "s/^[[:space:]]*export[[:space:]]+${var_name}=\"([^\"]+)\"[[:space:]]*$/\1/p" \
+            -e "s/^[[:space:]]*export[[:space:]]+${var_name}=([^[:space:]#]+)[[:space:]]*$/\1/p" \
+            "${HOME}/.bashrc" | tail -n 1
+    }
+fi
+
 ensure_opencode_config_file() {
     mkdir -p "${OPENCODE_CONFIG_DIR}"
     if [ ! -f "${OPENCODE_CONFIG_FILE}" ] && [ -f "${OPENCODE_DEFAULT_CONFIG_FILE}" ]; then
@@ -408,7 +428,6 @@ sanitize_neurodesk_api_key() {
 }
 
 load_neurodesk_api_key_from_bashrc() {
-    local bashrc_file="${HOME}/.bashrc"
     local key_from_bashrc
 
     if [ -n "${NEURODESK_API_KEY:-}" ]; then
@@ -417,16 +436,7 @@ load_neurodesk_api_key_from_bashrc() {
         return 0
     fi
 
-    if [ ! -f "${bashrc_file}" ]; then
-        return 0
-    fi
-
-    key_from_bashrc=$(sed -nE \
-        -e "s/^[[:space:]]*export[[:space:]]+NEURODESK_API_KEY='([^']+)'[[:space:]]*$/\1/p" \
-        -e 's/^[[:space:]]*export[[:space:]]+NEURODESK_API_KEY="([^"]+)"[[:space:]]*$/\1/p' \
-        -e 's/^[[:space:]]*export[[:space:]]+NEURODESK_API_KEY=([^[:space:]#]+)[[:space:]]*$/\1/p' \
-        "${bashrc_file}" | tail -n 1)
-
+    key_from_bashrc=$(read_export_from_bashrc NEURODESK_API_KEY)
     key_from_bashrc=$(sanitize_neurodesk_api_key "${key_from_bashrc}")
 
     if [ -n "${key_from_bashrc}" ]; then
@@ -481,7 +491,6 @@ sanitize_br_mcp_token() {
 }
 
 load_br_mcp_token_from_bashrc() {
-    local bashrc_file="${HOME}/.bashrc"
     local token_from_bashrc
 
     if [ -n "${BR_MCP_TOKEN:-}" ]; then
@@ -490,16 +499,7 @@ load_br_mcp_token_from_bashrc() {
         return 0
     fi
 
-    if [ ! -f "${bashrc_file}" ]; then
-        return 0
-    fi
-
-    token_from_bashrc=$(sed -nE \
-        -e "s/^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN='([^']+)'[[:space:]]*$/\1/p" \
-        -e 's/^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN="([^"]+)"[[:space:]]*$/\1/p' \
-        -e 's/^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN=([^[:space:]#]+)[[:space:]]*$/\1/p' \
-        "${bashrc_file}" | tail -n 1)
-
+    token_from_bashrc=$(read_export_from_bashrc BR_MCP_TOKEN)
     token_from_bashrc=$(sanitize_br_mcp_token "${token_from_bashrc}")
 
     if [ -n "${token_from_bashrc}" ]; then

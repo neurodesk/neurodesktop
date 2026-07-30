@@ -56,7 +56,22 @@ def make_nbi_setup_sandbox(tmp_path):
     default_mcp = tmp_path / "nbi-default-mcp.json"
     default_mcp.write_text('{"mcpServers": {}}\n', encoding="utf-8")
 
+    # Install the shared bashrc export-reader next to the test script and point
+    # nbi_setup.sh at it, so these tests exercise the homogenized parser the
+    # wrappers also use (instead of nbi_setup.sh's inline fallback copy).
+    helpers_src = resolve_source(
+        "/opt/neurodesktop/bashrc_helpers.sh", "config/agents/bashrc_helpers.sh"
+    )
+    helpers_dst = tmp_path / "bashrc_helpers.sh"
+    helpers_dst.write_text(helpers_src.read_text(encoding="utf-8"), encoding="utf-8")
+
     script_contents = nbi_setup_script_path().read_text(encoding="utf-8")
+    # Redirect nbi_setup.sh's helper default to the copy installed in the sandbox
+    # so the test runs the shared parser, not the inline fallback.
+    script_contents = script_contents.replace(
+        "/opt/neurodesktop/bashrc_helpers.sh",
+        str(helpers_dst),
+    )
     script_contents = script_contents.replace(
         'NBI_DEFAULT_CONFIG="/opt/jovyan_defaults/.jupyter/nbi/config.json"',
         f'NBI_DEFAULT_CONFIG="{default_config}"',

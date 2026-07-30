@@ -1262,3 +1262,130 @@ def test_claude_prints_brain_researcher_inactive_banner(tmp_path):
 
     assert result.returncode == 0, f"Wrapper execution failed: {result.stdout}"
     assert "Brain Researcher MCP server: inactive" in result.stdout
+
+
+def _bashrc_helpers_path():
+    """Resolve the shared bashrc export-reader library under test."""
+    return resolve_source(
+        "/opt/neurodesktop/bashrc_helpers.sh", "config/agents/bashrc_helpers.sh"
+    )
+
+
+def _run_reader_through_helpers(tmp_path, bashrc_contents, var_name):
+    """Invoke read_export_from_bashrc via the shared lib (not the fallback).
+
+    Sources the real installed/checkout helper inside a bash subshell so the
+    test exercises the homogenized parser every wrapper now depends on.
+    """
+    home_dir = tmp_path / "home"
+    home_dir.mkdir(exist_ok=True)
+    if bashrc_contents is not None:
+        (home_dir / ".bashrc").write_text(bashrc_contents, encoding="utf-8")
+    else:
+        # Ensure no stale ~/.bashrc leaks into the missing-file case.
+        (home_dir / ".bashrc").unlink(missing_ok=True)
+
+    helpers = _bashrc_helpers_path()
+    env = {**os.environ, "HOME": str(home_dir)}
+    result = subprocess.run(
+        ["bash", "-c", f'. "{helpers}"; printf %s "$(read_export_from_bashrc {var_name})"'],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, f"helper failed: {result.stderr}"
+    return result.stdout
+
+
+@pytest.mark.parametrize(
+    "bashrc_line, expected",
+    [
+        ("export BR_MCP_TOKEN='single-quote-value'\n", "single-quote-value"),
+        ('export BR_MCP_TOKEN="double-quote-value"\n', "double-quote-value"),
+        ("export BR_MCP_TOKEN=unquoted-value\n", "unquoted-value"),
+    ],
+)
+def test_bashrc_helpers_reads_all_quoting_forms(tmp_path, bashrc_line, expected):
+    """The shared reader handles single-, double-, and unquoted exports."""
+    assert _run_reader_through_helpers(tmp_path, bashrc_line, "BR_MCP_TOKEN") == expected
+
+
+def test_bashrc_helpers_returns_last_value(tmp_path):
+    """A re-export later in the file wins, matching every caller's contract."""
+    bashrc = (
+        "export BR_MCP_TOKEN='first'\n"
+        "export BR_MCP_TOKEN='second'\n"
+    )
+    assert _run_reader_through_helpers(tmp_path, bashrc, "BR_MCP_TOKEN") == "second"
+
+
+def test_bashrc_helpers_returns_empty_when_no_export(tmp_path):
+    """Missing exports and a missing ~/.bashrc both yield the empty string."""
+    assert _run_reader_through_helpers(tmp_path, "echo not an export\n", "BR_MCP_TOKEN") == ""
+    assert _run_reader_through_helpers(tmp_path, None, "BR_MCP_TOKEN") == ""
+
+
+def test_codex_reads_token_through_shared_helper(tmp_path):
+    """Codex loads BR_MCP_TOKEN from ~/.bashrc via the sourced shared lib."""
+    helpers = _bashrc_helpers_path()
+    test_wrapper, home_dir, env = _make_codex_wrapper(
+        tmp_path, bashrc_contents="export BR_MCP_TOKEN='codex-shared-lib-token'\n"
+    )
+    env["NEURODESKTOP_BASHRC_HELPERS"] = str(helpers)
+
+    result = subprocess.run(
+        [str(test_wrapper), "--version"],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, f"Wrapper execution failed: {result.stdout}"
+    assert "Brain Researcher MCP server: ACTIVE" in result.stdout
+
+
+def test_claude_reads_token_through_shared_helper(tmp_path):
+    """Claude loads BR_MCP_TOKEN from ~/.bashrc via the sourced shared lib."""
+    helpers = _bashrc_helpers_path()
+    test_wrapper, env, _mcp_config_file = _make_claude_wrapper_with_token(
+        tmp_path, bashrc_contents='export BR_MCP_TOKEN="claude-shared-lib-token"\n'
+    )
+    env["NEURODESKTOP_BASHRC_HELPERS"] = str(helpers)
+
+    result = subprocess.run(
+        [str(test_wrapper), "--version"],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, f"Wrapper execution failed: {result.stdout}"
+    assert "Brain Researcher MCP server: ACTIVE" in result.stdout
+
+
+def test_codex_falls_back_when_shared_helper_absent(tmp_path):
+    """A missing shared lib must not break token loading (inline fallback)."""
+    test_wrapper, home_dir, env = _make_codex_wrapper(
+        tmp_path, bashrc_contents="export BR_MCP_TOKEN='fallback-token'\n"
+    )
+    env["NEURODESKTOP_BASHRC_HELPERS"] = str(tmp_path / "no-such-helper.sh")
+
+    result = subprocess.run(
+        [str(test_wrapper), "--version"],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, f"Wrapper execution failed: {result.stdout}"
+    assert "Brain Researcher MCP server: ACTIVE" in result.stdout

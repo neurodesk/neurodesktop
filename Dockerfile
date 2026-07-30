@@ -769,6 +769,9 @@ RUN --mount=type=bind,source=config/itksnap,target=/tmp/itksnap,ro \
     && install -m 0644 /tmp/agents/nbi_mcp.json /opt/jovyan_defaults/.jupyter/nbi/mcp.json \
     && install -m 0644 /tmp/agents/nbi_tour_config.json /opt/jovyan_defaults/.jupyter/nbi/tour_config.json \
     && install -m 0755 /tmp/agents/nbi_setup.sh /opt/neurodesktop/nbi_setup.sh \
+    # Shared ~/.bashrc export reader sourced by the opencode/codex/claude
+    # wrappers and nbi_setup.sh so all four parse bashrc identically.
+    && install -m 0644 /tmp/agents/bashrc_helpers.sh /opt/neurodesktop/bashrc_helpers.sh \
     && install -m 0644 /tmp/lxde/.bashrc /opt/jovyan_defaults/.bashrc_append \
     && /usr/bin/printf '%s\n%s\n%s\n' 'password' 'password' 'n' | vncpasswd /opt/jovyan_defaults/.vnc/passwd \
     && chown root:users /opt/jovyan_defaults/.vnc/passwd \

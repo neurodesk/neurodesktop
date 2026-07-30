@@ -15,8 +15,26 @@ is_apptainer_runtime() {
     [ -d "/.singularity.d" ]
 }
 
+# Read an exported VAR=value from ~/.bashrc (handles single, double, unquoted).
+# Shared with the opencode/codex wrappers and nbi_setup.sh via
+# bashrc_helpers.sh so every reader uses the same parsing rule.
+NEURODESKTOP_BASHRC_HELPERS="${NEURODESKTOP_BASHRC_HELPERS:-/opt/neurodesktop/bashrc_helpers.sh}"
+if [ -r "${NEURODESKTOP_BASHRC_HELPERS}" ]; then
+    # shellcheck source=/opt/neurodesktop/bashrc_helpers.sh
+    . "${NEURODESKTOP_BASHRC_HELPERS}"
+else
+    read_export_from_bashrc() {
+        local var_name="$1"
+        [ -f "${HOME}/.bashrc" ] || { printf ''; return; }
+        sed -nE \
+            -e "s/^[[:space:]]*export[[:space:]]+${var_name}='([^']+)'[[:space:]]*$/\1/p" \
+            -e "s/^[[:space:]]*export[[:space:]]+${var_name}=\"([^\"]+)\"[[:space:]]*$/\1/p" \
+            -e "s/^[[:space:]]*export[[:space:]]+${var_name}=([^[:space:]#]+)[[:space:]]*$/\1/p" \
+            "${HOME}/.bashrc" | tail -n 1
+    }
+fi
+
 load_br_mcp_token_from_bashrc() {
-    local bashrc_file="${HOME}/.bashrc"
     local token_from_bashrc
 
     if [ -n "${BR_MCP_TOKEN:-}" ]; then
@@ -24,15 +42,7 @@ load_br_mcp_token_from_bashrc() {
         return 0
     fi
 
-    if [ ! -f "${bashrc_file}" ]; then
-        return 0
-    fi
-
-    token_from_bashrc=$(sed -nE \
-        -e "s/^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN='([^']+)'[[:space:]]*$/\1/p" \
-        -e 's/^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN="([^"]+)"[[:space:]]*$/\1/p' \
-        -e 's/^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN=([^[:space:]#]+)[[:space:]]*$/\1/p' \
-        "${bashrc_file}" | tail -n 1)
+    token_from_bashrc=$(read_export_from_bashrc BR_MCP_TOKEN)
 
     if [ -n "${token_from_bashrc}" ]; then
         export BR_MCP_TOKEN="${token_from_bashrc}"
