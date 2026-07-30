@@ -47,6 +47,13 @@
   tests/unit/test_myst_build_workaround.py` from a checkout and `pytest
   /opt/tests/test_nbi_labextension_patch.py` in the built image, and verify both
   extensions are compatible in `jupyter labextension list --verbose`.
+- When changing the Neurodesk launcher extension or how agent-authored
+  absolute paths are routed into the JupyterLab main panel, run `pytest
+  tests/unit/test_workspace_link_routing.py` from a checkout and `pytest
+  /opt/tests/test_workspace_link_routing_image.py` in the built image. Keep
+  the click interception scoped to same-origin, unmodified clicks resolving
+  inside `PageConfig` `serverRoot`, and keep both plugins in the extension's
+  default export.
 - When changing the `astra`/`lc` installs, `AGENT_SKILLS_REF`, or how the ASTRA
   skill reaches Codex, Claude, or OpenCode, run `pytest
   tests/unit/test_astra_jupyter_ai_tooling.py` from a checkout and `pytest

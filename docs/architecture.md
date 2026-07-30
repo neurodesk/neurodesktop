@@ -181,6 +181,30 @@ are zip containers, so the archive manager would otherwise win). The build
 fails if the neurocommand revision in the image does not declare MIME types in
 its menu entries yet.
 
+### Workspace link routing
+
+Coding agents describe their work with absolute filesystem paths, so a chat
+reply routinely contains markdown such as
+`[spec](/home/jovyan/project/astra.yaml)`. The browser resolves that against
+the page origin, navigates away from JupyterLab to
+`http://<host>/home/jovyan/project/astra.yaml`, which the Jupyter server does
+not serve, and the user loses their session to a 404.
+
+JupyterLab's own rendermime link handling cannot fix this: its resolver only
+rewrites *relative* URLs and treats a leading-slash path as an absolute URL to
+leave alone. The `neurodesk-launcher:workspace-links` plugin therefore
+intercepts the click instead, which covers every chat surface in the image
+rather than one extension's renderer.
+
+A click is claimed only when the link is same-origin, unmodified, not a
+download, and resolves inside `PageConfig` `serverRoot`. Everything else —
+external links, `/lab/...` routes JupyterLab already handles, paths outside
+the root, ctrl/cmd-clicks asking for a new tab — is left to the browser. A
+claimed path is opened with the document manager, or revealed in the file
+browser when it is a directory; `..` segments are rejected rather than
+normalized. Because a claimed click is already cancelled, a path that cannot
+be opened reports an error instead of silently doing nothing.
+
 ### Services
 
 - JupyterLab: main interface on port 8888

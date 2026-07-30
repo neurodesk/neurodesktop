@@ -66,6 +66,19 @@ docker buildx build --check .
 docker buildx build --target apptainer --progress=plain .
 ```
 
+For the launcher extension or workspace link routing:
+
+```bash
+pytest tests/unit/test_workspace_link_routing.py
+# In the rebuilt image:
+pytest /opt/tests/test_workspace_link_routing_image.py
+```
+
+The unit tier asserts the interception guards in the TypeScript source; the
+image tier asserts the plugin survived the labextension build, that JupyterLab
+accepts it, and that `jupyterlab_server` still publishes the `serverRoot` page
+config option the mapping depends on.
+
 For the `astra`/`lc` CLIs or the ASTRA agent skill in any of the three agents:
 
 ```bash
