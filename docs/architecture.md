@@ -205,6 +205,25 @@ browser when it is a directory; `..` segments are rejected rather than
 normalized. Because a claimed click is already cancelled, a path that cannot
 be opened reports an error instead of silently doing nothing.
 
+Agents are trained to cite code as `path/to/file.py:42`, and that convention
+follows them into chat links — an ASTRA run emits essentially every file link
+as `[Analysis report](/home/jovyan/project/results/report.md:1)`. That suffix
+is a reference, not part of the filename, so the contents API answers 404 and a
+file that plainly exists is reported as missing. The literal path is therefore
+tried first, and only a path the server does not have is retried with a
+trailing `:line` or `:line:column` stripped. Trying the literal path first is
+what keeps a filename that really does contain a colon working; a failure
+reports the path that was clicked rather than the rewritten candidate.
+
+A claimed file is opened with a rendering viewer when one exists for its
+format: `.md` and `.markdown` open in `Markdown Preview`, and `.html` and
+`.htm` open in `HTML Viewer`. An agent linking a report means the report,
+not its markup, and the default factory for both formats is the text editor —
+so a MySTRA report would otherwise arrive as raw MyST and a built site as raw
+HTML. The factory names are upstream strings, so the plugin falls back to the
+default factory when the viewer is not registered; a clicked link then still
+opens something rather than nothing.
+
 ### Services
 
 - JupyterLab: main interface on port 8888
@@ -288,6 +307,34 @@ site:
 MySTRA projects still own their `astra.yaml`, universes, report pages, and MyST
 configuration; Neurodesktop supplies pinned authoring tools and both report
 presentation flavors without requiring MyST to download a theme at first use.
+
+`neurodesktop-astra-report` owns that wiring so a project does not have to
+rediscover three absolute paths and MySTRA's discovery conventions:
+
+```bash
+neurodesktop-astra-report scaffold --project-dir . [--theme article|book]
+neurodesktop-astra-report build --project-dir .     # scaffold, render, print
+neurodesktop-astra-report chat-block --project-dir .
+```
+
+`scaffold` writes `myst.yml` and a starter `index.md` and never rewrites either
+once it exists, so an authored report outlives every later run. The starter
+report uses collection-level embeds (`:::{astra} decisions`) rather than a list
+of element ids, which stays correct as the spec grows. `build` renders the site
+into `_build/html/`; it verifies the pinned plugin and both themes first, so a
+missing asset fails as itself instead of as an opaque MyST error or a silent
+fall back to a downloaded theme.
+
+`chat-block` prints the markdown an agent pastes into a chat surface: absolute
+workspace paths to the rendered report, the report source, and the spec, which
+[workspace link routing](#workspace-link-routing) opens in the JupyterLab main
+panel. Nothing on this path reads the ASTRA schema — the summary in the block
+is relayed verbatim from `astra info`, keeping the released CLI and the
+viewer's `adapter.py` the only schema-aware readers in the image.
+
+Splitting `scaffold` from `build` is what keeps the contract testable: the
+first is pure file authoring covered on a checkout, the second needs the `myst`
+CLI and pinned assets and is covered against a real offline build in the image.
 
 ### ASTRA provenance viewer
 

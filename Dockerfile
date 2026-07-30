@@ -1222,6 +1222,13 @@ RUN --mount=type=bind,source=scripts/neurodesktop_astra_lightcone_pilot.py,targe
     && cp -a /tmp/astra-lightcone-bet /opt/neurodesktop/pilots/ \
     && chown -R root:users /opt/neurodesktop/pilots/astra-lightcone-bet
 
+# Install the MySTRA report CLI last: it only wires together the MyST CLI, the
+# MySTRA bundle, and the ASTRA themes installed above, so it must not be able
+# to satisfy its own asset check against a half-built image.
+RUN --mount=type=bind,source=scripts/neurodesktop_astra_report.py,target=/tmp/neurodesktop_astra_report.py,ro \
+    install -m 0755 /tmp/neurodesktop_astra_report.py /usr/local/bin/neurodesktop-astra-report \
+    && neurodesktop-astra-report --help > /dev/null
+
 
 # Start the container as root so docker-stacks runs before-notebook hooks with
 # the privileges needed to bootstrap local Slurm/CVMFS, then drops to NB_USER.

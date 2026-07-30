@@ -71,9 +71,61 @@ def test_click_is_intercepted_in_the_capture_phase():
 def test_directories_reveal_instead_of_failing_to_open_as_a_document():
     assert "model.type === 'directory'" in SOURCE
     assert "'filebrowser:go-to-path'" in SOURCE
-    assert "docManager.openOrReveal(path)" in SOURCE
+    assert "docManager.openOrReveal(path, widgetName)" in SOURCE
+
+
+def test_a_file_line_reference_is_not_treated_as_part_of_the_filename():
+    """Agents cite code as `file.py:42`, and that follows them into chat links.
+
+    An ASTRA run emits every file link that way, so without this the contents
+    API answers 404 and a file that plainly exists is reported as missing.
+    """
+    assert "export function stripLineReference(" in SOURCE
+    assert r"/^(.*?):\d+(?::\d+)?$/" in SOURCE
+    # A bare `:1` has no path left to open.
+    assert "match && match[1] ? match[1] : null" in SOURCE
+
+
+def test_the_literal_path_is_tried_before_it_is_reinterpreted():
+    """A filename may legally contain a colon; only a 404 earns a retry."""
+    resolver = SOURCE[SOURCE.index("const resolveTarget ="):]
+    assert resolver.index("await stat(path)") < resolver.index(
+        "stripLineReference(path)"
+    )
+    assert "throw reason;" in resolver
+
+
+def test_a_failure_reports_the_path_that_was_clicked():
+    assert "`${requested} could not be opened: ${reason}`" in SOURCE
 
 
 def test_an_unopenable_path_reports_instead_of_silently_doing_nothing():
     """The click is already cancelled, so a failure has to surface."""
     assert "showErrorMessage(" in SOURCE
+
+
+def test_rendered_formats_open_in_a_viewer_rather_than_the_text_editor():
+    """A linked report means the report, not its markup.
+
+    The default factory for both formats is the editor, so a MySTRA report
+    would arrive as raw MyST and a built site as raw HTML.
+    """
+    for extension, factory in (
+        ("'.md'", "'Markdown Preview'"),
+        ("'.markdown'", "'Markdown Preview'"),
+        ("'.html'", "'HTML Viewer'"),
+        ("'.htm'", "'HTML Viewer'"),
+    ):
+        assert f"[{extension}, {factory}]" in SOURCE, extension
+
+
+def test_an_unregistered_viewer_falls_back_to_the_default_factory():
+    """A disabled extension must degrade to the editor, not open nothing."""
+    assert "docManager.registry.getWidgetFactory(factory)" in SOURCE
+    assert "'default'" in SOURCE
+
+
+def test_the_factory_choice_is_extracted_for_testing():
+    assert "export function renderedFactoryFor(" in SOURCE
+    # A dotfile that is all extension has no extension to match on.
+    assert "if (dot <= 0)" in SOURCE

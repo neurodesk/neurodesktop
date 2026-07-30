@@ -70,6 +70,56 @@ export function toWorkspaceRelativePath(
 }
 
 /**
+ * Document factories that render a file rather than showing its source.
+ *
+ * An agent linking a report means the report, not its markup. Opening it with
+ * the default factory gives the text editor, so a MySTRA report scaffolded by
+ * `neurodesktop-astra-report` arrives as raw MyST and a built site arrives as
+ * raw HTML. Both formats already have a rendering viewer in the image; this
+ * just picks it.
+ */
+const RENDERED_FACTORIES = new Map<string, string>([
+  ['.md', 'Markdown Preview'],
+  ['.markdown', 'Markdown Preview'],
+  ['.html', 'HTML Viewer'],
+  ['.htm', 'HTML Viewer']
+]);
+
+/**
+ * The rendering factory for *path*, or `null` to use the default.
+ *
+ * Exported for testing.
+ */
+export function renderedFactoryFor(path: string): string | null {
+  const name = path.slice(path.lastIndexOf('/') + 1).toLowerCase();
+  const dot = name.lastIndexOf('.');
+  // `dot <= 0` also rejects a dotfile that is all extension, such as `.md`.
+  if (dot <= 0) {
+    return null;
+  }
+  return RENDERED_FACTORIES.get(name.slice(dot)) ?? null;
+}
+
+/**
+ * Strip a trailing `:line` or `:line:column` reference from a path.
+ *
+ * Agents are trained to cite code as `path/to/file.py:42`, and that convention
+ * follows them into chat links: an ASTRA run typically emits every file link
+ * as `[Analysis report](/home/jovyan/project/results/report.md:1)`. The suffix
+ * is a reference, not part of the filename, so the contents API answers 404
+ * and the click reports a file that plainly exists as missing.
+ *
+ * Returns `null` when there is no such suffix, so the caller can tell "nothing
+ * to retry" from "retry this".
+ *
+ * Exported for testing.
+ */
+export function stripLineReference(path: string): string | null {
+  const match = /^(.*?):\d+(?::\d+)?$/.exec(path);
+  return match && match[1] ? match[1] : null;
+}
+
+/**
  * Decide whether this click should be handled by JupyterLab at all.
  *
  * Exported for testing; keeps the DOM-dependent parts of `activate` thin.
@@ -94,21 +144,52 @@ const plugin: JupyterFrontEndPlugin<void> = {
   autoStart: true,
   requires: [IDocumentManager],
   activate: (app: JupyterFrontEnd, docManager: IDocumentManager) => {
-    const openWorkspacePath = async (path: string): Promise<void> => {
+    const stat = (candidate: string) =>
+      docManager.services.contents.get(candidate, { content: false });
+
+    /**
+     * Locate what the link actually refers to.
+     *
+     * The literal path is tried first, so a filename that really does contain
+     * a colon keeps working; only a path the server does not have is
+     * reinterpreted as a `file:line` reference.
+     */
+    const resolveTarget = async (path: string) => {
       try {
+        return { path, model: await stat(path) };
+      } catch (reason) {
+        const withoutReference = stripLineReference(path);
+        if (!withoutReference) {
+          throw reason;
+        }
+        return { path: withoutReference, model: await stat(withoutReference) };
+      }
+    };
+
+    const openWorkspacePath = async (requested: string): Promise<void> => {
+      try {
+        const { path, model } = await resolveTarget(requested);
+
         // A directory cannot be opened as a document; reveal it instead.
-        const model = await docManager.services.contents.get(path, {
-          content: false
-        });
         if (model.type === 'directory') {
           await app.commands.execute('filebrowser:go-to-path', { path });
           return;
         }
-        await docManager.openOrReveal(path);
+
+        // Fall back to the default factory when the viewer is not registered,
+        // so a disabled or missing extension degrades to the editor instead of
+        // opening nothing at all.
+        const factory = renderedFactoryFor(path);
+        const widgetName =
+          factory && docManager.registry.getWidgetFactory(factory)
+            ? factory
+            : 'default';
+        await docManager.openOrReveal(path, widgetName);
       } catch (reason) {
+        // Report what was clicked, not the rewritten candidate.
         void showErrorMessage(
           'Cannot open file',
-          `${path} could not be opened: ${reason}`
+          `${requested} could not be opened: ${reason}`
         );
       }
     };

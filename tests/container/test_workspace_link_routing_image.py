@@ -41,6 +41,62 @@ def test_bundle_carries_the_routing_logic_rather_than_a_stub():
     assert "filebrowser:go-to-path" in text
 
 
+def test_bundle_resolves_agent_authored_file_line_references():
+    """`file.md:1` is what an ASTRA run actually emits for every file link.
+
+    Assert the regex literal, not the function name: the production build
+    minifies identifiers away, so a name-based check would pass on any bundle.
+    """
+    assert r"^(.*?):\d+(?::\d+)?$" in bundle_text()
+
+
+def test_bundle_carries_the_rendering_factory_names():
+    text = bundle_text()
+
+    assert "Markdown Preview" in text
+    assert "HTML Viewer" in text
+    assert "getWidgetFactory" in text
+
+
+def test_the_named_viewers_are_registered_by_this_application():
+    """The factory names are upstream strings, not names this repo controls.
+
+    A JupyterLab upgrade that renamed either factory would make a clicked
+    report fall back to the text editor -- correct, but silently wrong -- so
+    pin the seam here rather than discovering it from a bug report.
+    """
+    package = json.loads(
+        Path("/opt/conda/share/jupyter/lab/static/package.json").read_text()
+    )
+    dependencies = package["dependencies"]
+    assert "@jupyterlab/markdownviewer-extension" in dependencies
+    assert "@jupyterlab/htmlviewer-extension" in dependencies
+
+    core = "\n".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for path in Path("/opt/conda/share/jupyter/lab/static").glob("*.js")
+    )
+    assert "Markdown Preview" in core
+    assert "HTML Viewer" in core
+
+
+def test_neither_rendering_viewer_is_disabled_in_page_config():
+    disabled = json.loads(
+        Path(
+            "/opt/jovyan_defaults/.jupyter/labconfig/page_config.json"
+        ).read_text()
+    ).get("disabledExtensions", {})
+
+    for extension in (
+        "@jupyterlab/markdownviewer-extension",
+        "@jupyterlab/htmlviewer-extension",
+    ):
+        assert not any(
+            key == extension or key.startswith(f"{extension}:")
+            for key in disabled
+        ), extension
+
+
 def test_document_manager_is_consumed_as_a_shared_module():
     """A privately bundled docmanager would open files into a detached shell."""
     package = json.loads((LABEXTENSION / "package.json").read_text())

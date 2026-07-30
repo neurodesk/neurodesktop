@@ -53,7 +53,18 @@
   /opt/tests/test_workspace_link_routing_image.py` in the built image. Keep
   the click interception scoped to same-origin, unmodified clicks resolving
   inside `PageConfig` `serverRoot`, and keep both plugins in the extension's
-  default export.
+  default export. Rendered formats open in a viewer rather than the editor;
+  keep that an extension-to-factory map that falls back to the default factory
+  when the named viewer is not registered.
+- When changing the MySTRA report CLI, its scaffold, or the chat block it
+  prints, run `pytest tests/unit/test_astra_report_cli.py` from a checkout and
+  `pytest /opt/tests/test_astra_report_image.py` in the built image. Keep
+  `scaffold` free of anything that needs the image so it stays covered on a
+  checkout, never rewrite a file the author already has, keep the scaffolded
+  `myst.yml` pointed at `/opt/neurodesktop/mystra/mystra.mjs` and a local
+  `/opt/neurodesktop/astra-theme/` template rather than a downloadable theme
+  name, and keep the chat block's links absolute so the launcher extension
+  claims them. Do not teach this path the ASTRA schema: relay `astra info`.
 - When changing the `astra`/`lc` installs, `AGENT_SKILLS_REF`, or how the ASTRA
   skill reaches Codex, Claude, or OpenCode, run `pytest
   tests/unit/test_astra_jupyter_ai_tooling.py` from a checkout and `pytest
