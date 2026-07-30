@@ -1,0 +1,4 @@
+id: choice-a
+decisions:
+  child_choice: a
+

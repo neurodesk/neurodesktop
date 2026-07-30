@@ -547,6 +547,7 @@ ARG BUST_CACHE_PIP=3
 ARG UV_VERSION="0.11.8"
 ARG ASTRA_SPEC_VERSION="0.0.12"
 ARG ASTRA_TOOLS_VERSION="0.2.11"
+ARG ANYWIDGET_VERSION="0.11.0"
 RUN /opt/conda/bin/pip install \
     datalad \
     nipype \
@@ -582,6 +583,7 @@ RUN /opt/conda/bin/pip install \
     rfc8785==0.1.4 \
     astra-spec==${ASTRA_SPEC_VERSION} \
     astra-tools==${ASTRA_TOOLS_VERSION} \
+    anywidget==${ANYWIDGET_VERSION} \
     uv==${UV_VERSION} \
     ipywidgets==8.1.8 \
     ipyvolume \
@@ -608,6 +610,15 @@ RUN --mount=type=bind,source=extensions/neurodesk-launcher,target=/tmp/neurodesk
     && npm_config_cache=/tmp/neurodesk-launcher-npm-cache /opt/conda/bin/pip install . \
     && /opt/conda/bin/jupyter labextension disable @jupyterhub/jupyter-server-proxy \
     && rm -rf /tmp/neurodesk-launcher /tmp/neurodesk-launcher-npm-cache /home/${NB_USER}/.cache
+
+# Install the offline anywidget ASTRA viewer. Cytoscape.js is vendored in the
+# wheel, so this has no npm build and performs no runtime network fetch.
+RUN --mount=type=bind,source=extensions/astra-viewer,target=/tmp/astra-viewer-src,ro \
+    rm -rf /tmp/astra-viewer \
+    && mkdir -p /tmp/astra-viewer \
+    && cp -R /tmp/astra-viewer-src/. /tmp/astra-viewer/ \
+    && /opt/conda/bin/pip install --no-deps /tmp/astra-viewer \
+    && rm -rf /tmp/astra-viewer /home/${NB_USER}/.cache
 
 #========================================#
 # Configuration (as root user)
@@ -948,6 +959,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0644 /tmp/tests/testlib.py /opt/tests/testlib.py \
     && install -m 0644 /tmp/tests/pytest.ini /opt/tests/pytest.ini \
     && install -m 0755 /tmp/neurodesktop_pilot_receipt.py /usr/local/bin/neurodesktop-pilot-receipt \
+    && install -D -m 0644 /tmp/neurodesktop_pilot_receipt.py /opt/neurodesktop/lib/neurodesktop_pilot_receipt.py \
     && install -D -m 0644 /tmp/schemas/neurodesktop-pilot-execution-receipt-v1.0.0.schema.json /opt/neurodesktop/schemas/neurodesktop-pilot-execution-receipt-v1.0.0.schema.json \
     && install -m 0755 /tmp/generate_jupyter_config.py /opt/neurodesktop/scripts/generate_jupyter_config.py \
     && cp -a /tmp/jupyter/webapp_wrapper/. /opt/neurodesktop/webapp_wrapper/ \

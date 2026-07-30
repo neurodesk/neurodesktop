@@ -240,6 +240,47 @@ deliberately left out because its workflows drive long autonomous replication
 loops that should not be on by default in a shared scientific image. Users can
 add it themselves from the same local marketplace with no network access.
 
+### ASTRA provenance viewer
+
+The image installs the in-repo `extensions/astra-viewer` wheel as
+`neurodesk_astra_view`. Its public seam is deliberately small:
+
+```python
+from neurodesk_astra_view import AstraView, build_graph
+
+AstraView(
+    "astra.yaml",
+    universe="universes/bet-f-0-5.yaml",
+    run="../receipt/receipt.json",  # optional
+    mode="flow",                    # flow, decisions, or evidence
+)
+```
+
+`adapter.py` is the only viewer module coupled to `astra-spec==0.0.12`. It runs
+the public schema and semantic validators over raw YAML, hard-fails a version
+mismatch, resolves external analysis and child-universe references recursively,
+and checks every resolved real path against the ASTRA project root before it is
+opened. The rest of the package consumes qualified, schema-independent entity
+records. `build_graph()` is pure and JSON-serializable; the anywidget is only a
+renderer over that result.
+
+The frontend concatenates the checked-in Cytoscape.js 3.34.0 distribution with
+the widget renderer at import time. It has no npm build, CDN import, fetch, or
+other runtime network path. Flow, Decisions, and Evidence modes filter the same
+Cytoscape instance, preserving positions and selection. Prior Insights,
+findings, and their Evidence sources remain distinct nodes and only
+schema-authoritative links are drawn.
+
+Without a run, the graph is grey `spec-only`. Generic Lightcone manifests and
+Workflow Run RO-Crates are amber unless passing verification is explicit. An
+explicit declared-container plus `runtime: none` mismatch is red and
+non-dismissible. A finalized Neurodesktop pilot receipt is revalidated through
+the same fail-closed receipt implementation used by the CLI, including hashes
+and semantic evidence reconciliation; even when its output-integrity check
+passes, the module route remains amber `executed-unverified`. Ordinary previews
+stay under the directory containing `astra.yaml`; receipt previews stay under
+the hash-authenticated `runs/<receiptId>` envelope.
+
 ### Pilot execution receipts
 
 The provisional ASTRA/Lightcone module pilot records its evidence through the

@@ -1,0 +1,4 @@
+id: only-a
+decisions:
+  method: a
+  unused_decision: x

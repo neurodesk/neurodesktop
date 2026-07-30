@@ -25,8 +25,14 @@ pytest /opt/tests/         # inside the built image
 ```
 
 Running `tests/unit` needs `pytest`, `httpx`, `traitlets`, `jsonschema`,
-`rfc8785==0.1.4`, and `ssh-keygen`
-(`openssh-client`); see `.github/workflows/unit-tests.yml`.
+`rfc8785==0.1.4`, and `ssh-keygen` (`openssh-client`); see
+`.github/workflows/unit-tests.yml`.
+
+`tests/unit/test_astra_view_graph.py` additionally needs
+`astra-spec==0.0.12`, `astra-tools==0.2.11`, and `anywidget==0.11.0`, because
+it runs the released ASTRA validators. Those pull in ~50 further packages, so
+the module skips cleanly when they are absent rather than failing a plain
+checkout. CI installs them, so they always run there.
 
 ## Shared helpers
 
@@ -96,6 +102,23 @@ eight output/manifests and amber receipt, modifies one result to prove fresh
 verification fails, restores it, and verifies again. Run it on native amd64:
 the FSL module sandbox is amd64, and nested module-sandbox emulation is not a
 valid runtime proof on an Apple Silicon Docker Desktop host.
+
+For the read-only ASTRA viewer:
+
+```bash
+pytest tests/unit/test_astra_view_graph.py \
+  tests/unit/test_astra_view_packaging.py
+
+# In the rebuilt image:
+pytest /opt/tests/test_astra_view_image.py
+```
+
+The unit tier uses the released ASTRA validators against checked-in projects,
+tests external-analysis and child-universe confinement, covers G1-G7 and all
+four trust states, and proves that receipt tampering yields no partial graph.
+The image tier is intentionally small: it checks the installed package/pins,
+the real vendored frontend, and the shipped BET project. It does not rerun the
+Slurm pilot; that remains the separate opt-in native-amd64 acceptance above.
 
 ## Negative Test Convention
 

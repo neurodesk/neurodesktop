@@ -1,0 +1,30 @@
+version: "0.0.12"
+name: "ASTRA viewer gap fixture"
+inputs:
+  - id: used_input
+    type: data
+  - id: unused_input
+    type: data
+decisions:
+  method:
+    label: "Method"
+    default: a
+    options:
+      a: {label: "A"}
+      b: {label: "B"}
+  unused_decision:
+    label: "Unused decision"
+    default: x
+    options:
+      x: {label: "X"}
+outputs:
+  - id: processed
+    type: data
+    inputs: [used_input]
+    decisions: [method]
+  - id: conditional
+    type: figure
+    inputs: [processed]
+    when: [method.b]
+  - id: orphan
+    type: report

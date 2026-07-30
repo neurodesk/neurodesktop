@@ -29,6 +29,13 @@
   its opt-in real module/Slurm acceptance only in a privileged native-amd64
   container with CVMFS and local Slurm ready; set
   `NEURODESKTOP_RUN_ASTRA_LIGHTCONE_PILOT=1` for that test.
+- When changing the ASTRA viewer adapter, graph/gap model, previews, widget,
+  vendored Cytoscape.js, manifest/receipt ingestion, or package pins, run
+  `pytest tests/unit/test_astra_view_graph.py
+  tests/unit/test_astra_view_packaging.py` from a checkout and `pytest
+  /opt/tests/test_astra_view_image.py` in the built image. Keep every read path
+  confined, keep `adapter.py` as the only released-schema-aware viewer module,
+  and never promote the module-pilot receipt above `executed-unverified`.
 - When changing OpenCode, its Web proxy/session-workspace behavior, its file
   previewer, or its pinned version, run `pytest tests/unit/test_opencode_web.py`
   from a checkout and `pytest /opt/tests/test_opencode_web_image.py` in the

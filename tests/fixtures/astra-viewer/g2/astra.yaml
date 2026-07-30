@@ -1,0 +1,7 @@
+version: "0.0.12"
+name: "Disconnected analysis fixture"
+inputs: []
+outputs:
+  - id: disconnected
+    type: report
+

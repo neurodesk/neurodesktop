@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "neurodesk-astra-view"
+version = "0.1.0"
+description = "Read-only, universe-aware ASTRA provenance viewer for Neurodesktop"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+dependencies = [
+    "anywidget==0.11.0",
+    "astra-spec==0.0.12",
+    "astra-tools==0.2.11",
+    "jsonschema>=4.23",
+    "PyYAML>=6.0",
+    "rfc8785==0.1.4",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["neurodesk_astra_view"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "neurodesk_astra_view/**",
+    "README.md",
+]
