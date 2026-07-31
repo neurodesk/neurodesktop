@@ -9,7 +9,7 @@ import importlib.metadata
 import logging
 from pathlib import Path
 
-from testlib import run_cmd
+from testlib import load_source_module, run_cmd
 
 
 def test_jupyter_ai_acp_stack_registers_neurodesktop_agent_personas():
@@ -32,6 +32,31 @@ def test_jupyter_ai_acp_stack_registers_neurodesktop_agent_personas():
     for command in ("claude-agent-acp", "codex-acp"):
         code, output = run_cmd(f"command -v {command}")
         assert code == 0, output
+
+
+def test_new_jupyter_ai_chat_seeds_editable_agents_file(tmp_path):
+    from jupyter_server.services.contents.filemanager import FileContentsManager
+
+    workspace_module = load_source_module(
+        "jupyter_ai_workspace_image",
+        "/opt/neurodesktop/jupyter_ai_workspace.py",
+        "config/jupyter/jupyter_ai_workspace.py",
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    manager = FileContentsManager(root_dir=str(workspace))
+    manager.register_post_save_hook(workspace_module.seed_agents_on_chat_save)
+
+    first_chat = manager.new_untitled(path="", type="file", ext=".chat")
+    assert first_chat["path"].endswith(".chat")
+
+    agents_file = workspace / "AGENTS.md"
+    assert agents_file.read_bytes() == Path("/opt/AGENTS.md").read_bytes()
+
+    agents_file.write_text("Project-specific guidance\n", encoding="utf-8")
+    second_chat = manager.new_untitled(path="", type="file", ext=".chat")
+    assert second_chat["path"].endswith(".chat")
+    assert agents_file.read_text(encoding="utf-8") == "Project-specific guidance\n"
 
 
 def test_jupyter_server_documents_stale_message_does_not_kill_room_queue():

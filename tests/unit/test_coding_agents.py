@@ -1256,6 +1256,65 @@ def test_codex_removes_brain_researcher_mcp_without_token(tmp_path):
     assert "brain-researcher" not in toml_text
 
 
+@pytest.mark.parametrize(
+    ("bashrc_contents", "expected_brain_tables"),
+    [
+        ("", 0),
+        ("export BR_MCP_TOKEN='codex-token-from-bashrc'\n", 1),
+    ],
+)
+def test_codex_preserves_plugin_sections_inserted_inside_managed_mcp_markers(
+    tmp_path, bashrc_contents, expected_brain_tables
+):
+    """Codex-managed plugin tables must survive the wrapper's MCP refresh."""
+    preexisting_toml = (
+        'model = "preexisting"\n'
+        "\n"
+        "# BEGIN brain-researcher MCP\n"
+        "[mcp_servers.brain-researcher]\n"
+        'url = "https://brain-researcher.com/mcp"\n'
+        'bearer_token_env_var = "BR_MCP_TOKEN"\n'
+        "enabled = true\n"
+        "\n"
+        "[marketplaces.lightcone-research]\n"
+        'source_type = "git"\n'
+        'source = "https://github.com/LightconeResearch/agent-skills.git"\n'
+        "\n"
+        '[plugins."astra@lightcone-research"]\n'
+        "enabled = true\n"
+        "# END brain-researcher MCP\n"
+    )
+    test_wrapper, home_dir, env = _make_codex_wrapper(
+        tmp_path,
+        bashrc_contents=bashrc_contents,
+        preexisting_toml=preexisting_toml,
+    )
+
+    for _ in range(2):
+        result = subprocess.run(
+            [str(test_wrapper), "--version"],
+            cwd=tmp_path,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, f"Wrapper execution failed: {result.stdout}"
+
+    toml_text = (home_dir / ".codex" / "config.toml").read_text(encoding="utf-8")
+    assert "[marketplaces.lightcone-research]" in toml_text
+    assert (
+        'source = "https://github.com/LightconeResearch/agent-skills.git"'
+        in toml_text
+    )
+    assert '[plugins."astra@lightcone-research"]' in toml_text
+    assert (
+        toml_text.count("[mcp_servers.brain-researcher]")
+        == expected_brain_tables
+    )
+
+
 def test_claude_prints_brain_researcher_banner(tmp_path):
     """Verify the claude wrapper prints a banner when BR_MCP_TOKEN is active."""
     test_wrapper, env, mcp_config_file = _make_claude_wrapper_with_token(

@@ -115,6 +115,7 @@ home to prove OpenCode's skill actually reaches a user.
 For Jupyter AI, MySTRA, or ASTRA theme changes:
 
 ```bash
+pytest tests/unit/test_jupyter_ai_workspace.py
 pytest tests/unit/test_astra_jupyter_ai_tooling.py
 pytest tests/unit/test_jupyter_server_documents_patch.py
 pytest tests/unit/test_coding_agents.py -k opencode_machine_commands
@@ -124,6 +125,12 @@ pip check
 jupyter server extension list
 jupyter labextension list --verbose
 ```
+
+The workspace test covers the checkout-safe hook behavior: only ``.chat``
+saves seed ``AGENTS.md``, project-authored guidance is never overwritten, and
+seed failures do not block chat creation. The image test drives a real
+``FileContentsManager.new_untitled(..., ext=".chat")`` call against the shipped
+hook and ``/opt/AGENTS.md``.
 
 For the bounded ASTRA/Lightcone BET pilot:
 

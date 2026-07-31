@@ -443,13 +443,6 @@ def _read_scontrol_evidence(content, job_id):
     return fields
 
 
-def _relative_to_workspace(path, workspace_root):
-    try:
-        return path.resolve(strict=True).relative_to(workspace_root).as_posix()
-    except (OSError, ValueError) as error:
-        raise PilotError(f"pilot evidence escapes the workspace: {path}") from error
-
-
 def _output_filename(output_id, token):
     return {
         "bet_brain": f"sub-01_ses-test_desc-{token}_T1w.nii.gz",

@@ -80,8 +80,14 @@ CLAUDE_LINK_TMP="${CLAUDE_BIN}.tmp.$$"
 if mkdir -p "${CLAUDE_BIN_DIR}"; then
     if [ ! -L "${CLAUDE_BIN}" ] || [ "$(readlink "${CLAUDE_BIN}")" != "${DEFAULT_CLAUDE_BIN}" ]; then
         rm -f "${CLAUDE_LINK_TMP}"
+        # `mv -T` is a GNU extension, so the relink silently degraded to the
+        # warning branch under a BSD userland. The only thing -T guarded was
+        # moving the link *into* a directory sitting at CLAUDE_BIN; test for
+        # that directly and keep the replacement itself POSIX, matching how
+        # every other atomic replace in this image is written.
         if ln -s "${DEFAULT_CLAUDE_BIN}" "${CLAUDE_LINK_TMP}" \
-            && mv -Tf "${CLAUDE_LINK_TMP}" "${CLAUDE_BIN}"; then
+            && [ ! -d "${CLAUDE_BIN}" ] \
+            && mv -f "${CLAUDE_LINK_TMP}" "${CLAUDE_BIN}"; then
             :
         else
             rm -f "${CLAUDE_LINK_TMP}"

@@ -106,6 +106,56 @@ def test_astra_plugin_is_installed_and_enabled_for_codex_and_claude():
     assert "enabled" in output
 
 
+def test_codex_wrapper_preserves_plugin_registration_after_mcp_refresh(tmp_path):
+    """The real Codex writer may place plugin tables inside our MCP markers."""
+    home = tmp_path / "home"
+    codex_home = home / ".codex"
+    work = tmp_path / "work"
+    codex_home.mkdir(parents=True)
+    work.mkdir()
+    config = codex_home / "config.toml"
+    config.write_text("", encoding="utf-8")
+    env = {
+        "HOME": str(home),
+        "CODEX_HOME": str(codex_home),
+        "BR_MCP_TOKEN": "wrapper-regression-test",
+    }
+
+    code, output = run_cmd(
+        "/usr/local/sbin/codex --version", cwd=work, env=env, timeout=30
+    )
+    assert code == 0, output
+    code, output = run_cmd(
+        f"/usr/bin/codex plugin marketplace add {SKILLS_CHECKOUT}",
+        cwd=work,
+        env=env,
+        timeout=30,
+    )
+    assert code == 0, output
+    code, output = run_cmd(
+        "/usr/bin/codex plugin add astra@lightcone-research",
+        cwd=work,
+        env=env,
+        timeout=30,
+    )
+    assert code == 0, output
+
+    text = config.read_text(encoding="utf-8")
+    assert (
+        text.index("# BEGIN brain-researcher MCP")
+        < text.index("[marketplaces.lightcone-research]")
+        < text.index("# END brain-researcher MCP")
+    ), "The regression fixture no longer matches the real Codex config writer"
+
+    for _ in range(2):
+        code, output = run_cmd(
+            "/usr/local/sbin/codex plugin list", cwd=work, env=env, timeout=30
+        )
+        assert code == 0, output
+        assert "astra@lightcone-research" in output
+        assert "installed, enabled" in output
+
+
 def test_only_the_astra_plugin_is_installed_by_default():
     """`reproduction` drives long autonomous loops and is opt-in, not default."""
     installed = json.loads(

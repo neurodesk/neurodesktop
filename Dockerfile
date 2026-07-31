@@ -964,6 +964,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh \
     && install -m 0755 /tmp/jupyter/kernel_wrapper.sh /opt/neurodesktop/kernel_wrapper.sh \
     && install -m 0755 /tmp/jupyter/jupyterlmod_modulepath.py /opt/neurodesktop/jupyterlmod_modulepath.py \
+    && install -m 0644 /tmp/jupyter/jupyter_ai_workspace.py /opt/neurodesktop/jupyter_ai_workspace.py \
     && install -m 0755 /tmp/jupyter/external_webapp_redirect.py /opt/neurodesktop/external_webapp_redirect.py \
     && install -m 0755 /tmp/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh \
     && install -m 0755 /tmp/ssh/ensure_ssh_keys.sh /opt/neurodesktop/ensure_ssh_keys.sh \
@@ -975,7 +976,12 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0644 /tmp/tests/testlib.py /opt/tests/testlib.py \
     && install -m 0644 /tmp/tests/pytest.ini /opt/tests/pytest.ini \
     && install -m 0755 /tmp/neurodesktop_pilot_receipt.py /usr/local/bin/neurodesktop-pilot-receipt \
-    && install -D -m 0644 /tmp/neurodesktop_pilot_receipt.py /opt/neurodesktop/lib/neurodesktop_pilot_receipt.py \
+    # The viewer imports the very implementation the CLI runs, so the module
+    # name is a link to the executable rather than a second copy that could
+    # drift. The schema is found at its absolute installed path, so importing
+    # through either name resolves the same contract.
+    && install -d -m 0755 /opt/neurodesktop/lib \
+    && ln -sf /usr/local/bin/neurodesktop-pilot-receipt /opt/neurodesktop/lib/neurodesktop_pilot_receipt.py \
     && install -D -m 0644 /tmp/schemas/neurodesktop-pilot-execution-receipt-v1.0.0.schema.json /opt/neurodesktop/schemas/neurodesktop-pilot-execution-receipt-v1.0.0.schema.json \
     && install -m 0755 /tmp/generate_jupyter_config.py /opt/neurodesktop/scripts/generate_jupyter_config.py \
     && cp -a /tmp/jupyter/webapp_wrapper/. /opt/neurodesktop/webapp_wrapper/ \

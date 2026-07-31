@@ -65,8 +65,9 @@ def test_acp_adapters_are_installed_after_every_frontend_build():
 def test_upstream_checkouts_are_pinned_to_an_exact_commit():
     """A moving branch would make the image unreproducible.
 
-    Each reference is asserted only once its ARG exists, so this holds while
-    the checkouts are still being added rather than only at the end.
+    Every checkout is required, not merely checked once its ARG happens to
+    exist: a reference that disappears has to fail here rather than reduce
+    this to a vacuous pass.
     """
     references = [
         "AGENT_SKILLS_REF",
@@ -74,8 +75,7 @@ def test_upstream_checkouts_are_pinned_to_an_exact_commit():
         "MYSTRA_REF",
         "ASTRA_THEME_REF",
     ]
-    present = [name for name in references if f"ARG {name}=" in DOCKERFILE]
-    assert present, "no pinned upstream checkout found"
 
-    for reference in present:
+    for reference in references:
+        assert f"ARG {reference}=" in DOCKERFILE, reference
         assert f'rev-parse HEAD)" = "${{{reference}}}"' in DOCKERFILE, reference
