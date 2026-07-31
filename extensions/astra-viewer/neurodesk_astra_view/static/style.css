@@ -1,5 +1,6 @@
 .astra-viewer {
   --astra-border: #d6dde5;
+
   border: 1px solid var(--astra-border);
   border-radius: 8px;
   color: var(--jp-ui-font-color1, #202833);

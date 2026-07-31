@@ -463,9 +463,9 @@ RUN retry bash -o pipefail -c 'curl -fsSL https://deb.nodesource.com/setup_24.x 
 
 # Install AI coding assistants. The Jupyter AI ACP adapters are installed in a
 # late runtime-only layer so adapter updates do not rebuild frontend assets.
-# CODEX_CLI_VERSION must stay inside the @openai/codex range pinned by
-# @agentclientprotocol/codex-acp (CODEX_ACP_VERSION below): the adapter is
-# installed without its bundled binary and drives this install via CODEX_PATH.
+# CODEX_CLI_VERSION must stay inside the @openai/codex range pinned by the
+# codex-acp adapter (CODEX_ACP_VERSION below): the adapter is installed
+# without its bundled binary and drives this install via CODEX_PATH.
 ARG CODEX_CLI_VERSION="0.145.0"
 RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_CLI_VERSION}" \
     && rm -rf /root/.npm /tmp/npm-root-cache /home/${NB_USER}/.npm \
@@ -667,6 +667,126 @@ RUN apt-mark manual autofs cvmfs libc6-dev linux-libc-dev uuid-dev \
     libgpgme-dev libossp-uuid-dev build-essential \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# The three from-source labextension rebuilds below are the most expensive
+# layers in the image. They live here — before neurocommand and every
+# config/tests layer — so that config, test, and webapp-link churn never
+# invalidates them; their only cache inputs are the pip layer and the two
+# bind-mounted files.
+
+# Rebuild Notebook Intelligence's frontend because the 5.3.0 PyPI wheel
+# contains only style.js. Build from the matching tag.
+# Its upstream lockfile pins the JupyterLab 4.2 builder stack. Use the checked-in
+# JupyterLab 4.6-compatible lockfile before selecting the current builder;
+# otherwise webpack's old license plugin crashes and launcher tokens are
+# compiled from incompatible package instances. Patch only after the real bundle
+# is installed so a changed upstream anchor fails the image build.
+# patch_nbi.py is bind-mounted rather than read from /opt/neurodesktop so this
+# layer does not depend on the config/agents install layer further down.
+ARG NBI_JUPYTERLAB_BUILDER_VERSION="4.5.10"
+RUN --mount=type=bind,source=config/jupyter/notebook-intelligence-5.3.0.yarn.lock,target=/tmp/nbi-yarn.lock,ro \
+    --mount=type=bind,source=config/agents/patch_nbi.py,target=/tmp/patch_nbi.py,ro \
+    NBI_PACKAGE_DIR="$(/opt/conda/bin/pip show notebook_intelligence | awk '/^Location:/ {print $2 "/notebook_intelligence"}')" \
+    && test -d "${NBI_PACKAGE_DIR}" \
+    && NBI_VERSION="$(/opt/conda/bin/pip show notebook_intelligence | awk '/^Version:/ {print $2}')" \
+    && retry git clone --depth 1 --branch "v${NBI_VERSION}" https://github.com/notebook-intelligence/notebook-intelligence.git /tmp/notebook-intelligence \
+    && cd /tmp/notebook-intelligence \
+    && npm pkg set "dependencies.@jupyterlab/launcher=^4.0.0" \
+    && npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}" \
+    && install -m 0644 /tmp/nbi-yarn.lock yarn.lock \
+    && retry jlpm install --immutable \
+    && jlpm build:prod \
+    && NBI_LABEXT_DIR="${NBI_PACKAGE_DIR}/labextension" \
+    && APP_NBI_DIR=/opt/conda/share/jupyter/labextensions/@plmbr/notebook-intelligence \
+    && rm -rf "${NBI_LABEXT_DIR}" "${APP_NBI_DIR}" \
+    && cp -a /tmp/notebook-intelligence/notebook_intelligence/labextension "${NBI_LABEXT_DIR}" \
+    && cp -a "${NBI_LABEXT_DIR}" "${APP_NBI_DIR}" \
+    && find "${NBI_LABEXT_DIR}/static" -type f -name 'remoteEntry*.js' | grep -q . \
+    && /opt/conda/bin/python3 /tmp/patch_nbi.py \
+    && rm -rf /tmp/notebook-intelligence /root/.cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
+
+# Workaround for jupyterlab-rise + jupyterlab-myst incompatibility:
+# jupyterlab-myst's federated bundle declares @jupyterlab/markdownviewer as a
+# shared module it consumes from the host. RISE's bundle does not include that
+# package in its shared scope, so MyST's plugins fail to instantiate and MyST
+# directives (admonitions, dropdowns, etc.) render as raw markdown in slides.
+# Rebuilding MyST with --core-path pointed at RISE's app directory embeds
+# @jupyterlab/markdownviewer into MyST's own bundle, so it no longer asks the
+# host for it. See https://github.com/jupyterlab-contrib/rise/issues/46
+# MyST 2.7.0 uses pnpm. Its published metadata requests @jupyter/ydoc 3.x,
+# while JupyterLab 4.6 provides 4.x, so compile against an exact current YDoc
+# and retain that exact version in both the manifest and lockfile.
+ARG MYST_PNPM_VERSION="11.17.0"
+ARG MYST_YDOC_VERSION="4.1.1"
+RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
+    && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
+    && MYST_PACKAGE_DIR="$(/opt/conda/bin/python -c 'import jupyterlab_myst, os; print(os.path.dirname(jupyterlab_myst.__file__))')" \
+    && retry git clone --depth 1 --branch "v${MYST_VERSION}" https://github.com/jupyter-book/jupyterlab-myst.git /tmp/myst \
+    && retry git clone --depth 1 --branch "v${RISE_VERSION}" https://github.com/jupyterlab-contrib/rise.git /tmp/rise \
+    && cd /tmp/myst \
+    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} install --frozen-lockfile --store-dir /tmp/myst-pnpm-store \
+    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} add --save-exact "@jupyter/ydoc@${MYST_YDOC_VERSION}" --store-dir /tmp/myst-pnpm-store \
+    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} run build:css \
+    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} run build:lib \
+    && /opt/conda/bin/jupyter labextension build --core-path=/tmp/rise/app . \
+    && MYST_LABEXT_DIR="${MYST_PACKAGE_DIR}/labextension" \
+    && APP_MYST_DIR=/opt/conda/share/jupyter/labextensions/jupyterlab-myst \
+    && rm -rf "${MYST_LABEXT_DIR}" \
+    && cp -a /tmp/myst/jupyterlab_myst/labextension "${MYST_LABEXT_DIR}" \
+    && rm -rf "${APP_MYST_DIR}" \
+    && cp -a "${MYST_LABEXT_DIR}" "${APP_MYST_DIR}" \
+    && rm -rf /tmp/myst /tmp/rise /tmp/myst-corepack /tmp/myst-pnpm-store /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
+
+# Jupyter AI currently resolves the Jupyter Collaboration 4.4.1 frontend,
+# whose published bundles advertise @jupyter/ydoc <4 and are rejected by
+# JupyterLab 4.6. Rebuild only the two frontend packages against the exact YDoc
+# already used by the image. The two casts bridge duplicate protected
+# TypeScript identities created by the workspace; they do not change runtime
+# code or the document factory implementations.
+# Upstream main is already on @jupyter/ydoc ^4 (5.0.0a0 on PyPI): delete this
+# entire layer once a fixed stable release can be pinned and validated.
+ARG JUPYTER_COLLABORATION_VERSION="4.4.1"
+ARG JUPYTER_COLLABORATION_REF="df6c4a325db80bed9df4cd5f768f3699adf7a6dd"
+RUN retry git clone --depth 1 --branch "v${JUPYTER_COLLABORATION_VERSION}" \
+    https://github.com/jupyterlab/jupyter-collaboration.git /tmp/jupyter-collaboration \
+    && test "$(git -C /tmp/jupyter-collaboration rev-parse HEAD)" = "${JUPYTER_COLLABORATION_REF}" \
+    && cd /tmp/jupyter-collaboration \
+    && npm pkg set "resolutions.@jupyter/ydoc=${MYST_YDOC_VERSION}" \
+    && for package_dir in \
+    packages/collaboration-extension \
+    packages/collaborative-drive \
+    packages/docprovider-extension \
+    packages/docprovider; do \
+    npm pkg set "dependencies.@jupyter/ydoc=^${MYST_YDOC_VERSION}" --prefix "${package_dir}"; \
+    done \
+    && npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}" \
+    --prefix packages/collaboration-extension \
+    && npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}" \
+    --prefix packages/docprovider-extension \
+    && sed -i \
+    -e 's/^      yFileFactory$/      yFileFactory as never/' \
+    -e 's/^      yNotebookFactory$/      yNotebookFactory as never/' \
+    packages/docprovider-extension/src/filebrowser.ts \
+    && YARN_ENABLE_IMMUTABLE_INSTALLS=0 retry jlpm install \
+    && jlpm lerna run build \
+    --scope @jupyter/collaboration \
+    --scope @jupyter/collaborative-drive \
+    --scope @jupyter/docprovider \
+    && jlpm lerna run build:lib:prod \
+    && /opt/conda/bin/jupyter labextension build \
+    --core-path=/opt/conda/share/jupyter/lab packages/collaboration-extension \
+    && /opt/conda/bin/jupyter labextension build \
+    --core-path=/opt/conda/share/jupyter/lab packages/docprovider-extension \
+    && COLLAB_SRC=/tmp/jupyter-collaboration/projects/jupyter-collaboration-ui/jupyter_collaboration_ui/labextension \
+    && DOCPROVIDER_SRC=/tmp/jupyter-collaboration/projects/jupyter-docprovider/jupyter_docprovider/labextension \
+    && COLLAB_DEST=/opt/conda/share/jupyter/labextensions/@jupyter/collaboration-extension \
+    && DOCPROVIDER_DEST=/opt/conda/share/jupyter/labextensions/@jupyter/docprovider-extension \
+    && rm -rf "${COLLAB_DEST}" "${DOCPROVIDER_DEST}" \
+    && cp -a "${COLLAB_SRC}" "${COLLAB_DEST}" \
+    && cp -a "${DOCPROVIDER_SRC}" "${DOCPROVIDER_DEST}" \
+    && test "$(node -p "require('${COLLAB_DEST}/package.json').dependencies['@jupyter/ydoc']")" = "^${MYST_YDOC_VERSION}" \
+    && test "$(node -p "require('${DOCPROVIDER_DEST}/package.json').dependencies['@jupyter/ydoc']")" = "^${MYST_YDOC_VERSION}" \
+    && rm -rf /tmp/jupyter-collaboration /root/.cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
+
 # The kernel-spec rewrite below embeds this path in every kernelspec. Keep this
 # cache boundary narrow; bulky local runtime config is installed after
 # neurocommand so webapp/link edits do not force the rest of the image to rebuild.
@@ -837,9 +957,15 @@ RUN --mount=type=bind,source=config/itksnap,target=/tmp/itksnap,ro \
 # left out: its workflows drive long autonomous replication loops that are not
 # appropriate to enable by default in a shared scientific image. Users can add
 # it themselves from the same local marketplace, with no network access needed.
+# Fetch the pinned commit directly rather than cloning a branch: GitHub
+# serves any commit still reachable from a ref (including PR refs), so this
+# keeps working after the source branch is merged and deleted, and pulls no
+# history.
 ARG AGENT_SKILLS_REF="4ded682be8487d8aa05831678ef84ef12068d50d"
-RUN retry git clone https://github.com/LightconeResearch/agent-skills.git /opt/neurodesktop/agent-skills \
-    && git -C /opt/neurodesktop/agent-skills checkout --detach "${AGENT_SKILLS_REF}" \
+RUN git init -q /opt/neurodesktop/agent-skills \
+    && git -C /opt/neurodesktop/agent-skills remote add origin https://github.com/LightconeResearch/agent-skills.git \
+    && retry git -C /opt/neurodesktop/agent-skills fetch --depth 1 origin "${AGENT_SKILLS_REF}" \
+    && git -C /opt/neurodesktop/agent-skills checkout --detach FETCH_HEAD \
     && test "$(git -C /opt/neurodesktop/agent-skills rev-parse HEAD)" = "${AGENT_SKILLS_REF}" \
     && HOME=/opt/jovyan_defaults CODEX_HOME=/opt/jovyan_defaults/.codex \
     /usr/bin/codex plugin marketplace add /opt/neurodesktop/agent-skills \
@@ -1017,103 +1143,25 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && chown -R root:users /opt/config /opt/neurodesktop /opt/tests
 
 
-# Workaround for jupyterlab-rise + jupyterlab-myst incompatibility:
-# jupyterlab-myst's federated bundle declares @jupyterlab/markdownviewer as a
-# shared module it consumes from the host. RISE's bundle does not include that
-# package in its shared scope, so MyST's plugins fail to instantiate and MyST
-# directives (admonitions, dropdowns, etc.) render as raw markdown in slides.
-# Rebuilding MyST with --core-path pointed at RISE's app directory embeds
-# @jupyterlab/markdownviewer into MyST's own bundle, so it no longer asks the
-# host for it. See https://github.com/jupyterlab-contrib/rise/issues/46
-# MyST 2.7.0 uses pnpm. Its published metadata requests @jupyter/ydoc 3.x,
-# while JupyterLab 4.6 provides 4.x, so compile against an exact current YDoc
-# and retain that exact version in both the manifest and lockfile.
-ARG MYST_PNPM_VERSION="11.17.0"
-ARG MYST_YDOC_VERSION="4.1.1"
-RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
-    && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
-    && MYST_PACKAGE_DIR="$(/opt/conda/bin/python -c 'import jupyterlab_myst, os; print(os.path.dirname(jupyterlab_myst.__file__))')" \
-    && retry git clone --depth 1 --branch "v${MYST_VERSION}" https://github.com/jupyter-book/jupyterlab-myst.git /tmp/myst \
-    && retry git clone --depth 1 --branch "v${RISE_VERSION}" https://github.com/jupyterlab-contrib/rise.git /tmp/rise \
-    && cd /tmp/myst \
-    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} install --frozen-lockfile --store-dir /tmp/myst-pnpm-store \
-    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} add --save-exact "@jupyter/ydoc@${MYST_YDOC_VERSION}" --store-dir /tmp/myst-pnpm-store \
-    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} run build:css \
-    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} run build:lib \
-    && /opt/conda/bin/jupyter labextension build --core-path=/tmp/rise/app . \
-    && MYST_LABEXT_DIR="${MYST_PACKAGE_DIR}/labextension" \
-    && APP_MYST_DIR=/opt/conda/share/jupyter/labextensions/jupyterlab-myst \
-    && rm -rf "${MYST_LABEXT_DIR}" \
-    && cp -a /tmp/myst/jupyterlab_myst/labextension "${MYST_LABEXT_DIR}" \
-    && rm -rf "${APP_MYST_DIR}" \
-    && cp -a "${MYST_LABEXT_DIR}" "${APP_MYST_DIR}" \
-    && rm -rf /tmp/myst /tmp/rise /tmp/myst-corepack /tmp/myst-pnpm-store /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
-
-# Jupyter AI currently resolves the Jupyter Collaboration 4.4.1 frontend,
-# whose published bundles advertise @jupyter/ydoc <4 and are rejected by
-# JupyterLab 4.6. Rebuild only the two frontend packages against the exact YDoc
-# already used by the image. The two casts bridge duplicate protected
-# TypeScript identities created by the workspace; they do not change runtime
-# code or the document factory implementations.
-ARG JUPYTER_COLLABORATION_VERSION="4.4.1"
-ARG JUPYTER_COLLABORATION_REF="df6c4a325db80bed9df4cd5f768f3699adf7a6dd"
-RUN retry git clone --depth 1 --branch "v${JUPYTER_COLLABORATION_VERSION}" \
-    https://github.com/jupyterlab/jupyter-collaboration.git /tmp/jupyter-collaboration \
-    && test "$(git -C /tmp/jupyter-collaboration rev-parse HEAD)" = "${JUPYTER_COLLABORATION_REF}" \
-    && cd /tmp/jupyter-collaboration \
-    && npm pkg set "resolutions.@jupyter/ydoc=${MYST_YDOC_VERSION}" \
-    && for package_dir in \
-    packages/collaboration-extension \
-    packages/collaborative-drive \
-    packages/docprovider-extension \
-    packages/docprovider; do \
-    npm pkg set "dependencies.@jupyter/ydoc=^${MYST_YDOC_VERSION}" --prefix "${package_dir}"; \
-    done \
-    && npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}" \
-    --prefix packages/collaboration-extension \
-    && npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}" \
-    --prefix packages/docprovider-extension \
-    && sed -i \
-    -e 's/^      yFileFactory$/      yFileFactory as never/' \
-    -e 's/^      yNotebookFactory$/      yNotebookFactory as never/' \
-    packages/docprovider-extension/src/filebrowser.ts \
-    && YARN_ENABLE_IMMUTABLE_INSTALLS=0 retry jlpm install \
-    && jlpm lerna run build \
-    --scope @jupyter/collaboration \
-    --scope @jupyter/collaborative-drive \
-    --scope @jupyter/docprovider \
-    && jlpm lerna run build:lib:prod \
-    && /opt/conda/bin/jupyter labextension build \
-    --core-path=/opt/conda/share/jupyter/lab packages/collaboration-extension \
-    && /opt/conda/bin/jupyter labextension build \
-    --core-path=/opt/conda/share/jupyter/lab packages/docprovider-extension \
-    && COLLAB_SRC=/tmp/jupyter-collaboration/projects/jupyter-collaboration-ui/jupyter_collaboration_ui/labextension \
-    && DOCPROVIDER_SRC=/tmp/jupyter-collaboration/projects/jupyter-docprovider/jupyter_docprovider/labextension \
-    && COLLAB_DEST=/opt/conda/share/jupyter/labextensions/@jupyter/collaboration-extension \
-    && DOCPROVIDER_DEST=/opt/conda/share/jupyter/labextensions/@jupyter/docprovider-extension \
-    && rm -rf "${COLLAB_DEST}" "${DOCPROVIDER_DEST}" \
-    && cp -a "${COLLAB_SRC}" "${COLLAB_DEST}" \
-    && cp -a "${DOCPROVIDER_SRC}" "${DOCPROVIDER_DEST}" \
-    && test "$(node -p "require('${COLLAB_DEST}/package.json').dependencies['@jupyter/ydoc']")" = "^${MYST_YDOC_VERSION}" \
-    && test "$(node -p "require('${DOCPROVIDER_DEST}/package.json').dependencies['@jupyter/ydoc']")" = "^${MYST_YDOC_VERSION}" \
-    && rm -rf /tmp/jupyter-collaboration /root/.cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
-
 # Expose the installed agent families as Jupyter AI ACP personas. These
 # adapters are runtime-only and deliberately live after all frontend builds.
 #
-# --omit=optional drops each adapter's vendored agent binary (an
-# optionalDependency chain worth ~250 MB per adapter). The adapters instead
-# drive the binaries already in this image via CODEX_PATH and
+# Each adapter vendors a full copy of its agent binary (~250 MB each) through
+# an optionalDependency chain; npm ignores every omit-optional spelling for
+# global installs, so the platform packages are deleted explicitly instead.
+# The adapters drive the binaries already in this image via CODEX_PATH and
 # CLAUDE_CODE_EXECUTABLE, exported in environment_variables.sh; codex-acp's
 # supported range for that binary is what pins CODEX_CLI_VERSION above. The
-# size assertion fails the build if a future adapter release stops declaring
-# its binary as optional and reintroduces the duplicate.
+# size assertion fails the build if a future adapter release relocates its
+# vendored binary and reintroduces the duplicate.
 ARG CODEX_ACP_VERSION="1.1.7"
 ARG CLAUDE_AGENT_ACP_VERSION="0.64.0"
-RUN npm_config_cache=/tmp/npm-acp-cache retry npm install -g --omit=optional \
+RUN npm_config_cache=/tmp/npm-acp-cache retry npm install -g \
     "@agentclientprotocol/codex-acp@${CODEX_ACP_VERSION}" \
     "@agentclientprotocol/claude-agent-acp@${CLAUDE_AGENT_ACP_VERSION}" \
     && rm -rf /root/.npm /tmp/npm-acp-cache /home/${NB_USER}/.npm \
+    "$(npm root -g)"/@agentclientprotocol/*/node_modules/@openai/codex-* \
+    "$(npm root -g)"/@agentclientprotocol/*/node_modules/@anthropic-ai/claude-agent-sdk-*-* \
     && command -v codex-acp && command -v claude-agent-acp \
     && test "$(du -sm "$(npm root -g)/@agentclientprotocol" | cut -f1)" -lt 100
 

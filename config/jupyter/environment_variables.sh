@@ -14,6 +14,20 @@ fi
 
 fi
 
+# The Jupyter AI ACP adapters are installed without their vendored agent
+# binaries (npm --omit=optional in the Dockerfile) and instead drive the
+# agent CLIs already in this image through these variables. The adapter
+# subprocesses inherit the Jupyter server environment, which sources this
+# file via before_notebook.sh.
+export CODEX_PATH="${CODEX_PATH:-/usr/bin/codex}"
+if [ -z "${CLAUDE_CODE_EXECUTABLE}" ]; then
+    if [ -x "${HOME}/.local/bin/claude" ]; then
+        export CLAUDE_CODE_EXECUTABLE="${HOME}/.local/bin/claude"
+    else
+        export CLAUDE_CODE_EXECUTABLE="/opt/jovyan_defaults/.local/bin/claude"
+    fi
+fi
+
 # MODULEPATH and CVMFS detection run on every source so that new shells
 # pick up CVMFS after a deferred (lazy) mount completes.
 export NEURODESKTOP_LOCAL_CONTAINERS="${NEURODESKTOP_LOCAL_CONTAINERS:-/neurodesktop-storage/containers}"

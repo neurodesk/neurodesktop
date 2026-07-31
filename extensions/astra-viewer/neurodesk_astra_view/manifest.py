@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -112,22 +113,27 @@ def _validate_finalized_receipt(
     except (ImportError, OSError) as error:
         raise RunManifestError(f"the receipt validator cannot be imported: {error}") from error
 
-    resolved_files = []
-
-    def collect(value: Any) -> None:
-        if isinstance(value, dict):
-            if {"path", "sha256", "sizeBytes"} <= value.keys():
-                resolved_files.append(Path(value["path"]))
-            for child in value.values():
-                collect(child)
-        elif isinstance(value, list):
-            for child in value:
-                collect(child)
-
-    collect(receipt)
-    allowed_roots = sorted(
-        {path.expanduser().parent for path in resolved_files}, key=lambda path: str(path)
+    configured_roots = (
+        Path("/cvmfs/neurodesk.ardc.edu.au"),
+        Path(
+            os.environ.get(
+                "NEURODESKTOP_LOCAL_CONTAINERS",
+                "/neurodesktop-storage/containers",
+            )
+        ),
     )
+    allowed_roots = []
+    for root in configured_roots:
+        try:
+            resolved = root.expanduser().resolve(strict=True)
+        except OSError:
+            continue
+        if (
+            resolved.is_dir()
+            and resolved != workspace
+            and not resolved.is_relative_to(workspace)
+        ):
+            allowed_roots.append(resolved)
     try:
         module.validate_receipt(receipt_path, workspace, allowed_roots)
     except (module.ReceiptValidationError, OSError, ValueError) as error:
@@ -283,7 +289,7 @@ def _trust_label(level: str) -> str:
         "executed-unverified": "Executed, unverified",
         "executed-verified": "Executed and verified",
         "provenance-mismatch": "Provenance mismatch",
-    }[level]
+    }.get(level, f"Unknown trust level: {level}")
 
 
 def _record_list(data: dict[str, Any]) -> list[dict[str, Any]]:

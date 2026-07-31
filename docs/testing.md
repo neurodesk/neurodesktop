@@ -83,21 +83,6 @@ disabled. Those factory names are upstream strings; if a JupyterLab upgrade
 renames one, a clicked report quietly falls back to the text editor rather
 than failing, which is exactly why the image tier pins them.
 
-For the MySTRA report CLI:
-
-```bash
-pytest tests/unit/test_astra_report_cli.py
-# In the rebuilt image:
-pytest /opt/tests/test_astra_report_image.py
-```
-
-The unit tier covers scaffolding, which is pure file authoring: that an
-authored `myst.yml` or `index.md` is never rewritten, and that a chat block
-emits absolute workspace paths. The image tier answers what only a built image
-can — that a scaffolded report renders offline with the pinned MySTRA plugin
-and a local theme in both flavors. That offline property fails silently, by
-falling back to a downloaded theme, so it is asserted against a real build.
-
 For the `astra`/`lc` CLIs or the ASTRA agent skill in any of the three agents:
 
 ```bash
@@ -112,7 +97,7 @@ answers on `PATH`, checks that the pinned marketplace commit teaches the
 schema version the installed `astra validate` speaks, and restores a throwaway
 home to prove OpenCode's skill actually reaches a user.
 
-For Jupyter AI, MySTRA, or ASTRA theme changes:
+For Jupyter AI or ACP persona changes:
 
 ```bash
 pytest tests/unit/test_jupyter_ai_workspace.py

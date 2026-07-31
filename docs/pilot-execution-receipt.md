@@ -118,8 +118,8 @@ not an authenticity or provenance claim.
 ## Path confinement
 
 All `relativePath` values are relative to `workspaceRoot`; absolute paths,
-empty segments, and `.` or `..` segments are rejected by the schema. The
-The CLI semantic validator must additionally:
+empty segments, and `.` or `..` segments are rejected by the schema. The CLI
+semantic validator must additionally:
 
 1. require the configured workspace root to equal the receipt's root;
 2. resolve every existing component and reject a path whose final target or

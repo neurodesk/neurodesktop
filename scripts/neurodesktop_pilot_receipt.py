@@ -293,6 +293,14 @@ def _validate_module_execution(receipt):
 
 def _derived_trust_values(receipt):
     if receipt.get("outcome") == "succeeded":
+        verification_status = (
+            receipt.get("lightcone", {}).get("verification", {}).get("status")
+        )
+        if verification_status != "passed":
+            raise ReceiptValidationError(
+                "successful receipt requires passed Lightcone verification, "
+                f"found {verification_status!r}"
+            )
         return "executed-unverified", "passed"
     level = (
         "executed-unverified"

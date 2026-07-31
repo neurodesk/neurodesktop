@@ -28,6 +28,11 @@ sys.path.insert(0, str(repo_path("extensions/astra-viewer")))
 
 from neurodesk_astra_view.adapter import AdapterError, adapt_project  # noqa: E402
 from neurodesk_astra_view.graph import build_graph  # noqa: E402
+from neurodesk_astra_view.manifest import (  # noqa: E402
+    RunManifestError,
+    _trust_label,
+    _validate_finalized_receipt,
+)
 from neurodesk_astra_view.preview import PreviewError, preview_artifact  # noqa: E402
 
 
@@ -80,6 +85,10 @@ def test_graph_returns_errors_and_no_partial_graph_for_wrong_schema_version(tmp_
     assert graph["meta"] == {"valid": False}
     assert graph["nodes"] == []
     assert "expected '0.0.12'" in graph["errors"][0]
+
+
+def test_unknown_trust_level_has_a_safe_label():
+    assert _trust_label("future-level") == "Unknown trust level: future-level"
 
 
 def test_external_analysis_and_child_universe_are_resolved_with_qualified_ids():
@@ -240,9 +249,10 @@ def test_finalized_module_receipt_stays_amber_and_tampering_fails_closed(
     custom_fixtures.mkdir()
     (custom_fixtures / "valid-success.json").write_text(json.dumps(fixture))
     monkeypatch.setattr(receipt_fixtures, "FIXTURE_DIR", custom_fixtures)
-    receipt_path, workspace, _ = receipt_fixtures.materialize_success_receipt(
+    receipt_path, workspace, module_root = receipt_fixtures.materialize_success_receipt(
         tmp_path / "materialized"
     )
+    monkeypatch.setenv("NEURODESKTOP_LOCAL_CONTAINERS", str(module_root))
     receipt = json.loads(receipt_path.read_text())
 
     spec_path = workspace / receipt["analysis"]["spec"]["relativePath"]
@@ -308,6 +318,32 @@ def test_finalized_module_receipt_stays_amber_and_tampering_fails_closed(
     rejected = build_graph(spec_path, universe_path, final_receipt)
     assert rejected["nodes"] == []
     assert "finalized receipt validation failed" in rejected["errors"][0]
+
+
+def test_finalized_receipt_cannot_authorize_an_arbitrary_module_root(
+    tmp_path, monkeypatch
+):
+    receipt_path, workspace, module_root = (
+        receipt_fixtures.materialize_success_receipt(tmp_path)
+    )
+    monkeypatch.setenv("NEURODESKTOP_LOCAL_CONTAINERS", str(module_root))
+    receipt = json.loads(receipt_path.read_text())
+
+    _validate_finalized_receipt(receipt_path, receipt, workspace)
+
+    outside_modulefile = tmp_path / "untrusted-modules" / "fsl.lua"
+    receipt["execution"]["module"]["modulefile"].update(
+        {
+            "path": str(outside_modulefile),
+            **receipt_fixtures.write_hashed_file(
+                outside_modulefile, b"untrusted modulefile\n"
+            ),
+        }
+    )
+    receipt_path.write_text(json.dumps(receipt))
+
+    with pytest.raises(RunManifestError, match="escapes its allowed roots"):
+        _validate_finalized_receipt(receipt_path, receipt, workspace)
 
 
 def test_previews_are_confined_and_cover_metric_table_report_and_figure(tmp_path):

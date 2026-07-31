@@ -78,27 +78,12 @@ mkdir -p <output_dir>
 
 ### D. Reporting an ASTRA analysis
 
-When you finish work on an `astra.yaml` and `astra validate` passes, publish a
-report rather than only describing the result in prose:
-
-```bash
-neurodesktop-astra-report build --project-dir <project>
-```
-
-This scaffolds `myst.yml` and a starter `index.md` if they are absent, renders
-the site with the pinned MySTRA plugin and a local ASTRA theme, and prints a
-markdown block. Paste that block into your reply verbatim. Its links are
-absolute workspace paths, which JupyterLab opens in the main panel — so the
-user clicks the rendered report in the chat and reads it next to their work.
-
-* Edit `index.md` to add your narrative; it is yours and is never overwritten.
-  Reference analysis elements (`:::{astra} decisions.<id>`, or
-  `` {astra}`outputs.<id>` `` inline) instead of restating them, so the report
-  stays true as the spec changes.
-* Re-run `build` after changing the spec, the universe, or results.
-* Link files you want the user to open as absolute paths (e.g.
-  `[QC overlay](/home/jovyan/project/results/qc.png)`); a relative path will
-  not resolve from a chat message.
+When you finish work on an `astra.yaml` and `astra validate` passes, summarise
+the analysis in your reply and link the key artifacts. Link files you want the
+user to open as absolute paths (e.g.
+`[QC overlay](/home/jovyan/project/results/qc.png)`); JupyterLab opens
+absolute workspace paths in the main panel, while a relative path will not
+resolve from a chat message.
 
 ## 4. Critical Constraints
 * **DO NOT** assume a module is loaded; always load it explicitly in the script.

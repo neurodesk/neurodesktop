@@ -480,6 +480,16 @@ def _terminal_outcome(state, exit_code):
     return "failed"
 
 
+def _elapsed_seconds(value):
+    try:
+        elapsed = int(value)
+    except (TypeError, ValueError) as error:
+        raise PilotError(f"Slurm returned an invalid ElapsedRaw: {value!r}") from error
+    if elapsed < 0:
+        raise PilotError(f"Slurm returned an invalid ElapsedRaw: {value!r}")
+    return elapsed
+
+
 def _prepare_run_snapshot(workspace_root, run_directory, contract):
     asset_project = _asset_root() / "project"
     run_project = run_directory / "project"
@@ -520,7 +530,7 @@ def _candidate_for_run(
         "exitCode": exit_code,
         "startedAt": _timestamp_utc(scontrol.get("StartTime", ""), "job start time"),
         "endedAt": _timestamp_utc(scontrol.get("EndTime", ""), "job end time"),
-        "elapsedSeconds": int(sacct.get("ElapsedRaw", "")),
+        "elapsedSeconds": _elapsed_seconds(sacct.get("ElapsedRaw", "")),
         "node": scontrol.get("NodeList", ""),
     }
     if not terminal["node"]:

@@ -55,6 +55,14 @@ def test_terminal_outcome_never_promotes_a_non_success_state(
     assert pilot._terminal_outcome(state, exit_code) == expected
 
 
+@pytest.mark.parametrize("value", [None, "", "not-a-number", "-1"])
+def test_elapsed_seconds_rejects_malformed_slurm_accounting(value):
+    pilot = _load_pilot_module()
+
+    with pytest.raises(pilot.PilotError, match="invalid ElapsedRaw"):
+        pilot._elapsed_seconds(value)
+
+
 def test_terminal_control_wait_ignores_completing_and_returns_final_state(monkeypatch):
     pilot = _load_pilot_module()
     responses = iter(

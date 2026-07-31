@@ -1,4 +1,4 @@
-"""Runtime contracts for Jupyter AI and the MyST/ASTRA report toolchain.
+"""Runtime contracts for Jupyter AI and its ACP personas.
 
 The `astra` CLI and the ASTRA agent skill are covered by
 ``test_astra_agent_skills_image.py``.
@@ -120,44 +120,22 @@ def test_jupyter_ai_server_and_frontend_extensions_are_compatible():
     assert "not compatible with the current JupyterLab" not in lab_output
 
 
-def test_mystra_inventory_bundle_and_myst_cli_are_available():
-    bundle = Path("/opt/neurodesktop/mystra/mystra.mjs")
-    revision = Path("/opt/neurodesktop/mystra/REVISION")
-    assert bundle.is_file()
-    assert revision.read_text(encoding="utf-8").strip() == (
-        "b01be473a4be988e58aa254c3efbf10c24f4d7bd"
-    )
-
-    code, output = run_cmd("myst --version")
-    assert code == 0, output
-    assert "1.10.1" in output
+def test_acp_adapters_use_the_image_agent_binaries_not_vendored_copies():
+    """The adapters install with --omit=optional, dropping their vendored
+    ~250 MB agent binaries; environment_variables.sh points them at the
+    CLIs already in the image instead."""
+    code, npm_root = run_cmd("npm root -g")
+    assert code == 0, npm_root
+    scope = Path(npm_root.strip()) / "@agentclientprotocol"
+    vendored = [
+        path
+        for pattern in ("**/@openai/codex-*", "**/@anthropic-ai/claude-agent-sdk-*-*")
+        for path in scope.glob(pattern)
+    ]
+    assert not vendored, vendored
 
     code, output = run_cmd(
-        "node -e \"import('/opt/neurodesktop/mystra/mystra.mjs')"
-        ".then(m => { if (m.default?.name !== 'astra') process.exit(1) })\""
+        "bash -c 'source /opt/neurodesktop/environment_variables.sh"
+        " && test -x \"${CODEX_PATH}\" && test -x \"${CLAUDE_CODE_EXECUTABLE}\"'"
     )
     assert code == 0, output
-
-
-def test_astra_article_and_book_themes_are_available_offline():
-    theme_root = Path("/opt/neurodesktop/astra-theme")
-    assert (theme_root / "REVISION").read_text(encoding="utf-8").strip() == (
-        "3939ceadcbde34b509896fe1a332fdaa611d0dab"
-    )
-
-    for flavor in ("article", "book"):
-        theme = theme_root / flavor
-        assert (theme / "template.yml").is_file()
-        assert (theme / "server.js").is_file()
-        assert (theme / "build/index.js").is_file()
-        assert (theme / "public/build").is_dir()
-
-        code, output = run_cmd(
-            "node -e \""
-            "const pkg=require('./package.json');"
-            "if(pkg.version !== '0.0.8') process.exit(1);"
-            "for(const name of Object.keys(pkg.dependencies)) require.resolve(name);"
-            "\"",
-            cwd=theme,
-        )
-        assert code == 0, output

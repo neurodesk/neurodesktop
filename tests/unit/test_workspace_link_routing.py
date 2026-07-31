@@ -107,8 +107,8 @@ def test_an_unopenable_path_reports_instead_of_silently_doing_nothing():
 def test_rendered_formats_open_in_a_viewer_rather_than_the_text_editor():
     """A linked report means the report, not its markup.
 
-    The default factory for both formats is the editor, so a MySTRA report
-    would arrive as raw MyST and a built site as raw HTML.
+    The default factory for both formats is the editor, so a linked markdown
+    report would arrive as raw markup and a built site as raw HTML.
     """
     for extension, factory in (
         ("'.md'", "'Markdown Preview'"),

@@ -6,20 +6,31 @@ viewer tests can build the same receipts without importing this module.
 
 import copy
 import hashlib
+import importlib.util
 import json
 import os
 import stat
 
+import pytest
 import rfc8785
 
 from receipt_fixtures import (
     generate as _generate,
     materialize_success_receipt as _materialize_success_receipt,
     materialize_timeout_receipt as _materialize_timeout_receipt,
+    receipt_cli_path as _receipt_cli_path,
     validate as _validate,
     write_hashed_file as _write_hashed_file,
     write_source_candidate as _write_source_candidate,
 )
+
+
+def _load_receipt_module():
+    path = _receipt_cli_path()
+    spec = importlib.util.spec_from_file_location("neurodesktop_pilot_receipt", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_validate_accepts_a_successful_receipt_with_matching_files(tmp_path):
@@ -29,6 +40,20 @@ def test_validate_accepts_a_successful_receipt_with_matching_files(tmp_path):
 
     assert result.returncode == 0, result.stdout
     assert result.stdout.strip() == f"valid: {receipt_path}"
+
+
+def test_successful_trust_derivation_requires_passed_verification():
+    receipt = {
+        "outcome": "succeeded",
+        "lightcone": {"verification": {"status": "failed"}},
+    }
+    module = _load_receipt_module()
+
+    with pytest.raises(
+        module.ReceiptValidationError,
+        match="successful receipt requires passed Lightcone verification",
+    ):
+        module._derived_trust_values(receipt)
 
 
 def test_validate_accepts_a_timed_out_receipt_without_outputs(tmp_path):

@@ -59,15 +59,6 @@
   default export. Rendered formats open in a viewer rather than the editor;
   keep that an extension-to-factory map that falls back to the default factory
   when the named viewer is not registered.
-- When changing the MySTRA report CLI, its scaffold, or the chat block it
-  prints, run `pytest tests/unit/test_astra_report_cli.py` from a checkout and
-  `pytest /opt/tests/test_astra_report_image.py` in the built image. Keep
-  `scaffold` free of anything that needs the image so it stays covered on a
-  checkout, never rewrite a file the author already has, keep the scaffolded
-  `myst.yml` pointed at `/opt/neurodesktop/mystra/mystra.mjs` and a local
-  `/opt/neurodesktop/astra-theme/` template rather than a downloadable theme
-  name, and keep the chat block's links absolute so the launcher extension
-  claims them. Do not teach this path the ASTRA schema: relay `astra info`.
 - When changing the `astra`/`lc` installs, `AGENT_SKILLS_REF`, or how the ASTRA
   skill reaches Codex, Claude, or OpenCode, run `pytest
   tests/unit/test_astra_jupyter_ai_tooling.py` from a checkout and `pytest
@@ -76,8 +67,8 @@
   the viewer imports, keep `jq` installed for the plugin hooks, and bump
   `AGENT_SKILLS_REF` together with the ASTRA pins so the skill teaches the
   schema `astra validate` speaks.
-- When changing Jupyter AI, Jupyter Collaboration, its ACP personas,
-  the Jupyter Server Documents workaround, MyST CLI, MySTRA, or ASTRA themes,
+- When changing Jupyter AI, Jupyter Collaboration, its ACP personas, or
+  the Jupyter Server Documents workaround,
   run `pytest tests/unit/test_jupyter_ai_workspace.py
   tests/unit/test_astra_jupyter_ai_tooling.py
   tests/unit/test_jupyter_server_documents_patch.py` from a checkout and `pytest
@@ -85,7 +76,12 @@
   `pip check`, `jupyter server extension list`, and `jupyter labextension list
   --verbose` in that image. Keep Jupyter AI chat workspace seeding scoped to
   `.chat` saves, never overwrite an existing `AGENTS.md`, and never make a seed
-  failure block the chat save.
+  failure block the chat save. Keep the ACP adapters' vendored agent binaries
+  deleted after install (npm ignores omit-optional for global installs) and
+  keep the adapters driving the image's own agent CLIs via `CODEX_PATH` and
+  `CLAUDE_CODE_EXECUTABLE`; the vendored copies would otherwise add ~500 MB
+  of duplicates, and `CODEX_CLI_VERSION` must stay inside the `@openai/codex`
+  range the pinned codex-acp declares.
 - When changing an agentic workflow under `.github/workflows/*.md`, regenerate
   its `.lock.yml` with `gh aw compile`, then run
   `pytest tests/unit/test_report_job_failure_action.py`.

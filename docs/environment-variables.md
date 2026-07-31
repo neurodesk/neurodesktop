@@ -115,7 +115,13 @@
   defaults to `3.1.1`, with its direct pre-1.0 extensions pinned alongside it
 - `CODEX_ACP_VERSION`, `CLAUDE_AGENT_ACP_VERSION` (build arguments): pinned
   ACP adapters that expose the Codex and Claude personas in Jupyter AI;
-  defaults to `1.1.7` and `0.63.0`
+  defaults to `1.1.7` and `0.64.0`. They install without their vendored agent
+  binaries and drive the image's own CLIs through `CODEX_PATH` and
+  `CLAUDE_CODE_EXECUTABLE` (runtime variables exported by
+  `environment_variables.sh`)
+- `CODEX_CLI_VERSION` (build argument): the `@openai/codex` CLI release
+  installed globally; defaults to `0.145.0` and must stay inside the range the
+  pinned codex-acp adapter declares, because the adapter drives this binary
 - `JUPYTER_COLLABORATION_VERSION`, `JUPYTER_COLLABORATION_REF` (build
   arguments): release and exact source commit used to rebuild Jupyter AI's
   collaboration frontends for JupyterLab 4.6; defaults to `4.4.1` and
@@ -123,13 +129,6 @@
 - `MYST_PNPM_VERSION`, `MYST_YDOC_VERSION` (build arguments): pnpm and Jupyter
   YDoc releases used for the MyST/RISE compatibility rebuild; defaults to
   `11.17.0` and `4.1.1`
-- `MYSTMD_VERSION`, `MYSTRA_REF` (build arguments): stock MyST CLI release and
-  exact MySTRA inventory-PR commit used for the offline report plugin;
-  defaults to `1.10.1` and `b01be473a4be988e58aa254c3efbf10c24f4d7bd`
-- `ASTRA_THEME_VERSION`, `ASTRA_THEME_REF` (build arguments): ASTRA theme
-  release and exact source commit used to build the offline article and book
-  templates; defaults to `0.0.8` and
-  `3939ceadcbde34b509896fe1a332fdaa611d0dab`
 - `NIIVUE_VERSION` (build argument): the `@niivue/niivue` release vendored to
   `/opt/neurodesktop/vendor/niivue.js` for the OpenCode Web volume
   previews; defaults to the pin in the Dockerfile (currently `0.69.0`)

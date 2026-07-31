@@ -224,8 +224,8 @@ A claimed file is opened with a rendering viewer when one exists for its
 format: `.md` and `.markdown` open in `Markdown Preview`, and `.html` and
 `.htm` open in `HTML Viewer`. An agent linking a report means the report,
 not its markup, and the default factory for both formats is the text editor —
-so a MySTRA report would otherwise arrive as raw MyST and a built site as raw
-HTML. The factory names are upstream strings, so the plugin falls back to the
+a linked markdown report would otherwise arrive as raw markup and a built
+site as raw HTML. The factory names are upstream strings, so the plugin falls back to the
 default factory when the viewer is not registered; a clicked link then still
 opens something rather than nothing.
 
@@ -287,59 +287,6 @@ Only the `astra` plugin is enabled. The marketplace also ships `reproduction`
 deliberately left out because its workflows drive long autonomous replication
 loops that should not be on by default in a shared scientific image. Users can
 add it themselves from the same local marketplace with no network access.
-
-### ASTRA reporting
-
-MyST reports can use the stock `myst` CLI and the locally built MySTRA bundle
-at `/opt/neurodesktop/mystra/mystra.mjs`. The bundle comes from the exact head
-of MySTRA PR 14's `prototype/astra-inventory` branch, recorded in the adjacent
-`REVISION` file. The paired ASTRA article and book themes are built from a
-commit-pinned `LightconeResearch/astra-theme` checkout and installed as compact,
-offline-capable runtime templates under `/opt/neurodesktop/astra-theme/`; their
-source revision is recorded in that directory's `REVISION` file. A project's
-`myst.yml` opts into the plugin and one local theme explicitly:
-
-```yaml
-version: 1
-project:
-  plugins:
-    - /opt/neurodesktop/mystra/mystra.mjs
-site:
-  template: /opt/neurodesktop/astra-theme/book
-# Use /opt/neurodesktop/astra-theme/article for a single-page report.
-```
-
-MySTRA projects still own their `astra.yaml`, universes, report pages, and MyST
-configuration; Neurodesktop supplies pinned authoring tools and both report
-presentation flavors without requiring MyST to download a theme at first use.
-
-`neurodesktop-astra-report` owns that wiring so a project does not have to
-rediscover three absolute paths and MySTRA's discovery conventions:
-
-```bash
-neurodesktop-astra-report scaffold --project-dir . [--theme article|book]
-neurodesktop-astra-report build --project-dir .     # scaffold, render, print
-neurodesktop-astra-report chat-block --project-dir .
-```
-
-`scaffold` writes `myst.yml` and a starter `index.md` and never rewrites either
-once it exists, so an authored report outlives every later run. The starter
-report uses collection-level embeds (`:::{astra} decisions`) rather than a list
-of element ids, which stays correct as the spec grows. `build` renders the site
-into `_build/html/`; it verifies the pinned plugin and both themes first, so a
-missing asset fails as itself instead of as an opaque MyST error or a silent
-fall back to a downloaded theme.
-
-`chat-block` prints the markdown an agent pastes into a chat surface: absolute
-workspace paths to the rendered report, the report source, and the spec, which
-[workspace link routing](#workspace-link-routing) opens in the JupyterLab main
-panel. Nothing on this path reads the ASTRA schema — the summary in the block
-is relayed verbatim from `astra info`, keeping the released CLI and the
-viewer's `adapter.py` the only schema-aware readers in the image.
-
-Splitting `scaffold` from `build` is what keeps the contract testable: the
-first is pure file authoring covered on a checkout, the second needs the `myst`
-CLI and pinned assets and is covered against a real offline build in the image.
 
 ### ASTRA provenance viewer
 
@@ -412,7 +359,7 @@ YDoc 4.1.1 contract, then replaces only those two incompatible wheel artifacts.
 The image test requires both to report `OK` in `jupyter labextension list
 --verbose`.
 
-`jupyter-server-documents` 0.3.1 has an upstream stale-client race in which one
+`jupyter-server-documents` 0.3.2 has an upstream stale-client race in which one
 queued update can terminate a chat room's background message processor.
 Neurodesktop applies an exact-source, build-time workaround for upstream issue
 271: missing-client lookup fails cleanly, and one rejected frame cannot stop the

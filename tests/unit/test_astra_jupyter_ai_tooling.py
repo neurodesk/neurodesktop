@@ -62,6 +62,26 @@ def test_acp_adapters_are_installed_after_every_frontend_build():
     assert myst_rebuild < acp_install
 
 
+def test_acp_adapters_exclude_their_vendored_agent_binaries():
+    """Each adapter's optionalDependency chain vendors a ~250 MB duplicate of
+    an agent binary the image already installs; the adapters are pointed at
+    those installs via CODEX_PATH and CLAUDE_CODE_EXECUTABLE instead. npm
+    ignores omit-optional for global installs, so the Dockerfile must delete
+    the vendored platform packages explicitly and keep the size guard."""
+    for removal in (
+        "/@agentclientprotocol/*/node_modules/@openai/codex-*",
+        "/@agentclientprotocol/*/node_modules/@anthropic-ai/claude-agent-sdk-*-*",
+    ):
+        assert removal in DOCKERFILE, removal
+    assert '-lt 100' in DOCKERFILE
+
+    environment = repo_path("config/jupyter/environment_variables.sh").read_text(
+        encoding="utf-8"
+    )
+    assert 'CODEX_PATH="${CODEX_PATH:-/usr/bin/codex}"' in environment
+    assert "CLAUDE_CODE_EXECUTABLE" in environment
+
+
 def test_upstream_checkouts_are_pinned_to_an_exact_commit():
     """A moving branch would make the image unreproducible.
 
@@ -72,8 +92,6 @@ def test_upstream_checkouts_are_pinned_to_an_exact_commit():
     references = [
         "AGENT_SKILLS_REF",
         "JUPYTER_COLLABORATION_REF",
-        "MYSTRA_REF",
-        "ASTRA_THEME_REF",
     ]
 
     for reference in references:

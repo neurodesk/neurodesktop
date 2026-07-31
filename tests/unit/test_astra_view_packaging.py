@@ -30,8 +30,25 @@ def test_cytoscape_is_vendored_with_its_license_header():
     assert "Copyright (c) 2016-2026, The Cytoscape Consortium" in vendor.read_text(
         encoding="utf-8"
     )[:1000]
-    assert "MIT License" not in license_file.read_text(encoding="utf-8")
-    assert "Permission is hereby granted" in license_file.read_text(encoding="utf-8")
+    license_text = license_file.read_text(encoding="utf-8")
+    assert "Copyright (c) 2016-2026, The Cytoscape Consortium" in license_text
+    assert "Permission is hereby granted" in license_text
+    assert "The above copyright notice and this permission notice" in license_text
+    assert "OUT OF OR IN CONNECTION WITH THE SOFTWARE" in license_text
+
+
+def test_frontend_cleanup_removes_only_its_registered_model_listeners():
+    javascript = (ROOT / "neurodesk_astra_view/static/index.js").read_text(
+        encoding="utf-8"
+    )
+
+    for event, callback in (
+        ("change:mode", "applyMode"),
+        ("change:collapsed", "applyCollapsed"),
+        ("change:selected_node", "onSelectedNodeChange"),
+    ):
+        assert javascript.count(f'model.on("{event}", {callback})') == 1
+        assert javascript.count(f'model.off("{event}", {callback})') == 1
 
 
 def test_viewer_is_installed_without_resolving_its_own_dependencies():

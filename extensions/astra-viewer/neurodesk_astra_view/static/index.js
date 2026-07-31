@@ -190,28 +190,31 @@ export function render({ model, el }) {
     applyCollapsed();
   };
 
-  cy.on("tap", "node", (event) => {
+  const onTap = (event) => {
     const id = event.target.id();
     model.set("selected_node", id);
     model.save_changes();
     renderInspector(inspector, nodeById.get(id));
-  });
-  cy.on("cxttap", 'node[kind = "analysis"]', (event) => {
+  };
+  cy.on("tap", "node", onTap);
+  const onCxttap = (event) => {
     const id = event.target.id();
     const collapsed = new Set(model.get("collapsed") || []);
     collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
     model.set("collapsed", [...collapsed]);
     model.save_changes();
     applyCollapsed();
-  });
-  model.on("change:mode", applyMode);
-  model.on("change:collapsed", applyCollapsed);
-  model.on("change:selected_node", () => {
+  };
+  cy.on("cxttap", 'node[kind = "analysis"]', onCxttap);
+  const onSelectedNodeChange = () => {
     const id = model.get("selected_node");
     cy.elements().unselect();
     if (id && nodeById.has(id)) cy.getElementById(id).select();
     renderInspector(inspector, nodeById.get(id));
-  });
+  };
+  model.on("change:mode", applyMode);
+  model.on("change:collapsed", applyCollapsed);
+  model.on("change:selected_node", onSelectedNodeChange);
   applyMode();
   renderInspector(inspector, nodeById.get(model.get("selected_node")));
 
@@ -223,6 +226,10 @@ export function render({ model, el }) {
     root.appendChild(details);
   }
 
-  return () => cy.destroy();
+  return () => {
+    model.off("change:mode", applyMode);
+    model.off("change:collapsed", applyCollapsed);
+    model.off("change:selected_node", onSelectedNodeChange);
+    cy.destroy();
+  };
 }
-
