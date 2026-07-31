@@ -59,3 +59,43 @@ def test_widget_frontend_is_vendored_and_contains_no_network_loader():
     assert "fetch(" not in widget_module.AstraView._esm
     assert "import(\"http" not in widget_module.AstraView._esm
     assert "import('http" not in widget_module.AstraView._esm
+
+
+def test_file_browser_server_extension_is_enabled_and_single_sourced():
+    """The extension behind double-clicking astra.yaml in the file browser."""
+    config = Path(
+        "/opt/conda/etc/jupyter/jupyter_server_config.d/neurodesk_astra_view.json"
+    )
+    assert config.is_file()
+
+    code, output = run_cmd("jupyter server extension list", timeout=60)
+    assert code == 0, output
+    assert "neurodesk_astra_view.serverext" in output
+    listed = [
+        line
+        for line in output.splitlines()
+        if "neurodesk_astra_view.serverext" in line
+    ]
+    assert any("enabled" in line for line in listed), output
+
+    # The HTTP asset endpoint must serve exactly the anywidget frontend.
+    from neurodesk_astra_view import serverext
+    import neurodesk_astra_view.widget as widget_module
+
+    assets = serverext._assets()
+    assert assets["esm"][1] == widget_module.AstraView._esm
+    assert assets["css"][1] == widget_module.AstraView._css
+
+
+def test_file_browser_viewer_plugin_survived_the_labextension_build():
+    bundle = "\n".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for path in Path(
+            "/opt/conda/share/jupyter/labextensions/neurodesk-launcher/static"
+        ).glob("*.js")
+    )
+
+    assert "neurodesk-launcher:astra-viewer" in bundle
+    assert "astra-yaml" in bundle
+    assert "ASTRA Viewer" in bundle
+    assert "neurodesk-astra-view" in bundle

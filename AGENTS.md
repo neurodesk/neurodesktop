@@ -39,6 +39,15 @@
   /opt/tests/test_astra_view_image.py` in the built image. Keep every read path
   confined, keep `adapter.py` as the only released-schema-aware viewer module,
   and never promote the module-pilot receipt above `executed-unverified`.
+- When changing the file-browser ASTRA viewer — the
+  `neurodesk_astra_view.serverext` server extension or the
+  `neurodesk-launcher:astra-viewer` file type/factory plugin — run `pytest
+  tests/unit/test_astra_view_filebrowser.py` from a checkout and `pytest
+  /opt/tests/test_astra_view_image.py` in the built image. Keep request paths
+  confined to the Jupyter server root before anything is read, keep the
+  frontend single-sourced from the anywidget's `static/` assets over the
+  asset endpoint (never a second bundled copy), and keep the factory a
+  pattern-file-type default so ordinary `.yaml` files stay in the editor.
 - When changing OpenCode, its Web proxy/session-workspace behavior, its file
   previewer, or its pinned version, run `pytest tests/unit/test_opencode_web.py`
   from a checkout and `pytest /opt/tests/test_opencode_web_image.py` in the
@@ -55,8 +64,8 @@
   tests/unit/test_workspace_link_routing.py` from a checkout and `pytest
   /opt/tests/test_workspace_link_routing_image.py` in the built image. Keep
   the click interception scoped to same-origin, unmodified clicks resolving
-  inside `PageConfig` `serverRoot`, and keep both plugins in the extension's
-  default export. Rendered formats open in a viewer rather than the editor;
+  inside `PageConfig` `serverRoot`, and keep all of the extension's plugins in
+  its default export. Rendered formats open in a viewer rather than the editor;
   keep that an extension-to-factory map that falls back to the default factory
   when the named viewer is not registered.
 - When changing the `astra`/`lc` installs, `AGENT_SKILLS_REF`, or how the ASTRA

@@ -14,6 +14,7 @@ dependencies = [
     "astra-spec==0.0.12",
     "astra-tools==0.2.11",
     "jsonschema>=4.23",
+    "jupyter-server>=2.0",
     "PyYAML>=6.0",
     "rfc8785==0.1.4",
 ]
@@ -21,8 +22,12 @@ dependencies = [
 [tool.hatch.build.targets.wheel]
 packages = ["neurodesk_astra_view"]
 
+[tool.hatch.build.targets.wheel.shared-data]
+"jupyter-config/jupyter_server_config.d" = "etc/jupyter/jupyter_server_config.d"
+
 [tool.hatch.build.targets.sdist]
 include = [
     "neurodesk_astra_view/**",
+    "jupyter-config/**",
     "README.md",
 ]

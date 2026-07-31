@@ -329,6 +329,23 @@ passes, the module route remains amber `executed-unverified`. Ordinary previews
 stay under the directory containing `astra.yaml`; receipt previews stay under
 the hash-authenticated `runs/<receiptId>` envelope.
 
+Double-clicking an `astra.yaml` (or `*.astra.yaml`) in the JupyterLab file
+browser renders the same viewer without a kernel, the way NIfTI volumes open
+in NiiVue. The `neurodesk_astra_view.serverext` Jupyter server extension
+answers `GET /neurodesk-astra-view/graph?spec=…[&universe=…][&run=…]` by
+running `build_graph()` server-side — request paths are workspace-relative and
+rejected with a 404 before any read when absolute, traversing, or resolving
+outside the server root — and serves the anywidget's own frontend at
+`/neurodesk-astra-view/asset/(esm|css)`, so the file-browser viewer and the
+notebook widget are one frontend with no second copy to drift. The
+`neurodesk-launcher:astra-viewer` plugin registers the pattern file type and a
+read-only default widget factory (`ASTRA Viewer`) over those endpoints, with a
+universe picker fed by the spec's sibling `universes/` directory. Because the
+factory is the pattern file type's default, agent-authored chat links to an
+`astra.yaml` open in the viewer too, and a disabled plugin degrades to the
+text editor. Editing stays on `Open With > Editor`; a save from that shared
+context re-renders the graph.
+
 ### Jupyter AI
 
 Jupyter AI provides a second, ACP-native JupyterLab chat surface alongside
