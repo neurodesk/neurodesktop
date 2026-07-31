@@ -1,7 +1,17 @@
+---
+title: OpenCode web interface plan
+description: Original implementation plan for the OpenCode web interface
+  launcher tile; the shipped behavior is documented in
+  architecture/coding-agents.md
+parent: index.md
+status: implemented
+last-reviewed: "2026-07-31"
+---
+
 # Plan: OpenCode web interface with one-click launch from the start page
 
 Status: implemented (first iteration) — see
-[architecture.md](architecture.md#opencode-web-interface) for the shipped
+[Coding agents](../architecture/coding-agents.md) for the shipped
 design. Two deviations from the plan below, both simplifications:
 
 - The first-run key dialog is served by the launch wrapper itself
@@ -33,22 +43,22 @@ Give Neurodesktop users a first-class, browser-based OpenCode experience:
 ## Where we are today
 
 - OpenCode is installed at image build time via `https://opencode.ai/install`
-  and moved to `/usr/bin/opencode` ([Dockerfile](../Dockerfile), "Install
+  and moved to `/usr/bin/opencode` ([Dockerfile](../../Dockerfile), "Install
   OpenCode CLI" layer). The `OPENCODE_VERSION` build argument pins the
   installed release (default 1.18.4); overriding it bumps the pin, and an
   empty value installs the latest release.
 - Users reach it only through a **terminal**: `/usr/local/sbin/opencode`
-  ([config/agents/opencode](../config/agents/opencode)) is a ~1600-line bash
+  ([config/agents/opencode](../../config/agents/opencode)) is a ~1600-line bash
   wrapper that probes the three providers (Jetstream, local Ollama,
   llm.neurodesk.org), interactively prompts for `NEURODESK_API_KEY`, persists
   it to `~/.bashrc`, rewrites `~/.config/opencode/opencode.json`, optionally
   sets up the Brain Researcher MCP token, mirrors everything into Notebook
-  Intelligence via [nbi_setup.sh](../config/agents/nbi_setup.sh), then execs
+  Intelligence via [nbi_setup.sh](../../config/agents/nbi_setup.sh), then execs
   the real binary as a TUI.
 - The start page is the JupyterLab launcher: tiles come from
   `c.ServerProxy.servers` entries in
-  [jupyter_notebook_config.py.template](../config/jupyter/jupyter_notebook_config.py.template)
-  plus the [neurodesk-launcher](../extensions/neurodesk-launcher/src/index.ts)
+  [jupyter_notebook_config.py.template](../../config/jupyter/jupyter_notebook_config.py.template)
+  plus the [neurodesk-launcher](../../extensions/neurodesk-launcher/src/index.ts)
   labextension, which renders them with icons and category ordering.
 - There is a proven pattern for **authenticated proxied services**: the
   Guacamole entries generate per-user credentials and inject them with
@@ -56,7 +66,7 @@ Give Neurodesktop users a first-class, browser-based OpenCode experience:
   never sees a login prompt.
 - There is a proven pattern for **wrapping webapps** with splash pages, unix
   sockets, idle shutdown and path rewrites:
-  [webapp_wrapper.py](../config/jupyter/webapp_wrapper/webapp_wrapper.py).
+  [webapp_wrapper.py](../../config/jupyter/webapp_wrapper/webapp_wrapper.py).
 
 ## What OpenCode 2 gives us
 
@@ -84,7 +94,7 @@ Relevant facts from the opencode docs/changelog (verified July 2026):
 
 ### Phase 1 - shared setup library + headless launch script
 
-Refactor the reusable parts of [config/agents/opencode](../config/agents/opencode)
+Refactor the reusable parts of [config/agents/opencode](../../config/agents/opencode)
 into a sourceable library, e.g. `config/agents/opencode_common.sh` installed to
 `/opt/neurodesktop/`:
 
@@ -146,7 +156,7 @@ Security setup in the same script:
 ### Phase 2 - launcher tile via jupyter-server-proxy
 
 Add an `opencode` entry to `c.ServerProxy.servers` in
-[jupyter_notebook_config.py.template](../config/jupyter/jupyter_notebook_config.py.template):
+[jupyter_notebook_config.py.template](../../config/jupyter/jupyter_notebook_config.py.template):
 
 ```python
 'opencode': {
@@ -171,7 +181,7 @@ reads the Guacamole credentials, so the proxy injects auth and the user never
 sees a Basic-auth prompt. The neurodesk-launcher extension picks the tile up
 automatically from `/server-proxy/servers-info` - no frontend change needed for
 the tile itself. Add an `opencode.svg` icon under
-[config/jupyter/webapp_icons/](../config/jupyter/webapp_icons/).
+[config/jupyter/webapp_icons/](../../config/jupyter/webapp_icons/).
 
 ### Phase 3 - solve the path-prefix problem (the actual "nice web interface")
 
@@ -209,7 +219,7 @@ Alternatives that were considered, kept here for context:
 **Zero-prefix escape hatch that can ship immediately:** inside the Neurodesktop
 VNC/RDP desktop there is no prefix - Firefox can open
 `http://127.0.0.1:<port>/` at root. Add an "OpenCode Web" desktop entry
-(pattern: [config/agents/opencode-web.desktop](../config/agents/opencode-web.desktop))
+(pattern: [config/agents/opencode-web.desktop](../../config/agents/opencode-web.desktop))
 that runs the Phase-1 script and opens the official web UI in
 `neurodesktop-firefox`. Local Docker users can alternatively publish the port
 (`-p 4096:4096`) - document both in the user docs.
@@ -220,7 +230,7 @@ Move the first-run key setup out of the terminal and into JupyterLab:
 
 - Add a small **Jupyter server extension** (natural home: the existing
   `neurodesk_launcher` Python package in
-  [extensions/neurodesk-launcher/](../extensions/neurodesk-launcher/), which is
+  [extensions/neurodesk-launcher/](../../extensions/neurodesk-launcher/), which is
   currently frontend-only) with two endpoints:
   - `GET /neurodesk-ai/key-status` -> `{configured, valid, models[]}` - checks
     `~/.bashrc`/env for `NEURODESK_API_KEY` and validates it against
@@ -253,7 +263,7 @@ The terminal flow keeps working unchanged; both flows write the same state
   (verify current CLI support for attaching to an existing server; the
   changelog's IDE plugins do exactly this via `/tui`).
 - **Config-level features** in
-  [config/agents/opencode_config.json](../config/agents/opencode_config.json):
+  [config/agents/opencode_config.json](../../config/agents/opencode_config.json):
   - `"share": "disabled"` - opencode's session-sharing uploads conversation
     data to opencode's share service; that is the wrong default for a research
     environment. Make it opt-in.
@@ -280,7 +290,7 @@ The terminal flow keeps working unchanged; both flows write the same state
 
 ### Phase 6 - tests and docs
 
-Per [docs/testing.md](testing.md) and AGENTS.md expectations:
+Per [docs/testing.md](../testing.md) and AGENTS.md expectations:
 
 - `tests/test_opencode_web.py`: proxy entry present in the Jupyter config
   template with auth header override and `new_browser_tab`; the Python
@@ -294,8 +304,8 @@ Per [docs/testing.md](testing.md) and AGENTS.md expectations:
   picked up by `nbi_setup.sh` the same as a terminal-set key.
 - New endpoint tests for `key-status`/`key` handlers (mock the models call).
 - Docs: new "AI coding agents" subsection in
-  [architecture.md](architecture.md) describing the server/UI processes and
-  auth; [environment-variables.md](environment-variables.md) additions
+  [architecture.md](../architecture.md) describing the server/UI processes and
+  auth; [environment-variables.md](../environment-variables.md) additions
   (`OPENCODE_SERVER_PASSWORD` handling, any `OPENCODE_WEB_*` toggles, existing
   `OPENCODE_MODEL_PROFILE`/`OPENCODE_STARTUP_VERBOSE` cross-references); user
   docs for the launcher tile and first-run dialog.

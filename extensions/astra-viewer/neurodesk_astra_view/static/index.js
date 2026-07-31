@@ -95,8 +95,38 @@ function renderInspector(panel, node) {
   }
 }
 
+/** Node kinds that carry a claim; the Evidence mode is built around these. */
+const CLAIM_KINDS = ["insight", "finding", "evidence"];
+/** Edges that attach a claim to what it rests on. */
+const CLAIM_EDGE_KINDS = ["supports", "claims", "justifies"];
+/** Classes that take an element out of the drawing, and so out of the layout. */
+const HIDDEN_CLASSES = ["astra-hidden", "astra-collapsed", "astra-empty"];
+
+const RANK_GAP = 132;
+const COLUMN_GAP = 180;
+
+const isHidden = (element) =>
+  HIDDEN_CLASSES.some((name) => element.hasClass(name));
+
+/**
+ * A decision's selected value belongs to the decision, not to each of the
+ * edges leaving it: repeating it per edge crowded the middle of the canvas
+ * with labels that overlapped each other.
+ */
+function decisionLabel(node) {
+  const chosen = (node.options || []).find((option) => option.selected);
+  const value = chosen ? chosen.label : node.selected;
+  return `${node.label}\n▸ ${value == null ? "unresolved" : value}`;
+}
+
 function cyElements(graph) {
-  const nodes = graph.nodes.map((node) => ({ data: { ...node } }));
+  const nodes = graph.nodes.map((node) => ({
+    data: {
+      ...node,
+      display_label:
+        node.kind === "decision" ? decisionLabel(node) : node.label,
+    },
+  }));
   const edges = graph.edges.map((edge) => ({ data: { ...edge } }));
   return [...nodes, ...edges];
 }
@@ -110,9 +140,18 @@ export function render({ model, el }) {
   const header = document.createElement("header");
   header.className = "astra-header";
   root.appendChild(header);
-  appendText(header, "strong", `ASTRA · ${graph.meta.universe_id || "invalid"}`);
-  const badge = appendText(header, "span", graph.trust.label, `astra-trust astra-trust-${graph.trust.level}`);
+  const title = appendText(header, "div", "", "astra-title");
+  appendText(title, "strong", graph.meta.analysis_name || "ASTRA analysis");
+  if (graph.meta.universe_id) {
+    appendText(title, "span", `universe: ${graph.meta.universe_id}`, "astra-universe");
+  }
+  // The badge names a run state, not a selection, and its explanation is the
+  // whole point of it — so it reads next to the badge rather than in a
+  // tooltip nobody discovers.
+  const provenance = appendText(header, "div", "", "astra-provenance");
+  const badge = appendText(provenance, "span", graph.trust.label, `astra-trust astra-trust-${graph.trust.level}`);
   badge.title = graph.trust.message;
+  appendText(provenance, "span", graph.trust.message, "astra-trust-message");
 
   if ((graph.warnings || []).length) {
     const warnings = document.createElement("div");
@@ -143,6 +182,18 @@ export function render({ model, el }) {
     });
   });
 
+  // A mode that filters to nothing must say so; silently redrawing the
+  // previous picture is what made the Evidence button look inert.
+  const notice = appendText(
+    root,
+    "div",
+    "This analysis declares no findings, prior insights, or evidence, so there "
+      + "is nothing for the Evidence view to show. Add prior_insights or "
+      + "findings to the spec to populate it.",
+    "astra-notice",
+  );
+  notice.hidden = true;
+
   const body = document.createElement("div");
   body.className = "astra-body";
   root.appendChild(body);
@@ -156,44 +207,121 @@ export function render({ model, el }) {
   const cy = globalThis.cytoscape({
     container: canvas,
     elements: cyElements(graph),
-    layout: { name: "breadthfirst", directed: true, padding: 24, spacingFactor: 1.25 },
+    // Positions come from the rank and order the Python model computed; see
+    // layoutVisible below and neurodesk_astra_view/layout.py for why.
+    layout: { name: "preset" },
     style: [
-      { selector: "node", style: { label: "data(label)", "font-size": 11, "text-wrap": "wrap", "text-max-width": 120, "background-color": "#4d6f8f", color: "#17202a", "text-valign": "bottom", "text-margin-y": 7, width: 38, height: 38 } },
+      { selector: "node", style: { label: "data(display_label)", "font-size": 11, "text-wrap": "wrap", "text-max-width": 150, "background-color": "#4d6f8f", color: "#17202a", "text-valign": "bottom", "text-margin-y": 7, width: 38, height: 38 } },
       { selector: 'node[kind = "input"]', style: { shape: "barrel", "background-color": "#5b8db8" } },
       { selector: 'node[kind = "output"]', style: { shape: "round-rectangle", "background-color": "#77a86a" } },
       { selector: 'node[kind = "decision"]', style: { shape: "hexagon", "background-color": "#d2a84a" } },
       { selector: 'node[kind = "finding"], node[kind = "insight"], node[kind = "evidence"]', style: { shape: "round-tag", "background-color": "#a884bd" } },
       { selector: 'node[kind = "artifact"]', style: { shape: "document", "background-color": "#73a6a0" } },
-      { selector: 'node[kind = "analysis"]', style: { shape: "round-rectangle", "background-opacity": 0.08, "border-width": 1, "border-color": "#718096", padding: 18, "text-valign": "top" } },
-      { selector: "edge", style: { width: 2, "line-color": "#8996a3", "target-arrow-color": "#8996a3", "target-arrow-shape": "triangle", "curve-style": "bezier", label: "data(label)", "font-size": 9 } },
-      { selector: 'edge[kind = "parameterizes"]', style: { "line-style": "dashed", "line-color": "#bd8c26", "target-arrow-color": "#bd8c26" } },
+      // The container title sits above its border: the base rule pushes
+      // labels below a node, which drops a compound title onto the box edge.
+      { selector: 'node[kind = "analysis"]', style: { shape: "round-rectangle", "background-opacity": 0.08, "border-width": 1, "border-color": "#718096", padding: 22, "text-valign": "top", "text-margin-y": -10, "text-max-width": 320, "font-size": 12, "font-weight": "bold", color: "#3d4854" } },
+      { selector: "edge", style: { width: 2, "line-color": "#8996a3", "target-arrow-color": "#8996a3", "target-arrow-shape": "triangle", "curve-style": "bezier", label: "data(label)", "font-size": 9, "text-background-color": "#ffffff", "text-background-opacity": 0.85, "text-background-padding": 2 } },
+      // The selected value now rides on the decision node itself.
+      { selector: 'edge[kind = "parameterizes"]', style: { label: "", "line-style": "dashed", "line-color": "#bd8c26", "target-arrow-color": "#bd8c26" } },
       { selector: 'edge[kind = "supports"], edge[kind = "claims"], edge[kind = "justifies"]', style: { "line-style": "dotted", "line-color": "#9168a6", "target-arrow-color": "#9168a6" } },
-      { selector: ".astra-hidden, .astra-collapsed", style: { display: "none" } },
+      { selector: ".astra-hidden, .astra-collapsed, .astra-empty", style: { display: "none" } },
       { selector: ":selected", style: { "border-width": 4, "border-color": "#2b6cb0" } },
     ],
   });
 
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
-  const applyCollapsed = () => {
-    cy.elements().removeClass("astra-collapsed");
-    (model.get("collapsed") || []).forEach((analysisId) => {
-      const parent = cy.getElementById(analysisId);
-      parent.descendants().addClass("astra-collapsed");
+
+  /**
+   * Place the visible nodes on the semantic grid the Python model computed.
+   *
+   * Ranks are stable across modes, but a mode that hides a whole rank must
+   * not leave a band of empty canvas behind, so rows and columns are
+   * compacted over what is actually drawn. Re-running this on every filter
+   * change is what the old single breadthfirst pass never did.
+   */
+  const layoutVisible = () => {
+    const placed = cy
+      .nodes()
+      .filter((node) => node.data("rank") != null && !isHidden(node));
+    if (placed.length === 0) return;
+    const rows = new Map();
+    placed.forEach((node) => {
+      const rank = node.data("rank");
+      if (!rows.has(rank)) rows.set(rank, []);
+      rows.get(rank).push(node);
     });
+    const positions = new Map();
+    [...rows.keys()]
+      .sort((left, right) => left - right)
+      .forEach((rank, row) => {
+        const members = rows
+          .get(rank)
+          .sort((left, right) => left.data("order") - right.data("order"));
+        members.forEach((node, column) => {
+          positions.set(node.id(), {
+            x: (column - (members.length - 1) / 2) * COLUMN_GAP,
+            y: row * RANK_GAP,
+          });
+        });
+      });
+    cy.layout({
+      name: "preset",
+      positions: (node) => positions.get(node.id()),
+      fit: true,
+      padding: 28,
+      animate: false,
+    }).run();
   };
+
+  const applyCollapsed = () => {
+    const collapsed = new Set(model.get("collapsed") || []);
+    cy.elements().removeClass("astra-collapsed");
+    collapsed.forEach((analysisId) => {
+      cy.getElementById(analysisId).descendants().addClass("astra-collapsed");
+    });
+    // An analysis whose every member is filtered out would otherwise draw as
+    // an empty labelled box. A collapsed one keeps its box: that is the point.
+    cy.nodes('[kind = "analysis"]').removeClass("astra-empty");
+    cy.nodes('[kind = "analysis"]').forEach((container) => {
+      if (collapsed.has(container.id())) return;
+      const alive = container
+        .descendants()
+        .filter((node) => !isHidden(node));
+      if (alive.length === 0) container.addClass("astra-empty");
+    });
+    layoutVisible();
+  };
+
   const applyMode = () => {
     const mode = model.get("mode");
     toolbar.querySelectorAll("button").forEach((button) => {
       button.classList.toggle("active", button.dataset.mode === mode);
     });
     cy.elements().removeClass("astra-hidden");
+    const claims = cy
+      .nodes()
+      .filter((node) => CLAIM_KINDS.includes(node.data("kind")));
     if (mode === "flow") {
-      cy.nodes().filter((node) => ["decision", "finding", "insight", "evidence"].includes(node.data("kind"))).addClass("astra-hidden");
-      cy.edges().filter((edge) => ["parameterizes", "supports", "claims", "justifies"].includes(edge.data("kind"))).addClass("astra-hidden");
+      cy.nodes().filter((node) => ["decision", ...CLAIM_KINDS].includes(node.data("kind"))).addClass("astra-hidden");
+      cy.edges().filter((edge) => ["parameterizes", ...CLAIM_EDGE_KINDS].includes(edge.data("kind"))).addClass("astra-hidden");
     } else if (mode === "decisions") {
-      cy.nodes().filter((node) => ["finding", "insight", "evidence"].includes(node.data("kind"))).addClass("astra-hidden");
-      cy.edges().filter((edge) => ["supports", "claims", "justifies"].includes(edge.data("kind"))).addClass("astra-hidden");
+      cy.nodes().filter((node) => CLAIM_KINDS.includes(node.data("kind"))).addClass("astra-hidden");
+      cy.edges().filter((edge) => CLAIM_EDGE_KINDS.includes(edge.data("kind"))).addClass("astra-hidden");
+    } else if (mode === "evidence") {
+      // Keep the claims and whatever they rest on; drop the dataflow
+      // plumbing no claim depends on. Showing everything, which is what this
+      // mode used to do, is not an evidence view.
+      const kept = new Set(
+        claims.union(claims.connectedEdges().connectedNodes()).map((node) => node.id()),
+      );
+      cy.nodes()
+        .filter((node) => node.data("kind") !== "analysis" && !kept.has(node.id()))
+        .addClass("astra-hidden");
+      cy.edges()
+        .filter((edge) => isHidden(edge.source()) || isHidden(edge.target()))
+        .addClass("astra-hidden");
     }
+    notice.hidden = !(mode === "evidence" && claims.length === 0);
     applyCollapsed();
   };
 

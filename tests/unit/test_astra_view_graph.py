@@ -33,7 +33,7 @@ from neurodesk_astra_view.preview import PreviewError, preview_artifact  # noqa:
 FIXTURES = repo_path("tests/fixtures/astra-viewer")
 # The shipped worked example doubles as the richest spec fixture: one spec,
 # one place to edit, and the image test asserts the installed copy of it.
-BET = repo_path("examples/astra-bet")
+BET = repo_path("tests/fixtures/astra-bet")
 
 
 def _node(graph, identifier):

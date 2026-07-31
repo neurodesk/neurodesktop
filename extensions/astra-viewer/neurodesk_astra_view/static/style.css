@@ -29,7 +29,12 @@
 }
 .astra-toolbar button.active { background: #2b6cb0; color: white; }
 
-.astra-trust { border-radius: 999px; font-size: 12px; padding: 4px 9px; }
+.astra-title { align-items: baseline; display: flex; gap: 8px; min-width: 0; }
+.astra-universe { color: #66778a; font-size: 12px; }
+.astra-provenance { align-items: center; display: flex; flex-shrink: 0; gap: 8px; }
+.astra-trust-message { color: #66778a; font-size: 12px; }
+
+.astra-trust { border-radius: 999px; font-size: 12px; padding: 4px 9px; white-space: nowrap; }
 .astra-trust-spec-only { background: #e2e8f0; }
 .astra-trust-executed-unverified { background: #f6d98b; }
 .astra-trust-executed-verified { background: #a7ddb0; }
@@ -49,8 +54,12 @@
 .astra-gaps, .astra-errors { border-top: 1px solid var(--astra-border); padding: 9px 12px; }
 .astra-errors { background: #fff0f0; color: #8b1d1d; }
 .astra-warnings { background: #fff7e0; border-bottom: 1px solid var(--astra-border); color: #7a5410; font-size: 13px; padding: 9px 12px; }
+.astra-notice { background: #eef2f7; border-bottom: 1px solid var(--astra-border); color: #47576b; font-size: 13px; padding: 9px 12px; }
+.astra-notice[hidden] { display: none; }
 
 @media (max-width: 760px) {
   .astra-body { grid-template-columns: 1fr; }
   .astra-inspector { border-left: 0; border-top: 1px solid var(--astra-border); }
+  .astra-header { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .astra-provenance { flex-wrap: wrap; }
 }

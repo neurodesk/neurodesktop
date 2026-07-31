@@ -116,7 +116,7 @@ path_append_if_missing "/opt/conda/condabin"
 export PATH
 
 # Default to host Ollama from inside Docker unless explicitly overridden.
-# Local Ollama mode (START_LOCAL_LLMS=1) overrides this in before_notebook.sh.
+# before_notebook.sh repoints this at 127.0.0.1 when the host is unreachable.
 if [ -z "${OLLAMA_HOST}" ]; then
         export OLLAMA_HOST="http://host.docker.internal:11434"
 fi

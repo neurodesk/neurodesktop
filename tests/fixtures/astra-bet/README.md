@@ -1,7 +1,8 @@
 # BET threshold sensitivity — worked ASTRA example
 
 A minimal but complete `astra.yaml` you can copy as the starting point for your
-own analysis. It records one methodological decision — FSL BET's fractional
+own analysis. Its repository source doubles as a regression fixture. It records
+one methodological decision — FSL BET's fractional
 intensity threshold — with two defensible options, and connects a prior
 insight, four outputs, and an artifact-backed finding to that decision.
 

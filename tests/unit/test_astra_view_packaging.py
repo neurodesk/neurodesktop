@@ -6,6 +6,7 @@ from testlib import repo_path
 
 
 ROOT = repo_path("extensions/astra-viewer")
+EXAMPLE = repo_path("tests/fixtures/astra-bet")
 DOCKERFILE = repo_path("Dockerfile").read_text(encoding="utf-8")
 
 
@@ -90,6 +91,16 @@ def test_viewer_is_installed_without_resolving_its_own_dependencies():
     """
     assert "source=extensions/astra-viewer" in DOCKERFILE
     assert "pip install --no-deps /tmp/astra-viewer" in DOCKERFILE
+
+
+def test_worked_example_is_shipped_from_tests_fixtures():
+    assert (EXAMPLE / "astra.yaml").is_file()
+    assert "source=tests,target=/tmp/tests,ro" in DOCKERFILE
+    assert (
+        "cp -a /tmp/tests/fixtures/astra-bet /opt/neurodesktop/examples/"
+        in DOCKERFILE
+    )
+    assert "source=examples" not in DOCKERFILE
 
 
 def test_viewer_pins_match_the_image_pins():

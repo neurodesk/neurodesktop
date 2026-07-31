@@ -46,6 +46,34 @@ def _require_no_errors(errors: list[Any], label: str) -> None:
         raise AdapterError(f"{label}: {'; '.join(_messages(errors))}")
 
 
+def _permitted_analysis_keys() -> tuple[str, ...]:
+    try:
+        from astra.datamodel.astra_pydantic import Analysis
+    except ImportError:  # pragma: no cover - the hint is optional context
+        return ()
+    return tuple(sorted(Analysis.model_fields))
+
+
+def _require_valid_analysis_data(errors: list[Any], label: str) -> None:
+    """Fail an analysis, naming the permitted keys when a key is the problem.
+
+    Specs scaffolded by an agent routinely invent plausible-looking top-level
+    fields (`authors`, `narrative`). The released validator answers each one
+    with a bare "Extra inputs are not permitted", which says what is wrong but
+    not what would be right, so the reader has no way to fix it from the
+    viewer. Listing the schema's own field names closes that loop.
+    """
+    messages = _messages(errors)
+    if not messages:
+        return
+    permitted = _permitted_analysis_keys()
+    if permitted and any(
+        "Extra inputs are not permitted" in message for message in messages
+    ):
+        messages.append(f"permitted keys here are: {', '.join(permitted)}")
+    raise AdapterError(f"{label}: {'; '.join(messages)}")
+
+
 def _confined_file(path: Path, root: Path, label: str) -> Path:
     try:
         resolved = path.resolve(strict=True)
@@ -116,7 +144,9 @@ def _resolve_analysis_tree(
         required=scope == ("root",),
         warnings=version_warnings,
     )
-    _require_no_errors(validate_analysis_data(data), f"invalid ASTRA schema at {'/'.join(scope)}")
+    _require_valid_analysis_data(
+        validate_analysis_data(data), f"invalid ASTRA schema at {'/'.join(scope)}"
+    )
     source_dirs[scope] = source_dir
 
     resolved = copy.deepcopy(data)

@@ -1,8 +1,22 @@
+---
+title: ASTRA and Lightcone integration
+description: Assessment, decision record, and viewer specification for the
+  ASTRA/Lightcone integration; the shipped behavior is documented in
+  architecture/astra.md
+parent: index.md
+status: implemented
+last-reviewed: "2026-07-31"
+---
+
 # ASTRA and Lightcone Integration
 
 Status: assessment complete; ASTRA authoring/reporting foundation, read-only
 viewer M1–M4 implemented; execution deferred
 Snapshot date: 2026-07-27 (assessment), 2026-07-30 (implementation)
+
+> This is the historical assessment and design record. The shipped behavior is
+> documented in [ASTRA integration](../architecture/astra.md); testing in
+> [Testing](../testing.md).
 
 ## Executive summary
 
@@ -77,7 +91,7 @@ as shell versus Python or equivalent file serialization, generally should not
 be represented as methodological decisions.
 
 This complements Neurodesktop's existing agent rules in
-[`config/agents/AGENTS.md`](../config/agents/AGENTS.md): discover available tools,
+[`config/agents/AGENTS.md`](../../config/agents/AGENTS.md): discover available tools,
 pin `module load` versions, submit substantial work through Slurm, retain the
 scripts, and visually inspect outputs. ASTRA can describe why a pipeline exists
 and which choices affect its outputs while those established mechanisms remain
@@ -102,8 +116,8 @@ Potential benefits include:
 | OpenCode, Claude, and Codex | Author or review `astra.yaml`, universes, recipes, and evidence using one shared contract; all three ship the pinned upstream ASTRA skill |
 | Notebook Intelligence | Explain or inspect the same project artifacts without introducing another model or credential path |
 | `NEURODESK_API_KEY` and existing provider setup | Continue to provide model access; ASTRA and `lc` do not need a parallel LLM configuration |
-| `ipywidgets==8.1.8` and `jupyterlab_widgets` ([`Dockerfile:576`](../Dockerfile#L576)) | Already installed, so an `anywidget`-based viewer needs no JupyterLab frontend build |
-| `extensions/neurodesk-launcher` ([`Dockerfile:591`](../Dockerfile#L591)) | Established pattern for building and installing an in-repo JupyterLab extension |
+| `ipywidgets==8.1.8` and `jupyterlab_widgets` ([`Dockerfile:576`](../../Dockerfile#L576)) | Already installed, so an `anywidget`-based viewer needs no JupyterLab frontend build |
+| `extensions/neurodesk-launcher` ([`Dockerfile:591`](../../Dockerfile#L591)) | Established pattern for building and installing an in-repo JupyterLab extension |
 | Neurocommand and Lmod | Supply explicitly versioned neuroimaging commands used by analysis scripts |
 | Slurm | Run long analyses in batch allocations rather than in an agent's interactive shell |
 | Apptainer and CVMFS | Provide reproducible neuroimaging software, once Lightcone can represent their use truthfully |
@@ -112,8 +126,8 @@ Potential benefits include:
 | NiiVue and desktop visualization tools | Support the visual QC required after outputs are materialized |
 
 The current agent and OpenCode architecture is documented in
-[`docs/architecture.md`](architecture.md), with package installation in
-the [`Dockerfile`](../Dockerfile). This integration reuses those surfaces rather
+[`docs/architecture.md`](../architecture.md), with package installation in
+the [`Dockerfile`](../../Dockerfile). This integration reuses those surfaces rather
 than adding another chat UI or credential store.
 
 ## Compatibility evidence
@@ -146,7 +160,7 @@ existing Notebook Intelligence or LiteLLM stack.
 
 This establishes Python-package feasibility, not complete image compatibility.
 A real implementation still needs the normal build, startup, Jupyter, agent,
-and full-image checks from [`docs/testing.md`](testing.md).
+and full-image checks from [`docs/testing.md`](../testing.md).
 
 ### Execution smoke test
 
@@ -207,13 +221,13 @@ viewer displays the decision space by default and layers real execution on top
 | Input contract | Spec + universe required; run manifest optional | Useful before `lc` execution is trustworthy; upgrades gracefully once it is |
 | Home | In-repo `extensions/astra-viewer`, importable as `neurodesk_astra_view` | Matches `extensions/neurodesk-launcher`; no squatting on the upstream `astra.*` namespace; upstreamable later |
 | Stack | `anywidget` + vendored Cytoscape.js | `ipywidgets` and `jupyterlab_widgets` are already installed, so this needs no `jupyter labextension build` and no federated-bundle rebuild |
-| Execution posture | The shipped BET example uses the existing module system with `runtime: none`; the viewer consumes its fail-closed Neurodesktop receipt and never invents the hidden tool-container identity | Keeps the provisional route persistently amber while showing output-integrity evidence separately |
+| Execution posture | The shipped BET example (`tests/fixtures/astra-bet`) is specification-only, with no declared containers; `runtime: none` receipts belong to the removed pilot's contract, which the viewer still consumes fail-closed and never uses to invent the hidden tool-container identity | Keeps the provisional route persistently amber while showing output-integrity evidence separately |
 
 `ipycytoscape` was considered and rejected: it ships its own JupyterLab
 frontend bundle whose JupyterLab 4.6 compatibility is unverified, and this
 image already carries two federated-bundle rebuild workarounds
-([`Dockerfile:913`](../Dockerfile#L913) for Notebook Intelligence,
-[`Dockerfile:939`](../Dockerfile#L939) for MyST/RISE). A third is not worth a
+([`Dockerfile:913`](../../Dockerfile#L913) for Notebook Intelligence,
+[`Dockerfile:939`](../../Dockerfile#L939) for MyST/RISE). A third is not worth a
 faster prototype. A full TypeScript labextension was rejected for M1–M4 but
 remains the natural home for a double-click-to-open file handler later.
 
@@ -251,7 +265,10 @@ document where the released schema cannot supply the sketched field.
   fatal. Inline selections may refine a referenced child universe but may not
   select the same decision twice with conflicting values.
 - A project `version` other than the installed `astra-spec` package version is
-  fatal before rendering, despite upstream treating it as a warning. An
+  recorded as a warning — matching upstream `astra validate` — and validation
+  continues against the installed release; the warning is shown on the rendered
+  graph and travels with the error view when validation fails. Only a missing
+  or unsupported installed `astra-spec` package is fatal. An
   Evidence record with neither or both of `doi` and `artifact` is preserved but
   receives the stable warning `evidence-source-cardinality`, because the
   exactly-one rule exists only in upstream prose. A missing recipe or command
@@ -453,9 +470,11 @@ extensions/astra-viewer/
 │       ├── index.js                  # widget ESM
 │       ├── style.css
 │       └── vendor/cytoscape.min.js   # vendored, checked in, license header retained
-└── examples/
-    └── iris_pipeline/                # or a real neuroimaging analysis
 ```
+
+The worked example lives outside the extension: `tests/fixtures/astra-bet` is
+the single canonical worked ASTRA spec, installed into the image at
+`/opt/neurodesktop/examples/astra-bet`.
 
 Two constraints on this layout are load-bearing:
 
@@ -469,21 +488,20 @@ Two constraints on this layout are load-bearing:
   Neurodesktop runs offline and on air-gapped HPC; a CDN reference is a build
   failure, and a unit test asserts there is no external URL in the shipped JS.
 
-Dockerfile changes:
+Dockerfile changes (implemented):
 
-1. Add `astra-tools==<pin>` (and `lightcone-cli==<pin>` once the execution
-   demo lands) to the pip block at [`Dockerfile:544`](../Dockerfile#L544), plus
-   `anywidget`.
-2. Add a bind-mount install block for `extensions/astra-viewer` mirroring
-   [`Dockerfile:591-600`](../Dockerfile#L591-L600) — but simpler, because with
-   anywidget there is no `jupyter labextension build` step and no npm cache to
-   clean.
-3. Add `jq` if the Lightcone hook scripts are ever adopted; not needed for the
-   viewer.
+1. `astra-spec`, `astra-tools`, and `anywidget` are pinned in the conda pip
+   block ([`Dockerfile:554`](../../Dockerfile#L554)); add `lightcone-cli==<pin>`
+   there once the execution demo lands.
+2. `extensions/astra-viewer` installs from a bind mount
+   ([`Dockerfile:636`](../../Dockerfile#L636)); with anywidget there is no
+   `jupyter labextension build` step and no npm cache to clean.
+3. `jq` is installed in the apt block ([`Dockerfile:335`](../../Dockerfile#L335))
+   for the ASTRA agent-skill plugin hooks; the viewer itself does not need it.
 
 ### Tests
 
-Per [`docs/testing.md`](testing.md), default to the unit tier and use the
+Per [`docs/testing.md`](../testing.md), default to the unit tier and use the
 container tier only for what needs a running image. `build_graph()` being pure
 is what makes almost all of this a unit test.
 
@@ -533,8 +551,9 @@ not launch Lightcone and does not turn the provisional module route green.
 
 ### Worked example
 
-For a two-stage `mlp_svm` universe, the Flow and Decisions modes together
-produce:
+For an illustrative two-stage `mlp_svm` universe (a synthetic design
+placeholder — the shipped example is `tests/fixtures/astra-bet`), the Flow and
+Decisions modes together produce:
 
 ```mermaid
 flowchart LR
@@ -568,8 +587,9 @@ Cytoscape.js, whose compound nodes give the collapsible `FE`/`CL` grouping.
 
 ### Viewer acceptance criteria
 
-- The iris example renders in JupyterLab in the built image with no network
-  access and no `jupyter labextension build` step.
+- The BET example (`tests/fixtures/astra-bet`, installed at
+  `/opt/neurodesktop/examples/astra-bet`) renders in JupyterLab in the built
+  image with no network access and no `jupyter labextension build` step.
 - Switching modes preserves node positions and selection.
 - Supplying a different universe changes the decision annotations and nothing
   else.
@@ -601,7 +621,7 @@ that depends on it:
    `runtime: none` and separately proves its module and output evidence without
    claiming the hidden tool-container identity.
 4. **Which example ships** — resolved: the specification-only
-   `examples/astra-bet` neuroimaging example is canonical. Small
+   `tests/fixtures/astra-bet` neuroimaging example is canonical. Small
    synthetic fixtures remain appropriate for focused unit tests.
 
 ---
@@ -726,13 +746,11 @@ This is the reason `adapter.py` is isolated.
    image. (Implemented.)
 2. Add harness-neutral ASTRA reference guidance. (Implemented for Codex and
    Claude through the pinned upstream marketplace; OpenCode remains.)
-3. Ship a small, realistic neuroimaging example containing:
-   - BIDS-style input data;
-   - one baseline universe;
-   - one meaningful methodological alternative;
-   - versioned Lmod analysis scripts;
-   - metric, derivative, and visual-QC outputs;
-   - **no declared container**, so no `runtime: none` mismatch can occur.
+3. Ship a small, realistic neuroimaging example. (Implemented as the
+   specification-only `tests/fixtures/astra-bet`, installed at
+   `/opt/neurodesktop/examples/astra-bet`: BIDS-style input identity, one
+   baseline universe, one meaningful methodological alternative, and **no
+   declared container**, so no `runtime: none` mismatch can occur.)
 4. Build the viewer through M1–M3. (Implemented.)
 5. Add tests that verify the installed versions and validate all shipped ASTRA
    fixtures. (Implemented.)
@@ -770,9 +788,9 @@ single-producer, single-consumer machinery — plus an acceptance test that only
 runs on privileged native-amd64 with CVMFS and Slurm — cost more in drift risk
 than the demonstration was worth once made.
 
-Its specification survives as the shipped worked example at
-`examples/astra-bet`; the executable pilot is recoverable from git history on
-the `astra-bet-pilot-parked` branch.
+Its specification survives as the shipped worked example sourced from
+`tests/fixtures/astra-bet`; the executable pilot is recoverable from git
+history on the `astra-bet-pilot-parked` branch.
 
 Revisit execution after the following are true:
 

@@ -69,9 +69,12 @@ def _normalize_status(value: Any, *, artifact_present: bool = False) -> str:
     return normalized if normalized in STATUS_VALUES else "unknown"
 
 
+#: "Selected analysis" read as a restatement of the universe picker sitting
+#: directly above the badge, rather than as a claim about execution. Every
+#: label now names the run state, which is the only thing trust measures.
 def _trust_label(level: str) -> str:
     return {
-        "spec-only": "Selected analysis",
+        "spec-only": "Not executed",
         "executed-unverified": "Executed, unverified",
         "executed-verified": "Executed and verified",
         "provenance-mismatch": "Provenance mismatch",
@@ -334,7 +337,7 @@ def load_run(
 def spec_only_trust() -> dict[str, Any]:
     return {
         "level": "spec-only",
-        "label": "Selected analysis",
+        "label": _trust_label("spec-only"),
         "message": "Shows declared intent. Nothing here was executed.",
         "dismissible": True,
         "output_integrity": "not-run",

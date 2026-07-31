@@ -1,3 +1,12 @@
+---
+title: Test suite audit
+description: Audit and cleanup record behind the two-tier test layout; the
+  current testing contract is documented in testing.md
+parent: index.md
+status: applied
+last-reviewed: "2026-07-31"
+---
+
 # Test suite audit and cleanup proposal
 
 Status: **applied**. The two-tier split, the deletions and the documentation

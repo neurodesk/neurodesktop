@@ -1062,7 +1062,6 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     --mount=type=bind,source=config/lxde,target=/tmp/lxde,ro \
     --mount=type=bind,source=config/lmod,target=/tmp/lmod,ro \
     --mount=type=bind,source=scripts/generate_jupyter_config.py,target=/tmp/generate_jupyter_config.py,ro \
-    --mount=type=bind,source=examples,target=/tmp/examples,ro \
     --mount=type=bind,source=tests,target=/tmp/tests,ro \
     install -D -m 0644 /tmp/jupyter/neurodesk_brain_logo.svg /opt/neurodesk_brain_logo.svg \
     && install -D -m 0644 /tmp/jupyter/neurodesk_brain_icon.svg /opt/neurodesk_brain_icon.svg \
@@ -1109,7 +1108,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     # also the spec the viewer and agent-skill image tests validate against,
     # so the example cannot silently rot.
     && install -d -m 0755 /opt/neurodesktop/examples \
-    && cp -a /tmp/examples/astra-bet /opt/neurodesktop/examples/ \
+    && cp -a /tmp/tests/fixtures/astra-bet /opt/neurodesktop/examples/ \
     && chown -R root:users /opt/neurodesktop/examples \
     && install -m 0755 /tmp/generate_jupyter_config.py /opt/neurodesktop/scripts/generate_jupyter_config.py \
     && cp -a /tmp/jupyter/webapp_wrapper/. /opt/neurodesktop/webapp_wrapper/ \

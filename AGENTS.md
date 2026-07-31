@@ -10,12 +10,23 @@
   inside the built image with `pytest /opt/tests/` and is only for assertions
   that need a running container. Only `tests/container/` is copied into the
   image. Resolve a test's subject through the helpers in `tests/testlib.py`.
+- The docs are a hierarchical wiki rooted at [`docs/index.md`](docs/index.md):
+  every page carries YAML frontmatter (`title`, `description`, `parent`,
+  `status`, `last-reviewed`) and cross-references relatives with markdown
+  links. Historical assessments, plans, and audits live under
+  [`docs/designs/`](docs/designs/index.md) as records; keep current behavior
+  in the reference pages, not in the records.
 - Follow the project testing and container validation expectations in
   [`docs/testing.md`](docs/testing.md).
 - Use [`docs/architecture.md`](docs/architecture.md) for project architecture,
-  startup flow, build-time behavior, and directory layout.
+  startup flow, and directory layout; it links to one page per subsystem
+  under [`docs/architecture/`](docs/architecture/), including
+  [build-time behavior](docs/architecture/build.md).
 - Use [`docs/environment-variables.md`](docs/environment-variables.md) for
   supported runtime and build environment variables.
+- `docs/architecture.md`, `docs/testing.md`, and
+  `docs/environment-variables.md` are referenced by path from tests and the
+  compiled agentic workflows; do not move or rename them.
 - When changing `print_access_url.sh` (the end-of-startup access-link banner)
   or how `before_notebook.sh` launches it, run `pytest
   tests/unit/test_print_access_url.py` from a checkout.
@@ -25,10 +36,10 @@
   tests/unit/test_astra_view_packaging.py` from a checkout and `pytest
   /opt/tests/test_astra_view_image.py` in the built image. Keep every read path
   confined and keep `adapter.py` as the only released-schema-aware viewer
-  module. `examples/astra-bet` is the single canonical worked ASTRA spec: the
-  unit tests read it from the checkout, the image tests validate its installed
-  copy at `/opt/neurodesktop/examples/astra-bet`, and users copy it as a
-  starting point — do not fork a second copy under `tests/`.
+  module. `tests/fixtures/astra-bet` is the single canonical worked ASTRA spec:
+  the unit tests read it from the checkout, the image tests validate its
+  installed copy at `/opt/neurodesktop/examples/astra-bet`, and users copy that
+  installed copy as a starting point — do not fork a second source copy.
 - When changing the file-browser ASTRA viewer — the
   `neurodesk_astra_view.serverext` server extension or the
   `neurodesk-launcher:astra-viewer` file type/factory plugin — run `pytest

@@ -8,6 +8,7 @@ from typing import Any
 
 from .adapter import AdapterError, adapt_project
 from .gaps import detect_gaps
+from .layout import assign_layout
 from .manifest import RunManifestError, load_run, spec_only_trust
 from .preview import PreviewError, preview_artifact
 
@@ -380,6 +381,11 @@ def _build_valid_graph(project: dict[str, Any], run_path: str | Path | None):
         node.pop("has_decisions", None)
         node.pop("has_outputs", None)
 
+    assign_layout(nodes, edges)
+
+    root_analysis = next(
+        (item for item in project["analyses"] if item["parent"] is None), None
+    )
     return {
         "nodes": nodes,
         "edges": edges,
@@ -391,6 +397,7 @@ def _build_valid_graph(project: dict[str, Any], run_path: str | Path | None):
             "valid": True,
             "schema_version": project["schema_version"],
             "universe_id": project["universe_id"],
+            "analysis_name": root_analysis["label"] if root_analysis else None,
             "baseline": project["baseline"],
             "run_source": overlay["source"] if overlay else None,
         },

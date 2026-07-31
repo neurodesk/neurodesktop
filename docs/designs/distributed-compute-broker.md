@@ -1,3 +1,12 @@
+---
+title: Distributed compute broker design
+description: Proposed production design for JupyterHub → Forgejo Actions →
+  site-local dispatchers → SLURM or Kubernetes with DataLad-managed data
+parent: index.md
+status: proposed
+last-reviewed: "2026-07-31"
+---
+
 # Neurodesk Distributed Compute Broker
 
 ## Production design specification: JupyterHub → Forgejo Actions → site-local dispatchers → SLURM or Kubernetes, with DataLad-managed data and provenance
@@ -129,9 +138,6 @@ accepted trade-offs.
 ## 2. Normative language and invariants
 
 **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are normative.
-Terminology follows the Neurodesk controlled vocabulary (`CONTEXT.md` in the
-neurodesktop repository): *verified run*, *truthful provenance*, and *derived
-trust* carry the meanings defined there.
 
 ### 2.1 Security invariants
 
@@ -338,6 +344,7 @@ Every compute site supplies a small, administrator-reviewed configuration:
 site_id: alpha
 executor: slurm
 runner_label: hpc-alpha-<forgejo-user>
+enrolled_forgejo_actor: <forgejo-user>
 allowed_forgejo_host: forge.neurodesk.org
 allowed_dataset_owners:
   - neurodesk-data
@@ -497,16 +504,22 @@ metadata:
     neurodesk.org/credential-purpose: forgejo-user
 type: Opaque
 stringData:
-  token: "<repository-restricted token>"
+  FORGEJO_DISPATCH_TOKEN: "<dispatcher-repository token>"
+  FORGEJO_DATA_TOKEN: "<approved dataset-repository token>"
+  SEAWEED_ACCESS_KEY_ID: "<per-user exchange key id>"
+  SEAWEED_SECRET_KEY: "<per-user exchange key>"
 ```
 
-The Hub reads only the spawning user's Secret and exposes
-`FORGEJO_URL=https://forge.neurodesk.org` and `FORGEJO_TOKEN=<token>`. The
-credential helper must not put the token in a URL:
+The Secret keys are the exact environment-variable names the notebook client
+requires, because section 13.2 injects the whole Secret with `extra_env_from`
+(a `secretRef` maps keys to variables verbatim). The pre-spawn hook sets
+`NEURODESK_FORGEJO_URL=https://forge.neurodesk.org` alongside them. Pod
+startup must be tested to receive every required variable. The credential
+helper must not put the token in a URL:
 
 ```bash
 git config --global credential.https://forge.neurodesk.org.helper \
-  '!f() { printf "%s\n" "username=token" "password=${FORGEJO_TOKEN}"; }; f'
+  '!f() { printf "%s\n" "username=token" "password=${FORGEJO_DATA_TOKEN}"; }; f'
 ```
 
 ### 5.5 Credential inventory
@@ -532,7 +545,8 @@ acceptable and the scope limit it imposes.
 ### 5.6 Secrets prohibited from compute jobs
 
 Never export to SLURM or include in a Kubernetes compute Job:
-`FORGEJO_TOKEN`; runner connection UUID/token; Forgejo administrator token;
+`FORGEJO_DISPATCH_TOKEN`, `FORGEJO_DATA_TOKEN`, or any other user Forgejo
+token; runner connection UUID/token; Forgejo administrator token;
 JupyterHub API token; Kubernetes dispatcher ServiceAccount token; PostgreSQL
 or backup credentials.
 
@@ -1565,6 +1579,7 @@ nd_update_state() {
     flock -x 9
     local temporary now
     temporary=$(mktemp "${run_dir}/.state.XXXXXX")
+    trap 'rm -f -- "${temporary:-}"' EXIT
     now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
     jq -S -e "$@" \
@@ -1579,6 +1594,7 @@ nd_update_state() {
     sync -f "${temporary}" 2>/dev/null || true
     mv -f -- "${temporary}" "${run_dir}/state.json"
     sync -f "${run_dir}" 2>/dev/null || true
+    trap - EXIT
   ) 9>"${run_dir}/state.lock"
 }
 ```
@@ -1755,6 +1771,14 @@ export ND_STATE_ROOT
 [[ "${slurm_bin_dir}" = /* && -x "${slurm_bin_dir}/sbatch" ]] ||
   nd_die "invalid Slurm binary directory"
 
+# The syntax check above is not the binding: the onboarding registry rendered
+# the enrolled Forgejo principal into this runner's site policy, and any
+# other actor reaching this repository-scoped runner is a misbinding.
+expected_actor=$(jq -er .enrolled_forgejo_actor "${policy}")
+[[ "${actor}" == "${expected_actor}" ]] ||
+  nd_die "actor is not the enrolled principal for this runner"
+
+submit_timeout=$(jq -er .submit_timeout_seconds "${policy}")
 account=$(jq -er --arg p "${resource_profile}" '.resources[$p].account' "${policy}")
 partition=$(jq -er --arg p "${resource_profile}" '.resources[$p].partition' "${policy}")
 walltime=$(jq -er --arg p "${resource_profile}" '.resources[$p].time' "${policy}")
@@ -1860,12 +1884,18 @@ clone_exact() {
     # operation depends on the git-annex branch: location logs for the
     # locality preflight, remote.log for special-remote configuration and
     # autoenable, and `datalad get --source`. A depth-1 tip is sufficient
-    # because each location-log file in the tree is complete. Harmless for
-    # the non-annex workflow clone.
-    git -C "${destination}" -c credential.helper= \
-      fetch --quiet --no-tags --depth=1 origin \
-      refs/heads/git-annex:refs/heads/git-annex
-    git -C "${destination}" annex init --quiet "neurodesk-dispatch"
+    # because each location-log file in the tree is complete. A Git-only
+    # repository — the normal workflow repository shape — has no such ref,
+    # so probe for it and skip annex setup entirely when it is absent; the
+    # dataset preflight below still fails closed because `git annex info`
+    # cannot succeed in a clone that was never annex-initialized.
+    if git -C "${destination}" -c credential.helper= \
+        ls-remote --exit-code origin refs/heads/git-annex >/dev/null; then
+      git -C "${destination}" -c credential.helper= \
+        fetch --quiet --no-tags --depth=1 origin \
+        refs/heads/git-annex:refs/heads/git-annex
+      git -C "${destination}" annex init --quiet "neurodesk-dispatch"
+    fi
   )
 }
 
@@ -1901,6 +1931,9 @@ install -m 0700 "${dispatcher_dir}/scripts/state-lib.sh" "${work_dir}/control/st
 install -m 0700 "${dispatcher_dir}/config/runtime/alpha.sh" \
   "${work_dir}/control/activate.sh"
 install -m 0600 "${run_dir}/request.json" "${work_dir}/control/request.json"
+sha256sum "${work_dir}/control/request.json" \
+  >"${work_dir}/control/request.json.sha256"
+chmod 0600 "${work_dir}/control/request.json.sha256"
 
 nd_update_state "${run_dir}" \
   '.phase = "SUBMITTING"
@@ -1912,8 +1945,13 @@ nd_update_state "${run_dir}" \
   --arg job_name "nd-${run_key//-/}" \
   --arg digest_prefix "${digest:0:16}"
 
+# A hung scheduler command would otherwise block this capacity-1 runner with
+# the submission outcome unknown. Timeout and ambiguous receipts both become
+# SUBMIT_UNCERTAIN: only the uncertain-submission recovery procedure may
+# resolve them; nothing here retries automatically.
 receipt=$(
   env -i PATH="${slurm_bin_dir}:/usr/bin:/bin" \
+    timeout --kill-after=15 "${submit_timeout}" \
     "${slurm_bin_dir}/sbatch" --parsable --export=NIL --no-requeue \
       --job-name="nd-${run_key//-/}" \
       --comment="neurodesk:${run_key}:${digest:0:16}" \
@@ -1926,12 +1964,17 @@ receipt=$(
       --output="${work_dir}/logs/driver-%j.log" \
       --open-mode=append \
       "${work_dir}/control/driver.sh" "${work_dir}"
-)
+) || {
+  nd_update_state "${run_dir}" '.phase = "SUBMIT_UNCERTAIN"'
+  nd_die "sbatch failed or timed out; do not resubmit automatically"
+}
 printf '%s\n' "${receipt}" >"${run_dir}/scheduler-submit.out"
 chmod 0600 "${run_dir}/scheduler-submit.out"
 
-[[ "${receipt}" =~ ^([0-9]+)(\;([A-Za-z0-9._-]+))?$ ]] ||
-  nd_die "unparseable sbatch receipt; do not resubmit automatically"
+[[ "${receipt}" =~ ^([0-9]+)(\;([A-Za-z0-9._-]+))?$ ]] || {
+  nd_update_state "${run_dir}" '.phase = "SUBMIT_UNCERTAIN"'
+  nd_die "unparsable sbatch receipt; do not resubmit automatically"
+}
 job_id=${BASH_REMATCH[1]}
 cluster=${BASH_REMATCH[3]:-alpha}
 
@@ -1954,10 +1997,10 @@ Production refinements: stage an approved result dataset before submitting;
 handle installed DataLad subdatasets explicitly; use
 `git annex checkpresentkey --batch` for a machine-readable active check once
 the pinned git-annex version is integration-tested; transition to `REJECTED`
-with a sanitized reason if staging fails; preserve `SUBMITTING` as uncertain
-if `sbatch` or receipt parsing fails; verify `state_root`/`work_root`
+with a sanitized reason if staging fails; verify `state_root`/`work_root`
 ownership and non-symlink status; reject a workflow URL whose registry entry
-does not match the requested engine and entrypoint.
+does not match the requested engine and entrypoint; and cover a Git-only
+(non-annex) workflow repository fixture in the integration tests.
 
 ### 9.7 Credential-free driver
 
@@ -2041,8 +2084,9 @@ export HOME="${home:?cannot resolve home}" USER="$(id -un)" LOGNAME="$(id -un)"
 export PATH="/usr/local/bin:/usr/bin:/bin"
 export DATALAD_LOG_LEVEL=info
 
-for secret_name in FORGEJO_TOKEN GITHUB_TOKEN AWS_ACCESS_KEY_ID \
-  AWS_SECRET_ACCESS_KEY KUBECONFIG JUPYTERHUB_API_TOKEN; do
+for secret_name in FORGEJO_TOKEN FORGEJO_DISPATCH_TOKEN FORGEJO_DATA_TOKEN \
+  GITHUB_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY KUBECONFIG \
+  JUPYTERHUB_API_TOKEN; do
   unset "${secret_name}"
 done
 
@@ -2055,6 +2099,14 @@ done
 : "${TMPDIR:?site did not provide a per-job TMPDIR}"
 mkdir -p "${TMPDIR}/engine" "${TMPDIR}/published"
 
+# The staged request and checkouts sit on writable scratch between sbatch
+# and job start, and `rev-parse HEAD` alone cannot detect edited files: an
+# altered request could expand paths, and an altered workflow tree could
+# execute while provenance records the original commit. Re-verify the
+# request bytes against the digest recorded at staging and require clean
+# trees before reading anything from them.
+sha256sum --check --quiet "${control}/request.json.sha256" || exit 65
+
 run_key=$(jq -er .run_key "${request}")
 dataset_commit=$(jq -er .dataset.commit "${request}")
 workflow_commit=$(jq -er .workflow.commit "${request}")
@@ -2065,6 +2117,8 @@ dataset="${work_dir}/input-dataset"
 workflow="${work_dir}/workflow"
 test "$(git -C "${dataset}" rev-parse HEAD)" = "${dataset_commit}"
 test "$(git -C "${workflow}" rev-parse HEAD)" = "${workflow_commit}"
+[[ -z "$(git -C "${dataset}" status --porcelain)" ]] || exit 65
+[[ -z "$(git -C "${workflow}" status --porcelain)" ]] || exit 65
 
 cd "${dataset}"
 datalad get --source=alpha-cache -- "${paths[@]}"
@@ -2429,6 +2483,14 @@ accepts only parameters validated by `parameters.schema.json`; does not call
 cloud, or personal credentials and no arbitrary internet access; terminates
 children on `TERM` with a meaningful nonzero exit code; and is
 integration-tested with its locked containers/environment.
+
+The no-internet clause is not self-enforcing on SLURM: the driver removes
+credentials, but nothing in the job stops a workflow from reading authorized
+data and sending it to an external endpoint. Site enrollment therefore
+requires compute-node egress controls — a no-WAN partition, firewall policy,
+or equivalent — and the site acceptance test must run a job that attempts
+outbound WAN connections and prove they are denied while the workflow
+otherwise completes.
 
 Scientific workflow code may be user-selected because it executes inside the
 user's scheduler allocation as that same user. It is never executed as a
@@ -3329,7 +3391,11 @@ gitea:
 
     actions:
       ENABLED: true
-      DEFAULT_ACTIONS_URL: https://data.forgejo.org
+      # Fail closed: resolve relative `uses:` only against this instance.
+      # Pointing this at an external instance would let a future
+      # author-written workflow execute remote code from a host this
+      # platform does not control.
+      DEFAULT_ACTIONS_URL: https://forge.neurodesk.org
       LOG_RETENTION_DAYS: 14
       ARTIFACT_RETENTION_DAYS: 7
       ENDLESS_TASK_TIMEOUT: 30m
@@ -3345,8 +3411,11 @@ gitea:
       ENABLED: true
 ```
 
-The reference workflows use no external `uses:` actions, so
-`DEFAULT_ACTIONS_URL` is not on their execution path. Record the chart and
+The reference workflows use no external `uses:` actions, and
+`DEFAULT_ACTIONS_URL` points at the instance itself, so a relative `uses:`
+in any future workflow can only resolve to a repository this platform
+controls; verify the rendered `app.ini` carries that value after
+`helm template`. Record the chart and
 application image digests after `helm dependency update` or OCI resolution —
 a tag alone is not a supply-chain lock.
 
@@ -3567,6 +3636,7 @@ import os
 import re
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import quote, urlparse
 
 import httpx
@@ -3602,16 +3672,23 @@ class NeurodeskBroker:
 
     @staticmethod
     def _validate_url(value: str, owner: str) -> None:
+        # Mirror the dispatcher regex exactly: one repository component,
+        # no explicit port, and no percent-encoded separators. A looser
+        # client check would accept URLs the dispatcher rejects — or,
+        # worse, URLs like /owner/repo.git/extra.git that only look
+        # pinned to one repository.
         parsed = urlparse(value)
+        repository = parsed.path.removeprefix(f"/{owner}/")
         if (
             parsed.scheme != "https"
             or parsed.hostname != "forge.neurodesk.org"
+            or parsed.port is not None
             or parsed.username is not None
             or parsed.password is not None
             or parsed.query
             or parsed.fragment
-            or not parsed.path.startswith(f"/{owner}/")
-            or not parsed.path.endswith(".git")
+            or repository == parsed.path
+            or not re.fullmatch(r"[A-Za-z0-9_.-]+\.git", repository)
         ):
             raise ValueError("repository URL is not approved")
 
@@ -3647,6 +3724,22 @@ class NeurodeskBroker:
             run_key = run_key.lower()
             if not RUN_KEY.fullmatch(run_key):
                 raise ValueError("run_key must be a canonical UUID")
+
+        # Persist the key durably before the POST: if dispatch times out
+        # after Forgejo has already accepted it, a retry must reuse this
+        # exact key — the dispatcher's idempotency check then returns the
+        # existing receipt instead of minting a duplicate analysis.
+        journal_dir = Path.home() / ".neurodesk" / "runs"
+        journal_dir.mkdir(parents=True, exist_ok=True)
+        journal = journal_dir / f"{run_key}.json"
+        if not journal.exists():
+            temporary = journal.with_suffix(".tmp")
+            with open(temporary, "w") as handle:
+                json.dump({"run_key": run_key, "site": site}, handle)
+                handle.flush()
+                os.fsync(handle.fileno())
+            temporary.rename(journal)
+
         owner, repository = self.repository.split("/", 1)
         endpoint = (
             f"{self.forgejo}/api/v1/repos/{quote(owner)}/{quote(repository)}"
