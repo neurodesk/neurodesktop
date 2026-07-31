@@ -24,7 +24,7 @@ HOOK_SCRIPTS = SKILLS_CHECKOUT / "plugins/astra/hooks/scripts"
 OPENCODE_SKILL = Path(
     "/opt/jovyan_defaults/.config/opencode/skills/astra/SKILL.md"
 )
-BET_PROJECT = Path("/opt/neurodesktop/pilots/astra-lightcone-bet/project")
+BET_PROJECT = Path("/opt/neurodesktop/examples/astra-bet")
 
 CODEX_ENV = {"HOME": "/opt/jovyan_defaults", "CODEX_HOME": "/opt/jovyan_defaults/.codex"}
 CLAUDE_ENV = {"HOME": "/opt/jovyan_defaults", "DISABLE_TELEMETRY": "1"}

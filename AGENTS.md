@@ -16,29 +16,19 @@
   startup flow, build-time behavior, and directory layout.
 - Use [`docs/environment-variables.md`](docs/environment-variables.md) for
   supported runtime and build environment variables.
-- When changing the pilot execution receipt schema, CLI, fixtures, hashing
-  rules, path-confinement contract, or trust conditionals, keep
-  [`docs/pilot-execution-receipt.md`](docs/pilot-execution-receipt.md) aligned
-  and run `pytest tests/unit/test_pilot_execution_receipt_schema.py
-  tests/unit/test_pilot_execution_receipt_cli.py` from a checkout and `pytest
-  /opt/tests/test_pilot_execution_receipt_image.py` in the built image.
 - When changing `print_access_url.sh` (the end-of-startup access-link banner)
   or how `before_notebook.sh` launches it, run `pytest
   tests/unit/test_print_access_url.py` from a checkout.
-- When changing the bounded ASTRA/Lightcone BET pilot, run `pytest
-  tests/unit/test_astra_lightcone_bet_pilot_cli.py
-  tests/unit/test_pilot_execution_receipt_cli.py` from a checkout and `pytest
-  /opt/tests/test_astra_lightcone_bet_pilot_image.py` in the built image. Run
-  its opt-in real module/Slurm acceptance only in a privileged native-amd64
-  container with CVMFS and local Slurm ready; set
-  `NEURODESKTOP_RUN_ASTRA_LIGHTCONE_PILOT=1` for that test.
 - When changing the ASTRA viewer adapter, graph/gap model, previews, widget,
-  vendored Cytoscape.js, manifest/receipt ingestion, or package pins, run
+  vendored Cytoscape.js, run-evidence ingestion, or package pins, run
   `pytest tests/unit/test_astra_view_graph.py
   tests/unit/test_astra_view_packaging.py` from a checkout and `pytest
   /opt/tests/test_astra_view_image.py` in the built image. Keep every read path
-  confined, keep `adapter.py` as the only released-schema-aware viewer module,
-  and never promote the module-pilot receipt above `executed-unverified`.
+  confined and keep `adapter.py` as the only released-schema-aware viewer
+  module. `examples/astra-bet` is the single canonical worked ASTRA spec: the
+  unit tests read it from the checkout, the image tests validate its installed
+  copy at `/opt/neurodesktop/examples/astra-bet`, and users copy it as a
+  starting point — do not fork a second copy under `tests/`.
 - When changing the file-browser ASTRA viewer — the
   `neurodesk_astra_view.serverext` server extension or the
   `neurodesk-launcher:astra-viewer` file type/factory plugin — run `pytest

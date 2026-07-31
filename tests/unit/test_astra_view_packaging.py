@@ -37,18 +37,48 @@ def test_cytoscape_is_vendored_with_its_license_header():
     assert "OUT OF OR IN CONNECTION WITH THE SOFTWARE" in license_text
 
 
-def test_frontend_cleanup_removes_only_its_registered_model_listeners():
+def test_frontend_renders_version_drift_warnings_before_errors():
+    """The warning banner is the context for a validation failure, so it must
+    render on the invalid path too — before the early return on errors."""
     javascript = (ROOT / "neurodesk_astra_view/static/index.js").read_text(
         encoding="utf-8"
     )
+    stylesheet = (ROOT / "neurodesk_astra_view/static/style.css").read_text(
+        encoding="utf-8"
+    )
+
+    assert javascript.index("graph.warnings") < javascript.index("graph.errors")
+    assert "astra-warnings" in javascript
+    assert ".astra-warnings" in stylesheet
+
+
+def test_frontend_cleanup_removes_only_its_registered_model_listeners():
+    """Each render registers its listeners exactly once, and the teardown
+    callback it returns to anywidget deregisters exactly those listeners, so
+    repeated mounts cannot accumulate stale handlers."""
+    javascript = (ROOT / "neurodesk_astra_view/static/index.js").read_text(
+        encoding="utf-8"
+    )
+
+    teardown = re.search(r"return \(\) => \{(?P<body>.*?)\n  \};", javascript, re.DOTALL)
+    assert teardown, "render() must return a teardown callback"
 
     for event, callback in (
         ("change:mode", "applyMode"),
         ("change:collapsed", "applyCollapsed"),
         ("change:selected_node", "onSelectedNodeChange"),
     ):
-        assert javascript.count(f'model.on("{event}", {callback})') == 1
-        assert javascript.count(f'model.off("{event}", {callback})') == 1
+        on_call = f'model.on("{event}", {callback})'
+        off_call = f'model.off("{event}", {callback})'
+        assert javascript.count(on_call) == 1
+        assert javascript.count(off_call) == 1
+        assert javascript.index(on_call) < teardown.start(), (
+            f"{on_call} must register during render, not in the teardown"
+        )
+        assert off_call in teardown.group("body"), (
+            f"{off_call} must run in the teardown callback"
+        )
+    assert "cy.destroy()" in teardown.group("body")
 
 
 def test_viewer_is_installed_without_resolving_its_own_dependencies():
@@ -60,9 +90,6 @@ def test_viewer_is_installed_without_resolving_its_own_dependencies():
     """
     assert "source=extensions/astra-viewer" in DOCKERFILE
     assert "pip install --no-deps /tmp/astra-viewer" in DOCKERFILE
-    # The viewer revalidates receipts through the same implementation the CLI
-    # uses, so the module has to be importable and not just on PATH.
-    assert "/opt/neurodesktop/lib/neurodesktop_pilot_receipt.py" in DOCKERFILE
 
 
 def test_viewer_pins_match_the_image_pins():

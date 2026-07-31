@@ -70,13 +70,29 @@ def _installed_schema_version() -> str:
     return installed
 
 
-def _check_version(data: dict[str, Any], label: str, *, required: bool) -> None:
+def _check_version(
+    data: dict[str, Any], label: str, *, required: bool, warnings: list[str]
+) -> None:
+    """Record a declared-version drift instead of refusing to render.
+
+    `astra validate` warns and validates against the installed release; the
+    viewer follows suit so a spec scaffolded against a stale example still
+    renders. If the spec genuinely uses a different schema, the installed
+    validators fail it on their own and the warning explains why.
+    """
     version = data.get("version")
-    if version is None and not required:
+    if version is None:
+        if required:
+            warnings.append(
+                f"{label} does not declare an ASTRA spec version; the graph "
+                f"reflects installed astra-spec {ASTRA_SPEC_VERSION}"
+            )
         return
     if version != ASTRA_SPEC_VERSION:
-        raise AdapterError(
-            f"{label} declares ASTRA version {version!r}; expected {ASTRA_SPEC_VERSION!r}"
+        warnings.append(
+            f"{label} declares ASTRA spec version {version!r}, but astra-spec "
+            f"{ASTRA_SPEC_VERSION} is installed; the graph reflects the "
+            f"installed version"
         )
 
 
@@ -88,10 +104,19 @@ def _resolve_analysis_tree(
     scope: tuple[str, ...],
     source_dirs: dict[tuple[str, ...], Path],
     active_files: set[Path],
+    version_warnings: list[str],
 ) -> dict[str, Any]:
     load_yaml, validate_analysis_data, _, _, _ = _astra_api()
+    # Record the version drift before schema validation: if the installed
+    # schema then rejects the spec, the warning is the context that explains
+    # the failure.
+    _check_version(
+        data,
+        f"analysis {'/'.join(scope)}",
+        required=scope == ("root",),
+        warnings=version_warnings,
+    )
     _require_no_errors(validate_analysis_data(data), f"invalid ASTRA schema at {'/'.join(scope)}")
-    _check_version(data, f"analysis {'/'.join(scope)}", required=scope == ("root",))
     source_dirs[scope] = source_dir
 
     resolved = copy.deepcopy(data)
@@ -118,6 +143,7 @@ def _resolve_analysis_tree(
                 scope=child_scope,
                 source_dirs=source_dirs,
                 active_files=active_files,
+                version_warnings=version_warnings,
             )
             active_files.remove(child_file)
             child_resolved["path"] = str(external_path)
@@ -132,6 +158,7 @@ def _resolve_analysis_tree(
                 scope=child_scope,
                 source_dirs=source_dirs,
                 active_files=active_files,
+                version_warnings=version_warnings,
             )
     if children:
         resolved["analyses"] = children
@@ -500,6 +527,20 @@ def adapt_project(
 ) -> dict[str, Any]:
     """Validate, confine, resolve, and normalize an ASTRA project."""
 
+    version_warnings: list[str] = []
+    try:
+        return _adapt_project(spec_path, universe_path, version_warnings)
+    except AdapterError as error:
+        # Let the caller surface the drift next to the failure it explains.
+        error.version_warnings = version_warnings
+        raise
+
+
+def _adapt_project(
+    spec_path: str | Path,
+    universe_path: str | Path | None,
+    version_warnings: list[str],
+) -> dict[str, Any]:
     load_yaml, _, validate_analysis, _, validate_universe = _astra_api()
     _installed_schema_version()
     try:
@@ -520,6 +561,7 @@ def adapt_project(
         scope=("root",),
         source_dirs=source_dirs,
         active_files={spec},
+        version_warnings=version_warnings,
     )
     _require_no_errors(
         validate_analysis(raw, base_path=project_root),
@@ -576,6 +618,7 @@ def adapt_project(
             "universe_path": str(selected_path) if selected_path else None,
             "baseline": baseline,
             "schema_version": ASTRA_SPEC_VERSION,
+            "version_warnings": list(version_warnings),
         }
     )
     return entities

@@ -138,14 +138,27 @@ def test_ensure_ssh_keys_failed_pub_publish_is_retryable(tmp_path):
     shim_dir = tmp_path / "bin"
     shim_dir.mkdir()
     fake_mv = shim_dir / "mv"
-    fake_mv.write_text("#!/bin/bash\nexit 1\n")
+    mv_marker = tmp_path / "mv-marker"
+    # The marker proves the script reached the .pub publish itself; without it
+    # an earlier setup failure could satisfy the same assertions.
+    fake_mv.write_text(
+        "#!/bin/bash\n"
+        'printf "%s\\n" "$*" > "$FAKE_MV_MARKER"\n'
+        "exit 1\n"
+    )
     fake_mv.chmod(0o755)
 
-    code, _ = run_cmd(
+    code, output = run_cmd(
         f"bash {ENSURE_SSH_KEYS}",
-        env={"HOME": str(home), "PATH": f"{shim_dir}:{os.environ['PATH']}"},
+        env={
+            "HOME": str(home),
+            "PATH": f"{shim_dir}:{os.environ['PATH']}",
+            "FAKE_MV_MARKER": str(mv_marker),
+        },
     )
     assert code != 0, "a failed .pub publish must be reported"
+    assert mv_marker.exists(), output
+    assert ".pub" in mv_marker.read_text(), output
     for name in ("guacamole_rsa", "id_rsa"):
         assert not (home / ".ssh" / name).exists(), (
             f"{name} survived a failed publish and would never be regenerated"

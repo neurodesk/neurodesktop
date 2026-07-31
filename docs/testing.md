@@ -24,9 +24,8 @@ pytest tests/unit          # from a checkout, no container needed
 pytest /opt/tests/         # inside the built image
 ```
 
-Running `tests/unit` needs `pytest`, `httpx`, `traitlets`, `jsonschema`,
-`rfc8785==0.1.4`, and `ssh-keygen` (`openssh-client`); see
-`.github/workflows/unit-tests.yml`.
+Running `tests/unit` needs `pytest`, `httpx`, `traitlets`, and `ssh-keygen`
+(`openssh-client`); see `.github/workflows/unit-tests.yml`.
 
 `tests/unit/test_astra_view_graph.py` additionally needs
 `astra-spec==0.0.12`, `astra-tools==0.2.11`, and `anywidget==0.11.0`, because
@@ -117,29 +116,6 @@ seed failures do not block chat creation. The image test drives a real
 ``FileContentsManager.new_untitled(..., ext=".chat")`` call against the shipped
 hook and ``/opt/AGENTS.md``.
 
-For the bounded ASTRA/Lightcone BET pilot:
-
-```bash
-pytest tests/unit/test_astra_lightcone_bet_pilot_cli.py \
-  tests/unit/test_pilot_execution_receipt_cli.py
-
-# In every rebuilt image:
-pytest /opt/tests/test_astra_lightcone_bet_pilot_image.py
-
-# Explicit native-amd64 acceptance in a privileged disposable image with
-# eager CVMFS and integrated local Slurm startup:
-NEURODESKTOP_RUN_ASTRA_LIGHTCONE_PILOT=1 \
-  pytest /opt/tests/test_astra_lightcone_bet_pilot_image.py \
-  -k real_local_slurm
-```
-
-The opt-in test downloads the two checksum-pinned OpenNeuro inputs, submits a
-real job to the `neurodesktop` partition, loads `fsl/6.0.7.22`, validates the
-eight output/manifests and amber receipt, modifies one result to prove fresh
-verification fails, restores it, and verifies again. Run it on native amd64:
-the FSL module sandbox is amd64, and nested module-sandbox emulation is not a
-valid runtime proof on an Apple Silicon Docker Desktop host.
-
 For the read-only ASTRA viewer:
 
 ```bash
@@ -151,11 +127,14 @@ pytest /opt/tests/test_astra_view_image.py
 ```
 
 The unit tier uses the released ASTRA validators against checked-in projects,
-tests external-analysis and child-universe confinement, covers G1-G7 and all
-four trust states, and proves that receipt tampering yields no partial graph.
-The image tier is intentionally small: it checks the installed package/pins,
-the real vendored frontend, and the shipped BET project. It does not rerun the
-Slurm pilot; that remains the separate opt-in native-amd64 acceptance above.
+tests external-analysis and child-universe confinement, and covers G1-G7 and
+the trust states the viewer derives from run evidence. `examples/astra-bet` is
+the canonical worked spec both tiers read: the unit tier reads it from the
+checkout and the image tier validates its installed copy at
+`/opt/neurodesktop/examples/astra-bet`, so a broken example fails the build
+rather than reaching a user. The image tier is otherwise intentionally small —
+the installed package and pins, the real vendored frontend, and the
+file-browser server extension.
 
 ## Negative Test Convention
 

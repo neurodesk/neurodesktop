@@ -121,12 +121,14 @@ def test_jupyter_ai_server_and_frontend_extensions_are_compatible():
 
 
 def test_acp_adapters_use_the_image_agent_binaries_not_vendored_copies():
-    """The adapters install with --omit=optional, dropping their vendored
-    ~250 MB agent binaries; environment_variables.sh points them at the
-    CLIs already in the image instead."""
+    """npm ignores --omit=optional for global installs, so the Dockerfile
+    deletes the adapters' vendored ~250 MB agent binaries explicitly;
+    environment_variables.sh points them at the CLIs already in the image
+    instead."""
     code, npm_root = run_cmd("npm root -g")
     assert code == 0, npm_root
     scope = Path(npm_root.strip()) / "@agentclientprotocol"
+    assert scope.is_dir(), f"ACP adapter scope missing: {scope}"
     vendored = [
         path
         for pattern in ("**/@openai/codex-*", "**/@anthropic-ai/claude-agent-sdk-*-*")

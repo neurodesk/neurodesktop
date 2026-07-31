@@ -13,8 +13,6 @@ import shutil
 import sys
 
 import pytest
-import receipt_fixtures
-import rfc8785
 
 from testlib import repo_path
 
@@ -28,16 +26,14 @@ sys.path.insert(0, str(repo_path("extensions/astra-viewer")))
 
 from neurodesk_astra_view.adapter import AdapterError, adapt_project  # noqa: E402
 from neurodesk_astra_view.graph import build_graph  # noqa: E402
-from neurodesk_astra_view.manifest import (  # noqa: E402
-    RunManifestError,
-    _trust_label,
-    _validate_finalized_receipt,
-)
+from neurodesk_astra_view.manifest import _trust_label  # noqa: E402
 from neurodesk_astra_view.preview import PreviewError, preview_artifact  # noqa: E402
 
 
-PILOT = repo_path("pilots/astra-lightcone-bet/project")
 FIXTURES = repo_path("tests/fixtures/astra-viewer")
+# The shipped worked example doubles as the richest spec fixture: one spec,
+# one place to edit, and the image test asserts the installed copy of it.
+BET = repo_path("examples/astra-bet")
 
 
 def _node(graph, identifier):
@@ -46,10 +42,10 @@ def _node(graph, identifier):
 
 def test_bet_graph_selects_exactly_one_universe_and_keeps_evidence_distinct():
     baseline = build_graph(
-        PILOT / "astra.yaml", PILOT / "universes/bet-f-0-5.yaml"
+        BET / "astra.yaml", BET / "universes/bet-f-0-5.yaml"
     )
     alternative = build_graph(
-        PILOT / "astra.yaml", PILOT / "universes/bet-f-0-3.yaml"
+        BET / "astra.yaml", BET / "universes/bet-f-0-3.yaml"
     )
 
     assert baseline["errors"] == []
@@ -74,17 +70,48 @@ def test_bet_graph_selects_exactly_one_universe_and_keeps_evidence_distinct():
     assert finding["description"].startswith("Each universe materializes")
 
 
-def test_graph_returns_errors_and_no_partial_graph_for_wrong_schema_version(tmp_path):
+def test_wrong_declared_version_warns_but_still_renders(tmp_path):
+    """Match `astra validate`: warn and validate against the installed release.
+
+    Agent-scaffolded specs routinely copy a stale version string from example
+    docs; refusing to render such a spec surfaced nothing the validators would
+    not catch anyway. The drift stays visible as a warning banner.
+    """
     project = tmp_path / "project"
-    shutil.copytree(PILOT, project)
+    shutil.copytree(BET, project)
     spec = project / "astra.yaml"
     spec.write_text(spec.read_text().replace('version: "0.0.12"', 'version: "9.9.9"'))
 
     graph = build_graph(spec)
 
+    assert graph["meta"]["valid"] is True
+    assert graph["errors"] == []
+    assert len(graph["nodes"]) > 0
+    assert len(graph["warnings"]) == 1
+    assert "'9.9.9'" in graph["warnings"][0]
+    assert "0.0.12" in graph["warnings"][0]
+
+
+def test_matching_version_renders_without_warnings():
+    graph = build_graph(BET / "astra.yaml", BET / "universes/bet-f-0-5.yaml")
+
+    assert graph["errors"] == []
+    assert graph["warnings"] == []
+
+
+def test_version_drift_survives_into_an_invalid_graph(tmp_path):
+    """When the installed schema rejects the spec, the drift explains why."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "astra.yaml").write_text(
+        'version: "9.9.9"\nname: broken\noutputs: "not a list"\n'
+    )
+
+    graph = build_graph(project / "astra.yaml")
+
     assert graph["meta"] == {"valid": False}
-    assert graph["nodes"] == []
-    assert "expected '0.0.12'" in graph["errors"][0]
+    assert graph["errors"]
+    assert any("'9.9.9'" in warning for warning in graph["warnings"])
 
 
 def test_unknown_trust_level_has_a_safe_label():
@@ -168,7 +195,7 @@ def test_explicit_runtime_none_with_declared_container_is_red_and_non_dismissibl
     tmp_path,
 ):
     project = tmp_path / "project"
-    shutil.copytree(PILOT, project)
+    shutil.copytree(BET, project)
     output = project / "brain.nii.gz"
     output.write_bytes(b"brain")
     manifest = project / "run-manifest.json"
@@ -197,161 +224,115 @@ def test_explicit_runtime_none_with_declared_container_is_red_and_non_dismissibl
     assert "did not run" in graph["trust"]["message"]
 
 
-def test_finalized_module_receipt_stays_amber_and_tampering_fails_closed(
-    tmp_path, monkeypatch
-):
-    fixture = json.loads(
-        repo_path(
-            "tests/fixtures/pilot-execution-receipts/valid-success.json"
-        ).read_text()
-    )
-    fixture["analysis"]["universes"] = fixture["analysis"]["universes"][:1]
-    fixture["outputs"] = [
-        item for item in fixture["outputs"] if item["universeId"] == "bet-f-0.5"
-    ]
-    fixture["lightcone"]["manifests"] = [
-        item
-        for item in fixture["lightcone"]["manifests"]
-        if item["outputKey"].startswith("bet-f-0.5:")
-    ]
-    verification = fixture["lightcone"]["verification"]
-    verification["expectedOutputKeys"] = [
-        value
-        for value in verification["expectedOutputKeys"]
-        if value.startswith("bet-f-0.5:")
-    ]
-    verification["results"] = [
-        item
-        for item in verification["results"]
-        if item["outputKey"].startswith("bet-f-0.5:")
-    ]
-    replacements = {
-        "bet-f-0.5": "bet-f-0-5",
-        "bet-brain": "bet_brain",
-        "bet-mask": "bet_mask",
-        "mask-volume": "mask_volume",
-        "boundary-qc": "boundary_qc",
-    }
+def _bet_run(project, manifest_body):
+    """Write a run manifest next to a copy of the worked example."""
+    manifest = project / "run-manifest.json"
+    manifest.write_text(json.dumps(manifest_body))
+    return manifest
 
-    def replace_strings(value):
-        if isinstance(value, str):
-            for old, new in replacements.items():
-                value = value.replace(old, new)
-            return value
-        if isinstance(value, list):
-            return [replace_strings(item) for item in value]
-        if isinstance(value, dict):
-            return {key: replace_strings(item) for key, item in value.items()}
-        return value
 
-    fixture = replace_strings(fixture)
-    run_id = fixture["receiptId"]
-    fixture["analysis"]["spec"]["relativePath"] = f"runs/{run_id}/project/astra.yaml"
-    universe = fixture["analysis"]["universes"][0]
-    universe["definition"]["relativePath"] = (
-        f"runs/{run_id}/project/universes/bet-f-0-5.yaml"
-    )
-    universe["decisions"] = {"bet_fractional_threshold": "f_0_5"}
+def test_execution_without_passing_verification_stays_amber(tmp_path):
+    """The third trust level: evidence of a run, no verification to trust.
 
-    custom_fixtures = tmp_path / "receipt-fixtures"
-    custom_fixtures.mkdir()
-    (custom_fixtures / "valid-success.json").write_text(json.dumps(fixture))
-    monkeypatch.setattr(receipt_fixtures, "FIXTURE_DIR", custom_fixtures)
-    receipt_path, workspace, module_root = receipt_fixtures.materialize_success_receipt(
-        tmp_path / "materialized"
+    Promoting an unverified run to `executed-verified` is the failure this
+    guards; a manifest that simply omits verification must stay amber.
+    """
+    project = tmp_path / "project"
+    shutil.copytree(BET, project)
+    (project / "brain.nii.gz").write_bytes(b"brain")
+    manifest = _bet_run(
+        project,
+        {
+            "execution": {"runtime": "apptainer"},
+            "outputs": [
+                {"output_id": "bet_brain", "artifact": "brain.nii.gz"}
+            ],
+        },
     )
-    monkeypatch.setenv("NEURODESKTOP_LOCAL_CONTAINERS", str(module_root))
-    receipt = json.loads(receipt_path.read_text())
 
-    spec_path = workspace / receipt["analysis"]["spec"]["relativePath"]
-    receipt["analysis"]["spec"].update(
-        receipt_fixtures.write_hashed_file(
-            spec_path, (PILOT / "astra.yaml").read_bytes()
-        )
+    graph = build_graph(
+        project / "astra.yaml", project / "universes/bet-f-0-5.yaml", manifest
     )
-    universe_path = workspace / receipt["analysis"]["universes"][0]["definition"][
-        "relativePath"
-    ]
-    receipt["analysis"]["universes"][0]["definition"].update(
-        receipt_fixtures.write_hashed_file(
-            universe_path, (PILOT / "universes/bet-f-0-5.yaml").read_bytes()
-        )
-    )
-    crate = receipt["roCrate"]
-    crate_root = workspace / crate["rootRelativePath"]
-    (crate_root / "payload/000-astra.yaml").write_bytes(spec_path.read_bytes())
-    (crate_root / "payload/001-bet-f-0-5.yaml").write_bytes(
-        universe_path.read_bytes()
-    )
-    inventory = []
-    for path in crate_root.rglob("*"):
-        if path.is_file():
-            content = path.read_bytes()
-            inventory.append(
-                {
-                    "relativePath": path.relative_to(crate_root).as_posix(),
-                    "sizeBytes": len(content),
-                    "sha256": hashlib.sha256(content).hexdigest(),
-                }
-            )
-    inventory.sort(key=lambda item: item["relativePath"].encode("utf-8"))
-    inventory_path = workspace / crate["inventory"]["relativePath"]
-    crate["inventory"].update(
-        receipt_fixtures.write_hashed_file(
-            inventory_path,
-            json.dumps(
-                inventory,
-                ensure_ascii=False,
-                separators=(",", ":"),
-                sort_keys=True,
-            ).encode(),
-        )
-    )
-    crate["treeSha256"] = hashlib.sha256(rfc8785.dumps(inventory)).hexdigest()
-    receipt_path.write_text(json.dumps(receipt))
-    final_receipt = workspace / "runs" / run_id / "receipt" / "receipt.json"
-    final_receipt.parent.mkdir(parents=True)
-    receipt_path.replace(final_receipt)
 
-    graph = build_graph(spec_path, universe_path, final_receipt)
     assert graph["errors"] == []
     assert graph["trust"]["level"] == "executed-unverified"
-    assert graph["trust"]["output_integrity"] == "passed"
-    output = _node(graph, "output:root/bet_brain")
-    assert output["published"] is True
-    assert output["status"] == "ok"
-
-    tampered = workspace / receipt["outputs"][0]["artifact"]["relativePath"]
-    tampered.write_bytes(tampered.read_bytes() + b"tampered")
-    rejected = build_graph(spec_path, universe_path, final_receipt)
-    assert rejected["nodes"] == []
-    assert "finalized receipt validation failed" in rejected["errors"][0]
+    assert graph["trust"]["output_integrity"] == "not-run"
+    # Amber is dismissible; only a provenance mismatch is not.
+    assert graph["trust"]["dismissible"] is True
 
 
-def test_finalized_receipt_cannot_authorize_an_arbitrary_module_root(
-    tmp_path, monkeypatch
-):
-    receipt_path, workspace, module_root = (
-        receipt_fixtures.materialize_success_receipt(tmp_path)
-    )
-    monkeypatch.setenv("NEURODESKTOP_LOCAL_CONTAINERS", str(module_root))
-    receipt = json.loads(receipt_path.read_text())
+def test_a_stale_recorded_hash_or_size_fails_closed(tmp_path):
+    """A recorded digest that no longer matches the artifact is not rendered.
 
-    _validate_finalized_receipt(receipt_path, receipt, workspace)
+    The manifest is the only claim that a byte on disk is the byte that was
+    produced. Rendering it anyway would attach real provenance to an artifact
+    nobody verified, so the graph reports the error instead of the run.
+    """
+    project = tmp_path / "project"
+    shutil.copytree(BET, project)
+    (project / "brain.nii.gz").write_bytes(b"brain")
 
-    outside_modulefile = tmp_path / "untrusted-modules" / "fsl.lua"
-    receipt["execution"]["module"]["modulefile"].update(
+    stale_hash = _bet_run(
+        project,
         {
-            "path": str(outside_modulefile),
-            **receipt_fixtures.write_hashed_file(
-                outside_modulefile, b"untrusted modulefile\n"
-            ),
-        }
+            "verification": {"status": "passed"},
+            "outputs": [
+                {
+                    "output_id": "bet_brain",
+                    "artifact": "brain.nii.gz",
+                    "sha256": hashlib.sha256(b"different bytes").hexdigest(),
+                }
+            ],
+        },
     )
-    receipt_path.write_text(json.dumps(receipt))
+    graph = build_graph(
+        project / "astra.yaml", project / "universes/bet-f-0-5.yaml", stale_hash
+    )
+    assert graph["meta"] == {"valid": False}
+    assert "stale hash" in graph["errors"][0]
 
-    with pytest.raises(RunManifestError, match="escapes its allowed roots"):
-        _validate_finalized_receipt(receipt_path, receipt, workspace)
+    stale_size = _bet_run(
+        project,
+        {
+            "verification": {"status": "passed"},
+            "outputs": [
+                {
+                    "output_id": "bet_brain",
+                    "artifact": "brain.nii.gz",
+                    "size": 999_999,
+                }
+            ],
+        },
+    )
+    graph = build_graph(
+        project / "astra.yaml", project / "universes/bet-f-0-5.yaml", stale_size
+    )
+    assert graph["meta"] == {"valid": False}
+    assert "stale size" in graph["errors"][0]
+
+
+def test_a_run_artifact_outside_the_project_is_rejected(tmp_path):
+    """A manifest must not be able to name a path it does not own."""
+    project = tmp_path / "project"
+    shutil.copytree(BET, project)
+    outside = tmp_path / "secret.txt"
+    outside.write_text("secret")
+    manifest = _bet_run(
+        project,
+        {
+            "verification": {"status": "passed"},
+            "outputs": [
+                {"output_id": "bet_brain", "artifact": "../secret.txt"}
+            ],
+        },
+    )
+
+    graph = build_graph(
+        project / "astra.yaml", project / "universes/bet-f-0-5.yaml", manifest
+    )
+
+    assert graph["meta"] == {"valid": False}
+    assert "escapes" in graph["errors"][0]
 
 
 def test_previews_are_confined_and_cover_metric_table_report_and_figure(tmp_path):

@@ -17,6 +17,7 @@ def _invalid(message: str) -> dict[str, Any]:
         "nodes": [],
         "edges": [],
         "gaps": [],
+        "warnings": [],
         "errors": [message],
         "trust": spec_only_trust(),
         "meta": {"valid": False},
@@ -295,7 +296,6 @@ def _build_valid_graph(project: dict[str, Any], run_path: str | Path | None):
         overlay = load_run(
             run_path,
             project_root=project["project_root"],
-            spec_path=project["spec_path"],
             universe_id=project["universe_id"],
         )
         matched, canonical_run_ids = _match_run_records(
@@ -384,6 +384,7 @@ def _build_valid_graph(project: dict[str, Any], run_path: str | Path | None):
         "nodes": nodes,
         "edges": edges,
         "gaps": gaps,
+        "warnings": list(project.get("version_warnings") or []),
         "errors": [],
         "trust": overlay["trust"] if overlay else spec_only_trust(),
         "meta": {
@@ -403,8 +404,16 @@ def build_graph(
 ) -> dict[str, Any]:
     """Build the viewer's complete JSON model without any widget state."""
 
+    project = None
     try:
         project = adapt_project(spec_path, universe_path)
         return _build_valid_graph(project, run_path)
     except (AdapterError, RunManifestError, PreviewError, OSError, ValueError) as error:
-        return _invalid(str(error))
+        invalid = _invalid(str(error))
+        # A declared-version drift is the context that explains many
+        # validation failures, so it survives into the invalid graph.
+        drift = getattr(error, "version_warnings", None)
+        if drift is None and project is not None:
+            drift = project.get("version_warnings")
+        invalid["warnings"] = list(drift or [])
+        return invalid

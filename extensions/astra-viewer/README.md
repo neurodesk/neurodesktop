@@ -2,16 +2,16 @@
 
 `neurodesk_astra_view` is the read-only ASTRA provenance widget shipped in
 Neurodesktop. It validates `astra-spec==0.0.12` projects, resolves one universe,
-and optionally overlays a Lightcone run or Neurodesktop pilot receipt without
-upgrading the module pilot beyond its amber trust level.
+and optionally overlays a Lightcone run manifest, `lc status` output, or
+Workflow Run RO-Crate without overstating what that evidence proves.
 
 ```python
 from neurodesk_astra_view import AstraView
 
 AstraView(
     "astra.yaml",
-    universe="universes/bet-f-0-5.yaml",
-    run="../receipt/receipt.json",  # optional
+    universe="universes/choice-a.yaml",
+    run="run-manifest.json",  # optional
 )
 ```
 

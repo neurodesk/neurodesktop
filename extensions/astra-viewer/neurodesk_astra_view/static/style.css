@@ -48,6 +48,7 @@
 .astra-metric { font-size: 28px; font-variant-numeric: tabular-nums; }
 .astra-gaps, .astra-errors { border-top: 1px solid var(--astra-border); padding: 9px 12px; }
 .astra-errors { background: #fff0f0; color: #8b1d1d; }
+.astra-warnings { background: #fff7e0; border-bottom: 1px solid var(--astra-border); color: #7a5410; font-size: 13px; padding: 9px 12px; }
 
 @media (max-width: 760px) {
   .astra-body { grid-template-columns: 1fr; }

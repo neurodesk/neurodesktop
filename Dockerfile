@@ -601,10 +601,6 @@ RUN /opt/conda/bin/pip install \
     jupyter_scheduler \
     jupyterlab-slurm@git+https://github.com/NERSC/jupyterlab-slurm.git@main \
     httpx \
-    # Direct dependency of neurodesktop-pilot-receipt and the astra viewer
-    # (installed --no-deps); the jupyter stack only pulls it transitively.
-    jsonschema \
-    rfc8785==0.1.4 \
     astra-spec==${ASTRA_SPEC_VERSION} \
     astra-tools==${ASTRA_TOOLS_VERSION} \
     anywidget==${ANYWIDGET_VERSION} \
@@ -1066,8 +1062,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     --mount=type=bind,source=config/lxde,target=/tmp/lxde,ro \
     --mount=type=bind,source=config/lmod,target=/tmp/lmod,ro \
     --mount=type=bind,source=scripts/generate_jupyter_config.py,target=/tmp/generate_jupyter_config.py,ro \
-    --mount=type=bind,source=scripts/neurodesktop_pilot_receipt.py,target=/tmp/neurodesktop_pilot_receipt.py,ro \
-    --mount=type=bind,source=schemas,target=/tmp/schemas,ro \
+    --mount=type=bind,source=examples,target=/tmp/examples,ro \
     --mount=type=bind,source=tests,target=/tmp/tests,ro \
     install -D -m 0644 /tmp/jupyter/neurodesk_brain_logo.svg /opt/neurodesk_brain_logo.svg \
     && install -D -m 0644 /tmp/jupyter/neurodesk_brain_icon.svg /opt/neurodesk_brain_icon.svg \
@@ -1110,14 +1105,12 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0644 /tmp/tests/conftest.py /opt/tests/conftest.py \
     && install -m 0644 /tmp/tests/testlib.py /opt/tests/testlib.py \
     && install -m 0644 /tmp/tests/pytest.ini /opt/tests/pytest.ini \
-    && install -m 0755 /tmp/neurodesktop_pilot_receipt.py /usr/local/bin/neurodesktop-pilot-receipt \
-    # The viewer imports the very implementation the CLI runs, so the module
-    # name is a link to the executable rather than a second copy that could
-    # drift. The schema is found at its absolute installed path, so importing
-    # through either name resolves the same contract.
-    && install -d -m 0755 /opt/neurodesktop/lib \
-    && ln -sf /usr/local/bin/neurodesktop-pilot-receipt /opt/neurodesktop/lib/neurodesktop_pilot_receipt.py \
-    && install -D -m 0644 /tmp/schemas/neurodesktop-pilot-execution-receipt-v1.0.0.schema.json /opt/neurodesktop/schemas/neurodesktop-pilot-execution-receipt-v1.0.0.schema.json \
+    # Read-only worked ASTRA example; users copy it out before editing. It is
+    # also the spec the viewer and agent-skill image tests validate against,
+    # so the example cannot silently rot.
+    && install -d -m 0755 /opt/neurodesktop/examples \
+    && cp -a /tmp/examples/astra-bet /opt/neurodesktop/examples/ \
+    && chown -R root:users /opt/neurodesktop/examples \
     && install -m 0755 /tmp/generate_jupyter_config.py /opt/neurodesktop/scripts/generate_jupyter_config.py \
     && cp -a /tmp/jupyter/webapp_wrapper/. /opt/neurodesktop/webapp_wrapper/ \
     && install -m 0755 /tmp/jupyter/webapp_launcher.sh /opt/neurodesktop/webapp_launcher.sh \
@@ -1190,8 +1183,8 @@ RUN set -eux; \
     npm cache clean --force
 
 # Lightcone runs as a second isolated tool so its Dask/Snakemake dependency
-# graph cannot perturb JupyterLab. Keep this after all frontend rebuilds: pilot
-# dependency updates are runtime-only. The Slurm allocation prepends this
+# graph cannot perturb JupyterLab. Keep this after all frontend rebuilds: its
+# dependency updates are runtime-only. A batch job must prepend this
 # environment's bin directory so `lc` and its `dask worker` share one runtime.
 # ASTRA_SPEC_VERSION and ASTRA_TOOLS_VERSION are still in scope from their
 # single declaration above; do not redeclare them here.
@@ -1200,21 +1193,14 @@ RUN UV_TOOL_DIR=/opt/uv/tools UV_TOOL_BIN_DIR=/usr/local/bin \
     /opt/conda/bin/uv tool install "lightcone-cli==${LIGHTCONE_CLI_VERSION}" \
     --with "astra-tools==${ASTRA_TOOLS_VERSION}" \
     --with "astra-spec==${ASTRA_SPEC_VERSION}" \
+    # --no-cache keeps uv's wheel cache out of this layer; without it the
+    # Dask/Snakemake graph would be baked into the image a second time.
+    --no-cache \
     --python /opt/conda/bin/python --no-python-downloads \
     && test "$(lc --version)" = "lc, version ${LIGHTCONE_CLI_VERSION}" \
     && /opt/uv/tools/lightcone-cli/bin/python -c \
     "import importlib.metadata as m; assert m.version('astra-tools') == '${ASTRA_TOOLS_VERSION}'; assert m.version('astra-spec') == '${ASTRA_SPEC_VERSION}'" \
     && PATH=/opt/uv/tools/lightcone-cli/bin:${PATH} dask --version
-
-# Install the bounded pilot's public CLI and immutable project assets after
-# the runtime so the two image contracts share one narrow cache boundary.
-RUN --mount=type=bind,source=scripts/neurodesktop_astra_lightcone_pilot.py,target=/tmp/neurodesktop_astra_lightcone_pilot.py,ro \
-    --mount=type=bind,source=pilots/astra-lightcone-bet,target=/tmp/astra-lightcone-bet,ro \
-    install -m 0755 /tmp/neurodesktop_astra_lightcone_pilot.py /usr/local/bin/neurodesktop-astra-lightcone-pilot \
-    && install -d -m 0755 /opt/neurodesktop/pilots \
-    && cp -a /tmp/astra-lightcone-bet /opt/neurodesktop/pilots/ \
-    && chown -R root:users /opt/neurodesktop/pilots/astra-lightcone-bet
-
 
 # Start the container as root so docker-stacks runs before-notebook hooks with
 # the privileges needed to bootstrap local Slurm/CVMFS, then drops to NB_USER.

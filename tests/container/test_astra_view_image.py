@@ -6,7 +6,7 @@ from pathlib import Path
 from testlib import run_cmd
 
 
-PILOT = Path("/opt/neurodesktop/pilots/astra-lightcone-bet/project")
+EXAMPLE = Path("/opt/neurodesktop/examples/astra-bet")
 
 
 def test_astra_viewer_and_schema_dependencies_are_installed_at_exact_versions():
@@ -22,7 +22,7 @@ def test_astra_viewer_and_schema_dependencies_are_installed_at_exact_versions():
 
 
 def test_shipped_bet_example_validates_and_builds_all_three_viewer_modes():
-    code, output = run_cmd("astra validate astra.yaml", cwd=PILOT)
+    code, output = run_cmd("astra validate astra.yaml", cwd=EXAMPLE)
     assert code == 0, output
     assert "Schema validation passed" in output
     assert "version mismatch" not in output.lower()
@@ -30,7 +30,7 @@ def test_shipped_bet_example_validates_and_builds_all_three_viewer_modes():
     from neurodesk_astra_view import AstraView, build_graph
 
     graph = build_graph(
-        PILOT / "astra.yaml", PILOT / "universes/bet-f-0-5.yaml"
+        EXAMPLE / "astra.yaml", EXAMPLE / "universes/bet-f-0-5.yaml"
     )
     assert graph["errors"] == []
     assert graph["trust"]["level"] == "spec-only"
@@ -44,8 +44,8 @@ def test_shipped_bet_example_validates_and_builds_all_three_viewer_modes():
     }
     for mode in ("flow", "decisions", "evidence"):
         widget = AstraView(
-            PILOT / "astra.yaml",
-            universe=PILOT / "universes/bet-f-0-5.yaml",
+            EXAMPLE / "astra.yaml",
+            universe=EXAMPLE / "universes/bet-f-0-5.yaml",
             mode=mode,
         )
         assert widget.mode == mode

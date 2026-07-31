@@ -1,19 +1,14 @@
-"""Fail-closed Lightcone manifest, RO-Crate, and pilot receipt ingestion."""
+"""Fail-closed Lightcone manifest and RO-Crate ingestion."""
 
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any
 
-from jsonschema import Draft202012Validator
 
-
-RECEIPT_SCHEMA = "neurodesktop-pilot-execution-receipt-v1.0.0.schema.json"
 STATUS_VALUES = {"unknown", "not_run", "ok", "stale", "failed"}
 
 
@@ -53,93 +48,6 @@ def _confined_artifact(path: Path, root: Path, label: str) -> Path:
     return resolved
 
 
-def _verify_recorded_artifact(
-    record: dict[str, Any], *, workspace: Path, allowed_root: Path, label: str
-) -> Path:
-    path = _confined_artifact(
-        workspace / record["relativePath"], allowed_root, label
-    )
-    digest, size = _sha256_size(path)
-    if digest != record.get("sha256") or size != record.get("sizeBytes"):
-        raise RunManifestError(f"{label} does not match its recorded hash and size")
-    return path
-
-
-def _receipt_schema_path() -> Path:
-    candidates = (
-        Path(__file__).resolve().parents[3] / "schemas" / RECEIPT_SCHEMA,
-        Path("/opt/neurodesktop/schemas") / RECEIPT_SCHEMA,
-    )
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    raise RunManifestError(f"receipt schema is unavailable: {RECEIPT_SCHEMA}")
-
-
-def _validate_receipt_schema(receipt: dict[str, Any]) -> None:
-    schema = _load_json(_receipt_schema_path())
-    errors = sorted(
-        Draft202012Validator(
-            schema, format_checker=Draft202012Validator.FORMAT_CHECKER
-        ).iter_errors(receipt),
-        key=lambda error: list(error.absolute_path),
-    )
-    if errors:
-        error = errors[0]
-        location = ".".join(str(part) for part in error.absolute_path) or "$"
-        raise RunManifestError(f"receipt schema violation at {location}: {error.message}")
-
-
-def _validate_finalized_receipt(
-    receipt_path: Path, receipt: dict[str, Any], workspace: Path
-) -> None:
-    candidates = (
-        Path(__file__).resolve().parents[3]
-        / "scripts"
-        / "neurodesktop_pilot_receipt.py",
-        Path("/opt/neurodesktop/lib/neurodesktop_pilot_receipt.py"),
-    )
-    validator_path = next((path for path in candidates if path.is_file()), None)
-    if validator_path is None:
-        raise RunManifestError("the Neurodesktop receipt validator is unavailable")
-    spec = importlib.util.spec_from_file_location(
-        "_neurodesktop_astra_view_receipt_validator", validator_path
-    )
-    if spec is None or spec.loader is None:
-        raise RunManifestError("the Neurodesktop receipt validator cannot be loaded")
-    module = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(module)
-    except (ImportError, OSError) as error:
-        raise RunManifestError(f"the receipt validator cannot be imported: {error}") from error
-
-    configured_roots = (
-        Path("/cvmfs/neurodesk.ardc.edu.au"),
-        Path(
-            os.environ.get(
-                "NEURODESKTOP_LOCAL_CONTAINERS",
-                "/neurodesktop-storage/containers",
-            )
-        ),
-    )
-    allowed_roots = []
-    for root in configured_roots:
-        try:
-            resolved = root.expanduser().resolve(strict=True)
-        except OSError:
-            continue
-        if (
-            resolved.is_dir()
-            and resolved != workspace
-            and not resolved.is_relative_to(workspace)
-        ):
-            allowed_roots.append(resolved)
-    try:
-        module.validate_receipt(receipt_path, workspace, allowed_roots)
-    except (module.ReceiptValidationError, OSError, ValueError) as error:
-        raise RunManifestError(f"finalized receipt validation failed: {error}") from error
-
-
 def _normalize_status(value: Any, *, artifact_present: bool = False) -> str:
     if value is None:
         return "ok" if artifact_present else "unknown"
@@ -159,128 +67,6 @@ def _normalize_status(value: Any, *, artifact_present: bool = False) -> str:
     }
     normalized = aliases.get(normalized, normalized)
     return normalized if normalized in STATUS_VALUES else "unknown"
-
-
-def _receipt_overlay(
-    receipt_path: Path,
-    receipt: dict[str, Any],
-    *,
-    project_root: Path,
-    spec_path: Path,
-    universe_id: str,
-) -> dict[str, Any]:
-    _validate_receipt_schema(receipt)
-    try:
-        workspace = Path(receipt["workspaceRoot"]).resolve(strict=True)
-    except OSError as error:
-        raise RunManifestError(f"receipt workspace is unavailable: {error}") from error
-    if not workspace.is_dir():
-        raise RunManifestError("receipt workspace is not a directory")
-    _validate_finalized_receipt(receipt_path, receipt, workspace)
-    expected_run = workspace / "runs" / receipt["receiptId"]
-    try:
-        resolved_run = expected_run.resolve(strict=True)
-        resolved_receipt = receipt_path.resolve(strict=True)
-    except OSError as error:
-        raise RunManifestError(f"receipt identity cannot be resolved: {error}") from error
-    if not resolved_receipt.is_relative_to(resolved_run):
-        raise RunManifestError("receipt path does not match its run identity")
-
-    recorded_spec = _verify_recorded_artifact(
-        receipt["analysis"]["spec"],
-        workspace=workspace,
-        allowed_root=resolved_run,
-        label="receipt ASTRA spec",
-    )
-    if recorded_spec != spec_path.resolve(strict=True):
-        raise RunManifestError("receipt is bound to a different ASTRA spec")
-
-    declared_containers: list[str] = []
-    manifest_records: dict[str, dict[str, Any]] = {}
-    for manifest_entry in receipt["lightcone"]["manifests"]:
-        manifest_path = _verify_recorded_artifact(
-            manifest_entry["artifact"],
-            workspace=workspace,
-            allowed_root=resolved_run,
-            label=f"Lightcone manifest {manifest_entry['outputKey']}",
-        )
-        manifest_data = _load_json(manifest_path)
-        if not isinstance(manifest_data, dict):
-            raise RunManifestError(f"Lightcone manifest is not an object: {manifest_path}")
-        manifest_records[manifest_entry["outputKey"]] = manifest_data
-        for key in ("container_image", "worker_image", "container"):
-            value = manifest_data.get(key)
-            if value:
-                declared_containers.append(str(value))
-
-    verification_by_key = {
-        item["outputKey"]: item
-        for item in receipt["lightcone"]["verification"]["results"]
-    }
-    records: dict[str, dict[str, Any]] = {}
-    run_node_ids: set[str] = set()
-    for output in receipt["outputs"]:
-        if output["universeId"] != universe_id:
-            continue
-        output_id = output["outputId"]
-        if output_id in records:
-            raise RunManifestError(f"receipt repeats output {output_id}")
-        artifact = _verify_recorded_artifact(
-            output["artifact"],
-            workspace=workspace,
-            allowed_root=resolved_run,
-            label=f"receipt output {output['outputKey']}",
-        )
-        verification = verification_by_key.get(output["outputKey"])
-        outcome = receipt["outcome"]
-        status = "ok" if outcome == "succeeded" else "failed"
-        if verification and verification.get("status") == "failed":
-            status = "stale"
-        manifest_data = manifest_records.get(output["outputKey"], {})
-        records[output_id] = {
-            "output_id": output_id,
-            "status": status,
-            "artifact_path": str(artifact),
-            "artifact_relative": str(artifact.relative_to(resolved_run)),
-            "preview_root": str(resolved_run),
-            "sha256": output["artifact"]["sha256"],
-            "size": output["artifact"]["sizeBytes"],
-            "media_type": output.get("mediaType"),
-            "units": manifest_data.get("units") or manifest_data.get("unit"),
-            "started_at": receipt["slurm"]["terminal"].get("startedAt"),
-            "ended_at": receipt["slurm"]["terminal"].get("endedAt"),
-            "command": manifest_data.get("recipe"),
-            "container": None,
-            "log_excerpt": None,
-        }
-        run_node_ids.add(output_id)
-
-    runtime = receipt["lightcone"]["runtime"]
-    mismatch = runtime == "none" and bool(declared_containers)
-    if mismatch:
-        trust_level = "provenance-mismatch"
-        trust_message = (
-            "The run declared a container but Lightcone resolved runtime none; "
-            "the declared image did not run."
-        )
-    else:
-        trust_level = receipt["trust"]["level"]
-        trust_message = receipt["trust"]["statement"]
-    return {
-        "present": True,
-        "source": "neurodesktop-pilot-receipt",
-        "records": records,
-        "run_node_ids": sorted(run_node_ids),
-        "trust": {
-            "level": trust_level,
-            "label": _trust_label(trust_level),
-            "message": trust_message,
-            "dismissible": trust_level != "provenance-mismatch",
-            "output_integrity": receipt["trust"]["outputIntegrity"],
-            "declared_containers": sorted(set(declared_containers)),
-            "runtime": runtime,
-        },
-    }
 
 
 def _trust_label(level: str) -> str:
@@ -506,8 +292,6 @@ def _generic_overlay(
 
 def _directory_run_file(directory: Path) -> Path:
     candidates = (
-        directory / "receipt" / "receipt.json",
-        directory / "receipt.json",
         directory / "run-manifest.json",
         directory / "manifest.json",
         directory / "status.json",
@@ -517,9 +301,6 @@ def _directory_run_file(directory: Path) -> Path:
     if len(existing) == 1:
         return existing[0]
     if len(existing) > 1:
-        receipt = [path for path in existing if path.name == "receipt.json"]
-        if len(receipt) == 1:
-            return receipt[0]
         raise RunManifestError(f"run directory is ambiguous: {directory}")
     raise RunManifestError(f"run directory contains no supported evidence: {directory}")
 
@@ -528,7 +309,6 @@ def load_run(
     run_path: str | Path,
     *,
     project_root: str | Path,
-    spec_path: str | Path,
     universe_id: str,
 ) -> dict[str, Any]:
     """Load one supported run-evidence surface into a normalized overlay."""
@@ -546,15 +326,6 @@ def load_run(
     if not isinstance(data, dict):
         raise RunManifestError("run evidence must be a JSON object")
     root = Path(project_root).resolve(strict=True)
-    spec = Path(spec_path).resolve(strict=True)
-    if data.get("schemaVersion") == "1.0.0" and "receiptId" in data:
-        return _receipt_overlay(
-            resolved,
-            data,
-            project_root=root,
-            spec_path=spec,
-            universe_id=universe_id,
-        )
     return _generic_overlay(
         resolved, data, project_root=root, universe_id=universe_id
     )

@@ -299,18 +299,22 @@ from neurodesk_astra_view import AstraView, build_graph
 AstraView(
     "astra.yaml",
     universe="universes/bet-f-0-5.yaml",
-    run="../receipt/receipt.json",  # optional
+    run="run-manifest.json",        # optional
     mode="flow",                    # flow, decisions, or evidence
 )
 ```
 
 `adapter.py` is the only viewer module coupled to `astra-spec==0.0.12`. It runs
-the public schema and semantic validators over raw YAML, hard-fails a version
-mismatch, resolves external analysis and child-universe references recursively,
-and checks every resolved real path against the ASTRA project root before it is
-opened. The rest of the package consumes qualified, schema-independent entity
-records. `build_graph()` is pure and JSON-serializable; the anywidget is only a
-renderer over that result.
+the public schema and semantic validators over raw YAML, resolves external
+analysis and child-universe references recursively, and checks every resolved
+real path against the ASTRA project root before it is opened. A spec that
+declares a different ASTRA version renders with a warning banner while being
+validated against the installed release — the same stance `astra validate`
+takes — and the warning survives into the error view when that validation
+fails; only an unsupported installed `astra-spec` package hard-fails. The rest
+of the package consumes qualified, schema-independent entity records.
+`build_graph()` is pure and JSON-serializable; the anywidget is only a renderer
+over that result.
 
 The frontend concatenates the checked-in Cytoscape.js 3.34.0 distribution with
 the widget renderer at import time. It has no npm build, CDN import, fetch, or
@@ -319,15 +323,16 @@ Cytoscape instance, preserving positions and selection. Prior Insights,
 findings, and their Evidence sources remain distinct nodes and only
 schema-authoritative links are drawn.
 
-Without a run, the graph is grey `spec-only`. Generic Lightcone manifests and
-Workflow Run RO-Crates are amber unless passing verification is explicit. An
-explicit declared-container plus `runtime: none` mismatch is red and
-non-dismissible. A finalized Neurodesktop pilot receipt is revalidated through
-the same fail-closed receipt implementation used by the CLI, including hashes
-and semantic evidence reconciliation; even when its output-integrity check
-passes, the module route remains amber `executed-unverified`. Ordinary previews
-stay under the directory containing `astra.yaml`; receipt previews stay under
-the hash-authenticated `runs/<receiptId>` envelope.
+Without a run, the graph is grey `spec-only`. Lightcone manifests, `lc status`
+output, and Workflow Run RO-Crates are amber unless passing verification is
+explicit. An explicit declared-container plus `runtime: none` mismatch is red
+and non-dismissible. Every recorded artifact is rehashed before it is trusted,
+so a stale hash or size fails the whole graph closed rather than rendering a
+partial one. Previews stay under the directory containing `astra.yaml`.
+
+`examples/astra-bet` is the shipped worked example, installed read-only at
+`/opt/neurodesktop/examples/astra-bet`. It is specification-only, so it renders
+grey; users copy it out as a starting point for their own analysis.
 
 Double-clicking an `astra.yaml` (or `*.astra.yaml`) in the JupyterLab file
 browser renders the same viewer without a kernel, the way NIfTI volumes open
@@ -383,40 +388,6 @@ Neurodesktop applies an exact-source, build-time workaround for upstream issue
 rest of the room queue. The anchored patch intentionally fails the image build
 if a future package release changes either source seam, forcing the workaround
 to be reassessed rather than silently carried forward.
-
-### Pilot execution receipts
-
-The provisional ASTRA/Lightcone module pilot records its evidence through the
-versioned contract in
-[`schemas/neurodesktop-pilot-execution-receipt-v1.0.0.schema.json`](../schemas/neurodesktop-pilot-execution-receipt-v1.0.0.schema.json).
-The schema is the public document seam; filesystem confinement, hash
-recomputation, evidence reconciliation, derived trust, and atomic publication
-are implemented by the `neurodesktop-pilot-receipt` CLI installed from
-[`scripts/neurodesktop_pilot_receipt.py`](../scripts/neurodesktop_pilot_receipt.py).
-Its full contract is documented in
-[`docs/pilot-execution-receipt.md`](pilot-execution-receipt.md). A schema-valid
-receipt remains amber because the transparent module wrapper does not attest
-the actual tool-container identity.
-
-The bounded BET pilot is installed at
-`/opt/neurodesktop/pilots/astra-lightcone-bet` and exposed through
-`neurodesktop-astra-lightcone-pilot`. `prepare` publishes its immutable ASTRA
-project and checksum-pinned OpenNeuro `ds000114/1.0.2` inputs into a persistent
-workspace. `run` accepts only the image's local `neurodesktop` partition,
-creates a run-scoped project/input snapshot, and submits the retained
-`run-bet-pilot.sbatch`. Inside that allocation the script loads exactly
-`fsl/6.0.7.22` through Lmod and runs the isolated `lightcone-cli==0.4.0` tool
-with Lightcone container runtime `none`; it does not invoke Apptainer or
-Singularity directly. The module's existing command wrappers remain the sole
-tool-execution seam.
-
-Each successful run retains Slurm control, accounting, and stream evidence;
-the loaded modulefile and resolved command wrappers; eight outputs and their
-Lightcone manifests; a status snapshot; fresh verification results; and a
-Workflow Run RO-Crate. `verify --run-directory` first revalidates the immutable
-receipt and then performs a fresh read-only `lc verify` against the run-scoped
-project. Failed, cancelled, and timed-out allocations receive non-success
-outcomes and can never satisfy the success receipt conditions.
 
 ### Claude Code
 

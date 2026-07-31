@@ -13,10 +13,8 @@ dependencies = [
     "anywidget==0.11.0",
     "astra-spec==0.0.12",
     "astra-tools==0.2.11",
-    "jsonschema>=4.23",
     "jupyter-server>=2.0",
     "PyYAML>=6.0",
-    "rfc8785==0.1.4",
 ]
 
 [tool.hatch.build.targets.wheel]

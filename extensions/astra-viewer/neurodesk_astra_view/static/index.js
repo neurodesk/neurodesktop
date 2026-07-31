@@ -114,6 +114,13 @@ export function render({ model, el }) {
   const badge = appendText(header, "span", graph.trust.label, `astra-trust astra-trust-${graph.trust.level}`);
   badge.title = graph.trust.message;
 
+  if ((graph.warnings || []).length) {
+    const warnings = document.createElement("div");
+    warnings.className = "astra-warnings";
+    graph.warnings.forEach((warning) => appendText(warnings, "div", warning));
+    root.appendChild(warnings);
+  }
+
   if ((graph.errors || []).length) {
     const errors = document.createElement("div");
     errors.className = "astra-errors";
