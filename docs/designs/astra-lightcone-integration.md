@@ -289,7 +289,7 @@ AstraView(spec, universe=..., run=None, mode="flow")
 | --- | --- | --- | --- |
 | `spec` | Yes | Path to `astra.yaml` | Error |
 | `universe` | No | Path to `universes/*.yaml` | Baseline universe is used; badge says "baseline" |
-| `run` | No | Path to an `lc` run manifest, `lc status --json` output, or an RO-Crate directory | Graph is labelled **"Selected analysis"**; all status is `unknown` |
+| `run` | No | Path to an `lc` run manifest, `lc status --json` output, or an RO-Crate directory | Graph is labelled **"Not executed"**; all status is `unknown` |
 
 Note the asymmetry, because it is the most commonly misunderstood part: the
 **YAML is the input** to Lightcone (`astra.yaml`, `universes/*.yaml`); what
@@ -350,20 +350,48 @@ Only meaningful when `run` is supplied; otherwise every output is `unknown`.
 
 ### The three modes
 
-All three modes render **the same graph**, with the same layout and the same
-node positions. Switching modes changes what is emphasized, never what exists.
+All three modes render **the same graph** on **the same semantic grid**:
+a node keeps its rank in every mode, so switching modes changes what is
+emphasized, never what a node means or where it sits relative to the others.
 This is what makes the views synchronized rather than three separate pictures.
+
+Rows are compacted over the nodes a mode actually draws, so hiding a whole
+rank does not leave a band of empty canvas behind. See "Layout" below.
 
 - **Flow** — inputs → intermediate outputs → published outputs. Decision,
   finding, and evidence nodes are hidden. Sub-analyses are collapsible compound
   nodes, collapsed by default when a spec has more than one.
-- **Decisions** — only the *selected* universe values, drawn as annotations on
-  the outputs they parameterize. Unselected alternatives are never drawn on the
-  canvas; they appear only in the inspector when a decision is clicked. This
-  keeps the graph a picture of one universe rather than of the whole decision
-  space.
+- **Decisions** — only the *selected* universe values, drawn on the decision
+  node itself rather than repeated on each edge leaving it. Unselected
+  alternatives are never drawn on the canvas; they appear only in the inspector
+  when a decision is clicked. This keeps the graph a picture of one universe
+  rather than of the whole decision space.
 - **Evidence** — findings, prior insights, and their supporting artifacts or
-  papers overlaid on the same nodes.
+  papers, together with the decisions and outputs those claims rest on. The
+  dataflow plumbing no claim depends on is hidden: this is a view of the
+  argument, not the whole graph with extra nodes. A spec that declares no
+  `prior_insights` and no `findings` gets an explicit empty-state notice rather
+  than a silent redraw of the previous mode.
+
+### Layout
+
+Node positions come from a `rank` and an `order` the Python model computes in
+`neurodesk_astra_view/layout.py`; the frontend only turns that pair into
+`preset` coordinates. Cytoscape's built-in `breadthfirst` is not usable here:
+it layers by hop count from the nearest root, so an output one hop from an
+input lands on the same row as an output one hop from a decision, and the
+graph draws its own dataflow arrows pointing backwards along that row.
+
+Every ASTRA edge already points from the earlier node to the later one, so a
+single longest-path pass ranks the whole graph correctly. Two refinements
+follow: a node nothing feeds is pushed down to sit directly above the earliest
+thing it does feed (otherwise every source strands on the top row, trailing
+long edges), and barycenter sweeps order each rank to reduce crossings while
+keeping one analysis's members contiguous so compound boxes cannot overlap.
+
+Keeping this in Python is what makes it testable, and it means the vendored
+Cytoscape bundle needs no layout extension — it ships only `breadthfirst`,
+`concentric`, `grid`, `circle`, `cose`, and `preset`.
 
 ### The inspector
 
@@ -400,7 +428,7 @@ The widget shows one persistent badge:
 
 | Level | Condition | Badge |
 | --- | --- | --- |
-| `spec-only` | No run manifest | **Selected analysis** — grey. "Shows declared intent. Nothing here was executed." |
+| `spec-only` | No run manifest | **Not executed** — grey. "Shows declared intent. Nothing here was executed." |
 | `executed-unverified` | Manifest present, `lc verify` result absent or not passing | **Executed, unverified** — amber |
 | `executed-verified` | Manifest present and `lc verify` passed | **Executed and verified** — green |
 | `provenance-mismatch` | Manifest declares a container **and** the run resolved to `runtime: none` | **Provenance mismatch** — red, non-dismissible, names the declared image and states that it did not run |
@@ -462,6 +490,7 @@ extensions/astra-viewer/
 │   ├── __init__.py                   # AstraView
 │   ├── adapter.py                    # astra-spec -> internal model; the ONLY schema-aware module
 │   ├── graph.py                      # build_graph(); pure, JSON-serialisable
+│   ├── layout.py                     # semantic rank/order per node; pure
 │   ├── manifest.py                   # lc manifest / status / RO-Crate ingestion, trust level
 │   ├── gaps.py                       # G1..G7
 │   ├── preview.py                    # artifact previews, path confinement, size cap
@@ -593,7 +622,7 @@ Cytoscape.js, whose compound nodes give the collapsible `FE`/`CL` grouping.
 - Switching modes preserves node positions and selection.
 - Supplying a different universe changes the decision annotations and nothing
   else.
-- Omitting `run` labels the graph "Selected analysis" and shows no status.
+- Omitting `run` labels the graph "Not executed" and shows no status.
 - A manifest declaring a container that did not run produces the red
   `provenance-mismatch` badge.
 - A spec failing `astra validate` renders errors, not a partial graph.

@@ -26,7 +26,8 @@ sys.path.insert(0, str(repo_path("extensions/astra-viewer")))
 
 from neurodesk_astra_view.adapter import AdapterError, adapt_project  # noqa: E402
 from neurodesk_astra_view.graph import build_graph  # noqa: E402
-from neurodesk_astra_view.manifest import _trust_label  # noqa: E402
+from neurodesk_astra_view.layout import assign_layout  # noqa: E402
+from neurodesk_astra_view.manifest import _trust_label, spec_only_trust  # noqa: E402
 from neurodesk_astra_view.preview import PreviewError, preview_artifact  # noqa: E402
 
 
@@ -116,6 +117,141 @@ def test_version_drift_survives_into_an_invalid_graph(tmp_path):
 
 def test_unknown_trust_level_has_a_safe_label():
     assert _trust_label("future-level") == "Unknown trust level: future-level"
+
+
+def test_trust_labels_name_the_run_state_not_a_selection():
+    """The badge sits under a universe picker, so it must not read as one.
+
+    Its old `spec-only` label, "Selected analysis", parsed as a restatement of
+    the universe the reader had just chosen rather than as the claim it makes:
+    that nothing was executed.
+    """
+    assert _trust_label("spec-only") == "Not executed"
+    assert spec_only_trust()["label"] == "Not executed"
+    for level in ("executed-unverified", "executed-verified", "provenance-mismatch"):
+        assert "analysis" not in _trust_label(level).lower()
+
+
+def test_extra_top_level_keys_are_answered_with_the_permitted_keys(tmp_path):
+    """"Extra inputs are not permitted" alone leaves the reader stuck.
+
+    Agent-scaffolded specs invent plausible top-level fields; the released
+    validator names the offending key but never the ones that would work, and
+    the viewer is the only place the author sees the failure.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "astra.yaml").write_text(
+        'version: "0.0.12"\nname: drifted\nauthors: [someone]\n'
+        "narrative: a write-up that belongs in description\n"
+        "inputs: []\noutputs: []\n"
+    )
+
+    graph = build_graph(project / "astra.yaml")
+
+    assert graph["meta"] == {"valid": False}
+    failure = graph["errors"][0]
+    assert "authors" in failure and "narrative" in failure
+    assert "permitted keys here are:" in failure
+    for permitted in ("description", "findings", "prior_insights", "decisions"):
+        assert permitted in failure
+
+
+def test_the_header_can_name_the_analysis_rather_than_only_its_universe():
+    graph = build_graph(BET / "astra.yaml", BET / "universes/bet-f-0-5.yaml")
+
+    assert graph["meta"]["analysis_name"] == "BET threshold sensitivity"
+    assert graph["meta"]["universe_id"] == "bet-f-0-5"
+
+
+# ---------------------------------------------------------------------------
+# Layered layout
+
+
+def test_every_edge_points_strictly_down_a_rank():
+    """The layering defect the viewer shipped with, stated as a contract.
+
+    Cytoscape's `breadthfirst` layers by hop count from the nearest root, so a
+    producer one hop from an input landed on the same row as a consumer one
+    hop from a decision — and the graph drew its dataflow arrows pointing
+    backwards along that row.
+    """
+    graph = build_graph(BET / "astra.yaml", BET / "universes/bet-f-0-5.yaml")
+    rank = {node["id"]: node["rank"] for node in graph["nodes"]}
+
+    for node in graph["nodes"]:
+        # Compound containers are sized by their children, never placed.
+        if node["kind"] == "analysis":
+            assert node["rank"] is None and node["order"] is None
+        else:
+            assert isinstance(node["rank"], int)
+            assert isinstance(node["order"], int)
+
+    for edge in graph["edges"]:
+        source, target = rank[edge["source"]], rank[edge["target"]]
+        assert source is not None and target is not None
+        assert source < target, f"{edge['kind']} {edge['source']} -> {edge['target']}"
+
+
+def test_a_source_sits_directly_above_what_it_feeds():
+    """Longest paths alone strand every source on the top row.
+
+    The citation backing a late finding would then sit rows above the outputs
+    beside it, trailing an edge across the whole graph.
+    """
+    graph = build_graph(BET / "astra.yaml", BET / "universes/bet-f-0-5.yaml")
+    rank = {node["id"]: node["rank"] for node in graph["nodes"]}
+
+    spans = [
+        rank[edge["target"]] - rank[edge["source"]] for edge in graph["edges"]
+    ]
+    assert spans and max(spans) == 1
+
+    # The artifact evidence for the finding belongs beside the outputs, not
+    # on the top row with the citation that informed the decision.
+    artifact_evidence = rank[
+        "evidence:root/findings/boundary_is_inspectable/boundary_overlay_artifact"
+    ]
+    assert artifact_evidence == rank["output:root/boundary_qc"]
+
+
+def _laid_out(nodes, edges):
+    prepared = [
+        {"id": node, "kind": "output", "parent": "analysis:root"} for node in nodes
+    ]
+    assign_layout(
+        prepared,
+        [{"source": source, "target": target} for source, target in edges],
+    )
+    return {node["id"]: (node["rank"], node["order"]) for node in prepared}
+
+
+def test_a_rank_is_ordered_to_reduce_crossings_not_left_in_declaration_order():
+    """Sibling order is what made a decision cross its own edges.
+
+    Declaration order puts `o1` before `o2` while their producers arrive in
+    the opposite order; a barycenter pass swaps them so the two edges run
+    parallel instead of crossing.
+    """
+    placed = _laid_out(
+        ["d1", "d2", "o1", "o2"], [("d1", "o2"), ("d2", "o1")]
+    )
+
+    assert placed["d1"][0] == placed["d2"][0] == 0
+    assert placed["o1"][0] == placed["o2"][0] == 1
+    # Whatever absolute order the sweep settles on, each edge must join nodes
+    # at the same offset within their rank.
+    assert placed["d1"][1] == placed["o2"][1]
+    assert placed["d2"][1] == placed["o1"][1]
+
+
+def test_a_cycle_is_ranked_rather_than_hung_on():
+    """The released validators reject cycles; the renderer must not hang if
+    one ever reaches it, because a wedged canvas reports nothing at all."""
+    placed = _laid_out(["a", "b", "c"], [("a", "b"), ("b", "c"), ("c", "a")])
+
+    assert set(placed) == {"a", "b", "c"}
+    assert all(isinstance(rank, int) for rank, _ in placed.values())
 
 
 def test_external_analysis_and_child_universe_are_resolved_with_qualified_ids():

@@ -53,6 +53,62 @@ def test_frontend_renders_version_drift_warnings_before_errors():
     assert ".astra-warnings" in stylesheet
 
 
+def test_frontend_lays_out_from_the_model_ranks_on_every_filter_change():
+    """The viewer ran one `breadthfirst` pass over the *whole* graph at mount
+    and then only toggled visibility, so every mode inherited one compromise
+    layout and a mode that hid a rank left the band of canvas behind."""
+    javascript = (ROOT / "neurodesk_astra_view/static/index.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'name: "breadthfirst"' not in javascript
+    assert 'name: "preset"' in javascript
+    assert 'node.data("rank")' in javascript
+    assert 'data("order")' in javascript
+    # applyMode delegates to applyCollapsed, so laying out there covers a mode
+    # switch, a collapse, and a re-render from one place.
+    applied = javascript.index("const applyCollapsed")
+    assert javascript.index("layoutVisible();", applied) > applied
+
+
+def test_frontend_evidence_mode_filters_instead_of_showing_everything():
+    """`evidence` fell off the end of the mode chain and cleared every filter,
+    so the button looked inert on any spec whose claims it was meant to show,
+    and identical to `decisions` on a spec with no claims at all."""
+    javascript = (ROOT / "neurodesk_astra_view/static/index.js").read_text(
+        encoding="utf-8"
+    )
+    stylesheet = (ROOT / "neurodesk_astra_view/static/style.css").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'mode === "evidence"' in javascript
+    assert "CLAIM_KINDS" in javascript
+    # A filter that matches nothing has to say so rather than silently
+    # redrawing the previous picture.
+    assert "astra-notice" in javascript
+    assert ".astra-notice" in stylesheet
+    assert "notice.hidden" in javascript
+
+
+def test_frontend_shows_the_trust_message_rather_than_hiding_it_in_a_tooltip():
+    javascript = (ROOT / "neurodesk_astra_view/static/index.js").read_text(
+        encoding="utf-8"
+    )
+    stylesheet = (ROOT / "neurodesk_astra_view/static/style.css").read_text(
+        encoding="utf-8"
+    )
+
+    assert "astra-trust-message" in javascript
+    assert ".astra-trust-message" in stylesheet
+    assert "graph.meta.analysis_name" in javascript
+
+    # Trust describes a graph that got drawn. On the validation-failure path
+    # there is no graph, so "Nothing here was executed" would be describing an
+    # empty canvas — the badge belongs past the early return.
+    assert javascript.index("graph.errors") < javascript.index("astra-trust-message")
+
+
 def test_frontend_cleanup_removes_only_its_registered_model_listeners():
     """Each render registers its listeners exactly once, and the teardown
     callback it returns to anywidget deregisters exactly those listeners, so

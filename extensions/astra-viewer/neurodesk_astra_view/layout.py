@@ -86,8 +86,19 @@ def _ranks(
         settled = [rank[source] for source in incoming[node_id] if source in resolved]
         rank[node_id] = max(settled, default=-1) + 1
 
-    # Longest-path ranks are contiguous from zero, but the cycle fallback can
-    # leave a hole; the renderer relies on contiguity to compact rows.
+    # Longest paths strand every source on the top row, so a citation backing
+    # a late finding would sit rows above the outputs beside it, trailing an
+    # edge across the whole graph. A node nothing feeds belongs directly above
+    # the earliest thing it feeds. Only sources move, and only downwards, so
+    # one pass settles it: a source's successors all have a predecessor and
+    # are therefore not themselves sources.
+    for node_id in ids:
+        if incoming[node_id] or not outgoing[node_id]:
+            continue
+        rank[node_id] = min(rank[target] for target in outgoing[node_id]) - 1
+
+    # The renderer compacts rows over what it draws, so ranks only have to be
+    # ordered — but contiguity keeps `rank - 1` meaningful to the sweeps below.
     used = sorted(set(rank.values()))
     compact = {value: index for index, value in enumerate(used)}
     return {node_id: compact[value] for node_id, value in rank.items()}

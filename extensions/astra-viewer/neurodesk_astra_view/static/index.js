@@ -127,7 +127,11 @@ function cyElements(graph) {
         node.kind === "decision" ? decisionLabel(node) : node.label,
     },
   }));
-  const edges = graph.edges.map((edge) => ({ data: { ...edge } }));
+  // Only some edges carry a label; without a default, the `data(label)`
+  // mapping warns once per unlabelled edge on every restyle.
+  const edges = graph.edges.map((edge) => ({
+    data: { label: "", ...edge },
+  }));
   return [...nodes, ...edges];
 }
 
@@ -145,13 +149,6 @@ export function render({ model, el }) {
   if (graph.meta.universe_id) {
     appendText(title, "span", `universe: ${graph.meta.universe_id}`, "astra-universe");
   }
-  // The badge names a run state, not a selection, and its explanation is the
-  // whole point of it — so it reads next to the badge rather than in a
-  // tooltip nobody discovers.
-  const provenance = appendText(header, "div", "", "astra-provenance");
-  const badge = appendText(provenance, "span", graph.trust.label, `astra-trust astra-trust-${graph.trust.level}`);
-  badge.title = graph.trust.message;
-  appendText(provenance, "span", graph.trust.message, "astra-trust-message");
 
   if ((graph.warnings || []).length) {
     const warnings = document.createElement("div");
@@ -168,6 +165,17 @@ export function render({ model, el }) {
     root.appendChild(errors);
     return;
   }
+
+  // Trust is a claim about a graph that got drawn, so it is appended only
+  // past the failure return: "Nothing here was executed" reads as a
+  // description of the picture, and on the invalid path there is no picture.
+  // The badge names a run state, not a selection, and its message is the
+  // whole point of it — so it reads beside the badge rather than living in a
+  // tooltip nobody discovers.
+  const provenance = appendText(header, "div", "", "astra-provenance");
+  const badge = appendText(provenance, "span", graph.trust.label, `astra-trust astra-trust-${graph.trust.level}`);
+  badge.title = graph.trust.message;
+  appendText(provenance, "span", graph.trust.message, "astra-trust-message");
 
   const toolbar = document.createElement("nav");
   toolbar.className = "astra-toolbar";
@@ -216,7 +224,9 @@ export function render({ model, el }) {
       { selector: 'node[kind = "output"]', style: { shape: "round-rectangle", "background-color": "#77a86a" } },
       { selector: 'node[kind = "decision"]', style: { shape: "hexagon", "background-color": "#d2a84a" } },
       { selector: 'node[kind = "finding"], node[kind = "insight"], node[kind = "evidence"]', style: { shape: "round-tag", "background-color": "#a884bd" } },
-      { selector: 'node[kind = "artifact"]', style: { shape: "document", "background-color": "#73a6a0" } },
+      // `document` is not a Cytoscape shape; it silently fell back to an
+      // ellipse, so artifacts drew the same as an unstyled node.
+      { selector: 'node[kind = "artifact"]', style: { shape: "cut-rectangle", "background-color": "#73a6a0" } },
       // The container title sits above its border: the base rule pushes
       // labels below a node, which drops a compound title onto the box edge.
       { selector: 'node[kind = "analysis"]', style: { shape: "round-rectangle", "background-opacity": 0.08, "border-width": 1, "border-color": "#718096", padding: 22, "text-valign": "top", "text-margin-y": -10, "text-max-width": 320, "font-size": 12, "font-weight": "bold", color: "#3d4854" } },

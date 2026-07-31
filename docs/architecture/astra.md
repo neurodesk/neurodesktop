@@ -92,9 +92,18 @@ over that result.
 The frontend concatenates the checked-in Cytoscape.js 3.34.0 distribution with
 the widget renderer at import time. It has no npm build, CDN import, fetch, or
 other runtime network path. Flow, Decisions, and Evidence modes filter the same
-Cytoscape instance, preserving positions and selection. Prior Insights,
-findings, and their Evidence sources remain distinct nodes and only
-schema-authoritative links are drawn.
+Cytoscape instance, preserving each node's semantic rank and the selection.
+Prior Insights, findings, and their Evidence sources remain distinct nodes and
+only schema-authoritative links are drawn.
+
+Node placement comes from `layout.py`, which ranks the graph by longest path so
+a producer always outranks its consumers, pushes a node nothing feeds down to
+sit above the earliest thing it does feed, and orders each rank by barycenter
+to reduce crossings. The renderer turns that `rank`/`order` pair into `preset`
+coordinates, compacting rows over whatever the active mode draws. No Cytoscape
+layout algorithm is used: the vendored bundle ships none that layers a DAG, and
+`breadthfirst` ranks by hop count, which draws dataflow arrows backwards along
+a row.
 
 Without a run, the graph is grey `spec-only`. Lightcone manifests, `lc status`
 output, and Workflow Run RO-Crates are amber unless passing verification is

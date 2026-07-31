@@ -42,6 +42,13 @@ def test_shipped_bet_example_validates_and_builds_all_three_viewer_modes():
         "insight",
         "evidence",
     }
+    # The renderer places nodes from these two fields alone, so the installed
+    # copy has to carry a layered ranking, not just a node list.
+    rank = {node["id"]: node["rank"] for node in graph["nodes"]}
+    for edge in graph["edges"]:
+        assert rank[edge["source"]] < rank[edge["target"]], edge["id"]
+    assert graph["meta"]["analysis_name"] == "BET threshold sensitivity"
+
     for mode in ("flow", "decisions", "evidence"):
         widget = AstraView(
             EXAMPLE / "astra.yaml",
