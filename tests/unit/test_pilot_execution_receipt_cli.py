@@ -441,7 +441,7 @@ def test_validate_rejects_receipt_finalization_before_job_completion(tmp_path):
 def test_validate_rejects_submission_of_a_different_script(tmp_path):
     receipt_path, workspace, module_root = _materialize_success_receipt(tmp_path)
     receipt = json.loads(receipt_path.read_text())
-    receipt["slurm"]["submissionArgv"][-1] = "project/scripts/other.sbatch"
+    receipt["slurm"]["submissionArgv"][-1] = "project/src/other.sbatch"
     receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
 
     result = _validate(receipt_path, workspace, module_root)

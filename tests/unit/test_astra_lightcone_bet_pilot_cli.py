@@ -172,7 +172,7 @@ def test_prepare_materializes_the_pinned_bounded_pilot_without_submitting(tmp_pa
         workspace / "project" / "universes" / "bet-f-0-3.yaml"
     ).is_file()
 
-    sbatch = (workspace / "project" / "scripts" / "run-bet-pilot.sbatch").read_text()
+    sbatch = (workspace / "project" / "src" / "run-bet-pilot.sbatch").read_text()
     for required in (
         "#SBATCH --partition=neurodesktop",
         "#SBATCH --nodes=1",
@@ -195,7 +195,7 @@ def test_prepare_materializes_the_pinned_bounded_pilot_without_submitting(tmp_pa
     assert not (workspace / "inputs" / "openneuro").exists()
 
     materializer = (
-        workspace / "project" / "scripts" / "materialize-bet-output.sh"
+        workspace / "project" / "src" / "materialize-bet-output.sh"
     ).read_text()
     # Every FSL tool the recipes call must be guarded before use, and the
     # module's command wrappers must stay the sole tool-execution seam.
@@ -207,7 +207,7 @@ def test_prepare_materializes_the_pinned_bounded_pilot_without_submitting(tmp_pa
     assert "singularity" not in materializer.lower()
 
     evidence_collector = (
-        workspace / "project" / "scripts" / "collect-pilot-evidence.py"
+        workspace / "project" / "src" / "collect-pilot-evidence.py"
     ).read_text()
     assert "from lightcone.engine.verify import verify_outputs" in evidence_collector
     assert '".lightcone-manifest.json"' in evidence_collector

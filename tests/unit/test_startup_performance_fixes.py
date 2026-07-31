@@ -126,6 +126,41 @@ def test_ensure_ssh_keys_concurrent_invocations_produce_valid_keys(tmp_path):
         )
 
 
+def test_ensure_ssh_keys_failed_pub_publish_is_retryable(tmp_path):
+    """A failed .pub publish after a winning ln must withdraw the private key.
+
+    Otherwise the existing-target check would skip regeneration forever and
+    strand a private key without its public half, which breaks the
+    authorized_keys entry guacamole.sh derives from it.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    shim_dir = tmp_path / "bin"
+    shim_dir.mkdir()
+    fake_mv = shim_dir / "mv"
+    fake_mv.write_text("#!/bin/bash\nexit 1\n")
+    fake_mv.chmod(0o755)
+
+    code, _ = run_cmd(
+        f"bash {ENSURE_SSH_KEYS}",
+        env={"HOME": str(home), "PATH": f"{shim_dir}:{os.environ['PATH']}"},
+    )
+    assert code != 0, "a failed .pub publish must be reported"
+    for name in ("guacamole_rsa", "id_rsa"):
+        assert not (home / ".ssh" / name).exists(), (
+            f"{name} survived a failed publish and would never be regenerated"
+        )
+
+    code, output = run_cmd(f"bash {ENSURE_SSH_KEYS}", env={"HOME": str(home)})
+    assert code == 0, output
+    for name in ("guacamole_rsa", "id_rsa"):
+        derived_public = _public_key_of(home / ".ssh" / name)
+        stored_public = (home / ".ssh" / f"{name}.pub").read_text().strip()
+        assert derived_public.split()[1] in stored_public, (
+            f"{name}.pub does not match the private key after the retry"
+        )
+
+
 # ---------------------------------------------------------------------------
 # before_notebook.sh OLLAMA_HOST guard
 # ---------------------------------------------------------------------------

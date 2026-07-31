@@ -46,7 +46,7 @@
   },
   "execution": {
     "retainedScript": {
-      "relativePath": "project/scripts/run-bet-pilot.sbatch",
+      "relativePath": "project/src/run-bet-pilot.sbatch",
       "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
       "sizeBytes": 4096
     },
@@ -130,7 +130,7 @@
     "submissionArgv": [
       "sbatch",
       "--parsable",
-      "project/scripts/run-bet-pilot.sbatch"
+      "project/src/run-bet-pilot.sbatch"
     ],
     "submittedAt": "2026-07-29T19:00:00Z",
     "resources": {

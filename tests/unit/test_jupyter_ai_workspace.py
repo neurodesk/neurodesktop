@@ -91,7 +91,14 @@ def test_image_installs_and_configures_the_chat_workspace_hook():
         "install -m 0644 /tmp/jupyter/jupyter_ai_workspace.py "
         "/opt/neurodesktop/jupyter_ai_workspace.py"
     ) in dockerfile
-    assert "from jupyter_ai_workspace import seed_agents_on_chat_save" in config
+    # The import must stay guarded so a missing or broken seeding module only
+    # disables AGENTS.md seeding instead of aborting server configuration.
     assert (
-        "c.FileContentsManager.post_save_hook = seed_agents_on_chat_save" in config
-    )
+        "try:\n"
+        "    from jupyter_ai_workspace import seed_agents_on_chat_save\n"
+        "except Exception"
+    ) in config
+    assert (
+        "if seed_agents_on_chat_save is not None:\n"
+        "    c.FileContentsManager.post_save_hook = seed_agents_on_chat_save"
+    ) in config

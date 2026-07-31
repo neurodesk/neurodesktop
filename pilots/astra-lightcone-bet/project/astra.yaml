@@ -43,7 +43,7 @@ outputs:
     decisions: [bet_fractional_threshold]
     recipe:
       command: >-
-        bash scripts/materialize-bet-output.sh bet_brain
+        bash src/materialize-bet-output.sh bet_brain
         {inputs.t1w} {decisions.bet_fractional_threshold} {output}
       resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}
   - id: bet_mask
@@ -53,7 +53,7 @@ outputs:
     decisions: [bet_fractional_threshold]
     recipe:
       command: >-
-        bash scripts/materialize-bet-output.sh bet_mask
+        bash src/materialize-bet-output.sh bet_mask
         {inputs.t1w} {decisions.bet_fractional_threshold} {output}
       resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}
   - id: mask_volume
@@ -63,7 +63,7 @@ outputs:
     decisions: [bet_fractional_threshold]
     recipe:
       command: >-
-        bash scripts/materialize-bet-output.sh mask_volume
+        bash src/materialize-bet-output.sh mask_volume
         {inputs.t1w} {decisions.bet_fractional_threshold} {output}
       resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}
   - id: boundary_qc
@@ -73,7 +73,7 @@ outputs:
     decisions: [bet_fractional_threshold]
     recipe:
       command: >-
-        bash scripts/materialize-bet-output.sh boundary_qc
+        bash src/materialize-bet-output.sh boundary_qc
         {inputs.t1w} {decisions.bet_fractional_threshold} {output}
       resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}
 

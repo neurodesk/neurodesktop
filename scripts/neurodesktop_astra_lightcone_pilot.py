@@ -628,7 +628,7 @@ def _candidate_for_run(
             "universes": universes,
         },
         "execution": {
-            "retainedScript": placeholder("project/scripts/run-bet-pilot.sbatch"),
+            "retainedScript": placeholder("project/src/run-bet-pilot.sbatch"),
             "module": {
                 "name": "fsl",
                 "version": contract["module"]["specifier"].split("/", 1)[1],
@@ -741,7 +741,7 @@ def run_pilot(workspace_root, scheduler_timeout_seconds):
     slurm_directory = run_directory / "slurm"
     slurm_directory.mkdir(parents=True, exist_ok=False)
     _prepare_run_snapshot(workspace_root, run_directory, contract)
-    relative_script = "project/scripts/run-bet-pilot.sbatch"
+    relative_script = "project/src/run-bet-pilot.sbatch"
     output_pattern = f"runs/{run_id}/slurm/astra-lightcone-bet-%j.out"
     error_pattern = f"runs/{run_id}/slurm/astra-lightcone-bet-%j.err"
     submission_argv = [

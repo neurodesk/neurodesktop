@@ -36,8 +36,8 @@ def test_astra_lightcone_pilot_cli_assets_and_exact_runtime_are_installed():
     code, output = run_cmd("astra validate astra.yaml", cwd=project)
     assert code == 0, output
     assert "Schema validation passed" in output
-    assert (project / "scripts" / "run-bet-pilot.sbatch").is_file()
-    assert (project / "scripts" / "materialize-bet-output.sh").is_file()
+    assert (project / "src" / "run-bet-pilot.sbatch").is_file()
+    assert (project / "src" / "materialize-bet-output.sh").is_file()
 
 
 @pytest.mark.skipif(

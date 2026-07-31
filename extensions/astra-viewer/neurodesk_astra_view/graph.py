@@ -305,7 +305,8 @@ def _build_valid_graph(project: dict[str, Any], run_path: str | Path | None):
             node = output_nodes[output_id]
             node["status"] = record["status"]
             node["published"] = bool(record.get("artifact_path"))
-            node["units"] = record.get("units")
+            if record.get("units") is not None:
+                node["units"] = record["units"]
             node["run"] = {
                 key: record.get(key)
                 for key in (

@@ -43,7 +43,15 @@ generate_pair() {
     # overwriting a key another process may already have handed out, which is
     # what would otherwise strand a private key next to a foreign .pub.
     if ln "${staging}/key" "${target}" 2>/dev/null; then
-        mv -f "${staging}/key.pub" "${target}.pub"
+        # A winning ln makes this process the sole owner of ${target}, so on a
+        # failed .pub publish it is safe to withdraw the private half; leaving
+        # it would make every later call skip regeneration and strand the pair
+        # without a public key.
+        if ! mv -f "${staging}/key.pub" "${target}.pub"; then
+            rm -f "${target}"
+            rm -rf "${staging}"
+            return 1
+        fi
     fi
 
     rm -rf "${staging}"

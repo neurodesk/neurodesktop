@@ -30,7 +30,7 @@ export HOME="${PILOT_LIGHTCONE_HOME}"
 export PATH="/opt/uv/tools/lightcone-cli/bin:${PATH}"
 
 /opt/conda/bin/python \
-    "${NEURODESKTOP_PILOT_WORKSPACE}/project/scripts/collect-pilot-evidence.py" \
+    "${NEURODESKTOP_PILOT_WORKSPACE}/project/src/collect-pilot-evidence.py" \
     capture-module \
     --workspace "${NEURODESKTOP_PILOT_WORKSPACE}" \
     --run-directory "${PILOT_RUN_DIR}"
@@ -45,6 +45,6 @@ mv "${PILOT_RUN_DIR}/lightcone/status.json.tmp" \
 lc verify | tee "${PILOT_RUN_DIR}/lightcone/verify.log"
 lc export wrroc --output "${PILOT_EXPORT_DIR}"
 /opt/uv/tools/lightcone-cli/bin/python \
-    scripts/collect-pilot-evidence.py collect-outputs \
+    src/collect-pilot-evidence.py collect-outputs \
     --workspace "${NEURODESKTOP_PILOT_WORKSPACE}" \
     --run-directory "${PILOT_RUN_DIR}"

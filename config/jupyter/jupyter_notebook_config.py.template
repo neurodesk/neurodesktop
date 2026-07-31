@@ -11,7 +11,11 @@ try:
 except Exception as _jupyterlmod_modulepath_error:
     print(f'[WARN] Failed to install jupyter-lmod MODULEPATH refresh: {_jupyterlmod_modulepath_error}')
 
-from jupyter_ai_workspace import seed_agents_on_chat_save
+try:
+    from jupyter_ai_workspace import seed_agents_on_chat_save
+except Exception as _jupyter_ai_workspace_error:
+    seed_agents_on_chat_save = None
+    print(f'[WARN] Jupyter AI chat workspace seeding unavailable: {_jupyter_ai_workspace_error}')
 
 # Per-user Guacamole web credentials. guacamole.sh writes these files on container
 # start with mode 0600. If they aren't present yet (first start, or direct Tomcat
@@ -152,7 +156,8 @@ c.ServerProxy.servers = {
 # c.ServerApp.root_dir = '/' # this causes an error when clicking on the little house icon when being located in the home directory
 c.ServerApp.preferred_dir = os.getcwd()
 c.FileContentsManager.allow_hidden = True
-c.FileContentsManager.post_save_hook = seed_agents_on_chat_save
+if seed_agents_on_chat_save is not None:
+    c.FileContentsManager.post_save_hook = seed_agents_on_chat_save
 c.ServerApp.terminado_settings = {
     "shell_command": ["/bin/bash"]
 }

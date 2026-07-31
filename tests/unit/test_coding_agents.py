@@ -1303,12 +1303,12 @@ def test_codex_preserves_plugin_sections_inserted_inside_managed_mcp_markers(
         assert result.returncode == 0, f"Wrapper execution failed: {result.stdout}"
 
     toml_text = (home_dir / ".codex" / "config.toml").read_text(encoding="utf-8")
-    assert "[marketplaces.lightcone-research]" in toml_text
+    assert toml_text.count("[marketplaces.lightcone-research]") == 1
     assert (
         'source = "https://github.com/LightconeResearch/agent-skills.git"'
         in toml_text
     )
-    assert '[plugins."astra@lightcone-research"]' in toml_text
+    assert toml_text.count('[plugins."astra@lightcone-research"]') == 1
     assert (
         toml_text.count("[mcp_servers.brain-researcher]")
         == expected_brain_tables

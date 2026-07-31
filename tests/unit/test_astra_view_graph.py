@@ -154,6 +154,14 @@ def test_gap_rules_g1_through_g6_are_stable_and_g5_is_run_only(tmp_path):
     executed_gap_ids = {gap["id"] for gap in executed["gaps"]}
     assert {"G5", "G7"} <= executed_gap_ids
     assert executed["trust"]["level"] == "executed-verified"
+    # A run record without units must leave the node's units untouched rather
+    # than overwrite them with None; one that declares units must apply them.
+    assert _node(executed, "output:root/processed")["units"] is None
+    with_units = json.loads(manifest.read_text())
+    with_units["outputs"][0]["units"] = "mm^3"
+    manifest.write_text(json.dumps(with_units))
+    executed_with_units = build_graph(spec, universe, manifest)
+    assert _node(executed_with_units, "output:root/processed")["units"] == "mm^3"
 
 
 def test_explicit_runtime_none_with_declared_container_is_red_and_non_dismissible(
