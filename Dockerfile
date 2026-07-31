@@ -463,7 +463,11 @@ RUN retry bash -o pipefail -c 'curl -fsSL https://deb.nodesource.com/setup_24.x 
 
 # Install AI coding assistants. The Jupyter AI ACP adapters are installed in a
 # late runtime-only layer so adapter updates do not rebuild frontend assets.
-RUN npm_config_cache=/tmp/npm-root-cache npm install -g @openai/codex \
+# CODEX_CLI_VERSION must stay inside the @openai/codex range pinned by
+# @agentclientprotocol/codex-acp (CODEX_ACP_VERSION below): the adapter is
+# installed without its bundled binary and drives this install via CODEX_PATH.
+ARG CODEX_CLI_VERSION="0.145.0"
+RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_CLI_VERSION}" \
     && rm -rf /root/.npm /tmp/npm-root-cache /home/${NB_USER}/.npm \
     && su - "${NB_USER}" -c 'retry bash -o pipefail -c "curl -fsSL https://claude.ai/install.sh | bash -s -- stable"' \
     && mkdir -p /opt/jovyan_defaults/.local/bin \
@@ -580,7 +584,9 @@ RUN /opt/conda/bin/pip install \
     jupyter-ai-persona-manager==0.1.2 \
     jupyter-ai-router==0.0.6 \
     jupyter-ai-tools==0.6.1 \
-    jupyter-server-documents==0.3.1 \
+    # 0.3.2 still ships the issue #271 bug; the anchored build-time patch
+    # below verifies its seams against every bump and fails loudly on a fix.
+    jupyter-server-documents==0.3.2 \
     jupyter-server-mcp==0.2.1 \
     jupyterlab-chat==0.23.0 \
     jupyterlab-commands-toolkit==0.1.6 \
@@ -595,6 +601,8 @@ RUN /opt/conda/bin/pip install \
     jupyter_scheduler \
     jupyterlab-slurm@git+https://github.com/NERSC/jupyterlab-slurm.git@main \
     httpx \
+    # Direct dependency of neurodesktop-pilot-receipt and the astra viewer
+    # (installed --no-deps); the jupyter stack only pulls it transitively.
     jsonschema \
     rfc8785==0.1.4 \
     astra-spec==${ASTRA_SPEC_VERSION} \
@@ -1009,34 +1017,6 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && chown -R root:users /opt/config /opt/neurodesktop /opt/tests
 
 
-# Rebuild Notebook Intelligence's frontend because the 5.3.0 PyPI wheel
-# contains only style.js. Build from the matching tag.
-# Its upstream lockfile pins the JupyterLab 4.2 builder stack. Use the checked-in
-# JupyterLab 4.6-compatible lockfile before selecting the current builder;
-# otherwise webpack's old license plugin crashes and launcher tokens are
-# compiled from incompatible package instances. Patch only after the real bundle
-# is installed so a changed upstream anchor fails the image build.
-ARG NBI_JUPYTERLAB_BUILDER_VERSION="4.5.10"
-RUN --mount=type=bind,source=config/jupyter/notebook-intelligence-5.3.0.yarn.lock,target=/tmp/nbi-yarn.lock,ro \
-    NBI_PACKAGE_DIR="$(/opt/conda/bin/pip show notebook_intelligence | awk '/^Location:/ {print $2 "/notebook_intelligence"}')" \
-    && test -d "${NBI_PACKAGE_DIR}" \
-    && NBI_VERSION="$(/opt/conda/bin/pip show notebook_intelligence | awk '/^Version:/ {print $2}')" \
-    && retry git clone --depth 1 --branch "v${NBI_VERSION}" https://github.com/notebook-intelligence/notebook-intelligence.git /tmp/notebook-intelligence \
-    && cd /tmp/notebook-intelligence \
-    && npm pkg set "dependencies.@jupyterlab/launcher=^4.0.0" \
-    && npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}" \
-    && install -m 0644 /tmp/nbi-yarn.lock yarn.lock \
-    && retry jlpm install --immutable \
-    && jlpm build:prod \
-    && NBI_LABEXT_DIR="${NBI_PACKAGE_DIR}/labextension" \
-    && APP_NBI_DIR=/opt/conda/share/jupyter/labextensions/@plmbr/notebook-intelligence \
-    && rm -rf "${NBI_LABEXT_DIR}" "${APP_NBI_DIR}" \
-    && cp -a /tmp/notebook-intelligence/notebook_intelligence/labextension "${NBI_LABEXT_DIR}" \
-    && cp -a "${NBI_LABEXT_DIR}" "${APP_NBI_DIR}" \
-    && find "${NBI_LABEXT_DIR}/static" -type f -name 'remoteEntry*.js' | grep -q . \
-    && /opt/conda/bin/python3 /opt/neurodesktop/patch_nbi.py \
-    && rm -rf /tmp/notebook-intelligence /root/.cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
-
 # Workaround for jupyterlab-rise + jupyterlab-myst incompatibility:
 # jupyterlab-myst's federated bundle declares @jupyterlab/markdownviewer as a
 # shared module it consumes from the host. RISE's bundle does not include that
@@ -1118,66 +1098,24 @@ RUN retry git clone --depth 1 --branch "v${JUPYTER_COLLABORATION_VERSION}" \
     && test "$(node -p "require('${DOCPROVIDER_DEST}/package.json').dependencies['@jupyter/ydoc']")" = "^${MYST_YDOC_VERSION}" \
     && rm -rf /tmp/jupyter-collaboration /root/.cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
 
-# MySTRA is a single-file MyST plugin rather than an npm package. Build the
-# requested inventory PR at its exact head and ship the bundle locally so a
-# project can reference it without following the moving branch or requiring a
-# first-use download.
-ARG MYSTMD_VERSION="1.10.1"
-ARG MYSTRA_REF="b01be473a4be988e58aa254c3efbf10c24f4d7bd"
-RUN retry npm --cache /tmp/mystmd-npm-cache install -g "mystmd@${MYSTMD_VERSION}" \
-    && retry git clone https://github.com/LightconeResearch/MySTRA.git /tmp/mystra \
-    && git -C /tmp/mystra checkout --detach "${MYSTRA_REF}" \
-    && test "$(git -C /tmp/mystra rev-parse HEAD)" = "${MYSTRA_REF}" \
-    && cd /tmp/mystra \
-    && retry npm --cache /tmp/mystra-npm-cache ci \
-    && npm test \
-    && npm run bundle \
-    && install -D -m 0644 dist/mystra.mjs /opt/neurodesktop/mystra/mystra.mjs \
-    && printf '%s\n' "${MYSTRA_REF}" > /opt/neurodesktop/mystra/REVISION \
-    && node -e "import('/opt/neurodesktop/mystra/mystra.mjs').then(m => { if (m.default?.name !== 'astra') process.exit(1) })" \
-    && myst --version \
-    && rm -rf /tmp/mystra /tmp/mystmd-npm-cache /tmp/mystra-npm-cache /root/.npm
-
-# Build both presentation flavors paired with MySTRA, then retain compact,
-# runnable template artifacts rather than the source tree and development
-# dependency graph. Each template keeps its runtime dependencies locally so a
-# project can select it without a first-use network download.
-ARG ASTRA_THEME_VERSION="0.0.8"
-ARG ASTRA_THEME_REF="3939ceadcbde34b509896fe1a332fdaa611d0dab"
-RUN retry git clone https://github.com/LightconeResearch/astra-theme.git /tmp/astra-theme \
-    && git -C /tmp/astra-theme checkout --detach "${ASTRA_THEME_REF}" \
-    && test "$(git -C /tmp/astra-theme rev-parse HEAD)" = "${ASTRA_THEME_REF}" \
-    && test "$(node -p "require('/tmp/astra-theme/package.json').version")" = "${ASTRA_THEME_VERSION}" \
-    && cd /tmp/astra-theme \
-    && retry npm --cache /tmp/astra-theme-npm-cache ci \
-    && npm test \
-    && npm run build \
-    && for theme in article book; do \
-    source_dir="/tmp/astra-theme/themes/${theme}"; \
-    destination="/opt/neurodesktop/astra-theme/${theme}"; \
-    install -d -m 0755 "${destination}"; \
-    cp -a "${source_dir}/template.yml" "${source_dir}/server.js" \
-    "${source_dir}/build" "${source_dir}/public" "${destination}/"; \
-    node -e 'const fs=require("fs"); const theme=require(process.argv[1]); const names=["@remix-run/express","@remix-run/node","compression","express","get-port","morgan"]; const pkg={name:theme.name,version:theme.version,description:theme.description,license:theme.license,private:true,scripts:{start:"node ./server.js"},dependencies:Object.fromEntries(names.map(name=>[name,theme.dependencies[name]])),engines:theme.engines}; fs.writeFileSync(process.argv[2],JSON.stringify(pkg,null,2)+"\n")' \
-    "${source_dir}/package.json" "${destination}/package.json"; \
-    cd "${destination}"; \
-    retry npm --cache /tmp/astra-theme-runtime-npm-cache install --omit=dev --ignore-scripts; \
-    test "$(node -p 'require("./package.json").version')" = "${ASTRA_THEME_VERSION}"; \
-    test -f build/index.js; \
-    test -d public/build; \
-    done \
-    && printf '%s\n' "${ASTRA_THEME_REF}" > /opt/neurodesktop/astra-theme/REVISION \
-    && rm -rf /tmp/astra-theme /tmp/astra-theme-npm-cache \
-    /tmp/astra-theme-runtime-npm-cache /root/.npm
-
 # Expose the installed agent families as Jupyter AI ACP personas. These
 # adapters are runtime-only and deliberately live after all frontend builds.
+#
+# --omit=optional drops each adapter's vendored agent binary (an
+# optionalDependency chain worth ~250 MB per adapter). The adapters instead
+# drive the binaries already in this image via CODEX_PATH and
+# CLAUDE_CODE_EXECUTABLE, exported in environment_variables.sh; codex-acp's
+# supported range for that binary is what pins CODEX_CLI_VERSION above. The
+# size assertion fails the build if a future adapter release stops declaring
+# its binary as optional and reintroduces the duplicate.
 ARG CODEX_ACP_VERSION="1.1.7"
-ARG CLAUDE_AGENT_ACP_VERSION="0.63.0"
-RUN npm_config_cache=/tmp/npm-acp-cache retry npm install -g \
+ARG CLAUDE_AGENT_ACP_VERSION="0.64.0"
+RUN npm_config_cache=/tmp/npm-acp-cache retry npm install -g --omit=optional \
     "@agentclientprotocol/codex-acp@${CODEX_ACP_VERSION}" \
     "@agentclientprotocol/claude-agent-acp@${CLAUDE_AGENT_ACP_VERSION}" \
-    && rm -rf /root/.npm /tmp/npm-acp-cache /home/${NB_USER}/.npm
+    && rm -rf /root/.npm /tmp/npm-acp-cache /home/${NB_USER}/.npm \
+    && command -v codex-acp && command -v claude-agent-acp \
+    && test "$(du -sm "$(npm root -g)/@agentclientprotocol" | cut -f1)" -lt 100
 
 # Upstream issue #271: a stale client frame can terminate a Jupyter AI chat
 # room's message queue. Keep this anchored workaround until a fixed
@@ -1228,13 +1166,6 @@ RUN --mount=type=bind,source=scripts/neurodesktop_astra_lightcone_pilot.py,targe
     && install -d -m 0755 /opt/neurodesktop/pilots \
     && cp -a /tmp/astra-lightcone-bet /opt/neurodesktop/pilots/ \
     && chown -R root:users /opt/neurodesktop/pilots/astra-lightcone-bet
-
-# Install the MySTRA report CLI last: it only wires together the MyST CLI, the
-# MySTRA bundle, and the ASTRA themes installed above, so it must not be able
-# to satisfy its own asset check against a half-built image.
-RUN --mount=type=bind,source=scripts/neurodesktop_astra_report.py,target=/tmp/neurodesktop_astra_report.py,ro \
-    install -m 0755 /tmp/neurodesktop_astra_report.py /usr/local/bin/neurodesktop-astra-report \
-    && neurodesktop-astra-report --help > /dev/null
 
 
 # Start the container as root so docker-stacks runs before-notebook hooks with
