@@ -22,6 +22,16 @@ fi
 MAX_WAIT="${NEURODESKTOP_ACCESS_URL_MAX_WAIT:-180}"
 SETTLE_SECONDS="${NEURODESKTOP_ACCESS_URL_SETTLE:-3}"
 
+# Print each argument as one line ending in CRLF, all in a single write.
+# By the time this watcher fires, other startup output may have left the
+# container console with ONLCR off, where a bare \n moves down without
+# returning to column 0 and the banner renders as a staircase. Explicit
+# \r\n is a no-op on a sane console and fixes the raw one; the single
+# write keeps concurrent log lines from interleaving mid-banner.
+emit_lines() {
+    printf '%s\r\n' "$@"
+}
+
 # Newest server info file across the runtime dirs the server may use. The
 # watcher can run as root while the server runs as ${NB_USER}, so check both
 # HOME-derived locations.
@@ -89,7 +99,7 @@ while :; do
         fi
     fi
     if [ "${WAITED}" -ge "${MAX_WAIT}" ]; then
-        echo "[WARN] print_access_url.sh: Jupyter did not answer within ${MAX_WAIT}s; no access link printed."
+        emit_lines "[WARN] print_access_url.sh: Jupyter did not answer within ${MAX_WAIT}s; no access link printed."
         exit 0
     fi
     sleep 1
@@ -110,14 +120,15 @@ if [ -z "${ACCESS_URL}" ]; then
     ACCESS_URL="$(printf '%s\n' "${URLS}" | sed -n 2p)"
 fi
 if [ -z "${ACCESS_URL}" ]; then
-    echo "[WARN] print_access_url.sh: could not determine the Jupyter access URL."
+    emit_lines "[WARN] print_access_url.sh: could not determine the Jupyter access URL."
     exit 0
 fi
 
-echo ""
-echo "=========================================================================="
-echo " Neurodesktop is ready. Open this link in your browser:"
-echo ""
-echo "     ${ACCESS_URL}"
-echo ""
-echo "=========================================================================="
+emit_lines \
+    "" \
+    "==========================================================================" \
+    " Neurodesktop is ready. Open this link in your browser:" \
+    "" \
+    "     ${ACCESS_URL}" \
+    "" \
+    "=========================================================================="
