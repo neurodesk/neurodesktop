@@ -132,29 +132,137 @@ def test_trust_labels_name_the_run_state_not_a_selection():
         assert "analysis" not in _trust_label(level).lower()
 
 
-def test_extra_top_level_keys_are_answered_with_the_permitted_keys(tmp_path):
-    """"Extra inputs are not permitted" alone leaves the reader stuck.
+def test_a_retired_narrative_is_read_as_a_description_not_rejected(tmp_path):
+    """A spec written before astra-spec RFC-0002 still draws.
 
-    Agent-scaffolded specs invent plausible top-level fields; the released
-    validator names the offending key but never the ones that would work, and
-    the viewer is the only place the author sees the failure.
+    RFC-0002 retired `narrative` and `authors` in favour of one `description`.
+    A spec that predates it is not wrong about its own analysis, only spelled
+    against a schema that moved; refusing to draw it tells the reader nothing
+    they can act on, and the viewer is often where they find out at all.
     """
     project = tmp_path / "project"
     project.mkdir()
     (project / "astra.yaml").write_text(
         'version: "0.0.12"\nname: drifted\nauthors: [someone]\n'
-        "narrative: a write-up that belongs in description\n"
+        "narrative:\n"
+        "  summary: |\n    What this analysis is.\n"
+        "  methods: |\n    How it was done.\n"
         "inputs: []\noutputs: []\n"
     )
 
     graph = build_graph(project / "astra.yaml")
 
+    assert graph["errors"] == []
+    assert graph["meta"]["valid"] is True
+    root = _node(graph, "analysis:root")
+    # The write-up is the part the reader most wants on screen, so it is
+    # folded into `description` rather than discarded with the field name.
+    assert "What this analysis is." in root["description"]
+    assert "How it was done." in root["description"]
+
+    warnings = " ".join(graph["warnings"])
+    assert "narrative" in warnings and "description" in warnings
+    assert "authors" in warnings
+
+
+def test_a_retired_field_in_an_inline_sub_analysis_is_adopted_too(tmp_path):
+    """An inline child is validated as part of its parent.
+
+    By the time the recursion reaches that child, the parent would already
+    have been rejected — so the child's retired spelling has to be adopted
+    from the parent's pass, not the child's.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "astra.yaml").write_text(
+        'version: "0.0.12"\nname: parent\ninputs: []\noutputs: []\n'
+        "analyses:\n"
+        "  child:\n"
+        "    name: Child\n"
+        "    narrative:\n      summary: |\n        Child prose.\n"
+        "    inputs:\n      - id: child_input\n        type: data\n"
+        "    outputs:\n      - id: child_result\n        type: metric\n"
+        "        inputs: [child_input]\n"
+    )
+
+    graph = build_graph(project / "astra.yaml")
+
+    assert graph["errors"] == []
+    assert "Child prose." in _node(graph, "analysis:root/child")["description"]
+
+
+def test_option_insights_naming_an_ancestor_insight_still_resolve(tmp_path):
+    """astra-tools scoped `Option.insights` to the declaring analysis.
+
+    A bare reference in an older spec meant "search upwards", so it is read as
+    a `../` reference rather than failing the whole graph. One that resolves
+    locally is left alone, so the two readings only differ where the old spec
+    had no other possible target.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "astra.yaml").write_text(
+        'version: "0.0.12"\nname: parent\ninputs: []\noutputs: []\n'
+        "prior_insights:\n"
+        "  upstairs:\n"
+        '    label: "Known upstairs"\n'
+        '    claim: "An insight declared on the root."\n'
+        '    created_at: "2026-07-30T00:00:00Z"\n'
+        "    evidence:\n      - id: a_paper\n"
+        '        doi: "10.1000/example"\n'
+        "analyses:\n"
+        "  child:\n"
+        "    name: Child\n"
+        "    inputs:\n      - id: child_input\n        type: data\n"
+        "    outputs:\n      - id: child_result\n        type: metric\n"
+        "        inputs: [child_input]\n        decisions: [pick]\n"
+        "    decisions:\n"
+        "      pick:\n"
+        '        label: "Pick"\n'
+        "        default: a\n"
+        "        options:\n"
+        "          a:\n"
+        '            label: "A"\n'
+        "            insights: [upstairs]\n"
+        "          b:\n"
+        '            label: "B"\n'
+    )
+
+    graph = build_graph(project / "astra.yaml")
+
+    assert graph["errors"] == []
+    # The reference survives as a real edge, not just a silenced error.
+    justifies = {
+        (edge["source"], edge["target"])
+        for edge in graph["edges"]
+        if edge["kind"] == "justifies"
+    }
+    assert ("insight:root/upstairs", "decision:root/child/pick") in justifies
+    assert "option insight reference" in " ".join(graph["warnings"])
+
+
+def test_a_genuine_schema_error_is_still_an_error(tmp_path):
+    """Adoption covers retired spellings, not authoring mistakes.
+
+    A stray key deep inside a decision is far likelier to be a typo than
+    schema drift, and silently discarding content there would hide it.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "astra.yaml").write_text(
+        'version: "0.0.12"\nname: broken\ninputs: []\noutputs: []\n'
+        "decisions:\n"
+        "  pick:\n"
+        '    label: "Pick"\n'
+        "    default: a\n"
+        "    nonsense: true\n"
+        "    options:\n      a:\n        label: \"A\"\n"
+    )
+
+    graph = build_graph(project / "astra.yaml")
+
     assert graph["meta"] == {"valid": False}
-    failure = graph["errors"][0]
-    assert "authors" in failure and "narrative" in failure
-    assert "permitted keys here are:" in failure
-    for permitted in ("description", "findings", "prior_insights", "decisions"):
-        assert permitted in failure
+    assert "nonsense" in graph["errors"][0]
 
 
 def test_the_header_can_name_the_analysis_rather_than_only_its_universe():

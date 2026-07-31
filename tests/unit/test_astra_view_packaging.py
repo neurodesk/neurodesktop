@@ -109,6 +109,22 @@ def test_frontend_shows_the_trust_message_rather_than_hiding_it_in_a_tooltip():
     assert javascript.index("graph.errors") < javascript.index("astra-trust-message")
 
 
+def test_frontend_collapses_a_long_warning_banner():
+    """A spec predating several schema changes warns once per analysis per
+    change. Left expanded, that wall of yellow pushes the graph the reader
+    came for off the screen, so past a handful they collapse behind a count."""
+    javascript = (ROOT / "neurodesk_astra_view/static/index.js").read_text(
+        encoding="utf-8"
+    )
+    stylesheet = (ROOT / "neurodesk_astra_view/static/style.css").read_text(
+        encoding="utf-8"
+    )
+
+    assert "graph.warnings.length > 3" in javascript
+    assert "schema warnings" in javascript
+    assert ".astra-warnings summary" in stylesheet
+
+
 def test_frontend_cleanup_removes_only_its_registered_model_listeners():
     """Each render registers its listeners exactly once, and the teardown
     callback it returns to anywidget deregisters exactly those listeners, so

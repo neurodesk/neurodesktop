@@ -520,12 +520,13 @@ Two constraints on this layout are load-bearing:
 Dockerfile changes (implemented):
 
 1. `astra-spec`, `astra-tools`, and `anywidget` are pinned in the conda pip
-   block ([`Dockerfile:554`](../../Dockerfile#L554)); add `lightcone-cli==<pin>`
-   there once the execution demo lands.
-2. `extensions/astra-viewer` installs from a bind mount
+   block ([`Dockerfile:604`](../../Dockerfile#L604)).
+2. `lightcone-cli` is installed at its own pin (`LIGHTCONE_CLI_VERSION`) in a
+   later layer ([`Dockerfile:1192`](../../Dockerfile#L1192)).
+3. `extensions/astra-viewer` installs from a bind mount
    ([`Dockerfile:636`](../../Dockerfile#L636)); with anywidget there is no
    `jupyter labextension build` step and no npm cache to clean.
-3. `jq` is installed in the apt block ([`Dockerfile:335`](../../Dockerfile#L335))
+4. `jq` is installed in the apt block ([`Dockerfile:335`](../../Dockerfile#L335))
    for the ASTRA agent-skill plugin hooks; the viewer itself does not need it.
 
 ### Tests

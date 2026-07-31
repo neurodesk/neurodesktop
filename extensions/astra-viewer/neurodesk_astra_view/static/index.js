@@ -153,7 +153,17 @@ export function render({ model, el }) {
   if ((graph.warnings || []).length) {
     const warnings = document.createElement("div");
     warnings.className = "astra-warnings";
-    graph.warnings.forEach((warning) => appendText(warnings, "div", warning));
+    // A spec that predates several schema changes warns once per analysis per
+    // change, which is a wall of yellow above the graph the reader came for.
+    // Past a handful they collapse behind a count that still names the cause.
+    const host =
+      graph.warnings.length > 3
+        ? appendText(warnings, "details", "")
+        : warnings;
+    if (host !== warnings) {
+      appendText(host, "summary", `${graph.warnings.length} schema warnings`);
+    }
+    graph.warnings.forEach((warning) => appendText(host, "div", warning));
     root.appendChild(warnings);
   }
 

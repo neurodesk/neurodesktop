@@ -89,6 +89,21 @@ of the package consumes qualified, schema-independent entity records.
 `build_graph()` is pure and JSON-serializable; the anywidget is only a renderer
 over that result.
 
+That stance extends to spellings the schema has retired. A spec written before
+`astra-spec` RFC-0002 (which replaced `authors` and the sectioned `narrative`
+map with one free-prose `description`), or before `astra-tools` scoped
+`Option.insights` to the declaring analysis, is read rather than refused: the
+narrative sections are folded into `description`, an undefined top-level key is
+ignored, and a bare option insight naming an ancestor's insight is read as the
+`../` reference it used to mean. Each adoption is reported as a warning, so the
+graph never silently disagrees with the file. The limits are deliberate —
+adoption only ever applies to top-level keys and to references with no other
+possible target, because a stray key inside a decision or output is far likelier
+to be an authoring mistake than schema drift, and it stays an error. Where a
+retired spelling has been adopted, semantic validation runs on the resolved tree
+instead of the raw file, since the released validator would otherwise re-read
+the retired spelling straight off disk.
+
 The frontend concatenates the checked-in Cytoscape.js 3.34.0 distribution with
 the widget renderer at import time. It has no npm build, CDN import, fetch, or
 other runtime network path. Flow, Decisions, and Evidence modes filter the same
@@ -122,10 +137,11 @@ for their own analysis.
 Double-clicking an `astra.yaml` (or `*.astra.yaml`) in the JupyterLab file
 browser renders the same viewer without a kernel, the way NIfTI volumes open
 in NiiVue. The `neurodesk_astra_view.serverext` Jupyter server extension
-answers `GET /neurodesk-astra-view/graph?spec=…[&universe=…][&run=…]` by
-running `build_graph()` server-side — request paths are workspace-relative and
-rejected with a 404 before any read when absolute, traversing, or resolving
-outside the server root — and serves the anywidget's own frontend at
+answers `GET <Jupyter Server base URL>/neurodesk-astra-view/graph?spec=…[&universe=…][&run=…]`
+by running `build_graph()` server-side — request paths are workspace-relative
+and rejected with a 404 before any read when absolute, traversing, or resolving
+outside the server root — and serves the anywidget's own frontend, also under
+the Jupyter Server base URL, at
 `/neurodesk-astra-view/asset/(esm|css)`, so the file-browser viewer and the
 notebook widget are one frontend with no second copy to drift. The
 `neurodesk-launcher:astra-viewer` plugin registers the pattern file type and a

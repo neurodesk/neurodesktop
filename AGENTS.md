@@ -36,7 +36,13 @@
   tests/unit/test_astra_view_packaging.py` from a checkout and `pytest
   /opt/tests/test_astra_view_image.py` in the built image. Keep every read path
   confined and keep `adapter.py` as the only released-schema-aware viewer
-  module. Node positions come from the `rank`/`order` pair `layout.py`
+  module. Schema drift the viewer can read unambiguously — a retired
+  `narrative`/`authors`, an undefined top-level key, an option insight naming
+  an ancestor's insight — is adopted with a warning rather than refused, and
+  every adoption must surface in `graph["warnings"]`; keep that confined to
+  top-level keys and to references with no other possible target, so an
+  authoring mistake inside a decision or output stays an error.
+  Node positions come from the `rank`/`order` pair `layout.py`
   computes, never from a Cytoscape layout algorithm: the bundle ships no
   layered layout, and `breadthfirst` ranks by hop count, which draws dataflow
   arrows backwards along a row. The renderer must re-lay out on every filter

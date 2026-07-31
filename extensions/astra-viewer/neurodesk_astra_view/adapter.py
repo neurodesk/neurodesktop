@@ -46,32 +46,191 @@ def _require_no_errors(errors: list[Any], label: str) -> None:
         raise AdapterError(f"{label}: {'; '.join(_messages(errors))}")
 
 
-def _permitted_analysis_keys() -> tuple[str, ...]:
-    try:
-        from astra.datamodel.astra_pydantic import Analysis
-    except ImportError:  # pragma: no cover - the hint is optional context
-        return ()
-    return tuple(sorted(Analysis.model_fields))
+class _Drift:
+    """Warnings gathered while reading a spec, plus whether it needed adopting.
 
-
-def _require_valid_analysis_data(errors: list[Any], label: str) -> None:
-    """Fail an analysis, naming the permitted keys when a key is the problem.
-
-    Specs scaffolded by an agent routinely invent plausible-looking top-level
-    fields (`authors`, `narrative`). The released validator answers each one
-    with a bare "Extra inputs are not permitted", which says what is wrong but
-    not what would be right, so the reader has no way to fix it from the
-    viewer. Listing the schema's own field names closes that loop.
+    `adopted` has to be its own fact rather than "are there any warnings":
+    a merely stale `version:` string changes nothing about how the released
+    validators read the spec, while a retired spelling does.
     """
-    messages = _messages(errors)
-    if not messages:
+
+    def __init__(self) -> None:
+        self.warnings: list[str] = []
+        self.adopted = False
+
+    def warn(self, message: str) -> None:
+        self.warnings.append(message)
+
+    def adopt(self, message: str) -> None:
+        self.adopted = True
+        self.warnings.append(message)
+
+
+#: Narrative sections, in the order they read as one prose description.
+#: astra-spec RFC-0002 ("decouple analysis reports from astra.yaml") replaced
+#: the sectioned `narrative` map with a single free-prose `description`.
+_NARRATIVE_ORDER = ("summary", "methods", "inputs", "outputs", "findings")
+
+
+def _narrative_prose(narrative: Any) -> str | None:
+    if isinstance(narrative, str):
+        return narrative.strip() or None
+    if not isinstance(narrative, dict):
+        return None
+    ordered = [key for key in _NARRATIVE_ORDER if narrative.get(key)]
+    ordered += [
+        key for key in narrative if key not in _NARRATIVE_ORDER and narrative[key]
+    ]
+    prose = "\n\n".join(str(narrative[key]).strip() for key in ordered)
+    return prose or None
+
+
+def _adopt_retired_fields(
+    data: dict[str, Any], label: str, drift: _Drift
+) -> dict[str, Any]:
+    """Read a pre-RFC-0002 analysis instead of refusing it.
+
+    A spec written before the retirement is not wrong about its own analysis;
+    it is only spelled in a schema that has moved on. Refusing to draw it
+    tells the reader nothing they can act on, and the viewer is often the
+    place they find out at all — so the drift is reported as a warning and the
+    graph is still built, exactly as a declared-version drift already is.
+
+    `narrative` carried the write-up the reader most wants on screen, so its
+    sections are folded into `description` rather than dropped.
+    """
+    if not isinstance(data, dict):
+        return data
+    adopted = dict(data)
+
+    # An inline sub-analysis is validated as part of its parent, so its own
+    # retired spellings have to be adopted here — by the time the recursion
+    # reaches that child, the parent would already have been rejected.
+    inline = {
+        child_id: child
+        for child_id, child in (adopted.get("analyses") or {}).items()
+        if isinstance(child, dict) and not child.get("path")
+    }
+    if inline:
+        children = dict(adopted["analyses"])
+        for child_id, child in inline.items():
+            children[child_id] = _adopt_retired_fields(
+                child, f"{label}/{child_id}", drift
+            )
+        adopted["analyses"] = children
+
+    narrative = adopted.pop("narrative", None)
+    if narrative is not None:
+        prose = _narrative_prose(narrative)
+        if prose and not adopted.get("description"):
+            adopted["description"] = prose
+            drift.adopt(
+                f"{label} uses the retired 'narrative' field; its text is shown "
+                f"as the analysis description (astra-spec {ASTRA_SPEC_VERSION} "
+                f"replaced 'narrative' with 'description')"
+            )
+        else:
+            drift.adopt(
+                f"{label} uses the retired 'narrative' field; 'description' is "
+                f"shown instead (astra-spec {ASTRA_SPEC_VERSION} replaced "
+                f"'narrative' with 'description')"
+            )
+
+    # Anything else the installed schema rejects outright at the top level is
+    # dropped so the rest of the analysis can still be read. Only top-level
+    # keys: a stray key deep inside a decision or output is far likelier to be
+    # an authoring mistake than schema drift, and silently discarding content
+    # there would hide it.
+    for _ in range(len(adopted)):
+        rejected = {
+            message.split(":", 1)[0].strip()
+            for message in _messages(_astra_api()[1](adopted))
+            if "Extra inputs are not permitted" in message
+        }
+        removable = sorted(key for key in rejected if key in adopted and "." not in key)
+        if not removable:
+            break
+        for key in removable:
+            adopted.pop(key)
+        drift.adopt(
+            f"{label} declares {', '.join(repr(key) for key in removable)}, which "
+            f"astra-spec {ASTRA_SPEC_VERSION} does not define; ignored for the graph"
+        )
+    return adopted
+
+
+def _qualify_ancestor_insights(
+    data: dict[str, Any], label: str, ancestors: list[set[str]], drift: _Drift
+) -> None:
+    """Rewrite option insight references that name an ancestor's insight.
+
+    astra-tools scoped `Option.insights` to the declaring node and now requires
+    `../` to reach an ancestor. A bare reference in an older spec meant "search
+    upwards", so pointing it at the ancestor that actually holds the insight
+    reproduces the original meaning rather than guessing at one. A reference
+    that already resolves locally is untouched, so the two readings only ever
+    differ where the old spec had no other possible target.
+    """
+    if not ancestors:
         return
-    permitted = _permitted_analysis_keys()
-    if permitted and any(
-        "Extra inputs are not permitted" in message for message in messages
-    ):
-        messages.append(f"permitted keys here are: {', '.join(permitted)}")
-    raise AdapterError(f"{label}: {'; '.join(messages)}")
+    local = set(data.get("prior_insights") or {})
+    qualified = 0
+    for decision in (data.get("decisions") or {}).values():
+        if not isinstance(decision, dict):
+            continue
+        for option in (decision.get("options") or {}).values():
+            if not isinstance(option, dict) or not option.get("insights"):
+                continue
+            rewritten = []
+            for reference in option["insights"]:
+                depth = next(
+                    (
+                        index + 1
+                        for index, scope in enumerate(ancestors)
+                        if reference in scope
+                    ),
+                    None,
+                )
+                if (
+                    isinstance(reference, str)
+                    and not reference.startswith("../")
+                    and reference not in local
+                    and depth is not None
+                ):
+                    rewritten.append("../" * depth + reference)
+                    qualified += 1
+                else:
+                    rewritten.append(reference)
+            option["insights"] = rewritten
+    if qualified:
+        drift.adopt(
+            f"{label}: {qualified} option insight reference(s) name an insight "
+            "declared further up the tree; read as '../' references (astra-tools "
+            "now scopes option insights to the declaring analysis)"
+        )
+
+
+def _without_resolved_paths(data: dict[str, Any]) -> dict[str, Any]:
+    """Drop the `path` marker from sub-analyses whose content is already inlined.
+
+    The released semantic validator re-reads every `path:` sub-analysis from
+    disk, which would step straight back onto the retired spelling this module
+    just adopted. Handing it the resolved tree keeps it validating what the
+    graph is actually built from — but a node carrying both `path` and inline
+    content trips the validator's mutual-exclusivity check.
+    """
+    result = copy.deepcopy(data)
+
+    def strip(node: dict[str, Any]) -> None:
+        children = node.get("analyses") or {}
+        for child in children.values():
+            if isinstance(child, dict):
+                if child.keys() - {"path"}:
+                    child.pop("path", None)
+                strip(child)
+
+    strip(result)
+    return result
 
 
 def _confined_file(path: Path, root: Path, label: str) -> Path:
@@ -99,7 +258,7 @@ def _installed_schema_version() -> str:
 
 
 def _check_version(
-    data: dict[str, Any], label: str, *, required: bool, warnings: list[str]
+    data: dict[str, Any], label: str, *, required: bool, drift: _Drift
 ) -> None:
     """Record a declared-version drift instead of refusing to render.
 
@@ -111,13 +270,13 @@ def _check_version(
     version = data.get("version")
     if version is None:
         if required:
-            warnings.append(
+            drift.warn(
                 f"{label} does not declare an ASTRA spec version; the graph "
                 f"reflects installed astra-spec {ASTRA_SPEC_VERSION}"
             )
         return
     if version != ASTRA_SPEC_VERSION:
-        warnings.append(
+        drift.warn(
             f"{label} declares ASTRA spec version {version!r}, but astra-spec "
             f"{ASTRA_SPEC_VERSION} is installed; the graph reflects the "
             f"installed version"
@@ -132,24 +291,32 @@ def _resolve_analysis_tree(
     scope: tuple[str, ...],
     source_dirs: dict[tuple[str, ...], Path],
     active_files: set[Path],
-    version_warnings: list[str],
+    drift: _Drift,
+    ancestor_insights: list[set[str]] | None = None,
 ) -> dict[str, Any]:
     load_yaml, validate_analysis_data, _, _, _ = _astra_api()
+    label = f"analysis {'/'.join(scope)}"
     # Record the version drift before schema validation: if the installed
     # schema then rejects the spec, the warning is the context that explains
     # the failure.
     _check_version(
         data,
-        f"analysis {'/'.join(scope)}",
+        label,
         required=scope == ("root",),
-        warnings=version_warnings,
+        drift=drift,
     )
-    _require_valid_analysis_data(
+    # Adopt retired spellings before validating, so a spec that predates a
+    # schema change is reported as drift rather than rejected outright.
+    data = _adopt_retired_fields(data, label, drift)
+    _require_no_errors(
         validate_analysis_data(data), f"invalid ASTRA schema at {'/'.join(scope)}"
     )
     source_dirs[scope] = source_dir
 
     resolved = copy.deepcopy(data)
+    ancestor_insights = list(ancestor_insights or [])
+    _qualify_ancestor_insights(resolved, label, ancestor_insights, drift)
+    child_ancestors = [set(data.get("prior_insights") or {}), *ancestor_insights]
     children: dict[str, Any] = {}
     for child_id, child in (data.get("analyses") or {}).items():
         child_scope = (*scope, child_id)
@@ -173,7 +340,8 @@ def _resolve_analysis_tree(
                 scope=child_scope,
                 source_dirs=source_dirs,
                 active_files=active_files,
-                version_warnings=version_warnings,
+                drift=drift,
+                ancestor_insights=child_ancestors,
             )
             active_files.remove(child_file)
             child_resolved["path"] = str(external_path)
@@ -188,7 +356,8 @@ def _resolve_analysis_tree(
                 scope=child_scope,
                 source_dirs=source_dirs,
                 active_files=active_files,
-                version_warnings=version_warnings,
+                drift=drift,
+                ancestor_insights=child_ancestors,
             )
     if children:
         resolved["analyses"] = children
@@ -557,19 +726,19 @@ def adapt_project(
 ) -> dict[str, Any]:
     """Validate, confine, resolve, and normalize an ASTRA project."""
 
-    version_warnings: list[str] = []
+    drift = _Drift()
     try:
-        return _adapt_project(spec_path, universe_path, version_warnings)
+        return _adapt_project(spec_path, universe_path, drift)
     except AdapterError as error:
         # Let the caller surface the drift next to the failure it explains.
-        error.version_warnings = version_warnings
+        error.version_warnings = list(drift.warnings)
         raise
 
 
 def _adapt_project(
     spec_path: str | Path,
     universe_path: str | Path | None,
-    version_warnings: list[str],
+    drift: _Drift,
 ) -> dict[str, Any]:
     load_yaml, _, validate_analysis, _, validate_universe = _astra_api()
     _installed_schema_version()
@@ -591,10 +760,18 @@ def _adapt_project(
         scope=("root",),
         source_dirs=source_dirs,
         active_files={spec},
-        version_warnings=version_warnings,
+        drift=drift,
+    )
+    # With nothing adopted, semantics run on the spec exactly as written —
+    # the validator resolves `path:` children itself and nothing has changed
+    # underneath it. Once a retired spelling has been adopted, that same
+    # re-read would walk back onto the old spelling and fail, so semantics
+    # run on the tree the graph is actually built from.
+    semantic_subject = (
+        _without_resolved_paths(resolved_analysis) if drift.adopted else raw
     )
     _require_no_errors(
-        validate_analysis(raw, base_path=project_root),
+        validate_analysis(semantic_subject, base_path=project_root),
         "invalid ASTRA semantics",
     )
 
@@ -648,7 +825,7 @@ def _adapt_project(
             "universe_path": str(selected_path) if selected_path else None,
             "baseline": baseline,
             "schema_version": ASTRA_SPEC_VERSION,
-            "version_warnings": list(version_warnings),
+            "version_warnings": list(drift.warnings),
         }
     )
     return entities

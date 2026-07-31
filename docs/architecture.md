@@ -93,8 +93,8 @@ itself.
 - [`extensions/`](../extensions/): in-repo JupyterLab extensions
   (`neurodesk-launcher`, `astra-viewer`)
 - [`tests/`](../tests/): the two-tier test suite (see [Testing](testing.md));
-  `tests/fixtures/` holds the canonical worked ASTRA spec installed into the
-  image as an example
+  [`tests/fixtures/astra-bet/`](../tests/fixtures/astra-bet/) is the canonical
+  worked ASTRA spec installed into the image as an example
 - [`docs/`](index.md): this wiki
 - [`.github/workflows/`](../.github/workflows/): CI/CD pipelines
 - [`.github/workflows/build-neurodesktop.yml`](../.github/workflows/build-neurodesktop.yml):

@@ -54,6 +54,8 @@
 .astra-gaps, .astra-errors { border-top: 1px solid var(--astra-border); padding: 9px 12px; }
 .astra-errors { background: #fff0f0; color: #8b1d1d; }
 .astra-warnings { background: #fff7e0; border-bottom: 1px solid var(--astra-border); color: #7a5410; font-size: 13px; padding: 9px 12px; }
+.astra-warnings summary { cursor: pointer; font-weight: 600; }
+.astra-warnings details > div { margin-top: 4px; }
 .astra-notice { background: #eef2f7; border-bottom: 1px solid var(--astra-border); color: #47576b; font-size: 13px; padding: 9px 12px; }
 .astra-notice[hidden] { display: none; }
 
