@@ -22,6 +22,9 @@
   and run `pytest tests/unit/test_pilot_execution_receipt_schema.py
   tests/unit/test_pilot_execution_receipt_cli.py` from a checkout and `pytest
   /opt/tests/test_pilot_execution_receipt_image.py` in the built image.
+- When changing `print_access_url.sh` (the end-of-startup access-link banner)
+  or how `before_notebook.sh` launches it, run `pytest
+  tests/unit/test_print_access_url.py` from a checkout.
 - When changing the bounded ASTRA/Lightcone BET pilot, run `pytest
   tests/unit/test_astra_lightcone_bet_pilot_cli.py
   tests/unit/test_pilot_execution_receipt_cli.py` from a checkout and `pytest

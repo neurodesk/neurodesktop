@@ -23,6 +23,15 @@
 - `NEURODESKTOP_CVMFS_STARTUP_MODE`, `NEURODESKTOP_SLURM_STARTUP_MODE`: set
   either service to `eager` for disposable runtime-acceptance containers that
   must wait for CVMFS/module and local scheduler readiness before testing
+- `NEURODESKTOP_PRINT_ACCESS_URL`: set to `0` to disable the end-of-startup
+  access-link banner that `print_access_url.sh` reprints once the Jupyter
+  server answers HTTP (the ServerApp's own token banner scrolls away behind
+  extension startup logs)
+- `NEURODESKTOP_ACCESS_URL_MAX_WAIT`: seconds `print_access_url.sh` waits for
+  the Jupyter server to answer before giving up; defaults to `180`
+- `NEURODESKTOP_ACCESS_URL_SETTLE`: seconds `print_access_url.sh` waits after
+  the server answers so the banner lands after the startup log burst;
+  defaults to `3`
 - `NEURODESKTOP_RUN_ASTRA_LIGHTCONE_PILOT`: set to `1` only in a privileged,
   native-amd64 disposable image to enable the real OpenNeuro/FSL/Slurm pilot
   acceptance test; it is unset by default

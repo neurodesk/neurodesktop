@@ -9,7 +9,12 @@ The startup sequence follows this order:
 2. [`config/jupyter/before_notebook.sh`](../config/jupyter/before_notebook.sh)
    mounts CVMFS, ranks the CVMFS servers by measured download throughput via
    [`config/jupyter/cvmfs_server_select.sh`](../config/jupyter/cvmfs_server_select.sh),
-   and configures the environment.
+   and configures the environment. It also launches
+   [`config/jupyter/print_access_url.sh`](../config/jupyter/print_access_url.sh)
+   in the background, which waits until the Jupyter server answers HTTP and
+   then reprints the access URL (read from the server's `jpserver-<pid>.json`
+   runtime info file) at the end of the startup log, where the ServerApp's own
+   token banner has already scrolled out of view.
 3. `jupyter_notebook_config.py` is generated and defines JupyterLab server
    proxies for webapps. It also installs
    [`config/jupyter/jupyterlmod_modulepath.py`](../config/jupyter/jupyterlmod_modulepath.py)
