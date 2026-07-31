@@ -1,9 +1,10 @@
 version: "0.0.12"
-name: "Neurodesktop BET threshold sensitivity pilot"
+name: "BET threshold sensitivity"
 description: |-
-  Compare two defensible FSL BET fractional intensity thresholds on one
-  checksum-pinned OpenNeuro ds000114 T1w image. The pilot reports both
-  universes and does not claim either threshold is universally superior.
+  A realistic neuroimaging spec used to exercise the viewer: two defensible
+  FSL BET fractional intensity thresholds over one T1w image, with a prior
+  insight, a decision carrying two options, four output types, and a finding
+  backed by artifact evidence. Neither threshold is claimed to be superior.
 
 inputs:
   - id: t1w

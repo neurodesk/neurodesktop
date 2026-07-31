@@ -1,7 +1,7 @@
 # ASTRA and Lightcone Integration
 
 Status: assessment complete; ASTRA authoring/reporting foundation, read-only
-viewer M1–M4, and bounded amber BET module pilot implemented
+viewer M1–M4 implemented; execution deferred
 Snapshot date: 2026-07-27 (assessment), 2026-07-30 (implementation)
 
 ## Executive summary
@@ -16,10 +16,12 @@ integration has three layers, and they do **not** mature at the same rate:
    overlaid with a real `lc` run. **This is the primary deliverable** and is
    specified in full below.
 3. **Execution** — `lightcone-cli` (`lc`) as the production execution engine.
-   A bounded in-image Slurm/module pilot is implemented with `runtime: none`
-   and amber receipts. General production execution remains blocked on
-   upstream Apptainer and generic Slurm support; see
-   [Blockers](#blockers-and-risks).
+   Execution is deliberately not integrated. A bounded in-image Slurm/module
+   pilot was built and then removed: it could only ever produce amber
+   `executed-unverified` evidence, and the runtime identity work it was
+   waiting on would have replaced its contract rather than extended it. See
+   [Blockers](#blockers-and-risks). The removed pilot remains in git history
+   on the `astra-bet-pilot-parked` branch.
 
 ASTRA is not another agent UI or an MCP protocol. It is a declarative YAML
 format for recording an analysis's inputs, outputs, methodological decisions,
@@ -75,7 +77,7 @@ as shell versus Python or equivalent file serialization, generally should not
 be represented as methodological decisions.
 
 This complements Neurodesktop's existing agent rules in
-[`config/agents/AGENTS.md`](config/agents/AGENTS.md): discover available tools,
+[`config/agents/AGENTS.md`](../config/agents/AGENTS.md): discover available tools,
 pin `module load` versions, submit substantial work through Slurm, retain the
 scripts, and visually inspect outputs. ASTRA can describe why a pipeline exists
 and which choices affect its outputs while those established mechanisms remain
@@ -100,8 +102,8 @@ Potential benefits include:
 | OpenCode, Claude, and Codex | Author or review `astra.yaml`, universes, recipes, and evidence using one shared contract; all three ship the pinned upstream ASTRA skill |
 | Notebook Intelligence | Explain or inspect the same project artifacts without introducing another model or credential path |
 | `NEURODESK_API_KEY` and existing provider setup | Continue to provide model access; ASTRA and `lc` do not need a parallel LLM configuration |
-| `ipywidgets==8.1.8` and `jupyterlab_widgets` ([`Dockerfile:576`](Dockerfile#L576)) | Already installed, so an `anywidget`-based viewer needs no JupyterLab frontend build |
-| `extensions/neurodesk-launcher` ([`Dockerfile:591`](Dockerfile#L591)) | Established pattern for building and installing an in-repo JupyterLab extension |
+| `ipywidgets==8.1.8` and `jupyterlab_widgets` ([`Dockerfile:576`](../Dockerfile#L576)) | Already installed, so an `anywidget`-based viewer needs no JupyterLab frontend build |
+| `extensions/neurodesk-launcher` ([`Dockerfile:591`](../Dockerfile#L591)) | Established pattern for building and installing an in-repo JupyterLab extension |
 | Neurocommand and Lmod | Supply explicitly versioned neuroimaging commands used by analysis scripts |
 | Slurm | Run long analyses in batch allocations rather than in an agent's interactive shell |
 | Apptainer and CVMFS | Provide reproducible neuroimaging software, once Lightcone can represent their use truthfully |
@@ -110,8 +112,8 @@ Potential benefits include:
 | NiiVue and desktop visualization tools | Support the visual QC required after outputs are materialized |
 
 The current agent and OpenCode architecture is documented in
-[`docs/architecture.md`](docs/architecture.md), with package installation in
-the [`Dockerfile`](Dockerfile). This integration reuses those surfaces rather
+[`docs/architecture.md`](architecture.md), with package installation in
+the [`Dockerfile`](../Dockerfile). This integration reuses those surfaces rather
 than adding another chat UI or credential store.
 
 ## Compatibility evidence
@@ -144,7 +146,7 @@ existing Notebook Intelligence or LiteLLM stack.
 
 This establishes Python-package feasibility, not complete image compatibility.
 A real implementation still needs the normal build, startup, Jupyter, agent,
-and full-image checks from [`docs/testing.md`](docs/testing.md).
+and full-image checks from [`docs/testing.md`](testing.md).
 
 ### Execution smoke test
 
@@ -210,8 +212,8 @@ viewer displays the decision space by default and layers real execution on top
 `ipycytoscape` was considered and rejected: it ships its own JupyterLab
 frontend bundle whose JupyterLab 4.6 compatibility is unverified, and this
 image already carries two federated-bundle rebuild workarounds
-([`Dockerfile:913`](Dockerfile#L913) for Notebook Intelligence,
-[`Dockerfile:939`](Dockerfile#L939) for MyST/RISE). A third is not worth a
+([`Dockerfile:913`](../Dockerfile#L913) for Notebook Intelligence,
+[`Dockerfile:939`](../Dockerfile#L939) for MyST/RISE). A third is not worth a
 faster prototype. A full TypeScript labextension was rejected for M1–M4 but
 remains the natural home for a double-click-to-open file handler later.
 
@@ -270,7 +272,7 @@ AstraView(spec, universe=..., run=None, mode="flow")
 | --- | --- | --- | --- |
 | `spec` | Yes | Path to `astra.yaml` | Error |
 | `universe` | No | Path to `universes/*.yaml` | Baseline universe is used; badge says "baseline" |
-| `run` | No | Path to an `lc` run manifest, `lc status --json` output, an RO-Crate directory, or a finalized Neurodesktop pilot receipt | Graph is labelled **"Selected analysis"**; all status is `unknown` |
+| `run` | No | Path to an `lc` run manifest, `lc status --json` output, or an RO-Crate directory | Graph is labelled **"Selected analysis"**; all status is `unknown` |
 
 Note the asymmetry, because it is the most commonly misunderstood part: the
 **YAML is the input** to Lightcone (`astra.yaml`, `universes/*.yaml`); what
@@ -452,7 +454,7 @@ extensions/astra-viewer/
 │       ├── style.css
 │       └── vendor/cytoscape.min.js   # vendored, checked in, license header retained
 └── examples/
-    └── iris_pipeline/                # or the neuroimaging pilot once it exists
+    └── iris_pipeline/                # or a real neuroimaging analysis
 ```
 
 Two constraints on this layout are load-bearing:
@@ -470,10 +472,10 @@ Two constraints on this layout are load-bearing:
 Dockerfile changes:
 
 1. Add `astra-tools==<pin>` (and `lightcone-cli==<pin>` once the execution
-   demo lands) to the pip block at [`Dockerfile:544`](Dockerfile#L544), plus
+   demo lands) to the pip block at [`Dockerfile:544`](../Dockerfile#L544), plus
    `anywidget`.
 2. Add a bind-mount install block for `extensions/astra-viewer` mirroring
-   [`Dockerfile:591-600`](Dockerfile#L591-L600) — but simpler, because with
+   [`Dockerfile:591-600`](../Dockerfile#L591-L600) — but simpler, because with
    anywidget there is no `jupyter labextension build` step and no npm cache to
    clean.
 3. Add `jq` if the Lightcone hook scripts are ever adopted; not needed for the
@@ -481,7 +483,7 @@ Dockerfile changes:
 
 ### Tests
 
-Per [`docs/testing.md`](docs/testing.md), default to the unit tier and use the
+Per [`docs/testing.md`](testing.md), default to the unit tier and use the
 container tier only for what needs a running image. `build_graph()` being pure
 is what makes almost all of this a unit test.
 
@@ -598,8 +600,8 @@ that depends on it:
    actual runtime, the viewer stays amber. The Neurodesktop receipt records
    `runtime: none` and separately proves its module and output evidence without
    claiming the hidden tool-container identity.
-4. **Which pilot example ships** — resolved: the bounded
-   `pilots/astra-lightcone-bet` neuroimaging example is canonical. Small
+4. **Which example ships** — resolved: the specification-only
+   `examples/astra-bet` neuroimaging example is canonical. Small
    synthetic fixtures remain appropriate for focused unit tests.
 
 ---
@@ -744,8 +746,7 @@ without changing execution semantics.
 
 1. Ingest canonical per-output manifests, status JSON, and Workflow Run
    RO-Crate without invoking `lc`. (Implemented.)
-2. Revalidate and ingest the stricter Neurodesktop pilot receipt. (Implemented.)
-3. Verify all four trust levels, including the deliberately constructed
+2. Verify all four trust levels, including the deliberately constructed
    `provenance-mismatch` fixture. (Implemented.)
 
 Nothing in this phase claims container-level reproducibility, and the widget
@@ -753,20 +754,27 @@ says so.
 
 ### Phase 3: controlled production `lightcone-cli` pilot
 
-The first bounded pilot is implemented under `pilots/astra-lightcone-bet`.
-It stages checksum-pinned OpenNeuro `ds000114/1.0.2`, submits a retained job to
-the integrated `neurodesktop` partition, loads `fsl/6.0.7.22` through the
-existing module system, and compares BET thresholds `f=0.5` and `f=0.3`.
-Lightcone runs synchronously inside the allocation with `runtime: none`; no
-declared container is silently ignored and no direct Apptainer path was added.
-The receipt therefore remains `executed-unverified` and explicitly does not
-attest the hidden tool-container identity.
+A bounded pilot was built under `pilots/astra-lightcone-bet` and subsequently
+removed. It staged checksum-pinned OpenNeuro `ds000114/1.0.2`, submitted a
+retained job to the integrated `neurodesktop` partition, loaded `fsl/6.0.7.22`
+through the existing module system, and compared BET thresholds `f=0.5` and
+`f=0.3`, with Lightcone running synchronously inside the allocation at
+`runtime: none`. It worked, and it demonstrated that the seam is sound.
 
-This bounded pilot proves the Neurodesktop seam without satisfying the broader
-production-runtime conditions below. Those still require first-class upstream
-runtime identity and generic scheduler support.
+It was removed because its trust ceiling was permanently amber: the transparent
+module wrapper cannot attest the tool-container identity, so no amount of
+evidence collection could promote it. Satisfying the conditions below would
+require first-class upstream runtime identity, which would replace the bespoke
+receipt contract rather than build on it. Carrying ~6,000 lines of
+single-producer, single-consumer machinery — plus an acceptance test that only
+runs on privileged native-amd64 with CVMFS and Slurm — cost more in drift risk
+than the demonstration was worth once made.
 
-Pilot full execution after the following are true:
+Its specification survives as the shipped worked example at
+`examples/astra-bet`; the executable pilot is recoverable from git history on
+the `astra-bet-pilot-parked` branch.
+
+Revisit execution after the following are true:
 
 1. Apptainer is a first-class runtime, or another supported runtime is
    deliberately deployed.
@@ -843,8 +851,8 @@ all of the following are demonstrated from runtime evidence:
 
 ## Recommendation
 
-Use the implemented viewer for planning, review, and honest inspection of the
-bounded module pilot. Its schema adapter is isolated for future ASTRA upgrades,
+Use the implemented viewer for planning, review, and honest inspection of
+whatever run evidence exists. Its schema adapter is isolated for future ASTRA upgrades,
 and its persistent trust badge keeps output integrity separate from runtime
 provenance.
 
