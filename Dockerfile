@@ -986,6 +986,9 @@ EOF
 
 ENV DONT_PROMPT_WSL_INSTALL=1
 ENV LMOD_CMD=/usr/share/lmod/lmod/libexec/lmod
+# jupyter_server_mcp embeds FastMCP, whose startup banner (an ASCII box with a
+# hosting ad) would otherwise land in the Jupyter server log on every boot.
+ENV FASTMCP_SHOW_SERVER_BANNER=0
 
 # Create defaults directory structure and copy default home files.
 # Mount individual files, not their directories: a whole-directory mount keys
@@ -1093,6 +1096,12 @@ RUN git init -q /opt/neurodesktop/agent-skills \
     # not be copied into every user's home.
     && rm -f /opt/jovyan_defaults/.claude.json \
     && rm -rf /opt/jovyan_defaults/.claude/backups \
+    # The codex warm-up leaves root-only runtime tmp dirs (mode 0700) that
+    # make restore_home_defaults' find print "Permission denied" at every
+    # startup, and tightens config.toml to 0600, which only restores into
+    # homes where the sudo fallback works (not unprivileged Apptainer).
+    && rm -rf /opt/jovyan_defaults/.codex/tmp /opt/jovyan_defaults/.codex/.tmp \
+    && chmod 0644 /opt/jovyan_defaults/.codex/config.toml \
     && sed -i '/^last_updated = /d' /opt/jovyan_defaults/.codex/config.toml \
     && sed -i -E \
     's/"(installedAt|lastUpdated)": "[^"]+"/"\1": "2026-07-29T15:19:38.000Z"/g' \
@@ -1219,6 +1228,10 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     /etc/jupyter/jupyter_notebook_config.py \
     --merged-webapps-output /opt/neurodesktop/webapps.json \
     /tmp/jupyter/webapp_links.json \
+    # Single-load server config additions (e.g. the AGENTS.md seeding
+    # post_save_hook, which must not be assigned once per shimmed legacy
+    # config load; see the snippet's header comment).
+    && cat /tmp/jupyter/jupyter_server_config_extra.py >> /etc/jupyter/jupyter_server_config.py \
     && chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/webapp_wrapper/webapp_wrapper.py \
     && chmod +r /opt/neurodesktop/webapp_wrapper/splash_template.html \

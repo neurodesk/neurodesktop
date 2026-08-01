@@ -11,11 +11,11 @@ try:
 except Exception as _jupyterlmod_modulepath_error:
     print(f'[WARN] Failed to install jupyter-lmod MODULEPATH refresh: {_jupyterlmod_modulepath_error}')
 
-try:
-    from jupyter_ai_workspace import seed_agents_on_chat_save
-except Exception as _jupyter_ai_workspace_error:
-    seed_agents_on_chat_save = None
-    print(f'[WARN] Jupyter AI chat workspace seeding unavailable: {_jupyter_ai_workspace_error}')
+# NOTE: the Jupyter AI AGENTS.md seeding hook (post_save_hook) is registered
+# in jupyter_server_config_extra.py, appended to the server config at build
+# time. It must not move back here: notebook_shim re-applies this legacy file
+# for every shimmed extension app, which would assign the hook repeatedly and
+# warn "Overriding existing post_save_hook" at every startup.
 
 # Per-user Guacamole web credentials. guacamole.sh writes these files on container
 # start with mode 0600. If they aren't present yet (first start, or direct Tomcat
@@ -117,8 +117,6 @@ c.ServerProxy.servers = {
 # c.ServerApp.root_dir = '/' # this causes an error when clicking on the little house icon when being located in the home directory
 c.ServerApp.preferred_dir = os.getcwd()
 c.FileContentsManager.allow_hidden = True
-if seed_agents_on_chat_save is not None:
-    c.FileContentsManager.post_save_hook = seed_agents_on_chat_save
 c.ServerApp.terminado_settings = {
     "shell_command": ["/bin/bash"]
 }
