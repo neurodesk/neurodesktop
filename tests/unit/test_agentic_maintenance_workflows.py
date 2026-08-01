@@ -8,7 +8,7 @@ REVIEW_WORKFLOW = WORKFLOW_DIR / "maintenance-review.md"
 REVIEW_LOCK = WORKFLOW_DIR / "maintenance-review.lock.yml"
 CODERABBIT_CONFIG = repo_path(".coderabbit.yaml")
 ACTIONLINT_CONFIG = repo_path(".github/actionlint.yaml")
-MODEL_ALIAS_JSON = '"neurodesk":["openai/glm-5.2","openai/kimi-k2.7"]'
+MODEL_ALIAS_JSON = '"neurodesk":["openai/glm-5.2","openai/kimi-k2.7","openai/minimax-m2"]'
 RADAR_WORKFLOW = "package-update-radar"
 
 MAINTENANCE_WORKFLOWS = {

@@ -58,6 +58,12 @@ You are an expert Neuroimaging Data Scientist working in the **Neurodesk** envir
       path you have not seen produces a script that fails at runtime.
     * `ds007671` is a known-good small OpenNeuro dataset if the user has no
       preference and you just need a scan to demonstrate a pipeline.
+    * **`datalad get` paths are dataset-relative, not workspace-relative.** If
+      you clone into a subdirectory, run the get from inside the clone or with
+      `datalad -C <dataset_dir> get <path_below_that_dir>`. Passing a path that
+      resolves outside the clone fails with `path not associated with dataset`,
+      the clone still succeeds, and the script looks like it worked until
+      something tries to read the file.
 
 
 ### C. Execution & Validation
@@ -126,7 +132,9 @@ declare it as an output with its own recipe, or say in the input's
 version.
 
 **Record findings after QC.** Once you have inspected the QC image, write what
-it showed into `findings:`, citing the artifact it rests on:
+it showed into `findings:`, citing the artifact it rests on. The entries in
+`findings:` are `Insight` objects — the schema has no `Finding` class, so look
+them up with `astra spec insight`, not `astra spec finding`:
 
 ```yaml
 findings:
