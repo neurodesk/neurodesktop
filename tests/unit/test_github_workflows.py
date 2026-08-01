@@ -7,6 +7,22 @@ from testlib import repo_path
 JUPYTER_TEST_WORKFLOW = repo_path(".github/workflows/jupyter_test_main.yml")
 NOTEBOOK_TEST_WORKFLOW = repo_path(".github/workflows/notebook_(FSL_bet)_workflow.yml")
 NOTEBOOK_FAILURE_TEMPLATE = repo_path(".github/notebook_failure_issue_template.md")
+CODESPELL_WORKFLOW = repo_path(".github/workflows/codespell.yml")
+
+
+def test_codespell_skips_vendored_cytoscape_bundle():
+    workflow = CODESPELL_WORKFLOW.read_text()
+    skip_line = next(
+        line.strip() for line in workflow.splitlines() if line.strip().startswith("skip:")
+    )
+    skipped = {
+        path.strip() for path in skip_line.removeprefix("skip:").split(",")
+    }
+
+    assert (
+        "./extensions/astra-viewer/neurodesk_astra_view/static/vendor/"
+        "cytoscape.min.js"
+    ) in skipped
 
 
 def _fsl_probe_command(workflow: str) -> str:

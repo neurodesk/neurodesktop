@@ -267,8 +267,8 @@ if [ "${1:-}" = "hpc" ]; then
     exit $?
 fi
 
-# Detached HPC session + run pytest inside. Container is left running so the
-# user can `docker exec -it neurodesktop-hpctest bash` for further inspection.
+# Detached HPC session + run pytest inside. Container and temp passwd/group/
+# home files are torn down on exit.
 #
 # Usage: build_and_run.sh hpctest [USERNAME] [UID] [GID]
 if [ "${1:-}" = "hpctest" ]; then

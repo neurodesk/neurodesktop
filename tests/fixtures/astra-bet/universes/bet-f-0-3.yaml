@@ -1,0 +1,4 @@
+id: bet-f-0-3
+description: "BET fractional intensity threshold f = 0.3."
+decisions:
+  bet_fractional_threshold: f_0_3

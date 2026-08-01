@@ -149,7 +149,9 @@ jobs:
           fi
 
           SERVER_PATH=$(jq -r '.server // ""' "$RESPONSE_BODY")
-          SERVER_READY=$(jq -r '.ready // false' "$RESPONSE_BODY")
+          # The user model has no top-level "ready"; it lives in the nested
+          # server model, so read it from there (issue #794).
+          SERVER_READY=$(jq -r '.servers[""].ready // .ready // false' "$RESPONSE_BODY")
           SERVER_PENDING=$(jq -r '.pending // ""' "$RESPONSE_BODY")
         }
 

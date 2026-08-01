@@ -147,6 +147,9 @@ RUN set -eux; \
     tar -xzf "${shell_quote_tar}" -C "${shell_quote_dir}" --strip-components=1; \
     rm -f "${shell_quote_tar}"; \
     test "$(node -p 'require("/opt/code-server/lib/vscode/node_modules/shell-quote/package.json").version')" = "1.8.4"; \
+    # Strip bundled sourcemaps in the stage that unpacks them so the runtime
+    # copy layer never carries them; they only serve devtools debugging.
+    find /opt/code-server -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete; \
     rm -f "/tmp/${cs_tar}"; \
     npm cache clean --force
 
@@ -254,7 +257,10 @@ RUN retry wget -q https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v$
     && tar -xf /tmp/apache-tomcat-${TOMCAT_VERSION}.tar.gz -C /tmp \
     && rm -rf /tmp/apache-tomcat-${TOMCAT_VERSION}.tar.gz \
     && mv /tmp/apache-tomcat-${TOMCAT_VERSION} /usr/local/tomcat \
-    && mv /usr/local/tomcat/webapps /usr/local/tomcat/webapps.dist \
+    # Delete Tomcat's default webapps (docs, examples, manager) instead of
+    # parking them: nothing ever serves them and Guacamole's ROOT webapp is
+    # installed later.
+    && rm -rf /usr/local/tomcat/webapps \
     && mkdir /usr/local/tomcat/webapps \
     && sed -i -E '/<Connector port="8080" protocol="HTTP\/1\.1"/ {/maxHttpRequestHeaderSize=/! s|$| maxHttpRequestHeaderSize="65536"|;}' /usr/local/tomcat/conf/server.xml \
     && grep -q 'maxHttpRequestHeaderSize="65536"' /usr/local/tomcat/conf/server.xml \
@@ -272,7 +278,18 @@ RUN retry wget -q https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v$
     && sed -i '/<Context sessionCookiePath/a\    <CookieProcessor className="org.apache.tomcat.util.http.Rfc6265CookieProcessor" sameSiteCookies="Lax" />' /usr/local/tomcat/conf/context.xml \
     # 3. Set Max-Age on session cookie so browsers auto-expire it (24h) in default web.xml
     && sed -i '/<session-config>/,/<\/session-config>/c\    <session-config>\n        <session-timeout>30</session-timeout>\n        <cookie-config>\n            <max-age>86400</max-age>\n            <http-only>true</http-only>\n        </cookie-config>\n    </session-config>' /usr/local/tomcat/conf/web.xml \
-    && chmod +x /usr/local/tomcat/bin/*.sh
+    && chmod +x /usr/local/tomcat/bin/*.sh \
+    # Ownership and modes are set in the layer that creates the tree: a later
+    # `chown -R`/`chmod -R` would copy every touched file into that layer
+    # again (~50 MB of duplication). Apache Tomcat ships `conf/` as 0750 and
+    # a few script/dir modes that deny world read/traverse. On Apptainer/HPC
+    # the container runs as an arbitrary host UID with no membership in group
+    # `users`, so the chown alone is not enough - `cp -rfT
+    # /usr/local/tomcat/conf ...` would silently fail and guacamole.sh could
+    # not launch Tomcat. Grant world read + traverse so any NB_UID can
+    # bootstrap its per-user CATALINA_BASE; write access stays owner-only.
+    && chown -R ${NB_UID}:${NB_GID} /usr/local/tomcat \
+    && chmod -R a+rX /usr/local/tomcat
 
 # Install Apache Guacamole WAR and convert its Java EE servlet APIs for Tomcat 11.
 #
@@ -341,6 +358,9 @@ RUN apt-install-retry \
     htop \
     imagemagick \
     iputils-ping \
+    # The ASTRA agent-skill hooks parse their stdin payload with jq; without it
+    # every hook exits non-zero and silently provides no validation context.
+    jq \
     less \
     libgfortran5 \
     libgpgme-dev \
@@ -440,7 +460,12 @@ RUN unzip -q /usr/local/tomcat/webapps/ROOT.war -d /usr/local/tomcat/webapps/ROO
         sed -i '/<session-config>/,/<\/session-config>/c\    <session-config>\n        <session-timeout>30</session-timeout>\n        <cookie-config>\n            <max-age>86400</max-age>\n            <http-only>true</http-only>\n        </cookie-config>\n    </session-config>' /usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml; \
     else \
         sed -i 's|</web-app>|    <session-config>\n        <session-timeout>30</session-timeout>\n        <cookie-config>\n            <max-age>86400</max-age>\n            <http-only>true</http-only>\n        </cookie-config>\n    </session-config>\n</web-app>|' /usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml; \
-    fi
+    fi \
+    # This layer creates the extracted ROOT tree, so it also sets the
+    # ownership and world-read modes the rest of /usr/local/tomcat received
+    # in its install layer (see the note there).
+    && chown -R ${NB_UID}:${NB_GID} /usr/local/tomcat/webapps/ROOT \
+    && chmod -R a+rX /usr/local/tomcat/webapps/ROOT
 
 # Install Nextflow ecosystem tools
 ENV NF_NEURO_MODULES_DIR=/opt/nf-neuro/modules
@@ -460,53 +485,20 @@ RUN mkdir -p "${NF_TEST_HOME}" \
     && chown -R ${NB_UID}:${NB_GID} /opt/nf-neuro "${NF_TEST_HOME}" "${HOME}/.nextflow" \
     && rm -rf /root/.cache "${HOME}/.nf-test" /tmp/nf-test /tmp/nextflow
 
-# Install build tools temporarily — nodejs is needed by codex CLI at runtime and
+# Install nodejs — needed by the codex CLI and ACP adapters at runtime and
 # by hatch-jupyter-builder to compile JupyterLab extensions from source (e.g.
-# jupyterlab-slurm, neurodesk-launcher). build-essential provides gcc for pip
-# packages with C extensions (e.g. psutil, traits). build-essential is removed
-# after extensions are built (see purge step below); nodejs stays for codex.
+# jupyterlab-slurm, neurodesk-launcher). gcc for pip packages with C
+# extensions (e.g. traits, which ships no cp313 wheel) is installed and
+# purged inside the pip layer itself: purging in a later layer only masks
+# the files with whiteouts while this layer's history keeps shipping the
+# ~200 MB toolchain.
 RUN retry bash -o pipefail -c 'curl -fsSL https://deb.nodesource.com/setup_24.x | bash -' \
-    && apt-install-retry nodejs build-essential \
+    && apt-install-retry nodejs \
+    # Node's C headers only serve node-gyp source builds, and node-gyp
+    # downloads matching headers itself; nothing in this image compiles
+    # native node modules against the system copy (~65 MB).
+    && rm -rf /usr/include/node \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install AI coding assistants
-RUN npm_config_cache=/tmp/npm-root-cache npm install -g @openai/codex \
-    && rm -rf /root/.npm /tmp/npm-root-cache /home/${NB_USER}/.npm \
-    && su - "${NB_USER}" -c 'retry bash -o pipefail -c "curl -fsSL https://claude.ai/install.sh | bash -s -- stable"' \
-    && mkdir -p /opt/jovyan_defaults/.local/bin \
-    && if [ -x /home/jovyan/.local/bin/claude ]; then \
-    cp -L /home/jovyan/.local/bin/claude /opt/jovyan_defaults/.local/bin/claude; \
-    else \
-    cp -L /home/jovyan/.local/share/claude/versions/* /opt/jovyan_defaults/.local/bin/claude; \
-    fi \
-    && chmod +x /opt/jovyan_defaults/.local/bin/claude \
-    && rm -rf /home/${NB_USER}/.cache \
-    && rm -rf /home/${NB_USER}/.local
-
-# Install OpenCode CLI (open source AI coding agent). OPENCODE_VERSION pins
-# the release so the web UI, the opencode_web.py proxy, and the default
-# config are tested as a set; override at build time to bump it, or set it
-# to an empty value to install the latest release.
-ARG OPENCODE_VERSION="1.18.7"
-RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash -s -- ${OPENCODE_VERSION:+--version "${OPENCODE_VERSION}"}' \
-    && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
-    && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
-
-# Vendor the NiiVue viewer that opencode_web.py serves for volume previews of
-# the files an agent produced. dist/index.js is the self-contained ESM bundle
-# (no bare imports, wasm inlined), so the preview works offline and needs no
-# CDN. Its sibling dist/index.min.js is NOT this module - it exports only a
-# percent-encoded worker source - so the build asserts the installed file
-# really exports the Niivue class rather than trusting the file name.
-ARG NIIVUE_VERSION="0.69.0"
-RUN mkdir -p /tmp/niivue \
-    && retry bash -o pipefail -c 'npm_config_cache=/tmp/npm-niivue-cache npm pack --silent "@niivue/niivue@${NIIVUE_VERSION}" --pack-destination /tmp/niivue' \
-    && tar -xzf /tmp/niivue/*.tgz -C /tmp/niivue package/dist/index.js \
-    && install -D -m 0644 /tmp/niivue/package/dist/index.js /opt/neurodesktop/vendor/niivue.js \
-    # The .map is not shipped; drop the reference so devtools never chases it.
-    && sed -i '/^\/\/# sourceMappingURL=/d' /opt/neurodesktop/vendor/niivue.js \
-    && node --input-type=module -e "const m = await import('/opt/neurodesktop/vendor/niivue.js'); if (typeof m.Niivue !== 'function') { throw new Error('vendored NiiVue bundle does not export Niivue'); }" \
-    && rm -rf /tmp/niivue /tmp/npm-niivue-cache /root/.npm
 
 # Install Firefox from Mozilla's official apt repository. This avoids both the
 # Launchpad API and Ubuntu's snap-backed firefox package.
@@ -551,8 +543,23 @@ RUN retry conda install -c conda-forge nb_conda_kernels \
 # JupyterLab 3. Keep its distribution for dependency integrity but remove the
 # exposed labextension; JupyterLab 4.6 and RISE both bundle the current
 # @jupyterlab/mathjax-extension instead.
+#
+# The layer runs as root so build-essential (gcc for sdist-only packages with
+# C extensions — traits ships no cp313 wheel) can be installed and purged in
+# this same layer; a later-layer purge would keep shipping the ~200 MB
+# toolchain in the install layer's history. The pip steps themselves run as
+# ${NB_USER} via runuser so /opt/conda stays user-owned exactly as before;
+# `env PATH=` restores the conda-first PATH that runuser resets (the
+# jupyterlab-slurm source build needs jlpm and node on PATH).
 ARG BUST_CACHE_PIP=3
-RUN /opt/conda/bin/pip install \
+ARG UV_VERSION="0.11.8"
+ARG JUPYTER_AI_VERSION="3.1.1"
+ARG ASTRA_SPEC_VERSION="0.0.12"
+ARG ASTRA_TOOLS_VERSION="0.2.11"
+ARG ANYWIDGET_VERSION="0.11.0"
+USER root
+RUN apt-install-retry build-essential \
+    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install \
     datalad \
     nipype \
     niwrap \
@@ -573,6 +580,22 @@ RUN /opt/conda/bin/pip install \
     # The 5.3.0 wheel omits its compiled frontend. A source rebuild below
     # installs and patches the matching labextension bundle.
     notebook_intelligence==5.3.0 \
+    # Jupyter AI's ACP-native chat surface. Pin the direct extension packages
+    # because their independent pre-1.0 releases otherwise drift underneath
+    # the stable jupyter_ai metapackage.
+    jupyter_ai==${JUPYTER_AI_VERSION} \
+    jupyter-ai-acp-client==0.2.1 \
+    jupyter-ai-chat-commands==0.0.4 \
+    jupyter-ai-persona-manager==0.1.2 \
+    jupyter-ai-router==0.0.6 \
+    jupyter-ai-tools==0.6.1 \
+    # 0.3.2 still ships the issue #271 bug; the anchored build-time patch
+    # below verifies its seams against every bump and fails loudly on a fix.
+    jupyter-server-documents==0.3.2 \
+    jupyter-server-mcp==0.2.1 \
+    jupyterlab-chat==0.23.0 \
+    jupyterlab-commands-toolkit==0.1.6 \
+    jupyterlab-notebook-awareness==0.2.0 \
     jupyterlab_rise \
     jupyterlab-niivue==0.2.7 \
     jupyterlab_myst==2.7.0 \
@@ -583,6 +606,10 @@ RUN /opt/conda/bin/pip install \
     jupyter_scheduler \
     jupyterlab-slurm@git+https://github.com/NERSC/jupyterlab-slurm.git@main \
     httpx \
+    astra-spec==${ASTRA_SPEC_VERSION} \
+    astra-tools==${ASTRA_TOOLS_VERSION} \
+    anywidget==${ANYWIDGET_VERSION} \
+    uv==${UV_VERSION} \
     ipywidgets==8.1.8 \
     ipyvolume \
     jupyterlab_widgets \
@@ -593,11 +620,304 @@ RUN /opt/conda/bin/pip install \
     "packaging>=26.0" \
     "requests>=2.34.2" \
     "chardet<8" \
-    && /opt/conda/bin/pip install --upgrade "litellm>=1.85.0" \
-    && /opt/conda/bin/python -m bash_kernel.install --sys-prefix \
-    && /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
+    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade "litellm>=1.85.0" \
+    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/python -m bash_kernel.install --sys-prefix \
+    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
     && rm -rf "/opt/conda/share/jupyter/labextensions/@jupyterlab/mathjax3-extension" \
-    && rm -rf /home/${NB_USER}/.cache
+    # claude-agent-sdk (a notebook_intelligence dependency) vendors a full
+    # Claude Code CLI (~260 MB). The image already ships that binary at
+    # /opt/jovyan_defaults/.local/bin/claude and NBI resolves `claude` from
+    # PATH (resolve_claude_cli_path) and passes it as cli_path, so the
+    # bundled copy is never used — the same policy as the ACP adapters'
+    # deleted vendored binaries. The test -d fails the build loudly if the
+    # SDK relocates its bundle so the duplicate cannot silently return.
+    && CLAUDE_SDK_DIR="$(/opt/conda/bin/python -B -c 'import claude_agent_sdk, os; print(os.path.dirname(claude_agent_sdk.__file__))')" \
+    && test -d "${CLAUDE_SDK_DIR}/_bundled" \
+    && rm -rf "${CLAUDE_SDK_DIR}/_bundled" \
+    # Strip webpack/TS sourcemaps (~85 MB) and the heavyweight bundled test
+    # suites (~60 MB) in the layer that installs them; neither is reachable
+    # at runtime. The test-suite list is curated rather than a blanket
+    # */tests sweep so an odd package that imports its tests keeps working.
+    && SITE_PACKAGES="$(/opt/conda/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" \
+    && find "${SITE_PACKAGES}" /opt/conda/share/jupyter -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
+    && for pkg in pandas scipy numpy matplotlib nibabel prov traits tornado psutil boutiques; do \
+        if [ -d "${SITE_PACKAGES}/${pkg}" ]; then \
+            find "${SITE_PACKAGES}/${pkg}" -type d \( -name tests -o -name test \) -prune -exec rm -rf {} +; \
+        fi; \
+    done \
+    # In-layer removal of the compiler toolchain (see the layer comment).
+    && apt-mark manual autofs cvmfs libc6-dev linux-libc-dev uuid-dev \
+    && DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove build-essential \
+    && apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.npm /root/.cache
+
+#========================================#
+# Configuration (as root user)
+#========================================#
+
+USER root
+
+# The `astra` command comes from the single conda `astra-tools` install above,
+# which the viewer already depends on. Assert that exactly one `astra` is on
+# PATH at the pinned version: a second isolated copy would shadow the one the
+# viewer imports and let the CLI and schema drift apart silently.
+RUN test "$(command -v astra)" = "/opt/conda/bin/astra" \
+    && test "$(astra --version)" = "astra, version ${ASTRA_TOOLS_VERSION}" \
+    && test "$(/opt/conda/bin/python -c 'import importlib.metadata as m; print(m.version("astra-spec"))')" = "${ASTRA_SPEC_VERSION}"
+
+# Remove the -dev headers that were only needed while the pip layer compiled
+# native extensions. build-essential is installed and purged inside the pip
+# layer itself; nodejs stays — codex CLI and the ACP adapters need it at
+# runtime. Keep the libc dev chain because cvmfs and uuid-dev depend on it.
+# (Guacamole build deps are already excluded via multi-stage build.)
+RUN apt-mark manual autofs cvmfs libc6-dev linux-libc-dev uuid-dev \
+    && DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove \
+    libgpgme-dev libossp-uuid-dev \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# The three from-source labextension rebuilds below are the most expensive
+# layers in the image. They live here — before neurocommand, the local
+# extension builds, and every config/tests layer — so that config, test,
+# webapp-link, and extension churn never invalidates them; their only cache
+# inputs are the pip layer and the two bind-mounted files.
+
+# Rebuild Notebook Intelligence's frontend because the 5.3.0 PyPI wheel
+# contains only style.js. Build from the matching tag.
+# Its upstream lockfile pins the JupyterLab 4.2 builder stack. Use the checked-in
+# JupyterLab 4.6-compatible lockfile before selecting the current builder;
+# otherwise webpack's old license plugin crashes and launcher tokens are
+# compiled from incompatible package instances. Patch only after the real bundle
+# is installed so a changed upstream anchor fails the image build.
+# patch_nbi.py is bind-mounted rather than read from /opt/neurodesktop so this
+# layer does not depend on the config/agents install layer further down.
+ARG NBI_JUPYTERLAB_BUILDER_VERSION="4.5.10"
+RUN --mount=type=bind,source=config/jupyter/notebook-intelligence-5.3.0.yarn.lock,target=/tmp/nbi-yarn.lock,ro \
+    --mount=type=bind,source=config/agents/patch_nbi.py,target=/tmp/patch_nbi.py,ro \
+    NBI_PACKAGE_DIR="$(/opt/conda/bin/pip show notebook_intelligence | awk '/^Location:/ {print $2 "/notebook_intelligence"}')" \
+    && test -d "${NBI_PACKAGE_DIR}" \
+    && NBI_VERSION="$(/opt/conda/bin/pip show notebook_intelligence | awk '/^Version:/ {print $2}')" \
+    && retry git clone --depth 1 --branch "v${NBI_VERSION}" https://github.com/notebook-intelligence/notebook-intelligence.git /tmp/notebook-intelligence \
+    && cd /tmp/notebook-intelligence \
+    && npm pkg set "dependencies.@jupyterlab/launcher=^4.0.0" \
+    && npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}" \
+    && install -m 0644 /tmp/nbi-yarn.lock yarn.lock \
+    && retry jlpm install --immutable \
+    && jlpm build:prod \
+    && NBI_LABEXT_DIR="${NBI_PACKAGE_DIR}/labextension" \
+    && APP_NBI_DIR=/opt/conda/share/jupyter/labextensions/@plmbr/notebook-intelligence \
+    && rm -rf "${NBI_LABEXT_DIR}" "${APP_NBI_DIR}" \
+    && cp -a /tmp/notebook-intelligence/notebook_intelligence/labextension "${NBI_LABEXT_DIR}" \
+    # Strip the build's sourcemaps in the layer that installs the bundle.
+    && find "${NBI_LABEXT_DIR}/static" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
+    # One real copy: the application-level dir is a symlink into the package
+    # so the two views cannot drift and the ~24 MB bundle is not shipped
+    # twice. patch_nbi.py globs the application path and therefore patches
+    # the single real bundle through this link.
+    && ln -s "${NBI_LABEXT_DIR}" "${APP_NBI_DIR}" \
+    && find "${NBI_LABEXT_DIR}/static" -type f -name 'remoteEntry*.js' | grep -q . \
+    && /opt/conda/bin/python3 /tmp/patch_nbi.py \
+    && rm -rf /tmp/notebook-intelligence /root/.cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
+
+# Workaround for jupyterlab-rise + jupyterlab-myst incompatibility:
+# jupyterlab-myst's federated bundle declares @jupyterlab/markdownviewer as a
+# shared module it consumes from the host. RISE's bundle does not include that
+# package in its shared scope, so MyST's plugins fail to instantiate and MyST
+# directives (admonitions, dropdowns, etc.) render as raw markdown in slides.
+# Rebuilding MyST with --core-path pointed at RISE's app directory embeds
+# @jupyterlab/markdownviewer into MyST's own bundle, so it no longer asks the
+# host for it. See https://github.com/jupyterlab-contrib/rise/issues/46
+# MyST 2.7.0 uses pnpm. Its published metadata requests @jupyter/ydoc 3.x,
+# while JupyterLab 4.6 provides 4.x, so compile against an exact current YDoc
+# and retain that exact version in both the manifest and lockfile.
+ARG MYST_PNPM_VERSION="11.17.0"
+ARG MYST_YDOC_VERSION="4.1.1"
+RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
+    && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
+    && MYST_PACKAGE_DIR="$(/opt/conda/bin/python -c 'import jupyterlab_myst, os; print(os.path.dirname(jupyterlab_myst.__file__))')" \
+    && retry git clone --depth 1 --branch "v${MYST_VERSION}" https://github.com/jupyter-book/jupyterlab-myst.git /tmp/myst \
+    && retry git clone --depth 1 --branch "v${RISE_VERSION}" https://github.com/jupyterlab-contrib/rise.git /tmp/rise \
+    && cd /tmp/myst \
+    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} install --frozen-lockfile --store-dir /tmp/myst-pnpm-store \
+    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} add --save-exact "@jupyter/ydoc@${MYST_YDOC_VERSION}" --store-dir /tmp/myst-pnpm-store \
+    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} run build:css \
+    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} run build:lib \
+    && /opt/conda/bin/jupyter labextension build --core-path=/tmp/rise/app . \
+    && MYST_LABEXT_DIR="${MYST_PACKAGE_DIR}/labextension" \
+    && APP_MYST_DIR=/opt/conda/share/jupyter/labextensions/jupyterlab-myst \
+    && rm -rf "${MYST_LABEXT_DIR}" \
+    && cp -a /tmp/myst/jupyterlab_myst/labextension "${MYST_LABEXT_DIR}" \
+    # Strip the build's sourcemaps before the bundle is mirrored below.
+    && find "${MYST_LABEXT_DIR}/static" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
+    && rm -rf "${APP_MYST_DIR}" \
+    && cp -a "${MYST_LABEXT_DIR}" "${APP_MYST_DIR}" \
+    && rm -rf /tmp/myst /tmp/rise /tmp/myst-corepack /tmp/myst-pnpm-store /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
+
+# Jupyter AI currently resolves the Jupyter Collaboration 4.4.1 frontend,
+# whose published bundles advertise @jupyter/ydoc <4 and are rejected by
+# JupyterLab 4.6. Rebuild only the two frontend packages against the exact YDoc
+# already used by the image. The two casts bridge duplicate protected
+# TypeScript identities created by the workspace; they do not change runtime
+# code or the document factory implementations.
+# Upstream main is already on @jupyter/ydoc ^4 (5.0.0a0 on PyPI): delete this
+# entire layer once a fixed stable release can be pinned and validated.
+ARG JUPYTER_COLLABORATION_VERSION="4.4.1"
+ARG JUPYTER_COLLABORATION_REF="df6c4a325db80bed9df4cd5f768f3699adf7a6dd"
+RUN retry git clone --depth 1 --branch "v${JUPYTER_COLLABORATION_VERSION}" \
+    https://github.com/jupyterlab/jupyter-collaboration.git /tmp/jupyter-collaboration \
+    && test "$(git -C /tmp/jupyter-collaboration rev-parse HEAD)" = "${JUPYTER_COLLABORATION_REF}" \
+    && cd /tmp/jupyter-collaboration \
+    && npm pkg set "resolutions.@jupyter/ydoc=${MYST_YDOC_VERSION}" \
+    && for package_dir in \
+    packages/collaboration-extension \
+    packages/collaborative-drive \
+    packages/docprovider-extension \
+    packages/docprovider; do \
+    npm pkg set "dependencies.@jupyter/ydoc=^${MYST_YDOC_VERSION}" --prefix "${package_dir}"; \
+    done \
+    && npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}" \
+    --prefix packages/collaboration-extension \
+    && npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}" \
+    --prefix packages/docprovider-extension \
+    && sed -i \
+    -e 's/^      yFileFactory$/      yFileFactory as never/' \
+    -e 's/^      yNotebookFactory$/      yNotebookFactory as never/' \
+    packages/docprovider-extension/src/filebrowser.ts \
+    && YARN_ENABLE_IMMUTABLE_INSTALLS=0 retry jlpm install \
+    && jlpm lerna run build \
+    --scope @jupyter/collaboration \
+    --scope @jupyter/collaborative-drive \
+    --scope @jupyter/docprovider \
+    && jlpm lerna run build:lib:prod \
+    && /opt/conda/bin/jupyter labextension build \
+    --core-path=/opt/conda/share/jupyter/lab packages/collaboration-extension \
+    && /opt/conda/bin/jupyter labextension build \
+    --core-path=/opt/conda/share/jupyter/lab packages/docprovider-extension \
+    && COLLAB_SRC=/tmp/jupyter-collaboration/projects/jupyter-collaboration-ui/jupyter_collaboration_ui/labextension \
+    && DOCPROVIDER_SRC=/tmp/jupyter-collaboration/projects/jupyter-docprovider/jupyter_docprovider/labextension \
+    && COLLAB_DEST=/opt/conda/share/jupyter/labextensions/@jupyter/collaboration-extension \
+    && DOCPROVIDER_DEST=/opt/conda/share/jupyter/labextensions/@jupyter/docprovider-extension \
+    && rm -rf "${COLLAB_DEST}" "${DOCPROVIDER_DEST}" \
+    && cp -a "${COLLAB_SRC}" "${COLLAB_DEST}" \
+    && cp -a "${DOCPROVIDER_SRC}" "${DOCPROVIDER_DEST}" \
+    # Strip the rebuild's sourcemaps in the layer that installs the bundles.
+    && find "${COLLAB_DEST}/static" "${DOCPROVIDER_DEST}/static" \
+    -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
+    && test "$(node -p "require('${COLLAB_DEST}/package.json').dependencies['@jupyter/ydoc']")" = "^${MYST_YDOC_VERSION}" \
+    && test "$(node -p "require('${DOCPROVIDER_DEST}/package.json').dependencies['@jupyter/ydoc']")" = "^${MYST_YDOC_VERSION}" \
+    && rm -rf /tmp/jupyter-collaboration /root/.cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
+
+# The layers from here to the local extension builds are keyed only on pinned
+# versions/refs (no local files), so they change on explicit bumps and never
+# on config, test, or extension churn. Keep them above every layer that bind
+# mounts a repository file.
+
+# Create cvmfs keys and data directories
+RUN --mount=type=bind,source=config/cvmfs,target=/tmp/cvmfs,ro \
+    mkdir -p /etc/cvmfs/keys/ardc.edu.au /etc/cvmfs/config.d \
+    && mkdir -p /data /neurodesktop-storage \
+    && chown ${NB_UID}:${NB_GID} /neurodesktop-storage \
+    # Mode 0770 (owner jovyan:users) denied write access to HPC-style
+    # unprivileged users whose UID is NOT 1000 and GID is NOT 100 - and on
+    # real HPC Apptainer the directory is usually bind-mounted from a
+    # per-user scratch dir anyway, so world-write is the realistic default.
+    # Was breaking test_crud's /neurodesktop-storage parametrisation in the
+    # HPC simulation CI job (UID 5000 could neither read nor write).
+    && chmod 0777 /neurodesktop-storage \
+    && install -m 0644 /tmp/cvmfs/neurodesk.ardc.edu.au.pub /etc/cvmfs/keys/ardc.edu.au/neurodesk.ardc.edu.au.pub \
+    && cp /tmp/cvmfs/neurodesk.ardc.edu.au.conf* /etc/cvmfs/config.d/ \
+    && chmod 0644 /etc/cvmfs/config.d/neurodesk.ardc.edu.au.conf* \
+    && install -m 0644 /tmp/cvmfs/default.local /etc/cvmfs/default.local
+
+# Install neurocommand
+ARG NEUROCOMMAND_REF=main
+RUN echo "Installing neurocommand ref ${NEUROCOMMAND_REF}" \
+    && retry git clone https://github.com/neurodesk/neurocommand.git /neurocommand \
+    && cd /neurocommand \
+    && git checkout -B main "$NEUROCOMMAND_REF" \
+    && git branch --set-upstream-to=origin/main main \
+    && bash build.sh --lxde --edit \
+    && bash install.sh \
+    && ln -s /neurodesktop-storage/containers /neurocommand/local/containers
+
+# Install AI coding assistants. The Jupyter AI ACP adapters are installed in
+# their own runtime-only layer below so adapter updates do not rebuild
+# frontend assets. CODEX_CLI_VERSION must stay inside the @openai/codex range
+# pinned by the codex-acp adapter (CODEX_ACP_VERSION below): the adapter is
+# installed without its bundled binary and drives this install via CODEX_PATH.
+ARG CODEX_CLI_VERSION="0.145.0"
+RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_CLI_VERSION}" \
+    && find "$(npm root -g)/@openai" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
+    && rm -rf /root/.npm /tmp/npm-root-cache /home/${NB_USER}/.npm \
+    && su - "${NB_USER}" -c 'retry bash -o pipefail -c "curl -fsSL https://claude.ai/install.sh | bash -s -- stable"' \
+    && mkdir -p /opt/jovyan_defaults/.local/bin \
+    && if [ -x /home/jovyan/.local/bin/claude ]; then \
+    cp -L /home/jovyan/.local/bin/claude /opt/jovyan_defaults/.local/bin/claude; \
+    else \
+    cp -L /home/jovyan/.local/share/claude/versions/* /opt/jovyan_defaults/.local/bin/claude; \
+    fi \
+    && chmod +x /opt/jovyan_defaults/.local/bin/claude \
+    && rm -rf /home/${NB_USER}/.cache \
+    && rm -rf /home/${NB_USER}/.local
+
+# Install OpenCode CLI (open source AI coding agent). OPENCODE_VERSION pins
+# the release so the terminal wrapper and the default config are tested as a
+# set; override at build time to bump it, or set it to an empty value to
+# install the latest release.
+ARG OPENCODE_VERSION="1.18.7"
+RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash -s -- ${OPENCODE_VERSION:+--version "${OPENCODE_VERSION}"}' \
+    && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
+    && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
+
+# Expose the installed agent families as Jupyter AI ACP personas. These
+# adapters are runtime-only and deliberately live after the expensive
+# third-party labextension rebuilds so adapter bumps never invalidate them.
+#
+# Each adapter vendors a full copy of its agent binary (~250 MB each) through
+# an optionalDependency chain; npm ignores every omit-optional spelling for
+# global installs, so the platform packages are deleted explicitly instead.
+# The adapters drive the binaries already in this image via CODEX_PATH and
+# CLAUDE_CODE_EXECUTABLE, exported in environment_variables.sh; codex-acp's
+# supported range for that binary is what pins CODEX_CLI_VERSION above. The
+# size assertion fails the build if a future adapter release relocates its
+# vendored binary and reintroduces the duplicate.
+ARG CODEX_ACP_VERSION="1.1.7"
+ARG CLAUDE_AGENT_ACP_VERSION="0.64.0"
+RUN npm_config_cache=/tmp/npm-acp-cache retry npm install -g \
+    "@agentclientprotocol/codex-acp@${CODEX_ACP_VERSION}" \
+    "@agentclientprotocol/claude-agent-acp@${CLAUDE_AGENT_ACP_VERSION}" \
+    && rm -rf /root/.npm /tmp/npm-acp-cache /home/${NB_USER}/.npm \
+    "$(npm root -g)"/@agentclientprotocol/*/node_modules/@openai/codex-* \
+    "$(npm root -g)"/@agentclientprotocol/*/node_modules/@anthropic-ai/claude-agent-sdk-*-* \
+    && find "$(npm root -g)/@agentclientprotocol" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
+    && command -v codex-acp && command -v claude-agent-acp \
+    && test "$(du -sm "$(npm root -g)/@agentclientprotocol" | cut -f1)" -lt 100
+
+# Lightcone runs as a second isolated tool so its Dask/Snakemake dependency
+# graph cannot perturb JupyterLab. Keep this after all frontend rebuilds: its
+# dependency updates are runtime-only. A batch job must prepend this
+# environment's bin directory so `lc` and its `dask worker` share one runtime.
+# ASTRA_SPEC_VERSION and ASTRA_TOOLS_VERSION are still in scope from their
+# single declaration above; do not redeclare them here.
+ARG LIGHTCONE_CLI_VERSION="0.4.0"
+RUN UV_TOOL_DIR=/opt/uv/tools UV_TOOL_BIN_DIR=/usr/local/bin \
+    /opt/conda/bin/uv tool install "lightcone-cli==${LIGHTCONE_CLI_VERSION}" \
+    --with "astra-tools==${ASTRA_TOOLS_VERSION}" \
+    --with "astra-spec==${ASTRA_SPEC_VERSION}" \
+    # --no-cache keeps uv's wheel cache out of this layer; without it the
+    # Dask/Snakemake graph would be baked into the image a second time.
+    --no-cache \
+    --python /opt/conda/bin/python --no-python-downloads \
+    && test "$(lc --version)" = "lc, version ${LIGHTCONE_CLI_VERSION}" \
+    && /opt/uv/tools/lightcone-cli/bin/python -c \
+    "import importlib.metadata as m; assert m.version('astra-tools') == '${ASTRA_TOOLS_VERSION}'; assert m.version('astra-spec') == '${ASTRA_SPEC_VERSION}'" \
+    && PATH=/opt/uv/tools/lightcone-cli/bin:${PATH} dask --version
+
+# Build the local JupyterLab extensions here: their sources are the most
+# frequently edited build inputs in the repository, so everything above this
+# point must not depend on them, and everything below is cheap file
+# installation. They need only nodejs and the pip layer (the builds are pure
+# TypeScript/webpack, so the purged build-essential is not required).
+USER ${NB_USER}
 
 # Build and install neurodesk-launcher JupyterLab extension
 RUN --mount=type=bind,source=extensions/neurodesk-launcher,target=/tmp/neurodesk-launcher-src,ro \
@@ -609,20 +929,33 @@ RUN --mount=type=bind,source=extensions/neurodesk-launcher,target=/tmp/neurodesk
     && /opt/conda/bin/jupyter labextension disable @jupyterhub/jupyter-server-proxy \
     && rm -rf /tmp/neurodesk-launcher /tmp/neurodesk-launcher-npm-cache /home/${NB_USER}/.cache
 
-#========================================#
-# Configuration (as root user)
-#========================================#
+# Install the offline anywidget ASTRA viewer. Cytoscape.js is vendored in the
+# wheel, so this has no npm build and performs no runtime network fetch.
+RUN --mount=type=bind,source=extensions/astra-viewer,target=/tmp/astra-viewer-src,ro \
+    rm -rf /tmp/astra-viewer \
+    && mkdir -p /tmp/astra-viewer \
+    && cp -R /tmp/astra-viewer-src/. /tmp/astra-viewer/ \
+    && /opt/conda/bin/pip install --no-deps /tmp/astra-viewer \
+    && rm -rf /tmp/astra-viewer /home/${NB_USER}/.cache
 
 USER root
 
-# Remove build-time packages: -dev headers for pip native extensions and
-# build-essential for C extensions. nodejs stays — codex CLI needs it at
-# runtime. Keep the libc dev chain because cvmfs and uuid-dev depend on it.
-# (Guacamole build deps are already excluded via multi-stage build.)
-RUN apt-mark manual autofs cvmfs libc6-dev linux-libc-dev uuid-dev \
-    && DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove \
-    libgpgme-dev libossp-uuid-dev build-essential \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+# Patch both nested tar copies after all npm-based build steps. Updating
+# code-server's top-level dependency graph does not reach either scanner path.
+ARG NODE_TAR_VERSION="7.5.22"
+RUN set -eux; \
+    node_tar_package="$(npm pack --silent "tar@${NODE_TAR_VERSION}")"; \
+    for node_tar_dir in \
+        /opt/code-server/lib/vscode/node_modules/tar \
+        "$(npm root -g)/npm/node_modules/tar"; do \
+        rm -rf "${node_tar_dir}"; \
+        mkdir -p "${node_tar_dir}"; \
+        tar -xzf "${node_tar_package}" -C "${node_tar_dir}" --strip-components=1; \
+    done; \
+    rm -f "${node_tar_package}"; \
+    test "$(node -p 'require("/opt/code-server/lib/vscode/node_modules/tar/package.json").version')" = "${NODE_TAR_VERSION}"; \
+    test "$(node -p 'require("/usr/lib/node_modules/npm/node_modules/tar/package.json").version')" = "${NODE_TAR_VERSION}"; \
+    npm cache clean --force
 
 # The kernel-spec rewrite below embeds this path in every kernelspec. Keep this
 # cache boundary narrow; bulky local runtime config is installed after
@@ -648,15 +981,17 @@ RUN --mount=type=bind,source=config/guacamole,target=/tmp/guacamole,ro \
     && sed -i "s|</body>|<script src=\"mac-clipboard-shim.js?v=${SHIM_V}\"></script></body>|" /usr/local/tomcat/webapps/ROOT/index.html \
     && grep -q "mac-clipboard-shim.js?v=${SHIM_V}" /usr/local/tomcat/webapps/ROOT/index.html \
     && chown -R ${NB_UID}:${NB_GID} /etc/guacamole \
-    && chown -R ${NB_UID}:${NB_GID} /usr/local/tomcat \
-    # Apache Tomcat ships `conf/` as 0750 and a few script/dir modes that deny
-    # world read/traverse. On Apptainer/HPC the container runs as an arbitrary
-    # host UID with no membership in group `users`, so the chown above alone
-    # is not enough - `cp -rfT /usr/local/tomcat/conf …` silently fails and
-    # guacamole.sh cannot launch Tomcat. Grant world read + traverse so any
-    # NB_UID can bootstrap its per-user CATALINA_BASE. Write access stays
-    # restricted to the owner.
-    && chmod -R a+rX /usr/local/tomcat /etc/guacamole
+    # /usr/local/tomcat is chowned/chmodded by the layers that create it (a
+    # whole-tree chown -R here would duplicate ~50 MB into this layer). Only
+    # the two files this layer touches need their ownership and world-read
+    # bits restored: the shim it installs and the index.html the sed rewrote.
+    && chown ${NB_UID}:${NB_GID} \
+    /usr/local/tomcat/webapps/ROOT/mac-clipboard-shim.js \
+    /usr/local/tomcat/webapps/ROOT/index.html \
+    && chmod a+r \
+    /usr/local/tomcat/webapps/ROOT/mac-clipboard-shim.js \
+    /usr/local/tomcat/webapps/ROOT/index.html \
+    && chmod -R a+rX /etc/guacamole
 
 # Configure NB_USER account defaults and JupyterLab settings
 RUN /usr/bin/printf '%s\n%s\n' 'password' 'password' | passwd ${NB_USER} \
@@ -740,13 +1075,33 @@ EOF
 
 ENV DONT_PROMPT_WSL_INSTALL=1
 ENV LMOD_CMD=/usr/share/lmod/lmod/libexec/lmod
+# jupyter_server_mcp embeds FastMCP, whose startup banner (an ASCII box with a
+# hosting ad) would otherwise land in the Jupyter server log on every boot.
+ENV FASTMCP_SHOW_SERVER_BANNER=0
 
 # Create defaults directory structure and copy default home files.
-RUN --mount=type=bind,source=config/itksnap,target=/tmp/itksnap,ro \
-    --mount=type=bind,source=config/lxde,target=/tmp/lxde,ro \
-    --mount=type=bind,source=config/vscode,target=/tmp/vscode,ro \
-    --mount=type=bind,source=config/conda,target=/tmp/conda,ro \
-    --mount=type=bind,source=config/agents,target=/tmp/agents,ro \
+# Mount individual files, not their directories: a whole-directory mount keys
+# this layer (and everything after it) on every file in the directory, so an
+# edit to an unrelated sibling would needlessly invalidate the cache.
+RUN --mount=type=bind,source=config/itksnap/UserPreferences.xml,target=/tmp/itksnap/UserPreferences.xml,ro \
+    --mount=type=bind,source=config/lxde/mimeapps.list,target=/tmp/lxde/mimeapps.list,ro \
+    --mount=type=bind,source=config/lxde/panel,target=/tmp/lxde/panel,ro \
+    --mount=type=bind,source=config/lxde/libfm.conf,target=/tmp/lxde/libfm.conf,ro \
+    --mount=type=bind,source=config/lxde/xstartup,target=/tmp/lxde/xstartup,ro \
+    --mount=type=bind,source=config/lxde/75neurodesk-clipboard-sync,target=/tmp/lxde/75neurodesk-clipboard-sync,ro \
+    --mount=type=bind,source=config/lxde/.bashrc,target=/tmp/lxde/.bashrc,ro \
+    --mount=type=bind,source=config/vscode/settings.json,target=/tmp/vscode/settings.json,ro \
+    --mount=type=bind,source=config/conda/conda-readme.md,target=/tmp/conda/conda-readme.md,ro \
+    --mount=type=bind,source=config/agents/claude_settings.json,target=/tmp/agents/claude_settings.json,ro \
+    --mount=type=bind,source=config/agents/claude_settings.local.json,target=/tmp/agents/claude_settings.local.json,ro \
+    --mount=type=bind,source=config/agents/claude_mcp_config.json,target=/tmp/agents/claude_mcp_config.json,ro \
+    --mount=type=bind,source=config/agents/opencode_config.json,target=/tmp/agents/opencode_config.json,ro \
+    --mount=type=bind,source=config/agents/codex_config.toml,target=/tmp/agents/codex_config.toml,ro \
+    --mount=type=bind,source=config/agents/AGENTS_nbi.md,target=/tmp/agents/AGENTS_nbi.md,ro \
+    --mount=type=bind,source=config/agents/nbi_config.json,target=/tmp/agents/nbi_config.json,ro \
+    --mount=type=bind,source=config/agents/nbi_mcp.json,target=/tmp/agents/nbi_mcp.json,ro \
+    --mount=type=bind,source=config/agents/nbi_tour_config.json,target=/tmp/agents/nbi_tour_config.json,ro \
+    --mount=type=bind,source=config/agents/nbi_setup.sh,target=/tmp/agents/nbi_setup.sh,ro \
     --mount=type=bind,source=config/ssh/sshd_config,target=/tmp/sshd_config,ro \
     --mount=type=bind,source=config/jupyter/page_config.json,target=/tmp/page_config.json,ro \
     mkdir -p /opt/jovyan_defaults/.itksnap.org/ITK-SNAP \
@@ -769,6 +1124,10 @@ RUN --mount=type=bind,source=config/itksnap,target=/tmp/itksnap,ro \
     && install -m 0755 /tmp/lxde/xstartup /opt/jovyan_defaults/.vnc/xstartup \
     && install -m 0644 /tmp/lxde/75neurodesk-clipboard-sync /etc/X11/Xsession.d/75neurodesk-clipboard-sync \
     && install -m 0644 /tmp/conda/conda-readme.md /opt/jovyan_defaults/conda-readme.md \
+    # User-level Claude Code settings: seeds the default permission mode and
+    # effort for the CLI and the Jupyter AI Claude persona, which resolves
+    # them from ~/.claude/settings.json (permissions.defaultMode/effortLevel).
+    && install -m 0644 /tmp/agents/claude_settings.json /opt/jovyan_defaults/.claude/settings.json \
     && install -m 0644 /tmp/agents/claude_settings.local.json /opt/jovyan_defaults/.claude/settings.local.json \
     && install -m 0644 /tmp/agents/claude_mcp_config.json /opt/jovyan_defaults/.claude/mcp_config.json \
     && install -m 0644 /tmp/agents/opencode_config.json /opt/jovyan_defaults/.config/opencode/opencode.json \
@@ -785,24 +1144,81 @@ RUN --mount=type=bind,source=config/itksnap,target=/tmp/itksnap,ro \
     && chown root:users /opt/jovyan_defaults/.vnc/passwd \
     && chmod 640 /opt/jovyan_defaults/.vnc/passwd
 
+# Seed the ASTRA marketplace plugin for all three bundled coding agents.
+# Register a fixed local checkout so image builds do not follow a moving
+# marketplace branch and runtime use does not require a network fetch.
+#
+# Only the `astra` plugin is enabled. The marketplace also ships `reproduction`
+# (assess-reproducibility, reproduce, figure-comparison), which is deliberately
+# left out: its workflows drive long autonomous replication loops that are not
+# appropriate to enable by default in a shared scientific image. Users can add
+# it themselves from the same local marketplace, with no network access needed.
+# Fetch the pinned commit directly rather than cloning a branch: GitHub
+# serves any commit still reachable from a ref (including PR refs), so this
+# keeps working after the source branch is merged and deleted, and pulls no
+# history.
+ARG AGENT_SKILLS_REF="4ded682be8487d8aa05831678ef84ef12068d50d"
+RUN git init -q /opt/neurodesktop/agent-skills \
+    && git -C /opt/neurodesktop/agent-skills remote add origin https://github.com/LightconeResearch/agent-skills.git \
+    && retry git -C /opt/neurodesktop/agent-skills fetch --depth 1 origin "${AGENT_SKILLS_REF}" \
+    && git -C /opt/neurodesktop/agent-skills checkout --detach FETCH_HEAD \
+    && test "$(git -C /opt/neurodesktop/agent-skills rev-parse HEAD)" = "${AGENT_SKILLS_REF}" \
+    && HOME=/opt/jovyan_defaults CODEX_HOME=/opt/jovyan_defaults/.codex \
+    /usr/bin/codex plugin marketplace add /opt/neurodesktop/agent-skills \
+    && HOME=/opt/jovyan_defaults CODEX_HOME=/opt/jovyan_defaults/.codex \
+    /usr/bin/codex plugin add astra@lightcone-research \
+    && HOME=/opt/jovyan_defaults DISABLE_TELEMETRY=1 \
+    /opt/jovyan_defaults/.local/bin/claude plugin marketplace add /opt/neurodesktop/agent-skills \
+    && HOME=/opt/jovyan_defaults DISABLE_TELEMETRY=1 \
+    /opt/jovyan_defaults/.local/bin/claude plugin install astra@lightcone-research \
+    # OpenCode has no marketplace client, but it discovers Claude-format skills
+    # from ~/.config/opencode/skills. Copy the skill out of the same pinned
+    # checkout so all three agents read identical guidance from one source of
+    # truth. The plugin's hooks are Claude/Codex-only and are not copied:
+    # OpenCode gets the skill, not the on-save validation hook.
+    && install -d -m 0755 /opt/jovyan_defaults/.config/opencode/skills \
+    && cp -a /opt/neurodesktop/agent-skills/plugins/astra/skills/astra \
+    /opt/jovyan_defaults/.config/opencode/skills/astra \
+    && test -f /opt/jovyan_defaults/.config/opencode/skills/astra/SKILL.md \
+    && grep -qx 'name: astra' /opt/jovyan_defaults/.config/opencode/skills/astra/SKILL.md \
+    # Plugin registration creates machine-specific onboarding state that must
+    # not be copied into every user's home.
+    && rm -f /opt/jovyan_defaults/.claude.json \
+    && rm -rf /opt/jovyan_defaults/.claude/backups \
+    # The codex warm-up leaves root-only runtime tmp dirs (mode 0700) that
+    # make restore_home_defaults' find print "Permission denied" at every
+    # startup, and tightens config.toml to 0600, which only restores into
+    # homes where the sudo fallback works (not unprivileged Apptainer).
+    && rm -rf /opt/jovyan_defaults/.codex/tmp /opt/jovyan_defaults/.codex/.tmp \
+    && chmod 0644 /opt/jovyan_defaults/.codex/config.toml \
+    && sed -i '/^last_updated = /d' /opt/jovyan_defaults/.codex/config.toml \
+    && sed -i -E \
+    's/"(installedAt|lastUpdated)": "[^"]+"/"\1": "2026-07-29T15:19:38.000Z"/g' \
+    /opt/jovyan_defaults/.claude/plugins/installed_plugins.json \
+    /opt/jovyan_defaults/.claude/plugins/known_marketplaces.json \
+    && chown -R root:users /opt/neurodesktop/agent-skills /opt/jovyan_defaults/.codex \
+    /opt/jovyan_defaults/.claude /opt/jovyan_defaults/.config/opencode
+
 # Copy restore scripts, agent metadata, and wrapper scripts.
+# Individual file mounts for the same reason as the defaults layer above:
+# config/agents holds frequently edited runtime scripts, and only the files
+# actually installed here may key this layer's cache.
 RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp/restore_home_defaults.sh,ro \
     --mount=type=bind,source=config/jupyter/update_page_config.py,target=/tmp/update_page_config.py,ro \
-    --mount=type=bind,source=config/agents,target=/tmp/agents,ro \
+    --mount=type=bind,source=config/agents/AGENTS.md,target=/tmp/agents/AGENTS.md,ro \
+    --mount=type=bind,source=config/agents/claude,target=/tmp/agents/claude,ro \
+    --mount=type=bind,source=config/agents/opencode,target=/tmp/agents/opencode,ro \
+    --mount=type=bind,source=config/agents/codex,target=/tmp/agents/codex,ro \
+    --mount=type=bind,source=config/agents/opencode_prune_sessions.py,target=/tmp/agents/opencode_prune_sessions.py,ro \
+    --mount=type=bind,source=config/agents/patch_nbi.py,target=/tmp/agents/patch_nbi.py,ro \
     install -m 0755 -o root -g users /tmp/restore_home_defaults.sh /opt/neurodesktop/restore_home_defaults.sh \
     && install -m 0755 -o root -g users /tmp/update_page_config.py /opt/neurodesktop/update_page_config.py \
     && install -D -m 0644 /tmp/agents/AGENTS.md /opt/AGENTS.md \
     && install -m 0755 -o root -g root /tmp/agents/claude /usr/local/sbin/claude \
     && install -m 0755 -o root -g root /tmp/agents/opencode /usr/local/sbin/opencode \
     && install -m 0755 -o root -g root /tmp/agents/codex /usr/local/sbin/codex \
-    # OpenCode web interface: launcher-tile proxy (key setup, auth, prefix
-    # rewriting) plus the desktop shortcut that opens it prefix-free.
-    && install -m 0755 -o root -g users /tmp/agents/opencode_web.py /opt/neurodesktop/opencode_web.py \
-    && install -m 0644 -o root -g users /tmp/agents/opencode_bash_env.sh /opt/neurodesktop/opencode_bash_env.sh \
-    && install -m 0755 -o root -g users /tmp/agents/opencode_web_desktop.sh /opt/neurodesktop/opencode_web_desktop.sh \
     # Startup cleanup: drop sessions whose working directory has been deleted.
     && install -m 0755 -o root -g users /tmp/agents/opencode_prune_sessions.py /opt/neurodesktop/opencode_prune_sessions.py \
-    && install -m 0644 /tmp/agents/opencode-web.desktop /usr/share/applications/opencode-web.desktop \
     # Anchored Notebook Intelligence patch (see patch_nbi.py): make the
     # settings panel fetch fresh capabilities on open instead of auto-saving
     # its stale client-side cache over the OpenCode model sync. The script
@@ -816,34 +1232,6 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
 # Switch to root user
 USER root
 
-# Create cvmfs keys and data directories
-RUN --mount=type=bind,source=config/cvmfs,target=/tmp/cvmfs,ro \
-    mkdir -p /etc/cvmfs/keys/ardc.edu.au /etc/cvmfs/config.d \
-    && mkdir -p /data /neurodesktop-storage \
-    && chown ${NB_UID}:${NB_GID} /neurodesktop-storage \
-    # Mode 0770 (owner jovyan:users) denied write access to HPC-style
-    # unprivileged users whose UID is NOT 1000 and GID is NOT 100 - and on
-    # real HPC Apptainer the directory is usually bind-mounted from a
-    # per-user scratch dir anyway, so world-write is the realistic default.
-    # Was breaking test_crud's /neurodesktop-storage parametrisation in the
-    # HPC simulation CI job (UID 5000 could neither read nor write).
-    && chmod 0777 /neurodesktop-storage \
-    && install -m 0644 /tmp/cvmfs/neurodesk.ardc.edu.au.pub /etc/cvmfs/keys/ardc.edu.au/neurodesk.ardc.edu.au.pub \
-    && cp /tmp/cvmfs/neurodesk.ardc.edu.au.conf* /etc/cvmfs/config.d/ \
-    && chmod 0644 /etc/cvmfs/config.d/neurodesk.ardc.edu.au.conf* \
-    && install -m 0644 /tmp/cvmfs/default.local /etc/cvmfs/default.local
-
-# Install neurocommand
-ARG NEUROCOMMAND_REF=main
-RUN echo "Installing neurocommand ref ${NEUROCOMMAND_REF}" \
-    && retry git clone https://github.com/neurodesk/neurocommand.git /neurocommand \
-    && cd /neurocommand \
-    && git checkout -B main "$NEUROCOMMAND_REF" \
-    && git branch --set-upstream-to=origin/main main \
-    && bash build.sh --lxde --edit \
-    && bash install.sh \
-    && ln -s /neurodesktop-storage/containers /neurocommand/local/containers
-
 # Install local runtime configuration late. This layer intentionally sits after
 # neurocommand so launcher/webapp config edits do not invalidate Guacamole,
 # defaults, CVMFS, or the neurocommand clone/install layer.
@@ -854,11 +1242,17 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     --mount=type=bind,source=config/lxde,target=/tmp/lxde,ro \
     --mount=type=bind,source=config/lmod,target=/tmp/lmod,ro \
     --mount=type=bind,source=scripts/generate_jupyter_config.py,target=/tmp/generate_jupyter_config.py,ro \
-    --mount=type=bind,source=tests,target=/tmp/tests,ro \
+    # Only the container test tier and its fixtures ship in the image, so only
+    # they may key this layer: mounting all of tests/ would rebuild everything
+    # from here down on every unit-test edit.
+    --mount=type=bind,source=tests/container,target=/tmp/tests/container,ro \
+    --mount=type=bind,source=tests/conftest.py,target=/tmp/tests/conftest.py,ro \
+    --mount=type=bind,source=tests/testlib.py,target=/tmp/tests/testlib.py,ro \
+    --mount=type=bind,source=tests/pytest.ini,target=/tmp/tests/pytest.ini,ro \
+    --mount=type=bind,source=tests/fixtures/astra-bet,target=/tmp/tests/fixtures/astra-bet,ro \
     install -D -m 0644 /tmp/jupyter/neurodesk_brain_logo.svg /opt/neurodesk_brain_logo.svg \
     && install -D -m 0644 /tmp/jupyter/neurodesk_brain_icon.svg /opt/neurodesk_brain_icon.svg \
     && install -D -m 0644 /tmp/jupyter/vscode_logo.svg /opt/vscode_logo.svg \
-    && install -D -m 0644 /tmp/jupyter/opencode_logo.svg /opt/opencode_logo.svg \
     && install -d -m 0755 /opt/neurodesk/icons \
     && cp -a /tmp/jupyter/webapp_icons/. /opt/neurodesk/icons/ \
     && install -D -m 0644 /tmp/jupyter/webapp_links.json /opt/config/jupyter/webapp_links.json \
@@ -877,6 +1271,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/before_notebook.sh \
     && install -m 0755 /tmp/jupyter/jupyterlab_startup.sh /opt/neurodesktop/jupyterlab_startup.sh \
     && install -m 0755 /tmp/jupyter/deferred_startup.sh /opt/neurodesktop/deferred_startup.sh \
+    && install -m 0755 /tmp/jupyter/print_access_url.sh /opt/neurodesktop/print_access_url.sh \
     && install -m 0755 /tmp/jupyter/cvmfs_server_select.sh /opt/neurodesktop/cvmfs_server_select.sh \
     && install -m 0755 /tmp/guacamole/guacamole.sh /opt/neurodesktop/guacamole.sh \
     && install -m 0755 /tmp/guacamole/init_secrets.sh /opt/neurodesktop/init_secrets.sh \
@@ -884,16 +1279,26 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh \
     && install -m 0755 /tmp/jupyter/kernel_wrapper.sh /opt/neurodesktop/kernel_wrapper.sh \
     && install -m 0755 /tmp/jupyter/jupyterlmod_modulepath.py /opt/neurodesktop/jupyterlmod_modulepath.py \
+    && install -m 0644 /tmp/jupyter/jupyter_ai_workspace.py /opt/neurodesktop/jupyter_ai_workspace.py \
     && install -m 0755 /tmp/jupyter/external_webapp_redirect.py /opt/neurodesktop/external_webapp_redirect.py \
     && install -m 0755 /tmp/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh \
     && install -m 0755 /tmp/ssh/ensure_ssh_keys.sh /opt/neurodesktop/ensure_ssh_keys.sh \
     && install -m 0755 /tmp/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh \
+    # Optional `lc` execution path: submitted with sbatch, so `lc run` finds
+    # itself inside an allocation and dispatches Dask workers with srun.
+    && install -m 0644 /tmp/slurm/astra_lc_run.sbatch /opt/neurodesktop/astra_lc_run.sbatch \
     # Only the container tier ships: tests/unit/ asserts on repository sources
     # and runs in CI on a checkout, so it has nothing to say inside the image.
     && cp -a /tmp/tests/container /opt/tests \
     && install -m 0644 /tmp/tests/conftest.py /opt/tests/conftest.py \
     && install -m 0644 /tmp/tests/testlib.py /opt/tests/testlib.py \
     && install -m 0644 /tmp/tests/pytest.ini /opt/tests/pytest.ini \
+    # Read-only worked ASTRA example; users copy it out before editing. It is
+    # also the spec the viewer and agent-skill image tests validate against,
+    # so the example cannot silently rot.
+    && install -d -m 0755 /opt/neurodesktop/examples \
+    && cp -a /tmp/tests/fixtures/astra-bet /opt/neurodesktop/examples/ \
+    && chown -R root:users /opt/neurodesktop/examples \
     && install -m 0755 /tmp/generate_jupyter_config.py /opt/neurodesktop/scripts/generate_jupyter_config.py \
     && cp -a /tmp/jupyter/webapp_wrapper/. /opt/neurodesktop/webapp_wrapper/ \
     && install -m 0755 /tmp/jupyter/webapp_launcher.sh /opt/neurodesktop/webapp_launcher.sh \
@@ -912,6 +1317,10 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     /etc/jupyter/jupyter_notebook_config.py \
     --merged-webapps-output /opt/neurodesktop/webapps.json \
     /tmp/jupyter/webapp_links.json \
+    # Single-load server config additions (e.g. the AGENTS.md seeding
+    # post_save_hook, which must not be assigned once per shimmed legacy
+    # config load; see the snippet's header comment).
+    && cat /tmp/jupyter/jupyter_server_config_extra.py >> /etc/jupyter/jupyter_server_config.py \
     && chmod +rx /etc/jupyter/jupyter_notebook_config.py \
     /opt/neurodesktop/webapp_wrapper/webapp_wrapper.py \
     && chmod +r /opt/neurodesktop/webapp_wrapper/splash_template.html \
@@ -919,83 +1328,27 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && chown -R root:users /opt/config /opt/neurodesktop /opt/tests
 
 
-# Rebuild Notebook Intelligence's frontend because the 5.3.0 PyPI wheel
-# contains only style.js. Build from the matching tag.
-# Its upstream lockfile pins the JupyterLab 4.2 builder stack. Use the checked-in
-# JupyterLab 4.6-compatible lockfile before selecting the current builder;
-# otherwise webpack's old license plugin crashes and launcher tokens are
-# compiled from incompatible package instances. Patch only after the real bundle
-# is installed so a changed upstream anchor fails the image build.
-ARG NBI_JUPYTERLAB_BUILDER_VERSION="4.5.10"
-RUN --mount=type=bind,source=config/jupyter/notebook-intelligence-5.3.0.yarn.lock,target=/tmp/nbi-yarn.lock,ro \
-    NBI_PACKAGE_DIR="$(/opt/conda/bin/pip show notebook_intelligence | awk '/^Location:/ {print $2 "/notebook_intelligence"}')" \
-    && test -d "${NBI_PACKAGE_DIR}" \
-    && NBI_VERSION="$(/opt/conda/bin/pip show notebook_intelligence | awk '/^Version:/ {print $2}')" \
-    && retry git clone --depth 1 --branch "v${NBI_VERSION}" https://github.com/notebook-intelligence/notebook-intelligence.git /tmp/notebook-intelligence \
-    && cd /tmp/notebook-intelligence \
-    && npm pkg set "dependencies.@jupyterlab/launcher=^4.0.0" \
-    && npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}" \
-    && install -m 0644 /tmp/nbi-yarn.lock yarn.lock \
-    && retry jlpm install --immutable \
-    && jlpm build:prod \
-    && NBI_LABEXT_DIR="${NBI_PACKAGE_DIR}/labextension" \
-    && APP_NBI_DIR=/opt/conda/share/jupyter/labextensions/@plmbr/notebook-intelligence \
-    && rm -rf "${NBI_LABEXT_DIR}" "${APP_NBI_DIR}" \
-    && cp -a /tmp/notebook-intelligence/notebook_intelligence/labextension "${NBI_LABEXT_DIR}" \
-    && cp -a "${NBI_LABEXT_DIR}" "${APP_NBI_DIR}" \
-    && find "${NBI_LABEXT_DIR}/static" -type f -name 'remoteEntry*.js' | grep -q . \
-    && /opt/conda/bin/python3 /opt/neurodesktop/patch_nbi.py \
-    && rm -rf /tmp/notebook-intelligence /root/.cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
+# Upstream issue #271: a stale client frame can terminate a Jupyter AI chat
+# room's message queue. Keep this anchored workaround until a fixed
+# jupyter-server-documents release is pinned and validated.
+RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_documents.py,target=/tmp/patch_jupyter_server_documents.py,ro \
+    install -m 0755 -o root -g users /tmp/patch_jupyter_server_documents.py /opt/neurodesktop/patch_jupyter_server_documents.py \
+    && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_server_documents.py
 
-# Workaround for jupyterlab-rise + jupyterlab-myst incompatibility:
-# jupyterlab-myst's federated bundle declares @jupyterlab/markdownviewer as a
-# shared module it consumes from the host. RISE's bundle does not include that
-# package in its shared scope, so MyST's plugins fail to instantiate and MyST
-# directives (admonitions, dropdowns, etc.) render as raw markdown in slides.
-# Rebuilding MyST with --core-path pointed at RISE's app directory embeds
-# @jupyterlab/markdownviewer into MyST's own bundle, so it no longer asks the
-# host for it. See https://github.com/jupyterlab-contrib/rise/issues/46
-# MyST 2.7.0 uses pnpm. Its published metadata requests @jupyter/ydoc 3.x,
-# while JupyterLab 4.6 provides 4.x, so compile against an exact current YDoc
-# and retain that exact version in both the manifest and lockfile.
-ARG MYST_PNPM_VERSION="11.17.0"
-ARG MYST_YDOC_VERSION="4.1.1"
-RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
-    && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
-    && MYST_PACKAGE_DIR="$(/opt/conda/bin/python -c 'import jupyterlab_myst, os; print(os.path.dirname(jupyterlab_myst.__file__))')" \
-    && retry git clone --depth 1 --branch "v${MYST_VERSION}" https://github.com/jupyter-book/jupyterlab-myst.git /tmp/myst \
-    && retry git clone --depth 1 --branch "v${RISE_VERSION}" https://github.com/jupyterlab-contrib/rise.git /tmp/rise \
-    && cd /tmp/myst \
-    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} install --frozen-lockfile --store-dir /tmp/myst-pnpm-store \
-    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} add --save-exact "@jupyter/ydoc@${MYST_YDOC_VERSION}" --store-dir /tmp/myst-pnpm-store \
-    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} run build:css \
-    && CI=true COREPACK_HOME=/tmp/myst-corepack corepack pnpm@${MYST_PNPM_VERSION} run build:lib \
-    && /opt/conda/bin/jupyter labextension build --core-path=/tmp/rise/app . \
-    && MYST_LABEXT_DIR="${MYST_PACKAGE_DIR}/labextension" \
-    && APP_MYST_DIR=/opt/conda/share/jupyter/labextensions/jupyterlab-myst \
-    && rm -rf "${MYST_LABEXT_DIR}" \
-    && cp -a /tmp/myst/jupyterlab_myst/labextension "${MYST_LABEXT_DIR}" \
-    && rm -rf "${APP_MYST_DIR}" \
-    && cp -a "${MYST_LABEXT_DIR}" "${APP_MYST_DIR}" \
-    && rm -rf /tmp/myst /tmp/rise /tmp/myst-corepack /tmp/myst-pnpm-store /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
+# jupyter-server-mcp starts FastMCP through its own embedded runner and prints
+# the FastMCP banner unconditionally, ignoring the image's
+# FASTMCP_SHOW_SERVER_BANNER=0. Keep this anchored patch until a release
+# gates the banner on the setting itself.
+RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_mcp.py,target=/tmp/patch_jupyter_server_mcp.py,ro \
+    install -m 0755 -o root -g users /tmp/patch_jupyter_server_mcp.py /opt/neurodesktop/patch_jupyter_server_mcp.py \
+    && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_server_mcp.py
 
-# Patch both nested tar copies after all npm-based build steps. Updating
-# code-server's top-level dependency graph does not reach either scanner path.
-ARG NODE_TAR_VERSION="7.5.22"
-RUN set -eux; \
-    node_tar_package="$(npm pack --silent "tar@${NODE_TAR_VERSION}")"; \
-    for node_tar_dir in \
-        /opt/code-server/lib/vscode/node_modules/tar \
-        "$(npm root -g)/npm/node_modules/tar"; do \
-        rm -rf "${node_tar_dir}"; \
-        mkdir -p "${node_tar_dir}"; \
-        tar -xzf "${node_tar_package}" -C "${node_tar_dir}" --strip-components=1; \
-    done; \
-    rm -f "${node_tar_package}"; \
-    test "$(node -p 'require("/opt/code-server/lib/vscode/node_modules/tar/package.json").version')" = "${NODE_TAR_VERSION}"; \
-    test "$(node -p 'require("/usr/lib/node_modules/npm/node_modules/tar/package.json").version')" = "${NODE_TAR_VERSION}"; \
-    npm cache clean --force
-
+# jupyter-ai-acp-client logs every streamed chunk and tool-call tick at INFO,
+# flooding the server log during any persona reply. Keep this anchored
+# demotion to DEBUG until a fixed jupyter-ai-acp-client release is pinned.
+RUN --mount=type=bind,source=config/jupyter/patch_jupyter_ai_acp_client.py,target=/tmp/patch_jupyter_ai_acp_client.py,ro \
+    install -m 0755 -o root -g users /tmp/patch_jupyter_ai_acp_client.py /opt/neurodesktop/patch_jupyter_ai_acp_client.py \
+    && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_ai_acp_client.py
 
 # Start the container as root so docker-stacks runs before-notebook hooks with
 # the privileges needed to bootstrap local Slurm/CVMFS, then drops to NB_USER.

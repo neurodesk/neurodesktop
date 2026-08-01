@@ -73,6 +73,34 @@ still starts, but jobs may pend with `InvalidAccount` on SLURM 23.11+.
 
 This means `sbatch`/`srun` jobs submitted inside the container stay inside the container and cannot exceed the configured node CPU/memory limits.
 
+### Running an ASTRA analysis with `lc`
+
+`astra_lc_run.sbatch` (installed at `/opt/neurodesktop/astra_lc_run.sbatch`) submits an ASTRA project
+through `lc run`. `lc` does not submit to Slurm itself — it dispatches through Dask and launches its
+workers with `srun` once it finds itself inside an allocation — so this template puts it inside one:
+
+```bash
+cd /home/jovyan/my-analysis        # the directory holding astra.yaml
+mkdir -p logs
+NEURODESK_ASTRA_MODULES="fsl/6.0.7.22" \
+NEURODESK_ASTRA_UNIVERSE="baseline" \
+  sbatch /opt/neurodesktop/astra_lc_run.sbatch
+```
+
+It writes `status.json` beside `astra.yaml`; open the spec in JupyterLab and press **Refresh** to see
+the run. The trust badge becomes amber "Executed, unverified" and stays there — see
+[docs/architecture/astra.md](../../docs/architecture/astra.md) for why it cannot reach green.
+
+This is optional. The default flow remains one plain `sbatch` script per analysis step, which writes
+no manifest and leaves the viewer reading "Not executed".
+
+| Variable | Meaning |
+| --- | --- |
+| `NEURODESK_ASTRA_PROJECT` | directory holding `astra.yaml` (default: the submitting directory) |
+| `NEURODESK_ASTRA_MODULES` | space-separated `module load` arguments, each with an explicit version |
+| `NEURODESK_ASTRA_UNIVERSE` | universe to materialize (default: every universe) |
+| `NEURODESK_ASTRA_JOBS` | parallel jobs passed to `lc run` (default: 1) |
+
 ### Environment variables
 
 - `NEURODESKTOP_SLURM_MODE=local|host` to select in-container (`local`) or host-cluster (`host`) Slurm mode

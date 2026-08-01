@@ -36,8 +36,15 @@ jobs:
         run: |
           # httpx: imported by config/jupyter/webapp_wrapper/webapp_wrapper.py
           # traitlets: imported by the real Jupyter config template
+          # ASTRA/anywidget: exercise the released-schema viewer adapter and
+          # widget. Optional for a plain checkout (test_astra_view_graph.py
+          # skips without them), installed here so CI always covers them.
           python -m pip install --upgrade pip
-          python -m pip install pytest httpx traitlets
+          # jupyter-server: exercise the astra.yaml file-browser server
+          # extension (test_astra_view_filebrowser.py skips without it)
+          python -m pip install pytest httpx traitlets \
+            astra-spec==0.0.12 astra-tools==0.2.11 anywidget==0.11.0 \
+            jupyter-server
           # ssh-keygen, for the ensure_ssh_keys.sh tests
           sudo apt-get update -qq
           sudo apt-get install -y -qq openssh-client

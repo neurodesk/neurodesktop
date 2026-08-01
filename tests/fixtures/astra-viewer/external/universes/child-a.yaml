@@ -1,0 +1,5 @@
+id: child-a
+analyses:
+  child:
+    universe: choice-a
+

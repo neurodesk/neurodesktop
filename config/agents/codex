@@ -67,11 +67,39 @@ try:
 except FileNotFoundError:
     text = ""
 
-# Remove any previous [mcp_servers.brain-researcher] block we may have written.
-pattern = re.compile(
-    r"(?ms)^\s*#\s*BEGIN brain-researcher MCP\s*\n.*?^\s*#\s*END brain-researcher MCP\s*\n?"
-)
-text = pattern.sub("", text)
+# Remove only the [mcp_servers.brain-researcher] table we wrote. Codex may add
+# new top-level tables (including marketplace and plugin registrations) before
+# our trailing END comment. Treating the comments as one disposable span would
+# delete those Codex-managed tables on the next wrapper invocation.
+begin_marker = re.compile(r"^\s*#\s*BEGIN brain-researcher MCP\s*$")
+end_marker = re.compile(r"^\s*#\s*END brain-researcher MCP\s*$")
+brain_table = re.compile(r"^\s*\[mcp_servers\.brain-researcher\]\s*$")
+table_header = re.compile(r"^\s*\[\[?.+\]\]?\s*(?:#.*)?$")
+
+cleaned_lines = []
+inside_markers = False
+skipping_brain_table = False
+for line in text.splitlines(keepends=True):
+    content = line.rstrip("\r\n")
+    if begin_marker.match(content):
+        inside_markers = True
+        skipping_brain_table = False
+        continue
+    if end_marker.match(content):
+        inside_markers = False
+        skipping_brain_table = False
+        continue
+    if inside_markers and brain_table.match(content):
+        skipping_brain_table = True
+        continue
+    if inside_markers and skipping_brain_table:
+        if table_header.match(content):
+            skipping_brain_table = False
+            cleaned_lines.append(line)
+        continue
+    cleaned_lines.append(line)
+
+text = "".join(cleaned_lines)
 
 if want_enabled:
     block = (

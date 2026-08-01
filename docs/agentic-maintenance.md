@@ -1,4 +1,17 @@
+---
+title: Agentic maintenance workflows
+description: Weekly agentic maintenance checks, the package-update radar, and
+  the CodeRabbit pull-request review loop
+parent: index.md
+status: current
+last-reviewed: "2026-07-31"
+---
+
 # Agentic Maintenance Workflows
+
+The architecture context for these workflows (including the issue
+investigator they share their review loop with) is in
+[Agentic CI workflows](architecture/agentic-workflows.md).
 
 Neurodesktop runs seven agentic maintenance checks and one read-only package
 survey once per week. Each source workflow uses gh-aw's fuzzy `weekly`
@@ -45,8 +58,12 @@ approval — `maintenance-updates` still has to prove the update independently.
 
 ## Pull Request and Review Loop
 
-The workflows import the shared
-`.github/workflows/shared/maintenance-base.md` contract. A run first checks for
+The seven maintenance workflows import the shared
+`.github/workflows/shared/maintenance-base.md` contract
+(`package-update-radar` deliberately does not — it has no pull-request
+outputs, and its bounds live in its own body;
+`tests/unit/test_agentic_maintenance_workflows.py` asserts it stays that
+way). A run first checks for
 an open pull request in its category, investigates one bounded candidate, and
 either opens one narrow draft PR or exits with `noop`. Empty, speculative,
 untested, and duplicate PRs are forbidden. The safe-output allowlist excludes
@@ -65,7 +82,8 @@ no actionable findings remain. It never marks a PR ready or merges it.
 ## Operational Limits
 
 - Each category permits one open PR and one coherent change per run.
-- Investigation and network reads are bounded in the shared contract.
+- Investigation and network reads are bounded in the shared contract (for the
+  radar, in its own workflow body).
 - Product behavior changes require focused regression tests and the validation
   described in `docs/testing.md`.
 - Protected or out-of-scope files require human review instead of an automated

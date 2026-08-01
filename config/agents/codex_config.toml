@@ -14,3 +14,9 @@ check_for_update_on_startup = false
 # approval prompts and Codex-managed Linux sandbox startup checks by default.
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
+
+# Default to high reasoning effort. The Codex app-server reports this as the
+# session default, so the Jupyter AI Codex persona's "Reasoning effort"
+# selector starts on High; both the CLI and the persona can still lower it
+# per session.
+model_reasoning_effort = "high"

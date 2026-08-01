@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+
 # test if dive is installed and make sure it is installed
 if ! command -v dive &> /dev/null
 then
@@ -8,7 +11,7 @@ then
     brew install dive
 fi
 
-docker build . -t neurodesktop:latest
+docker build "${REPO_ROOT}" -t neurodesktop:latest
 
 docker images neurodesktop:latest
 
@@ -25,7 +28,7 @@ fi
 read -p "Do you want to run dive? Default no (y/n) " -n 1 -r
 echo    # move to a new line
 if [[ $REPLY =~ ^[Yy]$ ]]
-then    
+then
     # run dive to get a full analysis
     dive neurodesktop
 fi

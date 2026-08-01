@@ -10,23 +10,126 @@
   inside the built image with `pytest /opt/tests/` and is only for assertions
   that need a running container. Only `tests/container/` is copied into the
   image. Resolve a test's subject through the helpers in `tests/testlib.py`.
+- The docs are a hierarchical wiki rooted at [`docs/index.md`](docs/index.md):
+  every page carries YAML frontmatter (`title`, `description`, `parent`,
+  `status`, `last-reviewed`) and cross-references relatives with markdown
+  links. Historical assessments, plans, and audits live under
+  [`docs/designs/`](docs/designs/index.md) as records; keep current behavior
+  in the reference pages, not in the records.
 - Follow the project testing and container validation expectations in
   [`docs/testing.md`](docs/testing.md).
 - Use [`docs/architecture.md`](docs/architecture.md) for project architecture,
-  startup flow, build-time behavior, and directory layout.
+  startup flow, and directory layout; it links to one page per subsystem
+  under [`docs/architecture/`](docs/architecture/), including
+  [build-time behavior](docs/architecture/build.md).
 - Use [`docs/environment-variables.md`](docs/environment-variables.md) for
   supported runtime and build environment variables.
-- When changing OpenCode, its Web proxy/session-workspace behavior, its file
-  previewer, or its pinned version, run `pytest tests/unit/test_opencode_web.py`
-  from a checkout and `pytest /opt/tests/test_opencode_web_image.py` in the
-  built image; the latter's real-bundle contract protects distinct durable
-  project identities for per-session directories, Jupyter prefix routing, the
-  native model picker, and the confinement of the preview file endpoint.
+- `docs/architecture.md`, `docs/testing.md`, and
+  `docs/environment-variables.md` are referenced by path from tests and the
+  compiled agentic workflows; do not move or rename them.
+- When changing `print_access_url.sh` (the end-of-startup access-link banner)
+  or how `before_notebook.sh` launches it, run `pytest
+  tests/unit/test_print_access_url.py` from a checkout.
+- When changing the ASTRA viewer adapter, graph/gap model, layout ranks,
+  previews, widget, vendored Cytoscape.js, run-evidence ingestion, or package
+  pins, run `pytest tests/unit/test_astra_view_graph.py
+  tests/unit/test_astra_view_packaging.py` from a checkout and `pytest
+  /opt/tests/test_astra_view_image.py` in the built image. Keep every read path
+  confined and keep `adapter.py` as the only released-schema-aware viewer
+  module. Schema drift the viewer can read unambiguously — a retired
+  `narrative`/`authors`, an undefined top-level key, an option insight naming
+  an ancestor's insight — is adopted with a warning rather than refused, and
+  every adoption must surface in `graph["warnings"]`; keep that confined to
+  top-level keys and to references with no other possible target, so an
+  authoring mistake inside a decision or output stays an error.
+  Node positions come from the `rank`/`order` pair `layout.py`
+  computes, never from a Cytoscape layout algorithm: the bundle ships no
+  layered layout, and `breadthfirst` ranks by hop count, which draws dataflow
+  arrows backwards along a row. The renderer must re-lay out on every filter
+  change, and each viewer mode must actually filter — a mode that shows
+  everything is indistinguishable from the one before it. `tests/fixtures/astra-bet` is the single canonical worked ASTRA spec:
+  the unit tests read it from the checkout, the image tests validate its
+  installed copy at `/opt/neurodesktop/examples/astra-bet`, and users copy that
+  installed copy as a starting point — do not fork a second source copy.
+- When changing the file-browser ASTRA viewer — the
+  `neurodesk_astra_view.serverext` server extension or the
+  `neurodesk-launcher:astra-viewer` file type/factory plugin — run `pytest
+  tests/unit/test_astra_view_filebrowser.py` from a checkout and `pytest
+  /opt/tests/test_astra_view_image.py` in the built image. Keep request paths
+  confined to the Jupyter server root before anything is read, keep the
+  frontend single-sourced from the anywidget's `static/` assets over the
+  asset endpoint (never a second bundled copy), and keep the factory a
+  pattern-file-type default so ordinary `.yaml` files stay in the editor.
+  The plugin discovers run evidence beside the spec and fills in `run=`
+  itself, because nothing else can: a name it recognises that `manifest.py`
+  does not is a manifest that never loads, so keep
+  `ASTRA_RUN_EVIDENCE_NAMES` in step with `_directory_run_file`. Ambiguity
+  stays Python's call — two or more candidates send the directory rather
+  than a guess — and run evidence appears without touching the spec, so the
+  viewer needs its `Refresh` to see a job that finished.
 - When changing Notebook Intelligence or MyST pins or their frontend rebuilds,
   run `pytest tests/unit/test_nbi_settings_patch.py
   tests/unit/test_myst_build_workaround.py` from a checkout and `pytest
   /opt/tests/test_nbi_labextension_patch.py` in the built image, and verify both
   extensions are compatible in `jupyter labextension list --verbose`.
+- When changing the Neurodesk launcher extension or how agent-authored
+  absolute paths are routed into the JupyterLab main panel, run `pytest
+  tests/unit/test_workspace_link_routing.py` from a checkout and `pytest
+  /opt/tests/test_workspace_link_routing_image.py` in the built image. Keep
+  the click interception scoped to same-origin, unmodified clicks resolving
+  inside `PageConfig` `serverRoot`, and keep all of the extension's plugins in
+  its default export. Rendered formats open in a viewer rather than the editor;
+  keep that an extension-to-factory map that falls back to the default factory
+  when the named viewer is not registered.
+- When changing `config/slurm/astra_lc_run.sbatch` — the optional `lc`
+  execution path — run `pytest tests/unit/test_astra_lc_run_sbatch.py` from a
+  checkout and `pytest /opt/tests/test_astra_lc_run_image.py` in the built
+  image. `lc run` never submits to Slurm; it dispatches through Dask and
+  launches workers with `srun` once inside an allocation, so the template must
+  stay something `sbatch` submits rather than something that wraps `sbatch`.
+  Keep `/opt/uv/tools/lightcone-cli/bin` on its `PATH` (`lc` shells out to the
+  `dask` CLI and neither is on the default `PATH`), keep it writing exactly one
+  recognised manifest beside the spec — `status.json`, renamed into place —
+  and keep it refusing a spec that declares a `container:`, since Apptainer is
+  not an `lc` runtime and the image would be recorded as used without ever
+  running. This path is amber by construction; do not add anything that
+  synthesizes the verification record `lc verify` does not write.
+- When changing the `astra`/`lc` installs, `AGENT_SKILLS_REF`, or how the ASTRA
+  skill reaches Codex, Claude, or OpenCode, run `pytest
+  tests/unit/test_astra_jupyter_ai_tooling.py` from a checkout and `pytest
+  /opt/tests/test_astra_agent_skills_image.py` in the built image. Keep
+  `astra-tools` installed exactly once so the CLI cannot drift from the schema
+  the viewer imports, keep `jq` installed for the plugin hooks, and bump
+  `AGENT_SKILLS_REF` together with the ASTRA pins so the skill teaches the
+  schema `astra validate` speaks.
+- When changing Jupyter AI, Jupyter Collaboration, its ACP personas,
+  the Jupyter Server Documents workaround, or the jupyter-server-mcp
+  banner patch,
+  run `pytest tests/unit/test_jupyter_ai_workspace.py
+  tests/unit/test_astra_jupyter_ai_tooling.py
+  tests/unit/test_jupyter_server_documents_patch.py
+  tests/unit/test_jupyter_ai_acp_client_patch.py
+  tests/unit/test_jupyter_server_mcp_patch.py` from a checkout and `pytest
+  /opt/tests/test_astra_jupyter_ai_image.py` in the built image, then verify
+  `pip check`, `jupyter server extension list`, and `jupyter labextension list
+  --verbose` in that image. Keep Jupyter AI chat workspace seeding scoped to
+  `.chat` saves, never overwrite an existing `AGENTS.md`, and never make a seed
+  failure block the chat save. Keep the ACP adapters' vendored agent binaries
+  deleted after install (npm ignores omit-optional for global installs) and
+  keep the adapters driving the image's own agent CLIs via `CODEX_PATH` and
+  `CLAUDE_CODE_EXECUTABLE`; the vendored copies would otherwise add ~500 MB
+  of duplicates, and `CODEX_CLI_VERSION` must stay inside the `@openai/codex`
+  range the pinned codex-acp declares. The same vendored-duplicate policy
+  covers `claude-agent-sdk/_bundled` (a second ~260 MB Claude CLI pulled in
+  via notebook_intelligence): it is deleted in the pip layer and guarded by
+  `pytest /opt/tests/test_image_size_hygiene.py`.
+- The image's size-hygiene invariants live in
+  [`docs/architecture/build.md`](docs/architecture/build.md#image-size-hygiene)
+  and are asserted by `pytest /opt/tests/test_image_size_hygiene.py` in the
+  built image: build-only apt packages are installed and purged inside the
+  layer that needs them (never purged in a later layer), `chown -R`/
+  `chmod -R` happen in the layer that creates a tree, and sourcemaps and
+  bundled Python test suites are stripped in the layer that installs them.
 - When changing an agentic workflow under `.github/workflows/*.md`, regenerate
   its `.lock.yml` with `gh aw compile`, then run
   `pytest tests/unit/test_report_job_failure_action.py`.

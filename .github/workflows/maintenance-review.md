@@ -89,7 +89,6 @@ safe-outputs:
       - "AGENTS.md"
       - "CLAUDE.md"
       - "README.md"
-      - "analyze_image_size.sh"
       - "build_and_run.bat"
       - "build_and_run.sh"
       - "neurodesk.yml"

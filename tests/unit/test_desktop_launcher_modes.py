@@ -109,6 +109,7 @@ def _execute_jupyter_config(config, tmp_path, monkeypatch, *, apptainer=False, e
     if apptainer:
         monkeypatch.setenv("APPTAINER_CONTAINER", "1")
     monkeypatch.setattr(os, "geteuid", lambda: euid)
+    monkeypatch.syspath_prepend(str(repo_path("config/jupyter")))
 
     c = SimpleNamespace(
         ServerProxy=SimpleNamespace(),
