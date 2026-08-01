@@ -8,7 +8,7 @@ REVIEW_WORKFLOW = repo_path(".github/workflows/issue-investigator-review.md")
 REVIEW_LOCK = repo_path(".github/workflows/issue-investigator-review.lock.yml")
 CODERABBIT_CONFIG = repo_path(".coderabbit.yaml")
 SHARED_MODELS_WORKFLOW = repo_path(".github/workflows/shared/agentic-models.md")
-MODEL_ALIAS_JSON = '"neurodesk":["openai/glm-5.2","openai/kimi-k2.7"]'
+MODEL_ALIAS_JSON = '"neurodesk":["openai/glm-5.2","openai/kimi-k2.7","openai/minimax-m2"]'
 
 
 def test_report_job_failure_gates_issue_investigator_dispatch():
@@ -44,7 +44,10 @@ def test_issue_investigator_routes_codex_through_neurodesk_gateway():
 
     assert f"model: {model}" in workflow
     assert model in lock
-    assert "neurodesk:\n    - openai/glm-5.2\n    - openai/kimi-k2.7" in shared_models
+    assert (
+        "neurodesk:\n    - openai/glm-5.2\n    - openai/kimi-k2.7\n    - openai/minimax-m2"
+        in shared_models
+    )
     assert "uses: .github/workflows/shared/agentic-models.md" in workflow
     assert "uses: .github/workflows/shared/agentic-models.md" in review_workflow
     assert MODEL_ALIAS_JSON in lock
