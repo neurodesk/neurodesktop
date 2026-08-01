@@ -462,22 +462,6 @@ RUN retry bash -o pipefail -c 'curl -fsSL https://deb.nodesource.com/setup_24.x 
     && apt-install-retry nodejs build-essential \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Vendor the NiiVue viewer that opencode_web.py serves for volume previews of
-# the files an agent produced. dist/index.js is the self-contained ESM bundle
-# (no bare imports, wasm inlined), so the preview works offline and needs no
-# CDN. Its sibling dist/index.min.js is NOT this module - it exports only a
-# percent-encoded worker source - so the build asserts the installed file
-# really exports the Niivue class rather than trusting the file name.
-ARG NIIVUE_VERSION="0.69.0"
-RUN mkdir -p /tmp/niivue \
-    && retry bash -o pipefail -c 'npm_config_cache=/tmp/npm-niivue-cache npm pack --silent "@niivue/niivue@${NIIVUE_VERSION}" --pack-destination /tmp/niivue' \
-    && tar -xzf /tmp/niivue/*.tgz -C /tmp/niivue package/dist/index.js \
-    && install -D -m 0644 /tmp/niivue/package/dist/index.js /opt/neurodesktop/vendor/niivue.js \
-    # The .map is not shipped; drop the reference so devtools never chases it.
-    && sed -i '/^\/\/# sourceMappingURL=/d' /opt/neurodesktop/vendor/niivue.js \
-    && node --input-type=module -e "const m = await import('/opt/neurodesktop/vendor/niivue.js'); if (typeof m.Niivue !== 'function') { throw new Error('vendored NiiVue bundle does not export Niivue'); }" \
-    && rm -rf /tmp/niivue /tmp/npm-niivue-cache /root/.npm
-
 # Install Firefox from Mozilla's official apt repository. This avoids both the
 # Launchpad API and Ubuntu's snap-backed firefox package.
 RUN --mount=type=bind,source=config/firefox,target=/tmp/firefox,ro \
@@ -790,9 +774,9 @@ RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_C
     && rm -rf /home/${NB_USER}/.local
 
 # Install OpenCode CLI (open source AI coding agent). OPENCODE_VERSION pins
-# the release so the web UI, the opencode_web.py proxy, and the default
-# config are tested as a set; override at build time to bump it, or set it
-# to an empty value to install the latest release.
+# the release so the terminal wrapper and the default config are tested as a
+# set; override at build time to bump it, or set it to an empty value to
+# install the latest release.
 ARG OPENCODE_VERSION="1.18.7"
 RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash -s -- ${OPENCODE_VERSION:+--version "${OPENCODE_VERSION}"}' \
     && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
@@ -1127,11 +1111,7 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     --mount=type=bind,source=config/agents/claude,target=/tmp/agents/claude,ro \
     --mount=type=bind,source=config/agents/opencode,target=/tmp/agents/opencode,ro \
     --mount=type=bind,source=config/agents/codex,target=/tmp/agents/codex,ro \
-    --mount=type=bind,source=config/agents/opencode_web.py,target=/tmp/agents/opencode_web.py,ro \
-    --mount=type=bind,source=config/agents/opencode_bash_env.sh,target=/tmp/agents/opencode_bash_env.sh,ro \
-    --mount=type=bind,source=config/agents/opencode_web_desktop.sh,target=/tmp/agents/opencode_web_desktop.sh,ro \
     --mount=type=bind,source=config/agents/opencode_prune_sessions.py,target=/tmp/agents/opencode_prune_sessions.py,ro \
-    --mount=type=bind,source=config/agents/opencode-web.desktop,target=/tmp/agents/opencode-web.desktop,ro \
     --mount=type=bind,source=config/agents/patch_nbi.py,target=/tmp/agents/patch_nbi.py,ro \
     install -m 0755 -o root -g users /tmp/restore_home_defaults.sh /opt/neurodesktop/restore_home_defaults.sh \
     && install -m 0755 -o root -g users /tmp/update_page_config.py /opt/neurodesktop/update_page_config.py \
@@ -1139,14 +1119,8 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     && install -m 0755 -o root -g root /tmp/agents/claude /usr/local/sbin/claude \
     && install -m 0755 -o root -g root /tmp/agents/opencode /usr/local/sbin/opencode \
     && install -m 0755 -o root -g root /tmp/agents/codex /usr/local/sbin/codex \
-    # OpenCode web interface: launcher-tile proxy (key setup, auth, prefix
-    # rewriting) plus the desktop shortcut that opens it prefix-free.
-    && install -m 0755 -o root -g users /tmp/agents/opencode_web.py /opt/neurodesktop/opencode_web.py \
-    && install -m 0644 -o root -g users /tmp/agents/opencode_bash_env.sh /opt/neurodesktop/opencode_bash_env.sh \
-    && install -m 0755 -o root -g users /tmp/agents/opencode_web_desktop.sh /opt/neurodesktop/opencode_web_desktop.sh \
     # Startup cleanup: drop sessions whose working directory has been deleted.
     && install -m 0755 -o root -g users /tmp/agents/opencode_prune_sessions.py /opt/neurodesktop/opencode_prune_sessions.py \
-    && install -m 0644 /tmp/agents/opencode-web.desktop /usr/share/applications/opencode-web.desktop \
     # Anchored Notebook Intelligence patch (see patch_nbi.py): make the
     # settings panel fetch fresh capabilities on open instead of auto-saving
     # its stale client-side cache over the OpenCode model sync. The script
@@ -1181,7 +1155,6 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     install -D -m 0644 /tmp/jupyter/neurodesk_brain_logo.svg /opt/neurodesk_brain_logo.svg \
     && install -D -m 0644 /tmp/jupyter/neurodesk_brain_icon.svg /opt/neurodesk_brain_icon.svg \
     && install -D -m 0644 /tmp/jupyter/vscode_logo.svg /opt/vscode_logo.svg \
-    && install -D -m 0644 /tmp/jupyter/opencode_logo.svg /opt/opencode_logo.svg \
     && install -d -m 0755 /opt/neurodesk/icons \
     && cp -a /tmp/jupyter/webapp_icons/. /opt/neurodesk/icons/ \
     && install -D -m 0644 /tmp/jupyter/webapp_links.json /opt/config/jupyter/webapp_links.json \

@@ -1,18 +1,27 @@
 ---
 title: OpenCode web interface plan
 description: Original implementation plan for the OpenCode web interface
-  launcher tile; the shipped behavior is documented in
-  architecture/coding-agents.md
+  launcher tile; implemented, then removed in July 2026 pending upstream
+  base-path support
 parent: index.md
-status: implemented
+status: retired
 last-reviewed: "2026-07-31"
 ---
 
 # Plan: OpenCode web interface with one-click launch from the start page
 
-Status: implemented (first iteration) — see
-[Coding agents](../architecture/coding-agents.md) for the shipped
-design. Two deviations from the plan below, both simplifications:
+Status: retired. The interface was implemented as planned and shipped, then
+**removed in July 2026**: upstream OpenCode never gained base-path /
+reverse-proxy support (anomalyco/opencode issue #7624 open, PR #28326
+unmerged), so the launcher depended on regex-patching each pinned release's
+minified web bundle, and both that rewriting layer and the upstream web UI
+(mid "v2" rewrite) proved too buggy to keep. The terminal wrapper, session
+pruning, and the shared `opencode_config.json` remain — see
+[Coding agents](../architecture/coding-agents.md). A web interface can return
+once upstream ships base-path support or a prefix-aware client stabilizes.
+
+The implementation deviated from the plan below in two ways, both
+simplifications:
 
 - The first-run key dialog is served by the launch wrapper itself
   (`config/agents/opencode_web.py`) instead of a JupyterLab extension

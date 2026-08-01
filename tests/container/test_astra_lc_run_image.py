@@ -22,14 +22,15 @@ def test_the_lc_sbatch_template_is_installed_and_readable():
     assert "status.json" in body
 
 
-def test_lc_and_dask_both_resolve_on_the_path_the_template_builds():
+def test_lc_and_its_shelled_out_clis_resolve_on_the_template_path():
     """The template's whole reason for touching PATH.
 
-    `lc` shells out to the `dask` CLI to launch its srun workers, and both
-    live in the isolated uv tool environment. If either stops resolving, every
-    job submitted with this template dies inside its allocation.
+    `lc` shells out to `dask` (srun workers) and `snakemake` (the rules)
+    without importing either: `lc`/`dask` come from the isolated uv tool
+    environment, `snakemake` from conda. If any stops resolving, every job
+    submitted with this template dies inside its allocation.
     """
-    for tool in ("lc", "dask", "astra"):
+    for tool in ("lc", "dask", "snakemake", "astra"):
         code, output = run_cmd(
             f'PATH={TOOL_BIN}:$PATH command -v {tool}', timeout=60
         )

@@ -36,7 +36,7 @@ own settings files, and the image seeds `permissions.defaultMode` and
 default when the selected model does not support a High level, and every
 default remains a per-chat selection in each session's config options. The
 personas reuse each user's agent credentials and configuration; they do not replace
-OpenCode Web, Notebook Intelligence, or Neurodesktop's existing model/API-key
+Notebook Intelligence or Neurodesktop's existing model/API-key
 configuration. The optional Jupyter AI magic and Jupyternaut extras are not
 installed because their LiteLLM/prerelease constraints conflict with the
 validated Neurodesktop stack.

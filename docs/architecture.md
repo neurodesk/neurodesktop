@@ -23,7 +23,7 @@ under [`docs/architecture/`](architecture/). The wiki entry point is
 | [Webapp system](architecture/webapps.md) | Container-backed and hosted webapp tiles, and the build-time Jupyter config generation |
 | [Workspace link routing](architecture/workspace-link-routing.md) | Opening agent-authored absolute file links inside JupyterLab |
 | [ASTRA integration](architecture/astra.md) | `astra`/`lc` CLIs, the shared agent skill, and the provenance viewer |
-| [Coding agents](architecture/coding-agents.md) | Claude Code, the OpenCode web interface, and session pruning |
+| [Coding agents](architecture/coding-agents.md) | Claude Code, the OpenCode terminal wrapper, and session pruning |
 | [Jupyter AI](architecture/jupyter-ai.md) | ACP personas, chat workspace seeding, collaboration-stack workarounds |
 | [Agentic CI workflows](architecture/agentic-workflows.md) | Issue investigation and the weekly maintenance suite |
 | [Build-time behaviors](architecture/build.md) | Notebook Intelligence and MyST/RISE rebuilds, Apptainer build stage, user permissions |
@@ -80,8 +80,8 @@ itself.
 - [`config/`](../config/): service configurations
 - [`config/jupyter/`](../config/jupyter/): JupyterLab config, startup scripts,
   and webapp infrastructure
-- [`config/agents/`](../config/agents/): coding-agent wrappers, OpenCode Web
-  launcher, and Notebook Intelligence setup
+- [`config/agents/`](../config/agents/): coding-agent wrappers, OpenCode
+  session pruning, and Notebook Intelligence setup
 - [`config/guacamole/`](../config/guacamole/): remote desktop gateway config
 - [`config/cvmfs/`](../config/cvmfs/): CVMFS mount configurations and keys
 - [`config/lxde/`](../config/lxde/): desktop environment customization

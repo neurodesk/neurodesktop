@@ -73,11 +73,14 @@ for spec in ${NEURODESK_ASTRA_MODULES:-}; do
     module load "${spec}"
 done
 
-# `lc` shells out to the `dask` CLI to start its srun workers, and both live in
-# the isolated uv tool environment rather than on the default PATH. Without
-# this, `lc run` fails inside the allocation complaining that `dask` is missing.
+# `lc` shells out to two CLIs it does not import: `dask`, to start its srun
+# workers, and `snakemake`, which actually drives the rules. `lc` and `dask`
+# live in the isolated uv tool environment rather than on the default PATH;
+# `snakemake` comes from the conda environment. Prepending keeps both reachable.
+# A missing one surfaces as a bare FileNotFoundError traceback from deep inside
+# lc, so name it here instead.
 export PATH="/opt/uv/tools/lightcone-cli/bin:${PATH}"
-for required in lc dask astra; do
+for required in lc dask snakemake astra; do
     command -v "${required}" >/dev/null || {
         echo "'${required}' is not on PATH inside the allocation." >&2
         exit 2

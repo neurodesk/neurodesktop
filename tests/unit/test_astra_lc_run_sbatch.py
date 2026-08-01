@@ -48,13 +48,14 @@ def test_it_refuses_to_run_outside_an_allocation():
 
 
 def test_the_lightcone_tool_bin_goes_on_path():
-    """`lc` shells out to the `dask` CLI, and neither is on the default PATH.
+    """`lc` shells out to CLIs it does not import, and they must resolve.
 
-    Without this the job dies inside the allocation complaining that `dask`
-    is missing, which is the single most likely way this template breaks.
+    `dask` starts the srun workers and `snakemake` drives the rules; a
+    missing one surfaces as a bare FileNotFoundError traceback from deep
+    inside lc, which is the single most likely way this template breaks.
     """
     assert 'export PATH="/opt/uv/tools/lightcone-cli/bin:${PATH}"' in SOURCE
-    assert "for required in lc dask astra; do" in SOURCE
+    assert "for required in lc dask snakemake astra; do" in SOURCE
 
 
 def test_modules_must_carry_an_explicit_version():

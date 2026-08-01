@@ -149,48 +149,19 @@ are listed at the end. The subsystems themselves are described in
   `/opt/jovyan_defaults/.jupyter/nbi/tour_config.json`, which disables the
   first-run tour in Neurodesktop
 
-## OpenCode Web
+## OpenCode
 
-- `OPENCODE_WEB_STARTUP_TIMEOUT`: seconds `opencode_web.py` (the "OpenCode
-  Web" launcher tile) waits for the `opencode web` backend to become ready;
-  defaults to `180`
-- `OPENCODE_WEB_BASH_ENV`: non-interactive Bash initializer used by OpenCode
-  Web tool commands; defaults to
-  `/opt/neurodesktop/opencode_bash_env.sh`, which refreshes the lazy-CVMFS
-  `MODULEPATH` and initializes Lmod (mainly overridable for testing)
-- `OPENCODE_DISABLE_FFF`: forced to `1` for the OpenCode Web child process so
-  its Add Project dialog can search below the `/home/jovyan` startup directory.
-  The terminal OpenCode workflow is unaffected
-- `OPENCODE_WEB_DESKTOP_STATE`: state file where the desktop "OpenCode Web"
-  shortcut records its launcher's PID and dynamically allocated port;
-  defaults to `~/.neurodesk/run/opencode_web_desktop.state`
-- `OPENCODE_WEB_LAUNCHER`, `OPENCODE_WEB_BROWSER`: launcher script and browser
-  used by the desktop "OpenCode Web" shortcut; default to
-  `/opt/neurodesktop/opencode_web.py` and
-  `/usr/local/bin/neurodesktop-firefox`
 - `NEURODESKTOP_OPENCODE_PRUNE_SESSIONS`: set to `0` (or `false`/`no`/`off`)
   to keep OpenCode sessions whose working directory has been deleted. By
   default `jupyterlab_startup.sh` runs
   `/opt/neurodesktop/opencode_prune_sessions.py --apply` once per container
   start, which drops those sessions from
   `~/.local/share/opencode/opencode.db` (OpenCode itself never prunes them, so
-  they otherwise stay on its Home page pointing at paths that no longer
+  they otherwise stay in its session index pointing at paths that no longer
   exist). Sessions whose whole parent tree is missing are left alone, so a
   volume that is not mounted yet is never mistaken for a deleted directory.
   The previous database is kept as a single rolling
   `opencode.db.prune-backup`
-- `OPENCODE_WEB_NIIVUE_BUNDLE`: NiiVue bundle the OpenCode Web file previewer
-  loads for NIfTI/MGZ volumes; defaults to
-  `/opt/neurodesktop/vendor/niivue.js` (vendored at build time by
-  `NIIVUE_VERSION`). When the file is missing, image previews still work and
-  volume previews report that the viewer is unavailable
-- `OPENCODE_WEB_PREVIEW_MAX_BYTES`: largest file the OpenCode Web preview
-  endpoint will stream to the browser; defaults to `536870912` (512 MiB)
-- `OPENCODE_WEB_WRAPPER_BIN`, `OPENCODE_WEB_SECRET_FILE`,
-  `OPENCODE_WEB_LOGIN_TOKEN_FILE`, `OPENCODE_WEB_AGENTS_FILE`,
-  `NEURODESK_LLM_BASE_URL`: test overrides for `opencode_web.py` (backend
-  command, credential file, single-use login token file, per-session
-  `AGENTS.md` seed, and key-validation endpoint)
 
 ## Build arguments
 
@@ -236,9 +207,6 @@ reviewed; the Dockerfile itself is authoritative.
 - `MYST_PNPM_VERSION`, `MYST_YDOC_VERSION`: pnpm and Jupyter
   YDoc releases used for the MyST/RISE compatibility rebuild; defaults to
   `11.17.0` and `4.1.1`
-- `NIIVUE_VERSION`: the `@niivue/niivue` release vendored to
-  `/opt/neurodesktop/vendor/niivue.js` for the OpenCode Web volume
-  previews; defaults to the pin in the Dockerfile (currently `0.69.0`)
 - `APPTAINER_VERSION`, `APPTAINER_GO_VERSION`, `APPTAINER_GRPC_VERSION`:
   Apptainer source release and the Go toolchain/grpc module versions used in
   its dedicated build stage; defaults to `1.5.3`, `1.26.5`, and `1.82.1`

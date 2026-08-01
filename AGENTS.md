@@ -67,12 +67,6 @@
   stays Python's call — two or more candidates send the directory rather
   than a guess — and run evidence appears without touching the spec, so the
   viewer needs its `Refresh` to see a job that finished.
-- When changing OpenCode, its Web proxy/session-workspace behavior, its file
-  previewer, or its pinned version, run `pytest tests/unit/test_opencode_web.py`
-  from a checkout and `pytest /opt/tests/test_opencode_web_image.py` in the
-  built image; the latter's real-bundle contract protects distinct durable
-  project identities for per-session directories, Jupyter prefix routing, the
-  native model picker, and the confinement of the preview file endpoint.
 - When changing Notebook Intelligence or MyST pins or their frontend rebuilds,
   run `pytest tests/unit/test_nbi_settings_patch.py
   tests/unit/test_myst_build_workaround.py` from a checkout and `pytest

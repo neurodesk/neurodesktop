@@ -84,7 +84,7 @@ Cover every surface that pins a third-party version:
 
 - `Dockerfile` build arguments, including the base image tag, Apptainer, Go,
   gRPC, CVMFS, Guacamole, Tomcat and the Jakarta EE migration tool,
-  code-server, OpenCode, NiiVue, and any other `ARG *_VERSION` pin.
+  code-server, OpenCode, and any other `ARG *_VERSION` pin.
 - `Dockerfile` package installs: `pip install` pins, `npm pack`/`npm install`
   pins, conda pins, and version-constrained apt packages.
 - JupyterLab extension and Python pins that `docs/architecture.md` and
