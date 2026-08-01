@@ -20,9 +20,21 @@ awaits a fresh capabilities fetch (the backend reloads config.json from
 disk before answering), and only then builds and shows the panel: the
 mount-time auto-save then writes back exactly what is on disk.
 
+Ollama context-length fallback (server-side provider):
+update_chat_model_list() takes the model family from `ollama list`, whose
+`details.family` is empty for models imported from safetensors/mlx, then
+looks up f"{family}.context_length" in the `ollama show` modelinfo. With an
+empty family the key ".context_length" never exists, so the provider logs an
+ERROR and silently drops the model from the chat model list even though the
+show response carries the real context length (e.g.
+"gemma4.context_length"). The patch falls back to the modelinfo's sole
+"*.context_length" key; a model without any such key still raises and is
+skipped exactly as before.
+
 Re-running is safe: patched files are detected via MARKER.
 """
 
+import argparse
 import glob
 import re
 import sys
@@ -31,6 +43,36 @@ SETTINGS_MARKER = "neurodesk-nbi-settings-refresh"
 
 DEFAULT_BUNDLE_GLOB = (
     "/opt/conda/share/jupyter/labextensions/@*/notebook-intelligence/static/*.js"
+)
+
+OLLAMA_MARKER = "neurodesk-nbi-ollama-context-fallback"
+
+DEFAULT_OLLAMA_PROVIDER_GLOB = (
+    "/opt/conda/lib/python3.*/site-packages/notebook_intelligence/"
+    "llm_providers/ollama_llm_provider.py"
+)
+
+# The context-window lookup as shipped in notebook_intelligence 5.3.0's
+# update_chat_model_list(); model_family comes from the `ollama list`
+# response and is empty for safetensors/mlx imports.
+OLLAMA_ANCHOR = (
+    '                    context_window = model_info[f"{model_family}.context_length"]\n'
+)
+
+OLLAMA_REPLACEMENT = (
+    f"                    # {OLLAMA_MARKER}: `ollama list` reports an empty\n"
+    "                    # details.family for safetensors/mlx imports; fall back\n"
+    "                    # to the modelinfo's *.context_length key so the model\n"
+    "                    # still registers instead of being dropped.\n"
+    '                    context_window = model_info.get(f"{model_family}.context_length")\n'
+    "                    if context_window is None:\n"
+    "                        context_window = next(\n"
+    "                            (value for key, value in model_info.items()\n"
+    '                             if key.endswith(".context_length")),\n'
+    "                            None,\n"
+    "                        )\n"
+    "                    if context_window is None:\n"
+    '                        raise KeyError(f"{model_family}.context_length")\n'
 )
 
 # The command registration as emitted by the current minifier:
@@ -132,9 +174,63 @@ def apply_settings_bundle_patch(bundle_glob):
     return True
 
 
-def main():
-    bundle_glob = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_BUNDLE_GLOB
-    return 0 if apply_settings_bundle_patch(bundle_glob) else 1
+def patch_ollama_provider_text(text):
+    """Return (patched_text, changed). Raises ValueError when the file is
+    unpatched but the upstream anchor line cannot be found."""
+    if OLLAMA_MARKER in text:
+        return text, False
+
+    if OLLAMA_ANCHOR not in text:
+        raise ValueError(
+            "the Ollama context_length anchor no longer matches. The "
+            "notebook_intelligence provider changed; update patch_nbi.py (or "
+            "drop the Ollama patch if empty-family models now register)."
+        )
+
+    return text.replace(OLLAMA_ANCHOR, OLLAMA_REPLACEMENT, 1), True
+
+
+def apply_ollama_provider_patch(provider_glob):
+    provider_files = sorted(glob.glob(provider_glob))
+    if not provider_files:
+        print(
+            f"ERROR: no Ollama provider module found under {provider_glob}",
+            file=sys.stderr,
+        )
+        return False
+
+    for provider_file in provider_files:
+        with open(provider_file, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        try:
+            new_text, changed = patch_ollama_provider_text(text)
+        except ValueError as exc:
+            print(f"ERROR: {provider_file}: {exc}", file=sys.stderr)
+            return False
+        if not changed:
+            print(f"Ollama context fallback already patched in {provider_file}")
+            continue
+        with open(provider_file, "w", encoding="utf-8") as fh:
+            fh.write(new_text)
+        print(f"patched Ollama context fallback into {provider_file}")
+    return True
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--bundles", metavar="GLOB", default=None)
+    parser.add_argument("--ollama", metavar="GLOB", default=None)
+    args = parser.parse_args(argv)
+
+    # With explicit targets, patch only those (the unit tests exercise each
+    # patch in isolation); with none, patch everything at the image defaults.
+    explicit = args.bundles is not None or args.ollama is not None
+    ok = True
+    if args.bundles is not None or not explicit:
+        ok = apply_settings_bundle_patch(args.bundles or DEFAULT_BUNDLE_GLOB) and ok
+    if args.ollama is not None or not explicit:
+        ok = apply_ollama_provider_patch(args.ollama or DEFAULT_OLLAMA_PROVIDER_GLOB) and ok
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

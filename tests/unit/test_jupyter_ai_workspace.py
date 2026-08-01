@@ -83,7 +83,10 @@ def test_missing_seed_warns_without_blocking_chat_save(tmp_path, monkeypatch):
 
 def test_image_installs_and_configures_the_chat_workspace_hook():
     dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
-    config = repo_path(
+    server_extra = repo_path(
+        "config/jupyter/jupyter_server_config_extra.py"
+    ).read_text(encoding="utf-8")
+    template = repo_path(
         "config/jupyter/jupyter_notebook_config.py.template"
     ).read_text(encoding="utf-8")
 
@@ -91,14 +94,23 @@ def test_image_installs_and_configures_the_chat_workspace_hook():
         "install -m 0644 /tmp/jupyter/jupyter_ai_workspace.py "
         "/opt/neurodesktop/jupyter_ai_workspace.py"
     ) in dockerfile
+    # The hook must be registered in the server config, which ServerApp loads
+    # exactly once. Registering it in jupyter_notebook_config.py would apply
+    # it once per shimmed legacy config load (nbclassic and notebook) and
+    # warn "Overriding existing post_save_hook" at every startup.
+    assert (
+        "cat /tmp/jupyter/jupyter_server_config_extra.py "
+        ">> /etc/jupyter/jupyter_server_config.py"
+    ) in dockerfile
+    assert "c.FileContentsManager.post_save_hook" not in template
     # The import must stay guarded so a missing or broken seeding module only
     # disables AGENTS.md seeding instead of aborting server configuration.
     assert (
         "try:\n"
         "    from jupyter_ai_workspace import seed_agents_on_chat_save\n"
         "except Exception"
-    ) in config
+    ) in server_extra
     assert (
-        "if seed_agents_on_chat_save is not None:\n"
+        "else:\n"
         "    c.FileContentsManager.post_save_hook = seed_agents_on_chat_save"
-    ) in config
+    ) in server_extra

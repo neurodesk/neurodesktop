@@ -48,6 +48,24 @@ def test_only_the_astra_plugin_is_installed_by_default():
     assert "reproduction@lightcone-research" not in DOCKERFILE
 
 
+def test_codex_warmup_state_is_scrubbed_from_the_defaults_tree():
+    """The plugin warm-up leaves root-only tmp dirs (a startup
+    "Permission denied" from restore_home_defaults' find) and a 0600
+    config.toml that only restores where the sudo fallback works."""
+    assert (
+        "rm -rf /opt/jovyan_defaults/.codex/tmp /opt/jovyan_defaults/.codex/.tmp"
+    ) in DOCKERFILE
+    assert "chmod 0644 /opt/jovyan_defaults/.codex/config.toml" in DOCKERFILE
+    # The scrub belongs to the warm-up layer itself, before ownership is
+    # normalised at the end of that layer.
+    warmup = DOCKERFILE.index("codex plugin add astra@lightcone-research")
+    scrub = DOCKERFILE.index("rm -rf /opt/jovyan_defaults/.codex/tmp", warmup)
+    chown = DOCKERFILE.index(
+        "chown -R root:users /opt/neurodesktop/agent-skills", warmup
+    )
+    assert warmup < scrub < chown
+
+
 def test_jupyter_ai_optional_extras_stay_excluded():
     """Their LiteLLM/prerelease constraints conflict with the validated stack."""
     assert "jupyter_ai[magics]" not in DOCKERFILE

@@ -1,7 +1,7 @@
 ---
 title: Build-time behaviors
 description: Image build steps with non-obvious behavior — the Notebook
-  Intelligence patch and rebuild, the MyST/RISE rebuild, the Apptainer build
+  Intelligence patches and rebuild, the MyST/RISE rebuild, the Apptainer build
   stage, and user permissions
 parent: ../architecture.md
 status: current
@@ -40,7 +40,7 @@ all of `tests/` was mounted) would needlessly rebuild everything downstream.
 When adding a layer, mount individual files and place the layer at the
 band matching its most volatile input.
 
-## Notebook Intelligence Settings Patch
+## Notebook Intelligence Patches
 
 The upstream Notebook Intelligence settings panel auto-saves its client-side
 state on open, using the capabilities cache fetched at page load. That
@@ -51,10 +51,19 @@ back — in particular the OpenCode model selection mirrored by
 [`config/agents/patch_nbi.py`](../../config/agents/patch_nbi.py) to rewrite the
 bundled labextension so opening the settings panel first re-fetches
 capabilities (the backend reloads the config file from disk to answer) and
-rebuilds the panel from that fresh state. The patcher is anchored on the
-exact minified code and fails the image build when a `notebook_intelligence`
-upgrade changes the bundle, so the workaround cannot silently regress;
-re-verify and update (or drop) the patch when bumping the pin.
+rebuilds the panel from that fresh state.
+
+The same patcher also fixes the server-side Ollama provider: `ollama list`
+reports an empty `details.family` for models imported from safetensors/mlx,
+so upstream's `f"{family}.context_length"` lookup raises and the provider
+logs an ERROR and drops the model from the chat model list. The patch falls
+back to the model info's sole `*.context_length` key; a model without any
+such key is still skipped as before.
+
+Both patches are anchored on the exact upstream code and fail the image
+build when a `notebook_intelligence` upgrade changes it, so the workarounds
+cannot silently regress; re-verify and update (or drop) them when bumping
+the pin.
 
 Notebook Intelligence 5.3.0's published Python wheel omits its compiled
 JupyterLab frontend. The Dockerfile therefore rebuilds the matching source tag,

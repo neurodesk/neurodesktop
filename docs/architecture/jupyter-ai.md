@@ -50,7 +50,12 @@ when the first chat is created there. It never overwrites an existing
 ``AGENTS.md`` and fails open so a missing seed or unwritable directory cannot
 prevent the chat itself from being saved. This hook is necessary because the
 ACP transports do not run the interactive Codex and OpenCode wrappers that
-normally seed the file.
+normally seed the file. It is registered in
+``config/jupyter/jupyter_server_config_extra.py``, appended to
+``/etc/jupyter/jupyter_server_config.py`` at build time, because ServerApp
+loads that file exactly once; the legacy ``jupyter_notebook_config.py`` is
+re-applied per shimmed extension app, which would assign the hook repeatedly
+and warn "Overriding existing post_save_hook" at every startup.
 
 ## Collaboration-stack workarounds
 
