@@ -106,7 +106,8 @@
   the Jupyter Server Documents workaround,
   run `pytest tests/unit/test_jupyter_ai_workspace.py
   tests/unit/test_astra_jupyter_ai_tooling.py
-  tests/unit/test_jupyter_server_documents_patch.py` from a checkout and `pytest
+  tests/unit/test_jupyter_server_documents_patch.py
+  tests/unit/test_jupyter_ai_acp_client_patch.py` from a checkout and `pytest
   /opt/tests/test_astra_jupyter_ai_image.py` in the built image, then verify
   `pip check`, `jupyter server extension list`, and `jupyter labextension list
   --verbose` in that image. Keep Jupyter AI chat workspace seeding scoped to

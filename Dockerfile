@@ -1233,6 +1233,13 @@ RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_documents.py,ta
     install -m 0755 -o root -g users /tmp/patch_jupyter_server_documents.py /opt/neurodesktop/patch_jupyter_server_documents.py \
     && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_server_documents.py
 
+# jupyter-ai-acp-client logs every streamed chunk and tool-call tick at INFO,
+# flooding the server log during any persona reply. Keep this anchored
+# demotion to DEBUG until a fixed jupyter-ai-acp-client release is pinned.
+RUN --mount=type=bind,source=config/jupyter/patch_jupyter_ai_acp_client.py,target=/tmp/patch_jupyter_ai_acp_client.py,ro \
+    install -m 0755 -o root -g users /tmp/patch_jupyter_ai_acp_client.py /opt/neurodesktop/patch_jupyter_ai_acp_client.py \
+    && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_ai_acp_client.py
+
 # Start the container as root so docker-stacks runs before-notebook hooks with
 # the privileges needed to bootstrap local Slurm/CVMFS, then drops to NB_USER.
 USER root

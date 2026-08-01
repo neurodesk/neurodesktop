@@ -125,6 +125,7 @@ home to prove OpenCode's skill actually reaches a user.
 pytest tests/unit/test_jupyter_ai_workspace.py
 pytest tests/unit/test_astra_jupyter_ai_tooling.py
 pytest tests/unit/test_jupyter_server_documents_patch.py
+pytest tests/unit/test_jupyter_ai_acp_client_patch.py
 pytest tests/unit/test_coding_agents.py -k opencode_machine_commands
 # In the rebuilt image:
 pytest /opt/tests/test_astra_jupyter_ai_image.py

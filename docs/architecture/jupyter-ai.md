@@ -68,3 +68,12 @@ Neurodesktop applies an exact-source, build-time workaround for upstream issue
 rest of the room queue. The anchored patch intentionally fails the image build
 if a future package release changes either source seam, forcing the workaround
 to be reassessed rather than silently carried forward.
+
+`jupyter-ai-acp-client` 0.2.1 logs every streamed message chunk at INFO — two
+lines per chunk, where a chunk is often a few characters — plus one line per
+tool-call start and per once-a-second progress tick, so a single persona reply
+floods the Jupyter server log with thousands of lines. A second anchored
+build-time patch (`patch_jupyter_ai_acp_client.py`) demotes those four
+per-event log statements to DEBUG; rarer events such as permission requests
+stay at INFO. Like the issue-271 patch, it fails the image build if a future
+release changes any source seam.

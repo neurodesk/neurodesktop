@@ -100,6 +100,25 @@ def test_jupyter_server_documents_stale_message_does_not_kill_room_queue():
     asyncio.run(exercise_queue())
 
 
+def test_jupyter_ai_acp_client_per_event_logging_is_demoted_to_debug():
+    """The anchored build-time patch keeps chunk and tool-call tick logging
+    out of the server log's INFO level; see patch_jupyter_ai_acp_client.py."""
+    import jupyter_ai_acp_client
+
+    package_dir = Path(jupyter_ai_acp_client.__file__).parent
+    client = (package_dir / "default_acp_client.py").read_text(encoding="utf-8")
+    manager = (package_dir / "tool_call_manager.py").read_text(encoding="utf-8")
+
+    for text in (client, manager):
+        assert "neurodesktop-acp-per-event-debug-log" in text
+    assert 'persona.log.debug(f"agent_message_chunk' in client
+    assert 'persona.log.debug(f"session_update' in client
+    assert 'log.info(f"agent_message_chunk' not in client
+    assert 'log.info(f"session_update' not in client
+    assert 'log.info(\n            f"tool_call_start' not in manager
+    assert 'log.info(\n            f"tool_call_progress' not in manager
+
+
 def test_jupyter_ai_server_and_frontend_extensions_are_compatible():
     code, server_output = run_cmd("jupyter server extension list", timeout=60)
     assert code == 0, server_output
