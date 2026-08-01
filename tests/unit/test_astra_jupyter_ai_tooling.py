@@ -8,6 +8,8 @@ version pin is verified against the *installed* package in
 substring here -- that would only add a second place to edit on every bump.
 """
 
+import json
+
 from testlib import repo_path
 
 
@@ -80,6 +82,51 @@ def test_acp_adapters_exclude_their_vendored_agent_binaries():
     )
     assert 'CODEX_PATH="${CODEX_PATH:-/usr/bin/codex}"' in environment
     assert "CLAUDE_CODE_EXECUTABLE" in environment
+
+
+def test_codex_acp_persona_defaults_to_full_access_mode():
+    """codex-acp hardcodes its sandboxed "Agent" preset as the initial session
+    mode and ignores ~/.codex/config.toml, but this image already runs Codex
+    without approval prompts inside the container boundary. INITIAL_AGENT_MODE
+    aligns the Jupyter AI persona with that default while respecting an
+    explicit override from the caller."""
+    environment = repo_path("config/jupyter/environment_variables.sh").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        'INITIAL_AGENT_MODE="${INITIAL_AGENT_MODE:-agent-full-access}"'
+        in environment
+    )
+
+
+def test_codex_defaults_to_high_reasoning_effort():
+    """The Codex app-server reports config.toml's model_reasoning_effort as
+    the session default, so this one seed sets the CLI and the Jupyter AI
+    persona's initial "Reasoning effort" together."""
+    config = repo_path("config/agents/codex_config.toml").read_text(
+        encoding="utf-8"
+    )
+    assert 'model_reasoning_effort = "high"' in config
+
+
+def test_claude_defaults_to_auto_mode_with_high_effort():
+    """claude-agent-acp resolves its initial permission mode and effort from
+    Claude Code's settings files. Only the user-level ~/.claude/settings.json
+    works for the mode: the personas never run the interactive wrapper that
+    seeds per-project settings, and the adapter's trust filter drops
+    escalating defaultMode values from project-level sources."""
+    settings = json.loads(
+        repo_path("config/agents/claude_settings.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert settings["permissions"]["defaultMode"] == "auto"
+    assert settings["effortLevel"] == "high"
+
+    assert (
+        "install -m 0644 /tmp/agents/claude_settings.json"
+        " /opt/jovyan_defaults/.claude/settings.json" in DOCKERFILE
+    )
 
 
 def test_upstream_checkouts_are_pinned_to_an_exact_commit():

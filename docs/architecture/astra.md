@@ -28,6 +28,43 @@ not installed; the build asserts that exactly `/opt/conda/bin/astra` answers on
 dependency graph cannot perturb JupyterLab. `uv` itself is on `PATH` for that
 reason; ordinary `uv tool` operations stay user-local at runtime.
 
+## Executing an analysis with `lc`
+
+The default Neurodesktop flow is one plain `sbatch` script per analysis step
+with `module load` pinning each tool. It produces no manifest, so the viewer
+reads `spec-only` — see [the trust ladder](#astra-provenance-viewer) — and that
+is the honest reading, not a defect.
+
+`/opt/neurodesktop/astra_lc_run.sbatch` is the optional second path, for a
+project that wants the badge to reflect a real run. `lc run` never submits to
+Slurm itself: it always dispatches through Dask, and when `SLURM_JOB_ID` is set
+it starts an in-process scheduler and launches one `dask worker` per allocated
+node with `srun`. So `lc` goes *inside* an allocation rather than in front of
+one, which is all the template is. Released `lightcone-cli` 0.4.0 has no
+`--async` or `sbatch` submission of its own.
+
+The template exports `/opt/uv/tools/lightcone-cli/bin` onto `PATH` because `lc`
+shells out to the `dask` CLI for those workers and neither is on the default
+`PATH`; that omission is the most likely way the path breaks. It writes
+`lc status --json` to `status.json` beside `astra.yaml`, renaming it into place
+so a half-written manifest never becomes evidence, and refuses to write at all
+when another recognised manifest is already there, since two beside one spec
+fail closed and blank the graph.
+
+Two things it deliberately refuses. A spec that declares a `container:` is
+rejected: Apptainer is not one of `lc`'s runtimes (`docker`, `podman`,
+`podman-hpc`, Kubernetes), so the declared image would be recorded as used
+without ever running — the red `provenance-mismatch` the viewer exists to
+expose. And a `module load` without an explicit version is refused, matching
+the standing agent rule.
+
+This path tops out at amber `executed-unverified` and cannot reach green.
+`lc verify` prints its result to the console and stamps nothing into the
+manifest, and Neurodesktop does not synthesize a verification record it did not
+earn. The [integration record](../designs/astra-lightcone-integration.md)
+covers why execution was left out of the first pass and what upstream work
+would raise the ceiling.
+
 ## ASTRA agent skill
 
 A commit-pinned checkout of the Lightcone Research agent marketplace is stored
@@ -151,3 +188,22 @@ factory is the pattern file type's default, agent-authored chat links to an
 `astra.yaml` open in the viewer too, and a disabled plugin degrades to the
 text editor. Editing stays on `Open With > Editor`; a save from that shared
 context re-renders the graph.
+
+The notebook widget is handed its run evidence as `AstraView(spec, run=…)`; a
+double-click has nobody to hand it one, so the plugin discovers it from the
+spec's own directory and fills in `run=` itself. It looks for exactly the
+filenames `manifest._directory_run_file` accepts — `run-manifest.json`,
+`manifest.json`, `status.json`, `ro-crate-metadata.json` — and a unit test
+holds the two lists together, since a name only the frontend knows is a
+manifest that never loads. None present sends no `run=`, which is the honest
+`spec-only` reading of a directory with no evidence in it; two or more sends
+the *directory*, so the one ambiguity rule in `manifest.py` refuses it rather
+than the frontend silently picking a file. A `Refresh` beside the universe
+picker re-runs that discovery: run evidence appears when a job finishes,
+which is not a change to the spec and so never raises `fileChanged`. A refresh
+keeps the universe the reader had selected.
+
+The default plain-`sbatch` flow emits no manifest, so an analysis run that way
+reads `spec-only` by design. Discovery is what lets evidence produced by
+[the optional `lc` path](#executing-an-analysis-with-lc) — or by any other
+producer of a recognised manifest — be read at all.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """OpenCode web launcher for Neurodesktop.
 
-Started by Jupyter Server Proxy (the "Scigent.ai" launcher tile) or by the
+Started by Jupyter Server Proxy (the "OpenCode Web" launcher tile) or by the
 desktop shortcut. It provides what the bare `opencode web` server cannot do
 behind Neurodesktop's proxy setup:
 
@@ -20,12 +20,17 @@ behind Neurodesktop's proxy setup:
 4. Rewrites root-absolute URLs in HTML/CSS/JS responses against the
    X-Forwarded-Prefix header, because the upstream web UI assumes it is
    served from `/` and breaks behind the /opencode/ proxy prefix.
-5. Runs the backend from ~/opencode-work, then creates a unique
-   ~/opencode-work/DATE_TIME Git project with a durable root commit for every
-   ``POST /session`` and seeds it with /opt/AGENTS.md. The proxy records the
-   returned session id and pins later requests for that session to its project.
-   Both the ``?directory=`` parameter and ``x-opencode-directory`` header are
-   enforced because
+5. Runs the backend from ~/opencode-work and confines every request directory
+   to the user's home. A ``POST /session`` naming an existing directory
+   strictly inside home (the web UI's "Add project" flow) runs there, and
+   that user-chosen project is never git-initialized or seeded; every other
+   session creation gets a unique ~/opencode-work/DATE_TIME Git project with
+   a durable root commit, seeded with /opt/AGENTS.md. The proxy records the
+   returned session id and pins later requests for that session to its
+   project. Directory-browsing requests (the Add-project picker's fs/list
+   and fs/find) may name home itself; anything outside home is forced back
+   to the managed work root. Both the ``?directory=`` parameter and
+   ``x-opencode-directory`` header are enforced because
    OpenCode's client only puts the directory in the query for GET/HEAD; POSTs
    such as session creation and message send carry it in the header alone.
 6. Previews the files an agent produced. The upstream changed-files list
@@ -1422,18 +1427,43 @@ def requested_opencode_directory(query, header):
     return urllib.parse.unquote(header) if header else ""
 
 
-def is_opencode_session_work_dir(directory, home_dir):
-    """Return whether ``directory`` is an existing direct session project."""
-    if not directory:
-        return False
-    parent = os.path.realpath(
+def opencode_work_root_path(home_dir):
+    """Return the canonical shared ``~/opencode-work`` backend root."""
+    return os.path.realpath(
         os.path.join(os.fspath(home_dir), OPENCODE_WORK_DIR_PARENT)
     )
+
+
+def is_opencode_home_confined_dir(directory, home_dir):
+    """Return whether ``directory`` is an existing directory inside home.
+
+    Home itself qualifies: the Add-project picker starts by listing ``~/``.
+    Symlinks are resolved before the containment check, so a link inside home
+    pointing elsewhere cannot smuggle an outside directory through.
+    """
+    if not directory:
+        return False
+    home = os.path.realpath(os.fspath(home_dir))
     candidate = os.path.realpath(os.fspath(directory))
     return (
-        os.path.dirname(candidate) == parent
-        and os.path.isdir(candidate)
-        and os.path.isdir(os.path.join(candidate, ".git"))
+        candidate == home or candidate.startswith(home + os.sep)
+    ) and os.path.isdir(candidate)
+
+
+def is_opencode_project_dir(directory, home_dir):
+    """Return whether ``directory`` may hold sessions and previews.
+
+    Stricter than browsing: home itself is excluded (OpenCode refuses it as a
+    workspace and pinning every tool to the whole home is never what a user
+    chose), and so is the shared ``~/opencode-work`` root — a request naming
+    it expressed no choice, and sessions running there would mix their
+    artifacts, which is exactly what the per-session dated projects prevent.
+    """
+    if not is_opencode_home_confined_dir(directory, home_dir):
+        return False
+    candidate = os.path.realpath(os.fspath(directory))
+    return candidate != os.path.realpath(os.fspath(home_dir)) and (
+        candidate != opencode_work_root_path(home_dir)
     )
 
 
@@ -1472,6 +1502,51 @@ def force_directory_query(query, directory):
         for key, value in pairs
     ]
     return urllib.parse.urlencode(forced)
+
+
+OPENCODE_FS_FIND_PATH = "/api/fs/find"
+OPENCODE_FS_LIST_PATH = "/api/fs/list"
+
+
+def is_empty_directory_find_request(method, path, query):
+    """Recognize the Add-project picker's initial empty directory search.
+
+    The picker opens with an empty query, and OpenCode's ``fs/find`` returns
+    nothing for it, so the dialog always started blank. Only the empty-query
+    directory form is special-cased; typed queries keep the backend's own
+    search semantics.
+    """
+    if method != "GET" or path != OPENCODE_FS_FIND_PATH:
+        return False
+    pairs = dict(urllib.parse.parse_qsl(query or "", keep_blank_values=True))
+    return pairs.get("type") == "directory" and not pairs.get("query")
+
+
+def directory_listing_entries(payload):
+    """Reduce an ``fs/list`` payload to its visible child directories.
+
+    Hidden directories are dropped: the picker's empty-query view is a
+    starting point for choosing a project, and a home directory's dotfile
+    tree would drown the real folders. Typing a query (or a ``.``-prefixed
+    path) still reaches the backend and can surface hidden directories.
+    """
+    try:
+        listing = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(listing, dict) or not isinstance(
+        listing.get("data"), list
+    ):
+        return None
+    entries = []
+    for entry in listing["data"]:
+        if not isinstance(entry, dict) or entry.get("type") != "directory":
+            continue
+        name = os.path.basename(str(entry.get("path", "")).rstrip("/"))
+        if not name or name.startswith("."):
+            continue
+        entries.append(entry)
+    return {"location": listing.get("location"), "data": entries}
 
 
 def force_directory_header(value, directory):
@@ -1519,9 +1594,23 @@ class OpencodeBackend:
             self.home_dir, agents_file=self.agents_file
         )
 
+    def session_creation_work_dir(self, query, directory_header):
+        """Resolve where one POST /session must run.
+
+        A request naming an existing user-chosen project directory (the web
+        UI's Add-project flow) is honored as-is: the directory belongs to the
+        user, so it is never git-initialized, seeded, or otherwise modified.
+        Every other creation — no directory, the managed root, home itself,
+        or anything outside home — gets a fresh seeded dated project.
+        """
+        requested = requested_opencode_directory(query, directory_header)
+        if is_opencode_project_dir(requested, self.home_dir):
+            return os.path.realpath(requested)
+        return self.create_session_work_dir()
+
     def remember_session_work_dir(self, session_id, directory):
-        """Pin ``session_id`` to a validated per-session project directory."""
-        if not session_id or not is_opencode_session_work_dir(
+        """Pin ``session_id`` to a validated project directory."""
+        if not session_id or not is_opencode_project_dir(
             directory, self.home_dir
         ):
             return False
@@ -1531,32 +1620,43 @@ class OpencodeBackend:
         return True
 
     def work_dir_for_request(self, path, query, directory_header):
-        """Resolve a request to its recorded or validated session project."""
+        """Resolve a request to its recorded or validated directory.
+
+        Session-scoped requests stay pinned to their recorded project. A
+        requested project directory is adopted (and remembered for the
+        session, if any); a merely home-confined directory — home itself —
+        is passed through for browsing but never remembered. Anything else
+        falls back to the managed backend root.
+        """
         session_id = session_id_from_path(path)
         if session_id:
             with self._session_lock:
                 recorded = self.session_work_dirs.get(session_id, "")
-            if is_opencode_session_work_dir(recorded, self.home_dir):
+            if is_opencode_project_dir(recorded, self.home_dir):
                 return recorded
 
         requested = requested_opencode_directory(query, directory_header)
-        if is_opencode_session_work_dir(requested, self.home_dir):
+        if is_opencode_project_dir(requested, self.home_dir):
             canonical = os.path.realpath(requested)
             if session_id:
                 self.remember_session_work_dir(session_id, canonical)
             return canonical
+        if is_opencode_home_confined_dir(requested, self.home_dir):
+            return os.path.realpath(requested)
         return self.work_dir
 
     def preview_work_dir(self, session_id, directory):
         """Resolve the project a file preview may be read from, or "".
 
-        Fails closed: only a validated ``~/opencode-work/DATE_TIME`` project is
-        ever returned, never the shared parent. Falling back to the parent
-        would widen the preview lookup across every session, so a stale or
-        unknown session id could surface a uniquely named artifact belonging
-        to a different one. A request that names a session must resolve to
-        that session; a request that names none is only answered when exactly
-        one session is known and therefore unambiguous.
+        Fails closed: only a validated project directory — a dated session
+        workspace or a user-chosen directory strictly inside home — is ever
+        returned, never home itself or the shared ``~/opencode-work`` parent.
+        Falling back to a shared ancestor would widen the preview lookup
+        across every session, so a stale or unknown session id could surface
+        a uniquely named artifact belonging to a different one. A request
+        that names a session must resolve to that session; a request that
+        names none is only answered when exactly one session is known and
+        therefore unambiguous.
         """
         query = urllib.parse.urlencode(
             {"directory": directory}
@@ -1566,12 +1666,12 @@ class OpencodeBackend:
             if not session_id_from_path(path):
                 return ""
             resolved = self.work_dir_for_request(path, query, "")
-            return resolved if is_opencode_session_work_dir(
+            return resolved if is_opencode_project_dir(
                 resolved, self.home_dir
             ) else ""
 
         resolved = self.work_dir_for_request("", query, "")
-        if is_opencode_session_work_dir(resolved, self.home_dir):
+        if is_opencode_project_dir(resolved, self.home_dir):
             return resolved
         with self._session_lock:
             known = sorted(set(self.session_work_dirs.values()))
@@ -1784,10 +1884,10 @@ def waiting_page():
 <html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="refresh" content="2">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Scigent.ai starting up...</title><style>{PAGE_STYLE}</style></head>
+<title>OpenCode Web starting up...</title><style>{PAGE_STYLE}</style></head>
 <body><div class="card" style="text-align:center">
 <div class="spinner" style="margin-left:auto;margin-right:auto"></div>
-<h1>Scigent.ai starting up&hellip;</h1>
+<h1>OpenCode Web starting up&hellip;</h1>
 <p class="muted">Checking model providers and launching the web interface.
 This page refreshes automatically.</p>
 </div></body></html>"""
@@ -1889,6 +1989,17 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         for name, value in (extra_headers or []):
             self.send_header(name, value)
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(payload)
+
+    def send_json(self, status, value):
+        """Send a JSON API response without caching."""
+        payload = json.dumps(value).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(payload)
@@ -2179,6 +2290,47 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
 
     # -- reverse proxy --
 
+    def send_directory_listing(self, backend, directory):
+        """Answer an empty-query directory search with the browsed folders.
+
+        The Add-project picker's first request is ``fs/find`` with an empty
+        query, which OpenCode answers with ``[]`` — the dialog opened onto
+        "No folders found" until the user typed. The proxy instead asks the
+        backend for the browsed directory's listing and returns its visible
+        child directories in the shape the picker reads. Any failure falls
+        back to the upstream behavior: an empty result.
+        """
+        credentials = base64.b64encode(
+            f"{BACKEND_USERNAME}:{backend.backend_password}".encode()
+        ).decode()
+        query = urllib.parse.urlencode({"location[directory]": directory})
+        listing = None
+        try:
+            conn = http.client.HTTPConnection(
+                "127.0.0.1", backend.port, timeout=30
+            )
+            try:
+                conn.request(
+                    "GET",
+                    f"{OPENCODE_FS_LIST_PATH}?{query}",
+                    headers={
+                        "Host": f"127.0.0.1:{backend.port}",
+                        "Authorization": f"Basic {credentials}",
+                        "Accept-Encoding": "identity",
+                    },
+                )
+                response = conn.getresponse()
+                payload = response.read()
+                if response.status == 200:
+                    listing = directory_listing_entries(payload)
+            finally:
+                conn.close()
+        except OSError:
+            listing = None
+        if listing is None:
+            listing = {"location": {"directory": directory}, "data": []}
+        self.send_json(200, listing)
+
     def send_upstream_payload(self, response, payload):
         """Forward one finite upstream response with deterministic framing."""
         self.send_response(response.status)
@@ -2201,7 +2353,10 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
         creates_session = is_session_creation_request(self.command, parsed.path)
         try:
             if creates_session:
-                request_work_dir = backend.create_session_work_dir()
+                request_work_dir = backend.session_creation_work_dir(
+                    parsed.query,
+                    self.headers.get(OPENCODE_DIRECTORY_HEADER, ""),
+                )
             else:
                 request_work_dir = backend.work_dir_for_request(
                     parsed.path,
@@ -2214,6 +2369,12 @@ class OpencodeWebHandler(http.server.BaseHTTPRequestHandler):
                 "<h1>500</h1><p>Could not create the OpenCode session "
                 f"workspace: {html.escape(str(exc))}</p>",
             )
+            return
+
+        if is_empty_directory_find_request(
+            self.command, parsed.path, parsed.query
+        ):
+            self.send_directory_listing(backend, request_work_dir)
             return
 
         body = None

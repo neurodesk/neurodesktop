@@ -217,3 +217,94 @@ def test_a_save_from_the_shared_context_rerenders_the_graph():
 
 def test_a_failed_asset_load_is_forgotten_so_a_later_open_can_retry():
     assert "viewerModulePromise = null;" in FRONTEND
+
+
+# ---------------------------------------------------------------------------
+# Run-evidence discovery
+#
+# The server extension has always accepted `run=`; until the file browser
+# discovered one, nothing sent it, so every double-clicked spec rendered
+# spec-only and the whole trust ladder in manifest.py was unreachable here.
+
+
+def frontend_run_evidence_names() -> list[str]:
+    match = re.search(
+        r"export const ASTRA_RUN_EVIDENCE_NAMES = \[(.*?)\];", FRONTEND, re.S
+    )
+    assert match, "ASTRA_RUN_EVIDENCE_NAMES not found in astraViewer.ts"
+    return re.findall(r"'([^']+)'", match.group(1))
+
+
+def test_discovered_names_are_exactly_the_ones_manifest_py_accepts():
+    """A name only the frontend knows is a manifest that never loads."""
+    from neurodesk_astra_view import manifest
+
+    source = (
+        VIEWER / "neurodesk_astra_view/manifest.py"
+    ).read_text(encoding="utf-8")
+    body = re.search(
+        r"def _directory_run_file.*?candidates = \((.*?)\)", source, re.S
+    )
+    assert body, "_directory_run_file candidates not found in manifest.py"
+    python_names = re.findall(r'directory / "([^"]+)"', body.group(1))
+
+    assert python_names, "no candidate filenames parsed from manifest.py"
+    assert frontend_run_evidence_names() == python_names
+    # The parse above is only trustworthy while the function still exists.
+    assert callable(manifest._directory_run_file)
+
+
+def test_the_graph_request_carries_the_discovered_run():
+    assert "run: string | null" in FRONTEND
+    assert "query.run = run;" in FRONTEND
+    assert "const run = await this._discoverRun();" in FRONTEND
+
+
+def test_discovery_sends_nothing_when_no_evidence_sits_beside_the_spec():
+    """No manifest is a true spec-only reading, not an error."""
+    discover = re.search(
+        r"private async _discoverRun\(\).*?\n  \}", FRONTEND, re.S
+    )
+    assert discover, "_discoverRun not found in astraViewer.ts"
+    body = discover.group(0)
+
+    assert "if (present.length === 0) {\n      return null;\n    }" in body
+    # An unreadable directory must degrade to spec-only, never break the view.
+    assert "} catch {\n      return null;\n    }" in body
+
+
+def test_ambiguous_evidence_is_left_for_the_server_to_refuse():
+    """Two manifests is a choice this side must not make silently."""
+    discover = re.search(
+        r"private async _discoverRun\(\).*?\n  \}", FRONTEND, re.S
+    )
+    assert discover
+    body = discover.group(0)
+
+    assert "if (present.length > 1) {" in body
+    # '' is the dirname of a spec at the workspace root, which resolve_confined
+    # rejects; '.' resolves to the root itself.
+    assert "return directory || '.';" in body
+
+
+def test_ambiguity_is_still_refused_by_the_server(tmp_path):
+    """The rule the frontend defers to has to actually be there."""
+    from neurodesk_astra_view.manifest import RunManifestError, load_run
+
+    (tmp_path / "run-manifest.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "status.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(RunManifestError, match="ambiguous"):
+        load_run(tmp_path, project_root=tmp_path, universe_id="baseline")
+
+
+def test_a_refresh_rereads_the_directory_for_evidence_written_since():
+    """`fileChanged` never fires for a manifest a finished job dropped in."""
+    assert "void this._refresh();" in FRONTEND
+    assert "private async _refresh(): Promise<void> {" in FRONTEND
+    assert "nd-astra-refresh" in FRONTEND
+
+
+def test_a_refresh_keeps_the_universe_the_user_was_looking_at():
+    assert "this._universeSelect.options.length > 0" in FRONTEND
+    assert "this._universeSelect.value = previous as string;" in FRONTEND

@@ -27,6 +27,20 @@
   gap: 6px;
 }
 
+.nd-astra-refresh {
+  background: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 2px;
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+  font-size: var(--jp-ui-font-size1);
+  padding: 2px 8px;
+}
+
+.nd-astra-refresh:hover {
+  background: var(--jp-layout-color2);
+}
+
 .nd-astra-host {
   flex: 1 1 auto;
   min-height: 0;

@@ -37,6 +37,15 @@ integration has three layers, and they do **not** mature at the same rate:
    [Blockers](#blockers-and-risks). The removed pilot remains in git history
    on the `astra-bet-pilot-parked` branch.
 
+   > **Superseded in part.** The judgment above still stands for the ~6,000
+   > lines of receipt schema and evidence-collection code that were removed,
+   > and Neurodesktop still synthesizes no verification record. What was
+   > restored is only the ~50-line sbatch wrapper: `lc run` inside an
+   > allocation, writing `lc status --json` beside the spec, shipped as an
+   > opt-in path rather than the default flow. It is still amber-only, for the
+   > reason recorded here. Current behavior lives in the
+   > [ASTRA integration](../architecture/astra.md) reference page.
+
 ASTRA is not another agent UI or an MCP protocol. It is a declarative YAML
 format for recording an analysis's inputs, outputs, methodological decisions,
 evidence, findings, and alternative decision universes. `astra-tools` validates

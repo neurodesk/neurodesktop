@@ -167,7 +167,10 @@ def test_viewer_is_installed_without_resolving_its_own_dependencies():
 
 def test_worked_example_is_shipped_from_tests_fixtures():
     assert (EXAMPLE / "astra.yaml").is_file()
-    assert "source=tests,target=/tmp/tests,ro" in DOCKERFILE
+    assert (
+        "source=tests/fixtures/astra-bet,target=/tmp/tests/fixtures/astra-bet,ro"
+        in DOCKERFILE
+    )
     assert (
         "cp -a /tmp/tests/fixtures/astra-bet /opt/neurodesktop/examples/"
         in DOCKERFILE

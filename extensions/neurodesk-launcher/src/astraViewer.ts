@@ -19,6 +19,12 @@
  * code with no copy to drift. If the server extension is missing, the factory
  * is never registered against a working endpoint: the widget reports the
  * failure, and disabling this plugin degrades `astra.yaml` to the text editor.
+ *
+ * The notebook widget is handed its run evidence (`AstraView(spec, run=…)`);
+ * a double-click has nobody to hand it one, so this viewer discovers it from
+ * the spec's own directory. Without that the `run=` the server extension
+ * accepts is never sent and every spec reads `spec-only` forever, whatever was
+ * executed.
  */
 
 import {
@@ -43,6 +49,22 @@ export const ASTRA_FILE_TYPE = 'astra-yaml';
 export const ASTRA_FACTORY = 'ASTRA Viewer';
 /** Matched against the basename; only ASTRA specs, never ordinary YAML. */
 export const ASTRA_FILENAME_PATTERN = '^astra\\.ya?ml$|\\.astra\\.ya?ml$';
+
+/**
+ * Run-evidence filenames recognised beside a spec, in the order
+ * `neurodesk_astra_view.manifest._directory_run_file` lists them.
+ *
+ * Without this discovery the file browser never sends `run=`, so every spec
+ * renders `spec-only` — a permanent grey "Not executed" badge no finished job
+ * could ever change. A name only this side knows is a manifest that never
+ * loads, so a unit test holds the two lists together.
+ */
+export const ASTRA_RUN_EVIDENCE_NAMES = [
+  'run-manifest.json',
+  'manifest.json',
+  'status.json',
+  'ro-crate-metadata.json'
+];
 
 const STYLE_ELEMENT_ID = 'neurodesk-astra-view-style';
 
@@ -160,11 +182,15 @@ function loadViewerModule(
 async function fetchGraph(
   settings: ServerConnection.ISettings,
   spec: string,
-  universe: string | null
+  universe: string | null,
+  run: string | null
 ): Promise<Record<string, unknown>> {
   const query: Record<string, string> = { spec };
   if (universe) {
     query.universe = universe;
+  }
+  if (run) {
+    query.run = run;
   }
   const url =
     URLExt.join(settings.baseUrl, 'neurodesk-astra-view', 'graph') +
@@ -180,7 +206,7 @@ async function fetchGraph(
 }
 
 /**
- * The document content: a universe picker above the rendered ASTRA graph.
+ * The document content: a universe picker and a refresh above the graph.
  */
 class AstraDocumentContent extends Widget {
   constructor(
@@ -202,6 +228,21 @@ class AstraDocumentContent extends Widget {
     });
     label.appendChild(this._universeSelect);
     bar.appendChild(label);
+
+    // Run evidence lands beside the spec when a job finishes, long after the
+    // spec itself was last saved. `fileChanged` never fires for it, so
+    // without this the badge stays grey until the tab is closed and reopened.
+    const refresh = document.createElement('button');
+    refresh.type = 'button';
+    refresh.className = 'nd-astra-refresh';
+    refresh.textContent = 'Refresh';
+    refresh.title =
+      'Re-read the spec directory. Run evidence written after a job finishes ' +
+      'is picked up here.';
+    refresh.addEventListener('click', () => {
+      void this._refresh();
+    });
+    bar.appendChild(refresh);
 
     this._host = document.createElement('div');
     this._host.className = 'nd-astra-host';
@@ -234,12 +275,59 @@ class AstraDocumentContent extends Widget {
     void this._reload();
   }
 
+  /** Re-read the directory: new universes, and any run evidence since. */
+  private async _refresh(): Promise<void> {
+    await this._populateUniverses();
+    await this._reload();
+  }
+
+  /**
+   * Find run evidence beside the spec.
+   *
+   * Nothing there is the honest `spec-only` reading, so no `run=` is sent.
+   * Two or more supported names is a directory nobody can read unambiguously;
+   * rather than guess on this side, the directory itself goes to the server so
+   * `manifest.py` raises the one ambiguity error both viewers already share.
+   */
+  private async _discoverRun(): Promise<string | null> {
+    const directory = PathExt.dirname(this._context.path);
+    let present: string[] = [];
+    try {
+      const listing = await this._contents.get(directory, { content: true });
+      present = (listing.content as Contents.IModel[])
+        .filter(
+          entry =>
+            entry.type === 'file' &&
+            ASTRA_RUN_EVIDENCE_NAMES.includes(entry.name)
+        )
+        .map(entry => entry.name);
+    } catch {
+      return null;
+    }
+    if (present.length === 0) {
+      return null;
+    }
+    // `dirname` of a spec at the workspace root is '', which is not a path
+    // the server can confine; '.' resolves to the root itself.
+    if (present.length > 1) {
+      return directory || '.';
+    }
+    return PathExt.join(directory, present[0]);
+  }
+
   /**
    * Offer the spec's sibling `universes/*.yaml` files, defaulting to the
    * first one: a bare spec renders every decision unresolved, which is the
    * less useful first look at an analysis that ships universes.
    */
   private async _populateUniverses(): Promise<void> {
+    // A refresh must not throw the user back to the default universe, so a
+    // selection that still exists survives the rebuild. On the first pass
+    // there are no options yet and the default below applies.
+    const previous =
+      this._universeSelect.options.length > 0
+        ? this._universeSelect.value
+        : null;
     const directory = PathExt.join(
       PathExt.dirname(this._context.path),
       'universes'
@@ -272,7 +360,14 @@ class AstraDocumentContent extends Widget {
       option.textContent = name;
       this._universeSelect.appendChild(option);
     }
-    if (names.length > 0) {
+    const restored =
+      previous !== null &&
+      Array.from(this._universeSelect.options).some(
+        option => option.value === previous
+      );
+    if (restored) {
+      this._universeSelect.value = previous as string;
+    } else if (names.length > 0) {
       this._universeSelect.selectedIndex = 1;
     }
   }
@@ -285,12 +380,17 @@ class AstraDocumentContent extends Widget {
     const mode = this._model ? this._model.get('mode') : 'flow';
     this._host.textContent = 'Loading ASTRA graph…';
     try {
+      const run = await this._discoverRun();
+      if (this.isDisposed || sequence !== this._reloadSequence) {
+        return;
+      }
       const [viewer, graph] = await Promise.all([
         loadViewerModule(settings),
         fetchGraph(
           settings,
           this._context.path,
-          this._universeSelect.value || null
+          this._universeSelect.value || null,
+          run
         )
       ]);
       if (this.isDisposed || sequence !== this._reloadSequence) {

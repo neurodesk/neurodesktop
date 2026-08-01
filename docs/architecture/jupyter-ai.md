@@ -17,7 +17,24 @@ Notebook Intelligence. Its ACP client discovers the existing Claude, Codex,
 and OpenCode commands and registers all three personas. Neurodesktop installs
 pinned Codex and Claude ACP adapters; OpenCode uses its native `opencode acp`
 transport. Machine-facing `opencode --version` and `opencode acp` calls bypass
-the interactive terminal wrapper so their output remains protocol-safe. The
+the interactive terminal wrapper so their output remains protocol-safe; the
+`acp` branch still silently loads `NEURODESK_API_KEY` and `BR_MCP_TOKEN` from
+`~/.bashrc` before exec, because the Jupyter server that spawns it never
+sources that file and the `{env:...}` references in `opencode.json` would
+otherwise resolve empty and fail auth in the chat. The
+Codex persona starts sessions in "Agent (full access)" via the
+`INITIAL_AGENT_MODE` variable exported in `environment_variables.sh`, because
+codex-acp otherwise hardcodes its sandboxed "Agent" preset and ignores the
+image's no-approval `~/.codex/config.toml` defaults; users can still switch
+modes per chat. Its "Reasoning effort" selector starts on High because the
+Codex app-server reports the `model_reasoning_effort = "high"` default seeded
+in that same `config.toml`. The Claude persona starts in "Auto" permission
+mode with Effort "High": claude-agent-acp resolves both from Claude Code's
+own settings files, and the image seeds `permissions.defaultMode` and
+`effortLevel` in the user-level `~/.claude/settings.json`
+(from `config/agents/claude_settings.json`). Effort falls back to the model's
+default when the selected model does not support a High level, and every
+default remains a per-chat selection in each session's config options. The
 personas reuse each user's agent credentials and configuration; they do not replace
 OpenCode Web, Notebook Intelligence, or Neurodesktop's existing model/API-key
 configuration. The optional Jupyter AI magic and Jupyternaut extras are not

@@ -106,3 +106,66 @@ def test_file_browser_viewer_plugin_survived_the_labextension_build():
     assert "astra-yaml" in bundle
     assert "ASTRA Viewer" in bundle
     assert "neurodesk-astra-view" in bundle
+
+    # Run-evidence discovery is what lets a double-clicked spec report
+    # anything but spec-only; the names it looks for are string literals, so
+    # they survive minification and a build that dropped them is visible here.
+    # tests/unit/test_astra_view_filebrowser.py is what holds this list to
+    # the one manifest.py accepts.
+    for name in (
+        "run-manifest.json",
+        "manifest.json",
+        "status.json",
+        "ro-crate-metadata.json",
+    ):
+        assert name in bundle, name
+    assert "Refresh" in bundle
+
+
+def test_run_evidence_beside_a_spec_is_read_by_the_installed_viewer(tmp_path):
+    """The contract behind discovery: a manifest has to change the badge.
+
+    The file-browser plugin finds the manifest and passes it as ``run=``;
+    this is the server-side half it hands that path to.
+    """
+    import json
+    import shutil
+
+    from neurodesk_astra_view import build_graph
+
+    project = tmp_path / "astra-bet"
+    shutil.copytree(EXAMPLE, project)
+    universe = project / "universes/bet-f-0-5.yaml"
+
+    assert build_graph(project / "astra.yaml", universe)["trust"][
+        "level"
+    ] == "spec-only"
+
+    artifact = project / "results/boundary_qc.png"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+    (project / "run-manifest.json").write_text(
+        json.dumps(
+            {
+                "runtime": "slurm",
+                "outputs": [
+                    {
+                        "output_id": "boundary_qc",
+                        "universe_id": "bet-f-0-5",
+                        "status": "ok",
+                        "artifact": "results/boundary_qc.png",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    graph = build_graph(
+        project / "astra.yaml", universe, project / "run-manifest.json"
+    )
+    assert graph["errors"] == []
+    assert graph["trust"]["level"] == "executed-unverified"
+    assert graph["trust"]["label"] == "Executed, unverified"
+    assert graph["meta"]["run_source"] == "lightcone-run"
+    assert any(node["kind"] == "artifact" for node in graph["nodes"])

@@ -22,6 +22,12 @@ fi
 # copy comes first: restore_home_defaults.sh skips copying the ~230 MB
 # binary into $HOME, so the home path only exists on user-managed installs.
 export CODEX_PATH="${CODEX_PATH:-/usr/bin/codex}"
+# Start the Codex persona in "Agent (full access)"; codex-acp otherwise
+# hardcodes the sandboxed "Agent" preset regardless of ~/.codex/config.toml,
+# while this image already runs Codex without approval prompts inside the
+# container boundary. Only codex-acp reads this variable, and users can still
+# pick another mode per session in the chat's mode selector.
+export INITIAL_AGENT_MODE="${INITIAL_AGENT_MODE:-agent-full-access}"
 if [ -z "${CLAUDE_CODE_EXECUTABLE}" ]; then
     if [ -x "/opt/jovyan_defaults/.local/bin/claude" ]; then
         export CLAUDE_CODE_EXECUTABLE="/opt/jovyan_defaults/.local/bin/claude"

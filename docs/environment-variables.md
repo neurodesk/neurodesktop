@@ -138,14 +138,21 @@ are listed at the end. The subsystems themselves are described in
   model when it is available and otherwise uses the first listed model
 - `OPENCODE_STARTUP_VERBOSE`: set to `1` to show detailed OpenCode provider
   probe output during startup
+- `INITIAL_AGENT_MODE`: initial approval/sandbox mode of the Jupyter AI Codex
+  ACP persona (`read-only`, `agent`, or `agent-full-access`); defaults to
+  `agent-full-access` in `environment_variables.sh` so chats start as
+  "Agent (full access)", matching the image's no-approval Codex defaults.
+  Only the codex-acp adapter reads it; an unrecognised value falls back to
+  the adapter's own sandboxed `agent` default, and each chat's mode selector
+  can still switch modes per session
 - `NBI_TOUR_CONFIG_PATH`: Notebook Intelligence tour override file; defaults to
   `/opt/jovyan_defaults/.jupyter/nbi/tour_config.json`, which disables the
   first-run tour in Neurodesktop
 
 ## OpenCode Web
 
-- `OPENCODE_WEB_STARTUP_TIMEOUT`: seconds `opencode_web.py` (the "Scigent.ai"
-  launcher tile) waits for the `opencode web` backend to become ready;
+- `OPENCODE_WEB_STARTUP_TIMEOUT`: seconds `opencode_web.py` (the "OpenCode
+  Web" launcher tile) waits for the `opencode web` backend to become ready;
   defaults to `180`
 - `OPENCODE_WEB_BASH_ENV`: non-interactive Bash initializer used by OpenCode
   Web tool commands; defaults to

@@ -27,9 +27,17 @@ deployed image without retaining a stale per-user binary or duplicating the
 large executable. Claude's in-process auto-updater remains disabled because
 version updates are managed by the container image.
 
+The image seeds a user-level `~/.claude/settings.json` (from
+[`config/agents/claude_settings.json`](../../config/agents/claude_settings.json))
+that defaults the permission mode to `auto` and the effort level to `high` for
+both the CLI and the Jupyter AI Claude persona; per-project
+`.claude/settings.local.json` files seeded by the wrapper still layer the
+Neurodesktop tool allowlist on top. Codex likewise defaults to
+`model_reasoning_effort = "high"` in its seeded `~/.codex/config.toml`.
+
 ## OpenCode Web Interface
 
-The JupyterLab launcher exposes a "Scigent.ai" tile backed by a Jupyter
+The JupyterLab launcher exposes an "OpenCode Web" tile backed by a Jupyter
 Server Proxy entry that runs
 [`config/agents/opencode_web.py`](../../config/agents/opencode_web.py)
 (installed to `/opt/neurodesktop/opencode_web.py`). The launcher script:
@@ -62,9 +70,13 @@ Server Proxy entry that runs
   re-sources the current Neurodesktop environment and initializes Lmod for
   every Bash tool command, so `module load <tool>/<version>` works without
   per-command setup. The terminal OpenCode workflow is unaffected.
-- runs the long-lived web backend from the stable `~/opencode-work` parent, then
-  creates a unique `~/opencode-work/YYYYMMDD_HHMMSS/` project for every
-  `POST /session`. The session directory is created before forwarding the
+- runs the long-lived web backend from the stable `~/opencode-work` parent.
+  A `POST /session` naming an existing user-chosen directory strictly inside
+  home (the web UI's "Add project" flow) runs there, and that directory is
+  never git-initialized, seeded, or otherwise modified; every other session
+  creation — no directory, home itself, the shared work root, or anything
+  outside home — gets a unique `~/opencode-work/YYYYMMDD_HHMMSS/` project.
+  That dated directory is created before forwarding the
   request, initialized as its own Git worktree, seeded with an editable copy of
   `/opt/AGENTS.md`, and given a unique initial commit; a numeric suffix prevents
   collisions between concurrent or same-second session creations. A separate
@@ -80,10 +92,17 @@ Server Proxy entry that runs
   `instructions`, and the wrapper strips that legacy entry from configs written
   by earlier releases (user-added instructions survive).
 - records the session id returned by each successful creation response and pins
-  every later request for that id to its dated project. After a launcher restart,
-  a dated directory supplied by the browser is accepted only when it is an
-  existing direct Git-project child of `~/opencode-work`, then remembered for
-  that session; arbitrary paths fall back to the managed backend root. Both the
+  every later request for that id to its project. After a launcher restart,
+  a directory supplied by the browser is accepted only when it is an existing
+  directory strictly inside home (excluding home itself and the shared
+  `~/opencode-work` root), then remembered for
+  that session. Directory-browsing requests — the Add-project picker's
+  `fs/list` and `fs/find` — may additionally name home itself, so the picker
+  can surface real folders; anything outside home falls back to the managed
+  backend root. The picker's initial empty-query `fs/find` (which OpenCode
+  answers with `[]`, leaving the dialog on "No folders found") is answered by
+  the proxy with the browsed directory's visible child directories; typed
+  queries keep the backend's own search. Both the
   `?directory=` query parameter **and** `x-opencode-directory` header are
   enforced: OpenCode's client mirrors the directory into the query string only
   for GET and HEAD requests, so `POST /session` and
@@ -154,12 +173,14 @@ Server Proxy entry that runs
   png/jpg/gif/webp/bmp/svg, NiiVue for nii/nii.gz/mgz/mgh/mif/nrrd/mha/mhd.
   Bytes come from the proxy's own `/neurodesk-file/<path>` route, which sits
   behind the same credential as the UI and resolves the path *inside* one
-  validated `~/opencode-work/YYYYMMDD_HHMMSS/` project. Resolution fails
+  validated project directory — a dated `~/opencode-work/YYYYMMDD_HHMMSS/`
+  workspace or a user-chosen project strictly inside home. Resolution fails
   closed: a request naming a session must resolve to that session (a stale
   or unknown id is a 404, never a widened search), and a request naming none
   is answered only from the directory OpenCode's own client reports or when
-  exactly one session exists. The shared `~/opencode-work` parent is never
-  searched, so a uniquely named artifact cannot leak between sessions.
+  exactly one session exists. Home itself and the shared `~/opencode-work`
+  parent are never searched, so a uniquely named artifact cannot leak
+  between sessions.
   Absolute paths, `..` segments, and symlinks leaving the project are
   refused, only the previewable extensions above are served, an ambiguous
   name match is refused rather than guessed, and files above

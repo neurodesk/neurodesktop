@@ -1,6 +1,6 @@
 """Tests for the OpenCode web launcher (config/agents/opencode_web.py).
 
-Covers the pieces that make the JupyterLab "Scigent.ai" tile work: the
+Covers the pieces that make the JupyterLab "OpenCode Web" tile work: the
 prefix rewriting for the upstream web UI, the browser-based
 llm.neurodesk.org key setup (persisted in the same ~/.bashrc format the
 terminal wrapper and nbi_setup.sh read), the per-user credential handling,
@@ -738,6 +738,35 @@ def test_create_opencode_work_dir_outranks_a_legacy_parent_repo(tmp_path):
     assert _git_toplevel(work_dir) == str(work_dir)
 
 
+def test_project_dir_validation_confines_to_home(tmp_path):
+    """Project directories are real directories strictly inside home.
+
+    Browsing may additionally name home itself, but neither home nor the
+    shared ``~/opencode-work`` root may ever hold a session: sessions running
+    there would mix their artifacts across projects.
+    """
+    home = tmp_path / "home"
+    study = home / "projects" / "study-a"
+    study.mkdir(parents=True)
+    dated = Path(ocw.create_opencode_work_dir(home, "20260721_203001"))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    escape = home / "escape"
+    escape.symlink_to(outside)
+
+    assert ocw.is_opencode_project_dir(str(study), home)
+    assert ocw.is_opencode_project_dir(str(dated), home)
+    assert ocw.is_opencode_home_confined_dir(str(home), home)
+    assert not ocw.is_opencode_project_dir(str(home), home)
+    assert not ocw.is_opencode_project_dir(str(home / "opencode-work"), home)
+    assert not ocw.is_opencode_project_dir(str(outside), home)
+    assert not ocw.is_opencode_home_confined_dir(str(outside), home)
+    assert not ocw.is_opencode_project_dir(str(escape), home)
+    assert not ocw.is_opencode_home_confined_dir(str(escape), home)
+    assert not ocw.is_opencode_project_dir(str(home / "missing"), home)
+    assert not ocw.is_opencode_project_dir("", home)
+
+
 def test_force_directory_query_overrides_selected_directory():
     """A UI-selected directory is rewritten to the seeded work dir."""
     forced = ocw.force_directory_query(
@@ -886,7 +915,7 @@ def test_jupyter_template_defines_opencode_proxy_entry():
     assert "/opt/neurodesktop/opencode_web.py" in template_text
     assert "opencode_server_password" in template_text
     assert "_opencode_basic" in template_text
-    assert "'title': 'Scigent.ai'" in template_text
+    assert "'title': 'OpenCode Web'" in template_text
     assert "'enabled': bool(_opencode_pass)" in template_text
     assert "'icon_path': '/opt/opencode_logo.svg'" in template_text
 
@@ -1115,6 +1144,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if parsed.path == "/neurodesk-echo-directory":
             self.echo_directory(parsed)
+            return
+        if parsed.path == "/api/fs/list":
+            directory = self.request_directory(parsed)
+            entries = []
+            try:
+                for name in sorted(os.listdir(directory)):
+                    is_dir = os.path.isdir(os.path.join(directory, name))
+                    entries.append({
+                        "path": name + ("/" if is_dir else ""),
+                        "type": "directory" if is_dir else "file",
+                    })
+            except OSError:
+                pass
+            self.send_json(
+                {"location": {"directory": directory}, "data": entries}
+            )
+            return
+        if parsed.path == "/api/fs/find":
+            # OpenCode returns [] for an empty query; a typed query returns
+            # search results. The marker lets tests prove pass-through.
+            query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+            results = [] if not query.get("query", [""])[0] else [
+                {"path": "backend-search-result/", "type": "directory"}
+            ]
+            self.send_json({
+                "location": {"directory": self.request_directory(parsed)},
+                "data": results,
+            })
             return
         content_type, body = PAGES.get(parsed.path, ("text/plain", "fallback"))
         payload = body.encode()
@@ -1401,6 +1458,197 @@ def test_each_created_session_gets_a_distinct_seeded_work_directory(launcher):
     assert json.loads(body)["directory"] == str(first_dir)
 
 
+def test_session_created_in_user_chosen_home_project(launcher):
+    """POST /session naming an existing home directory runs there untouched.
+
+    This is the web UI's Add-project flow: the picker records a directory and
+    the next session creation names it. The user's directory is honored as
+    the session project and never git-initialized or seeded, and the proxy
+    keeps later requests for that session pinned to it against stale headers.
+    """
+    status, _headers = _complete_key_setup(launcher)
+    assert status == 303
+    _wait_for_proxied_root(launcher)
+
+    study = launcher["home"] / "projects" / "study-a"
+    study.mkdir(parents=True)
+    (study / "notes.txt").write_text("data\n", encoding="utf-8")
+
+    status, _headers, body = _request(
+        launcher["port"],
+        "/session",
+        method="POST",
+        data=b"{}",
+        headers={
+            **launcher["auth"],
+            "Content-Type": "application/json",
+            "x-opencode-directory": urllib.parse.quote(str(study), safe=""),
+        },
+    )
+    assert status == 200
+    session = json.loads(body)
+    assert Path(session["directory"]) == study.resolve()
+    assert not (study / ".git").exists()
+    assert not (study / "AGENTS.md").exists()
+    assert sorted(entry.name for entry in study.iterdir()) == ["notes.txt"]
+
+    other = launcher["home"] / "projects" / "study-b"
+    other.mkdir()
+    status, _headers, body = _request(
+        launcher["port"],
+        f"/session/{session['id']}/prompt_async",
+        method="POST",
+        data=b"{}",
+        headers={
+            **launcher["auth"],
+            "Content-Type": "application/json",
+            "x-opencode-directory": urllib.parse.quote(str(other), safe=""),
+        },
+    )
+    assert status == 200
+    assert Path(json.loads(body)["directory"]) == study.resolve()
+
+
+def test_session_creation_in_home_or_work_root_gets_a_dated_project(launcher):
+    """Naming home or the shared work root still allocates a fresh project.
+
+    The SPA's default draft directory is the backend cwd (the shared work
+    root), so an unchosen directory must keep the isolated dated-workspace
+    behavior rather than running sessions in a shared directory.
+    """
+    status, _headers = _complete_key_setup(launcher)
+    assert status == 303
+    _wait_for_proxied_root(launcher)
+
+    work_root = launcher["home"] / "opencode-work"
+    for named in (launcher["home"], work_root):
+        status, _headers, body = _request(
+            launcher["port"],
+            "/session",
+            method="POST",
+            data=b"{}",
+            headers={
+                **launcher["auth"],
+                "Content-Type": "application/json",
+                "x-opencode-directory": urllib.parse.quote(
+                    str(named), safe=""
+                ),
+            },
+        )
+        assert status == 200
+        directory = Path(json.loads(body)["directory"])
+        assert directory.parent == work_root
+        assert re.fullmatch(r"\d{8}_\d{6}(?:_\d+)?", directory.name)
+
+
+def test_browse_requests_are_confined_to_home(launcher):
+    """Directory browsing may name anything inside home, and only that.
+
+    The Add-project picker lists directories with ``fs/list``/``fs/find``
+    requests that carry the browsed path; forcing those to the work root made
+    the picker unable to surface any real folder. Home and its descendants
+    pass through; anything else still falls back to the managed root.
+    """
+    status, _headers = _complete_key_setup(launcher)
+    assert status == 303
+    _wait_for_proxied_root(launcher)
+
+    study = launcher["home"] / "projects" / "study-a"
+    study.mkdir(parents=True)
+    work_root = launcher["home"] / "opencode-work"
+
+    def browsed(directory):
+        status, _headers, body = _request(
+            launcher["port"],
+            "/neurodesk-echo-directory?"
+            + urllib.parse.urlencode({"directory": str(directory)}),
+            headers=launcher["auth"],
+        )
+        assert status == 200
+        return Path(json.loads(body)["directory"])
+
+    assert browsed(launcher["home"]) == launcher["home"].resolve()
+    assert browsed(study) == study.resolve()
+    assert browsed(launcher["home"] / "missing") == work_root
+    assert browsed("/somewhere/else") == work_root
+
+
+def test_empty_directory_find_request_recognition():
+    """Only the picker's empty-query directory search is special-cased."""
+    is_empty = ocw.is_empty_directory_find_request
+    query = "location%5Bdirectory%5D=%2Fhome&query=&type=directory&limit=50"
+    assert is_empty("GET", "/api/fs/find", query)
+    assert is_empty("GET", "/api/fs/find", "type=directory")
+    assert not is_empty("GET", "/api/fs/find", "query=neuro&type=directory")
+    assert not is_empty("GET", "/api/fs/find", "query=&type=file")
+    assert not is_empty("GET", "/api/fs/list", "query=&type=directory")
+    assert not is_empty("POST", "/api/fs/find", "query=&type=directory")
+
+
+def test_directory_listing_entries_keeps_visible_directories():
+    """The synthesized picker listing hides files and dot-directories."""
+    payload = json.dumps({
+        "location": {"directory": "/home/jovyan"},
+        "data": [
+            {"path": "projects/", "type": "directory"},
+            {"path": ".git/", "type": "directory"},
+            {"path": "notes.txt", "type": "file"},
+            "garbage",
+        ],
+    }).encode("utf-8")
+    listing = ocw.directory_listing_entries(payload)
+    assert listing == {
+        "location": {"directory": "/home/jovyan"},
+        "data": [{"path": "projects/", "type": "directory"}],
+    }
+    assert ocw.directory_listing_entries(b"not json") is None
+    assert ocw.directory_listing_entries(b'{"data": "nope"}') is None
+
+
+def test_add_project_picker_gets_a_listing_for_its_empty_query(launcher):
+    """The picker's initial empty search shows the browsed folders.
+
+    OpenCode's own ``fs/find`` answers an empty query with ``[]``, so the
+    Add-project dialog always opened onto "No folders found". The proxy
+    answers that one request with the browsed directory's visible child
+    directories instead, and leaves typed queries to the backend.
+    """
+    status, _headers = _complete_key_setup(launcher)
+    assert status == 303
+    _wait_for_proxied_root(launcher)
+
+    (launcher["home"] / "projects").mkdir()
+    (launcher["home"] / ".hidden").mkdir()
+    (launcher["home"] / "notes.txt").write_text("data\n", encoding="utf-8")
+
+    home_query = urllib.parse.urlencode(
+        {"location[directory]": str(launcher["home"])}
+    )
+    status, _headers, body = _request(
+        launcher["port"],
+        f"/api/fs/find?{home_query}&query=&type=directory&limit=50",
+        headers=launcher["auth"],
+    )
+    assert status == 200
+    listing = json.loads(body)
+    names = [entry["path"] for entry in listing["data"]]
+    assert "projects/" in names
+    assert "opencode-work/" in names
+    assert ".hidden/" not in names
+    assert "notes.txt" not in names
+
+    # A typed query still reaches the backend's own search.
+    status, _headers, body = _request(
+        launcher["port"],
+        f"/api/fs/find?{home_query}&query=proj&type=directory&limit=50",
+        headers=launcher["auth"],
+    )
+    assert status == 200
+    assert json.loads(body)["data"] == [
+        {"path": "backend-search-result/", "type": "directory"}
+    ]
+
+
 def _request_bytes(port, path, headers=None, timeout=15):
     """HTTP GET helper that keeps the response body binary."""
     request = urllib.request.Request(
@@ -1476,6 +1724,56 @@ def test_preview_serves_session_images_and_volumes(launcher):
     )
     assert status == 200
     assert body == b"\x1f\x8bfake-volume"
+
+
+def test_preview_serves_user_chosen_projects_but_never_home(launcher):
+    """Previews follow a session into a user-chosen project, nothing wider.
+
+    A session pinned to an Add-project directory must preview its files, but
+    the ``dir`` fallback naming home (or any non-project directory) must not
+    turn the endpoint into a home-wide file reader.
+    """
+    status, _headers = _complete_key_setup(launcher)
+    assert status == 303
+    _wait_for_proxied_root(launcher)
+
+    study = launcher["home"] / "projects" / "study-c"
+    study.mkdir(parents=True)
+    (study / "qc_overlay.png").write_bytes(b"\x89PNG\r\n\x1a\nstudy")
+    (launcher["home"] / "home_only.png").write_bytes(b"home-secret")
+
+    status, _headers, body = _request(
+        launcher["port"],
+        "/session",
+        method="POST",
+        data=b"{}",
+        headers={
+            **launcher["auth"],
+            "Content-Type": "application/json",
+            "x-opencode-directory": urllib.parse.quote(str(study), safe=""),
+        },
+    )
+    assert status == 200
+    session = json.loads(body)
+
+    status, headers, body = _request_bytes(
+        launcher["port"],
+        f"/neurodesk-file/qc_overlay.png?session={session['id']}",
+        headers=launcher["auth"],
+    )
+    assert status == 200
+    assert headers["Content-Type"] == "image/png"
+    assert body == b"\x89PNG\r\n\x1a\nstudy"
+
+    # Naming home via the dir fallback resolves to the single known session
+    # project, so a file that exists only in home stays unreachable.
+    home_query = urllib.parse.urlencode({"dir": str(launcher["home"])})
+    status, _headers, _body = _request_bytes(
+        launcher["port"],
+        f"/neurodesk-file/home_only.png?{home_query}",
+        headers=launcher["auth"],
+    )
+    assert status == 404
 
 
 def test_preview_endpoint_is_credentialed_and_confined(launcher):

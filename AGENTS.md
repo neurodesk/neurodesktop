@@ -60,6 +60,13 @@
   frontend single-sourced from the anywidget's `static/` assets over the
   asset endpoint (never a second bundled copy), and keep the factory a
   pattern-file-type default so ordinary `.yaml` files stay in the editor.
+  The plugin discovers run evidence beside the spec and fills in `run=`
+  itself, because nothing else can: a name it recognises that `manifest.py`
+  does not is a manifest that never loads, so keep
+  `ASTRA_RUN_EVIDENCE_NAMES` in step with `_directory_run_file`. Ambiguity
+  stays Python's call — two or more candidates send the directory rather
+  than a guess — and run evidence appears without touching the spec, so the
+  viewer needs its `Refresh` to see a job that finished.
 - When changing OpenCode, its Web proxy/session-workspace behavior, its file
   previewer, or its pinned version, run `pytest tests/unit/test_opencode_web.py`
   from a checkout and `pytest /opt/tests/test_opencode_web_image.py` in the
@@ -80,6 +87,19 @@
   its default export. Rendered formats open in a viewer rather than the editor;
   keep that an extension-to-factory map that falls back to the default factory
   when the named viewer is not registered.
+- When changing `config/slurm/astra_lc_run.sbatch` — the optional `lc`
+  execution path — run `pytest tests/unit/test_astra_lc_run_sbatch.py` from a
+  checkout and `pytest /opt/tests/test_astra_lc_run_image.py` in the built
+  image. `lc run` never submits to Slurm; it dispatches through Dask and
+  launches workers with `srun` once inside an allocation, so the template must
+  stay something `sbatch` submits rather than something that wraps `sbatch`.
+  Keep `/opt/uv/tools/lightcone-cli/bin` on its `PATH` (`lc` shells out to the
+  `dask` CLI and neither is on the default `PATH`), keep it writing exactly one
+  recognised manifest beside the spec — `status.json`, renamed into place —
+  and keep it refusing a spec that declares a `container:`, since Apptainer is
+  not an `lc` runtime and the image would be recorded as used without ever
+  running. This path is amber by construction; do not add anything that
+  synthesizes the verification record `lc verify` does not write.
 - When changing the `astra`/`lc` installs, `AGENT_SKILLS_REF`, or how the ASTRA
   skill reaches Codex, Claude, or OpenCode, run `pytest
   tests/unit/test_astra_jupyter_ai_tooling.py` from a checkout and `pytest

@@ -59,6 +59,9 @@ def _normalize_status(value: Any, *, artifact_present: bool = False) -> str:
         "completed": "ok",
         "pending": "not_run",
         "notrun": "not_run",
+        # `lc status` spells an unmaterialized output "missing"; without this
+        # it read as "unknown", which claims we could not tell.
+        "missing": "not_run",
         "error": "failed",
         "cancelled": "failed",
         "canceled": "failed",

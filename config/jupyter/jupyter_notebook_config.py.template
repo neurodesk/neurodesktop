@@ -126,7 +126,7 @@ c.ServerProxy.servers = {
     'launcher_entry': {
       'enabled': bool(_opencode_pass),
       'path_info': 'opencode',
-      'title': 'Scigent.ai',
+      'title': 'OpenCode Web',
       'icon_path': '/opt/opencode_logo.svg',
       'category': 'Neurodesk'
     }

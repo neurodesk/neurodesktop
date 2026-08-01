@@ -16,6 +16,30 @@ further build-time behaviors live with their subsystems:
 [config generation](webapps.md#build-time-config-generation) and
 [CVMFS setup](cvmfs.md#build-time-cvmfs-setup).
 
+## Layer Ordering and Cache
+
+The runtime stage is ordered by how often each layer's inputs change, because
+invalidating a layer re-runs every layer after it. Three bands, in order:
+
+1. **Stable system software** — apt packages, builder-stage copies, Tomcat,
+   TinyTeX, Firefox, conda/pip, and the three expensive from-source
+   labextension rebuilds. Keyed on pinned versions that rarely move.
+2. **Pinned-version tool installs** — CVMFS keys, neurocommand, the agent
+   CLIs (codex, claude, opencode), the ACP adapters, and lightcone. Keyed
+   only on explicit version/ref bumps, never on local files.
+3. **Local-file layers** — the local JupyterLab extension builds
+   (`extensions/`), then kernel/Guacamole/home-default configuration, and
+   finally the catch-all runtime-config layer. Everything here is keyed on
+   repository files that change frequently, so it sits last and re-runs
+   cheaply.
+
+Layers that consume repository files bind-mount the specific files they
+install rather than whole directories: a whole-directory mount keys the layer
+on every sibling file, so an unrelated edit (for example a unit test, when
+all of `tests/` was mounted) would needlessly rebuild everything downstream.
+When adding a layer, mount individual files and place the layer at the
+band matching its most volatile input.
+
 ## Notebook Intelligence Settings Patch
 
 The upstream Notebook Intelligence settings panel auto-saves its client-side
