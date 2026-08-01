@@ -275,10 +275,21 @@ RUN retry wget -q https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v$
     && chmod +x /usr/local/tomcat/bin/*.sh
 
 # Install Apache Guacamole WAR and convert its Java EE servlet APIs for Tomcat 11.
-RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
+#
+# archive.apache.org is a slow, rate-limited mirror: the WAR is ~15 MB and a
+# non-resumable `curl --retry` restarts from byte 0 on every timeout, so a slow
+# transfer can never complete within a single --max-time window (see build run
+# 30478316312, where every attempt reached 15.5 of 15.6 MB then hit the 300 s
+# cutoff, exit code 28). Wrap each download in the `retry` helper and use
+# `curl --continue-at -` so a timed-out attempt resumes from where it stopped
+# instead of starting over. The per-attempt --max-time is the time budget for
+# one curl invocation; the `retry` wrapper supplies the outer attempt loop.
+RUN retry curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
+    --continue-at - \
     "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/binary/guacamole-${GUACAMOLE_VERSION}.war" \
     -o /tmp/guacamole-${GUACAMOLE_VERSION}.war \
-    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
+    && retry curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
+    --continue-at - \
     "https://archive.apache.org/dist/tomcat/jakartaee-migration/v${TOMCAT_MIGRATION_VERSION}/binaries/jakartaee-migration-${TOMCAT_MIGRATION_VERSION}-shaded.jar" \
     -o /tmp/jakartaee-migration-${TOMCAT_MIGRATION_VERSION}-shaded.jar \
     && java -jar /tmp/jakartaee-migration-${TOMCAT_MIGRATION_VERSION}-shaded.jar \
