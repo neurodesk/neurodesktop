@@ -147,6 +147,9 @@ RUN set -eux; \
     tar -xzf "${shell_quote_tar}" -C "${shell_quote_dir}" --strip-components=1; \
     rm -f "${shell_quote_tar}"; \
     test "$(node -p 'require("/opt/code-server/lib/vscode/node_modules/shell-quote/package.json").version')" = "1.8.4"; \
+    # Strip bundled sourcemaps in the stage that unpacks them so the runtime
+    # copy layer never carries them; they only serve devtools debugging.
+    find /opt/code-server -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete; \
     rm -f "/tmp/${cs_tar}"; \
     npm cache clean --force
 
@@ -254,7 +257,10 @@ RUN retry wget -q https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v$
     && tar -xf /tmp/apache-tomcat-${TOMCAT_VERSION}.tar.gz -C /tmp \
     && rm -rf /tmp/apache-tomcat-${TOMCAT_VERSION}.tar.gz \
     && mv /tmp/apache-tomcat-${TOMCAT_VERSION} /usr/local/tomcat \
-    && mv /usr/local/tomcat/webapps /usr/local/tomcat/webapps.dist \
+    # Delete Tomcat's default webapps (docs, examples, manager) instead of
+    # parking them: nothing ever serves them and Guacamole's ROOT webapp is
+    # installed later.
+    && rm -rf /usr/local/tomcat/webapps \
     && mkdir /usr/local/tomcat/webapps \
     && sed -i -E '/<Connector port="8080" protocol="HTTP\/1\.1"/ {/maxHttpRequestHeaderSize=/! s|$| maxHttpRequestHeaderSize="65536"|;}' /usr/local/tomcat/conf/server.xml \
     && grep -q 'maxHttpRequestHeaderSize="65536"' /usr/local/tomcat/conf/server.xml \
@@ -272,7 +278,18 @@ RUN retry wget -q https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v$
     && sed -i '/<Context sessionCookiePath/a\    <CookieProcessor className="org.apache.tomcat.util.http.Rfc6265CookieProcessor" sameSiteCookies="Lax" />' /usr/local/tomcat/conf/context.xml \
     # 3. Set Max-Age on session cookie so browsers auto-expire it (24h) in default web.xml
     && sed -i '/<session-config>/,/<\/session-config>/c\    <session-config>\n        <session-timeout>30</session-timeout>\n        <cookie-config>\n            <max-age>86400</max-age>\n            <http-only>true</http-only>\n        </cookie-config>\n    </session-config>' /usr/local/tomcat/conf/web.xml \
-    && chmod +x /usr/local/tomcat/bin/*.sh
+    && chmod +x /usr/local/tomcat/bin/*.sh \
+    # Ownership and modes are set in the layer that creates the tree: a later
+    # `chown -R`/`chmod -R` would copy every touched file into that layer
+    # again (~50 MB of duplication). Apache Tomcat ships `conf/` as 0750 and
+    # a few script/dir modes that deny world read/traverse. On Apptainer/HPC
+    # the container runs as an arbitrary host UID with no membership in group
+    # `users`, so the chown alone is not enough - `cp -rfT
+    # /usr/local/tomcat/conf ...` would silently fail and guacamole.sh could
+    # not launch Tomcat. Grant world read + traverse so any NB_UID can
+    # bootstrap its per-user CATALINA_BASE; write access stays owner-only.
+    && chown -R ${NB_UID}:${NB_GID} /usr/local/tomcat \
+    && chmod -R a+rX /usr/local/tomcat
 
 # Install Apache Guacamole WAR and convert its Java EE servlet APIs for Tomcat 11.
 RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
@@ -432,7 +449,12 @@ RUN unzip -q /usr/local/tomcat/webapps/ROOT.war -d /usr/local/tomcat/webapps/ROO
         sed -i '/<session-config>/,/<\/session-config>/c\    <session-config>\n        <session-timeout>30</session-timeout>\n        <cookie-config>\n            <max-age>86400</max-age>\n            <http-only>true</http-only>\n        </cookie-config>\n    </session-config>' /usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml; \
     else \
         sed -i 's|</web-app>|    <session-config>\n        <session-timeout>30</session-timeout>\n        <cookie-config>\n            <max-age>86400</max-age>\n            <http-only>true</http-only>\n        </cookie-config>\n    </session-config>\n</web-app>|' /usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml; \
-    fi
+    fi \
+    # This layer creates the extracted ROOT tree, so it also sets the
+    # ownership and world-read modes the rest of /usr/local/tomcat received
+    # in its install layer (see the note there).
+    && chown -R ${NB_UID}:${NB_GID} /usr/local/tomcat/webapps/ROOT \
+    && chmod -R a+rX /usr/local/tomcat/webapps/ROOT
 
 # Install Nextflow ecosystem tools
 ENV NF_NEURO_MODULES_DIR=/opt/nf-neuro/modules
@@ -452,14 +474,19 @@ RUN mkdir -p "${NF_TEST_HOME}" \
     && chown -R ${NB_UID}:${NB_GID} /opt/nf-neuro "${NF_TEST_HOME}" "${HOME}/.nextflow" \
     && rm -rf /root/.cache "${HOME}/.nf-test" /tmp/nf-test /tmp/nextflow
 
-# Install build tools temporarily — nodejs is needed by codex CLI at runtime and
+# Install nodejs — needed by the codex CLI and ACP adapters at runtime and
 # by hatch-jupyter-builder to compile JupyterLab extensions from source (e.g.
-# jupyterlab-slurm, neurodesk-launcher). build-essential provides gcc for pip
-# packages with C extensions (e.g. psutil, traits). build-essential is removed
-# once the pip layer no longer needs it (see purge step below); nodejs stays
-# for codex and the pure-TypeScript extension builds further down.
+# jupyterlab-slurm, neurodesk-launcher). gcc for pip packages with C
+# extensions (e.g. traits, which ships no cp313 wheel) is installed and
+# purged inside the pip layer itself: purging in a later layer only masks
+# the files with whiteouts while this layer's history keeps shipping the
+# ~200 MB toolchain.
 RUN retry bash -o pipefail -c 'curl -fsSL https://deb.nodesource.com/setup_24.x | bash -' \
-    && apt-install-retry nodejs build-essential \
+    && apt-install-retry nodejs \
+    # Node's C headers only serve node-gyp source builds, and node-gyp
+    # downloads matching headers itself; nothing in this image compiles
+    # native node modules against the system copy (~65 MB).
+    && rm -rf /usr/include/node \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Firefox from Mozilla's official apt repository. This avoids both the
@@ -505,13 +532,23 @@ RUN retry conda install -c conda-forge nb_conda_kernels \
 # JupyterLab 3. Keep its distribution for dependency integrity but remove the
 # exposed labextension; JupyterLab 4.6 and RISE both bundle the current
 # @jupyterlab/mathjax-extension instead.
+#
+# The layer runs as root so build-essential (gcc for sdist-only packages with
+# C extensions — traits ships no cp313 wheel) can be installed and purged in
+# this same layer; a later-layer purge would keep shipping the ~200 MB
+# toolchain in the install layer's history. The pip steps themselves run as
+# ${NB_USER} via runuser so /opt/conda stays user-owned exactly as before;
+# `env PATH=` restores the conda-first PATH that runuser resets (the
+# jupyterlab-slurm source build needs jlpm and node on PATH).
 ARG BUST_CACHE_PIP=3
 ARG UV_VERSION="0.11.8"
 ARG JUPYTER_AI_VERSION="3.1.1"
 ARG ASTRA_SPEC_VERSION="0.0.12"
 ARG ASTRA_TOOLS_VERSION="0.2.11"
 ARG ANYWIDGET_VERSION="0.11.0"
-RUN /opt/conda/bin/pip install \
+USER root
+RUN apt-install-retry build-essential \
+    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install \
     datalad \
     nipype \
     niwrap \
@@ -572,11 +609,36 @@ RUN /opt/conda/bin/pip install \
     "packaging>=26.0" \
     "requests>=2.34.2" \
     "chardet<8" \
-    && /opt/conda/bin/pip install --upgrade "litellm>=1.85.0" \
-    && /opt/conda/bin/python -m bash_kernel.install --sys-prefix \
-    && /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
+    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade "litellm>=1.85.0" \
+    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/python -m bash_kernel.install --sys-prefix \
+    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
     && rm -rf "/opt/conda/share/jupyter/labextensions/@jupyterlab/mathjax3-extension" \
-    && rm -rf /home/${NB_USER}/.cache
+    # claude-agent-sdk (a notebook_intelligence dependency) vendors a full
+    # Claude Code CLI (~260 MB). The image already ships that binary at
+    # /opt/jovyan_defaults/.local/bin/claude and NBI resolves `claude` from
+    # PATH (resolve_claude_cli_path) and passes it as cli_path, so the
+    # bundled copy is never used — the same policy as the ACP adapters'
+    # deleted vendored binaries. The test -d fails the build loudly if the
+    # SDK relocates its bundle so the duplicate cannot silently return.
+    && CLAUDE_SDK_DIR="$(/opt/conda/bin/python -B -c 'import claude_agent_sdk, os; print(os.path.dirname(claude_agent_sdk.__file__))')" \
+    && test -d "${CLAUDE_SDK_DIR}/_bundled" \
+    && rm -rf "${CLAUDE_SDK_DIR}/_bundled" \
+    # Strip webpack/TS sourcemaps (~85 MB) and the heavyweight bundled test
+    # suites (~60 MB) in the layer that installs them; neither is reachable
+    # at runtime. The test-suite list is curated rather than a blanket
+    # */tests sweep so an odd package that imports its tests keeps working.
+    && SITE_PACKAGES="$(/opt/conda/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" \
+    && find "${SITE_PACKAGES}" /opt/conda/share/jupyter -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
+    && for pkg in pandas scipy numpy matplotlib nibabel prov traits tornado psutil boutiques; do \
+        if [ -d "${SITE_PACKAGES}/${pkg}" ]; then \
+            find "${SITE_PACKAGES}/${pkg}" -type d \( -name tests -o -name test \) -prune -exec rm -rf {} +; \
+        fi; \
+    done \
+    # In-layer removal of the compiler toolchain (see the layer comment).
+    && apt-mark manual autofs cvmfs libc6-dev linux-libc-dev uuid-dev \
+    && DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove build-essential \
+    && apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.npm /root/.cache
 
 #========================================#
 # Configuration (as root user)
@@ -592,13 +654,14 @@ RUN test "$(command -v astra)" = "/opt/conda/bin/astra" \
     && test "$(astra --version)" = "astra, version ${ASTRA_TOOLS_VERSION}" \
     && test "$(/opt/conda/bin/python -c 'import importlib.metadata as m; print(m.version("astra-spec"))')" = "${ASTRA_SPEC_VERSION}"
 
-# Remove build-time packages: -dev headers for pip native extensions and
-# build-essential for C extensions. nodejs stays — codex CLI needs it at
+# Remove the -dev headers that were only needed while the pip layer compiled
+# native extensions. build-essential is installed and purged inside the pip
+# layer itself; nodejs stays — codex CLI and the ACP adapters need it at
 # runtime. Keep the libc dev chain because cvmfs and uuid-dev depend on it.
 # (Guacamole build deps are already excluded via multi-stage build.)
 RUN apt-mark manual autofs cvmfs libc6-dev linux-libc-dev uuid-dev \
     && DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove \
-    libgpgme-dev libossp-uuid-dev build-essential \
+    libgpgme-dev libossp-uuid-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # The three from-source labextension rebuilds below are the most expensive
@@ -633,7 +696,13 @@ RUN --mount=type=bind,source=config/jupyter/notebook-intelligence-5.3.0.yarn.loc
     && APP_NBI_DIR=/opt/conda/share/jupyter/labextensions/@plmbr/notebook-intelligence \
     && rm -rf "${NBI_LABEXT_DIR}" "${APP_NBI_DIR}" \
     && cp -a /tmp/notebook-intelligence/notebook_intelligence/labextension "${NBI_LABEXT_DIR}" \
-    && cp -a "${NBI_LABEXT_DIR}" "${APP_NBI_DIR}" \
+    # Strip the build's sourcemaps in the layer that installs the bundle.
+    && find "${NBI_LABEXT_DIR}/static" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
+    # One real copy: the application-level dir is a symlink into the package
+    # so the two views cannot drift and the ~24 MB bundle is not shipped
+    # twice. patch_nbi.py globs the application path and therefore patches
+    # the single real bundle through this link.
+    && ln -s "${NBI_LABEXT_DIR}" "${APP_NBI_DIR}" \
     && find "${NBI_LABEXT_DIR}/static" -type f -name 'remoteEntry*.js' | grep -q . \
     && /opt/conda/bin/python3 /tmp/patch_nbi.py \
     && rm -rf /tmp/notebook-intelligence /root/.cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
@@ -666,6 +735,8 @@ RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {
     && APP_MYST_DIR=/opt/conda/share/jupyter/labextensions/jupyterlab-myst \
     && rm -rf "${MYST_LABEXT_DIR}" \
     && cp -a /tmp/myst/jupyterlab_myst/labextension "${MYST_LABEXT_DIR}" \
+    # Strip the build's sourcemaps before the bundle is mirrored below.
+    && find "${MYST_LABEXT_DIR}/static" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
     && rm -rf "${APP_MYST_DIR}" \
     && cp -a "${MYST_LABEXT_DIR}" "${APP_MYST_DIR}" \
     && rm -rf /tmp/myst /tmp/rise /tmp/myst-corepack /tmp/myst-pnpm-store /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
@@ -717,6 +788,9 @@ RUN retry git clone --depth 1 --branch "v${JUPYTER_COLLABORATION_VERSION}" \
     && rm -rf "${COLLAB_DEST}" "${DOCPROVIDER_DEST}" \
     && cp -a "${COLLAB_SRC}" "${COLLAB_DEST}" \
     && cp -a "${DOCPROVIDER_SRC}" "${DOCPROVIDER_DEST}" \
+    # Strip the rebuild's sourcemaps in the layer that installs the bundles.
+    && find "${COLLAB_DEST}/static" "${DOCPROVIDER_DEST}/static" \
+    -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
     && test "$(node -p "require('${COLLAB_DEST}/package.json').dependencies['@jupyter/ydoc']")" = "^${MYST_YDOC_VERSION}" \
     && test "$(node -p "require('${DOCPROVIDER_DEST}/package.json').dependencies['@jupyter/ydoc']")" = "^${MYST_YDOC_VERSION}" \
     && rm -rf /tmp/jupyter-collaboration /root/.cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
@@ -761,6 +835,7 @@ RUN echo "Installing neurocommand ref ${NEUROCOMMAND_REF}" \
 # installed without its bundled binary and drives this install via CODEX_PATH.
 ARG CODEX_CLI_VERSION="0.145.0"
 RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_CLI_VERSION}" \
+    && find "$(npm root -g)/@openai" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
     && rm -rf /root/.npm /tmp/npm-root-cache /home/${NB_USER}/.npm \
     && su - "${NB_USER}" -c 'retry bash -o pipefail -c "curl -fsSL https://claude.ai/install.sh | bash -s -- stable"' \
     && mkdir -p /opt/jovyan_defaults/.local/bin \
@@ -802,6 +877,7 @@ RUN npm_config_cache=/tmp/npm-acp-cache retry npm install -g \
     && rm -rf /root/.npm /tmp/npm-acp-cache /home/${NB_USER}/.npm \
     "$(npm root -g)"/@agentclientprotocol/*/node_modules/@openai/codex-* \
     "$(npm root -g)"/@agentclientprotocol/*/node_modules/@anthropic-ai/claude-agent-sdk-*-* \
+    && find "$(npm root -g)/@agentclientprotocol" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
     && command -v codex-acp && command -v claude-agent-acp \
     && test "$(du -sm "$(npm root -g)/@agentclientprotocol" | cut -f1)" -lt 100
 
@@ -894,15 +970,17 @@ RUN --mount=type=bind,source=config/guacamole,target=/tmp/guacamole,ro \
     && sed -i "s|</body>|<script src=\"mac-clipboard-shim.js?v=${SHIM_V}\"></script></body>|" /usr/local/tomcat/webapps/ROOT/index.html \
     && grep -q "mac-clipboard-shim.js?v=${SHIM_V}" /usr/local/tomcat/webapps/ROOT/index.html \
     && chown -R ${NB_UID}:${NB_GID} /etc/guacamole \
-    && chown -R ${NB_UID}:${NB_GID} /usr/local/tomcat \
-    # Apache Tomcat ships `conf/` as 0750 and a few script/dir modes that deny
-    # world read/traverse. On Apptainer/HPC the container runs as an arbitrary
-    # host UID with no membership in group `users`, so the chown above alone
-    # is not enough - `cp -rfT /usr/local/tomcat/conf …` silently fails and
-    # guacamole.sh cannot launch Tomcat. Grant world read + traverse so any
-    # NB_UID can bootstrap its per-user CATALINA_BASE. Write access stays
-    # restricted to the owner.
-    && chmod -R a+rX /usr/local/tomcat /etc/guacamole
+    # /usr/local/tomcat is chowned/chmodded by the layers that create it (a
+    # whole-tree chown -R here would duplicate ~50 MB into this layer). Only
+    # the two files this layer touches need their ownership and world-read
+    # bits restored: the shim it installs and the index.html the sed rewrote.
+    && chown ${NB_UID}:${NB_GID} \
+    /usr/local/tomcat/webapps/ROOT/mac-clipboard-shim.js \
+    /usr/local/tomcat/webapps/ROOT/index.html \
+    && chmod a+r \
+    /usr/local/tomcat/webapps/ROOT/mac-clipboard-shim.js \
+    /usr/local/tomcat/webapps/ROOT/index.html \
+    && chmod -R a+rX /etc/guacamole
 
 # Configure NB_USER account defaults and JupyterLab settings
 RUN /usr/bin/printf '%s\n%s\n' 'password' 'password' | passwd ${NB_USER} \
@@ -1245,6 +1323,14 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
 RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_documents.py,target=/tmp/patch_jupyter_server_documents.py,ro \
     install -m 0755 -o root -g users /tmp/patch_jupyter_server_documents.py /opt/neurodesktop/patch_jupyter_server_documents.py \
     && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_server_documents.py
+
+# jupyter-server-mcp starts FastMCP through its own embedded runner and prints
+# the FastMCP banner unconditionally, ignoring the image's
+# FASTMCP_SHOW_SERVER_BANNER=0. Keep this anchored patch until a release
+# gates the banner on the setting itself.
+RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_mcp.py,target=/tmp/patch_jupyter_server_mcp.py,ro \
+    install -m 0755 -o root -g users /tmp/patch_jupyter_server_mcp.py /opt/neurodesktop/patch_jupyter_server_mcp.py \
+    && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_server_mcp.py
 
 # jupyter-ai-acp-client logs every streamed chunk and tool-call tick at INFO,
 # flooding the server log during any persona reply. Keep this anchored

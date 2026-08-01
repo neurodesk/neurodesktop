@@ -52,10 +52,12 @@ prevent the chat itself from being saved. This hook is necessary because the
 ACP transports do not run the interactive Codex and OpenCode wrappers that
 normally seed the file. It is registered in
 ``config/jupyter/jupyter_server_config_extra.py``, appended to
-``/etc/jupyter/jupyter_server_config.py`` at build time, because ServerApp
-loads that file exactly once; the legacy ``jupyter_notebook_config.py`` is
-re-applied per shimmed extension app, which would assign the hook repeatedly
-and warn "Overriding existing post_save_hook" at every startup.
+``/etc/jupyter/jupyter_server_config.py`` at build time. Jupyter's config
+system applies the trait more than once per startup (the shimmed extension
+apps re-apply config), and jupyter_server warns on every ``post_save_hook``
+reassignment even when the hook is unchanged, so the snippet suppresses
+exactly that duplicate self-registration warning next to the single
+registration site; a different hook overriding ours still warns.
 
 ## Collaboration-stack workarounds
 
@@ -82,3 +84,11 @@ build-time patch (`patch_jupyter_ai_acp_client.py`) demotes those four
 per-event log statements to DEBUG; rarer events such as permission requests
 stay at INFO. Like the issue-271 patch, it fails the image build if a future
 release changes any source seam.
+
+`jupyter-server-mcp` 0.2.1 starts FastMCP through its own embedded HTTP
+runner and prints the FastMCP ASCII banner unconditionally, ignoring
+FastMCP's `show_server_banner` setting. The image exports
+`FASTMCP_SHOW_SERVER_BANNER=0` and a third anchored build-time patch
+(`patch_jupyter_server_mcp.py`) gates the banner call on that setting, so
+the box no longer lands in the server log on every boot. It follows the same
+fail-loud contract as the other anchored patches.

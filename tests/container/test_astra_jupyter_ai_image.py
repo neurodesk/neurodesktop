@@ -119,6 +119,23 @@ def test_jupyter_ai_acp_client_per_event_logging_is_demoted_to_debug():
     assert 'log.info(\n            f"tool_call_progress' not in manager
 
 
+def test_jupyter_server_mcp_banner_respects_fastmcp_setting():
+    """The anchored build-time patch gates jupyter_server_mcp's unconditional
+    FastMCP banner on FASTMCP_SHOW_SERVER_BANNER, which the image sets to 0;
+    see patch_jupyter_server_mcp.py."""
+    import os
+
+    import jupyter_server_mcp
+
+    assert os.environ.get("FASTMCP_SHOW_SERVER_BANNER") == "0"
+
+    package_dir = Path(jupyter_server_mcp.__file__).parent
+    text = (package_dir / "mcp_server.py").read_text(encoding="utf-8")
+    assert "neurodesktop-mcp-honor-banner-setting" in text
+    assert "if fastmcp_settings.show_server_banner:" in text
+    assert "\n        log_server_banner(server=self.mcp)\n" not in text
+
+
 def test_jupyter_ai_server_and_frontend_extensions_are_compatible():
     code, server_output = run_cmd("jupyter server extension list", timeout=60)
     assert code == 0, server_output

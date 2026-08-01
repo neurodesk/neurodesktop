@@ -102,12 +102,14 @@
   the viewer imports, keep `jq` installed for the plugin hooks, and bump
   `AGENT_SKILLS_REF` together with the ASTRA pins so the skill teaches the
   schema `astra validate` speaks.
-- When changing Jupyter AI, Jupyter Collaboration, its ACP personas, or
-  the Jupyter Server Documents workaround,
+- When changing Jupyter AI, Jupyter Collaboration, its ACP personas,
+  the Jupyter Server Documents workaround, or the jupyter-server-mcp
+  banner patch,
   run `pytest tests/unit/test_jupyter_ai_workspace.py
   tests/unit/test_astra_jupyter_ai_tooling.py
   tests/unit/test_jupyter_server_documents_patch.py
-  tests/unit/test_jupyter_ai_acp_client_patch.py` from a checkout and `pytest
+  tests/unit/test_jupyter_ai_acp_client_patch.py
+  tests/unit/test_jupyter_server_mcp_patch.py` from a checkout and `pytest
   /opt/tests/test_astra_jupyter_ai_image.py` in the built image, then verify
   `pip check`, `jupyter server extension list`, and `jupyter labextension list
   --verbose` in that image. Keep Jupyter AI chat workspace seeding scoped to
@@ -117,7 +119,17 @@
   keep the adapters driving the image's own agent CLIs via `CODEX_PATH` and
   `CLAUDE_CODE_EXECUTABLE`; the vendored copies would otherwise add ~500 MB
   of duplicates, and `CODEX_CLI_VERSION` must stay inside the `@openai/codex`
-  range the pinned codex-acp declares.
+  range the pinned codex-acp declares. The same vendored-duplicate policy
+  covers `claude-agent-sdk/_bundled` (a second ~260 MB Claude CLI pulled in
+  via notebook_intelligence): it is deleted in the pip layer and guarded by
+  `pytest /opt/tests/test_image_size_hygiene.py`.
+- The image's size-hygiene invariants live in
+  [`docs/architecture/build.md`](docs/architecture/build.md#image-size-hygiene)
+  and are asserted by `pytest /opt/tests/test_image_size_hygiene.py` in the
+  built image: build-only apt packages are installed and purged inside the
+  layer that needs them (never purged in a later layer), `chown -R`/
+  `chmod -R` happen in the layer that creates a tree, and sourcemaps and
+  bundled Python test suites are stripped in the layer that installs them.
 - When changing an agentic workflow under `.github/workflows/*.md`, regenerate
   its `.lock.yml` with `gh aw compile`, then run
   `pytest tests/unit/test_report_job_failure_action.py`.

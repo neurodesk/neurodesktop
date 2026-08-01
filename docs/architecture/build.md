@@ -40,6 +40,28 @@ all of `tests/` was mounted) would needlessly rebuild everything downstream.
 When adding a layer, mount individual files and place the layer at the
 band matching its most volatile input.
 
+## Image Size Hygiene
+
+Layers are append-only: deleting or re-owning a file in a later layer only
+adds whiteouts or duplicates while the original layer keeps shipping the
+bytes. The image therefore follows three rules, asserted by
+`pytest /opt/tests/test_image_size_hygiene.py` in the built image:
+
+- **Build-only packages are purged in the layer that needs them.** The pip
+  layer runs as root, installs `build-essential` (gcc for sdist-only
+  packages such as `traits`, which ships no cp313 wheel), runs the pip steps
+  as `${NB_USER}` via `runuser`, and purges the toolchain before the layer
+  ends. Node's unused C headers are deleted in the nodejs install layer.
+- **Ownership and modes are set where a tree is created.** `/usr/local/tomcat`
+  is chowned and made world-readable in its install layer and in the WAR
+  extraction layer; a whole-tree `chown -R` in a later layer would duplicate
+  ~50 MB per run.
+- **Unreachable payload is stripped in the layer that installs it.** Vendored
+  duplicate agent binaries (the ACP adapters' platform packages and
+  `claude-agent-sdk/_bundled`, together ~750 MB), webpack/TS sourcemaps, a
+  curated list of heavyweight bundled Python test suites, and Tomcat's
+  default webapps are all deleted where they first appear.
+
 ## Notebook Intelligence Patches
 
 The upstream Notebook Intelligence settings panel auto-saves its client-side
