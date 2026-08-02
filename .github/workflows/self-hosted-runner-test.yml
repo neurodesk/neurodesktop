@@ -119,11 +119,14 @@ jobs:
           case "$SV" in 29.*) echo "docker server $SV ok" ;; *) echo "docker server expected 29.x, got $SV" >> /tmp/parity_fail ;; esac
           echo "::endgroup::"
 
-          echo "::group::CVMFS (expect the neurodesk repo to list container dirs)"
-          if ls /cvmfs/neurodesk.ardc.edu.au >/dev/null 2>&1; then
-            echo "cvmfs entries: $(ls /cvmfs/neurodesk.ardc.edu.au | wc -l)"
+          # CVMFS is mounted into the DinD (docker) container, NOT the runner —
+          # by design, so containers spawned by the daemon can bind-mount it.
+          # Checking from the runner gives a FALSE failure (learned 2026-08-02).
+          echo "::group::CVMFS (via a DinD container — it is not mounted in the runner)"
+          if docker run --rm -v /cvmfs:/cvmfs:ro alpine:3.19 ls /cvmfs/neurodesk.ardc.edu.au >/dev/null 2>&1; then
+            echo "cvmfs entries: $(docker run --rm -v /cvmfs:/cvmfs:ro alpine:3.19 ls /cvmfs/neurodesk.ardc.edu.au | wc -l)"
           else
-            echo "CVMFS /cvmfs/neurodesk.ardc.edu.au not listable" >> /tmp/parity_fail
+            echo "CVMFS /cvmfs/neurodesk.ardc.edu.au not listable from a DinD container" >> /tmp/parity_fail
           fi
           echo "::endgroup::"
 
