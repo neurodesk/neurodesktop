@@ -119,16 +119,9 @@ jobs:
           case "$SV" in 29.*) echo "docker server $SV ok" ;; *) echo "docker server expected 29.x, got $SV" >> /tmp/parity_fail ;; esac
           echo "::endgroup::"
 
-          # CVMFS is mounted into the DinD (docker) container, NOT the runner —
-          # by design, so containers spawned by the daemon can bind-mount it.
-          # Checking from the runner gives a FALSE failure (learned 2026-08-02).
-          echo "::group::CVMFS (via a DinD container — it is not mounted in the runner)"
-          if docker run --rm -v /cvmfs:/cvmfs:ro alpine:3.19 ls /cvmfs/neurodesk.ardc.edu.au >/dev/null 2>&1; then
-            echo "cvmfs entries: $(docker run --rm -v /cvmfs:/cvmfs:ro alpine:3.19 ls /cvmfs/neurodesk.ardc.edu.au | wc -l)"
-          else
-            echo "CVMFS /cvmfs/neurodesk.ardc.edu.au not listable from a DinD container" >> /tmp/parity_fail
-          fi
-          echo "::endgroup::"
+          # NOTE: the CVMFS check is deliberately NOT here — see the dedicated step
+          # after the DinD build. Running it this early races the docker daemon
+          # coming up and reports a false "CVMFS missing" (hit twice, 2026-08-02).
 
           echo "::group::Registry mirror reachable from the runner"
           curl -sS -o /dev/null -m 10 -w "registry-mirror http=%{http_code}\n" \
@@ -152,6 +145,18 @@ jobs:
           set -euo pipefail
           printf 'FROM alpine:3.19\nRUN dd if=/dev/zero of=/blob bs=1M count=128 status=none && sha256sum /blob\n' > Dockerfile
           docker build -t ca-soak:${{ matrix.role }} .
+
+      # Runs AFTER the build so the docker daemon is provably warm. CVMFS is
+      # mounted into the DinD (docker) container, NOT the runner — by design, so
+      # containers the daemon spawns can bind-mount it. Checking from the runner,
+      # or before the daemon is ready, both give FALSE failures (hit both, 2026-08-02).
+      - name: CVMFS reachable from a DinD container
+        run: |
+          if docker run --rm -v /cvmfs:/cvmfs:ro alpine:3.19 ls /cvmfs/neurodesk.ardc.edu.au >/dev/null 2>&1; then
+            echo "cvmfs entries: $(docker run --rm -v /cvmfs:/cvmfs:ro alpine:3.19 ls /cvmfs/neurodesk.ardc.edu.au | wc -l)"
+          else
+            echo "CVMFS /cvmfs/neurodesk.ardc.edu.au not listable from a DinD container" >> /tmp/parity_fail
+          fi
 
       # The heartbeat is the instrument. If CA evicts this node the log simply
       # stops — the last timestamp tells us exactly when, to line up against the
