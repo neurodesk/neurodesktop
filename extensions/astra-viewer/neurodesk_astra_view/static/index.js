@@ -577,6 +577,7 @@ export function render({ model, el }) {
   };
 
   const activateNode = (node) => {
+    state.refocus = node.id;
     if (node.kind === "decision-cluster") {
       const expanded = new Set(model.get("expanded") || []);
       expanded.has(node.id) ? expanded.delete(node.id) : expanded.add(node.id);
@@ -672,6 +673,7 @@ export function render({ model, el }) {
         activateNode(node);
       }
     });
+    if (state.refocus === node.id) state.focusTarget = group;
     svg.appendChild(group);
   };
 
@@ -687,6 +689,13 @@ export function render({ model, el }) {
 
     const visible = visibleProjection(projection, mode, expanded);
     const layout = layoutVisible(visible, mode, expanded);
+    // Every redraw rebuilds the viewport, which would reset its scroll
+    // position to the origin — a click far down the graph must not fling
+    // the reader back to the top.
+    const previousViewport = canvas.querySelector(".astra-viewport");
+    const scrollLeft = previousViewport ? previousViewport.scrollLeft : 0;
+    const scrollTop = previousViewport ? previousViewport.scrollTop : 0;
+    state.focusTarget = null;
     canvas.replaceChildren();
     const viewport = document.createElement("div");
     viewport.className = "astra-viewport";
@@ -750,10 +759,20 @@ export function render({ model, el }) {
     layout.positions.forEach((entry) => drawNode(svg, entry, selected, expanded));
     viewport.appendChild(svg);
     canvas.appendChild(viewport);
+    viewport.scrollLeft = scrollLeft;
+    viewport.scrollTop = scrollTop;
     canvas.appendChild(buildLegend(state, draw));
     const inspector = inspectorFor(state.hovered || selected);
     inspector.className = "astra-overlay astra-inspector";
     canvas.appendChild(inspector);
+    if (state.focusTarget) {
+      // Re-focus the activated node in the rebuilt drawing without letting
+      // the browser scroll it into view — the restored offsets are already
+      // right, and a focus-scroll would jump the viewport again.
+      state.focusTarget.focus?.({ preventScroll: true });
+      state.focusTarget = null;
+      state.refocus = null;
+    }
   };
 
   const applyMode = () => draw();

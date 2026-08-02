@@ -76,6 +76,11 @@ def test_frontend_lays_out_from_the_model_ranks_on_every_filter_change():
     assert javascript.index("layoutVisible(visible", drawn) > drawn
     for handler in ("applyMode", "applyExpanded", "onSelectedNodeChange"):
         assert f"const {handler} = () => draw();" in javascript
+    # The rebuilt viewport must keep the reader's place: a click far down the
+    # graph must not reset the scroll position or focus-scroll to the top.
+    assert "viewport.scrollTop = scrollTop" in javascript
+    assert "viewport.scrollLeft = scrollLeft" in javascript
+    assert "preventScroll: true" in javascript
 
 
 def test_frontend_evidence_mode_filters_instead_of_showing_everything():
