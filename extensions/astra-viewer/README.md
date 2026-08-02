@@ -15,6 +15,7 @@ AstraView(
 )
 ```
 
-The widget is fully offline. Cytoscape.js is vendored in the wheel and no
-frontend build or network fetch happens at installation or import time.
+The widget is fully offline. The frontend is a self-contained SVG renderer
+shipped in the wheel; no frontend build or network fetch happens at
+installation or import time.
 

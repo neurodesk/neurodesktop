@@ -929,8 +929,9 @@ RUN --mount=type=bind,source=extensions/neurodesk-launcher,target=/tmp/neurodesk
     && /opt/conda/bin/jupyter labextension disable @jupyterhub/jupyter-server-proxy \
     && rm -rf /tmp/neurodesk-launcher /tmp/neurodesk-launcher-npm-cache /home/${NB_USER}/.cache
 
-# Install the offline anywidget ASTRA viewer. Cytoscape.js is vendored in the
-# wheel, so this has no npm build and performs no runtime network fetch.
+# Install the offline anywidget ASTRA viewer. The frontend is a
+# self-contained SVG renderer, so this has no npm build and performs no
+# runtime network fetch.
 RUN --mount=type=bind,source=extensions/astra-viewer,target=/tmp/astra-viewer-src,ro \
     rm -rf /tmp/astra-viewer \
     && mkdir -p /tmp/astra-viewer \

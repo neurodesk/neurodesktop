@@ -18,24 +18,29 @@ def test_viewer_has_no_npm_builder_or_runtime_network_import():
 
     assert "hatch-jupyter-builder" not in pyproject
     assert "npm" not in pyproject
-    assert "http://" not in javascript
-    assert "https://" not in javascript
+    # The W3C namespace URI is an inert identifier createElementNS requires,
+    # not a network reference; nothing else may look like a URL.
+    without_namespace = javascript.replace("http://www.w3.org/2000/svg", "")
+    assert "http://" not in without_namespace
+    assert "https://" not in without_namespace
     assert "fetch(" not in javascript
 
 
-def test_cytoscape_is_vendored_with_its_license_header():
-    vendor = ROOT / "neurodesk_astra_view/static/vendor/cytoscape.min.js"
-    license_file = ROOT / "neurodesk_astra_view/static/vendor/LICENSE.cytoscape.txt"
+def test_the_renderer_is_self_contained_with_no_vendored_graph_library():
+    """The frontend draws its own SVG; a graph library would be a second
+    place for layout to happen and a megabyte of bundle to carry."""
+    static = ROOT / "neurodesk_astra_view/static"
 
-    assert vendor.stat().st_size > 400_000
-    assert "Copyright (c) 2016-2026, The Cytoscape Consortium" in vendor.read_text(
-        encoding="utf-8"
-    )[:1000]
-    license_text = license_file.read_text(encoding="utf-8")
-    assert "Copyright (c) 2016-2026, The Cytoscape Consortium" in license_text
-    assert "Permission is hereby granted" in license_text
-    assert "The above copyright notice and this permission notice" in license_text
-    assert "OUT OF OR IN CONNECTION WITH THE SOFTWARE" in license_text
+    assert not (static / "vendor").exists()
+    assert sorted(path.name for path in static.iterdir()) == [
+        "index.js",
+        "style.css",
+    ]
+    for path in (ROOT / "neurodesk_astra_view").rglob("*.py"):
+        assert "cytoscape" not in path.read_text(encoding="utf-8").lower(), path
+    javascript = (static / "index.js").read_text(encoding="utf-8")
+    assert "cytoscape" not in javascript.lower()
+    assert "createElementNS" in javascript
 
 
 def test_frontend_renders_version_drift_warnings_before_errors():
@@ -54,21 +59,23 @@ def test_frontend_renders_version_drift_warnings_before_errors():
 
 
 def test_frontend_lays_out_from_the_model_ranks_on_every_filter_change():
-    """The viewer ran one `breadthfirst` pass over the *whole* graph at mount
-    and then only toggled visibility, so every mode inherited one compromise
-    layout and a mode that hid a rank left the band of canvas behind."""
+    """Positions come from the rank/order pairs the Python model computed —
+    one pair per view — and the renderer rebuilds the drawing on every mode
+    switch, cluster expansion, and selection, so each filter re-lays out what
+    it actually draws instead of inheriting one compromise layout."""
     javascript = (ROOT / "neurodesk_astra_view/static/index.js").read_text(
         encoding="utf-8"
     )
 
-    assert 'name: "breadthfirst"' not in javascript
-    assert 'name: "preset"' in javascript
-    assert 'node.data("rank")' in javascript
-    assert 'data("order")' in javascript
-    # applyMode delegates to applyCollapsed, so laying out there covers a mode
-    # switch, a collapse, and a re-render from one place.
-    applied = javascript.index("const applyCollapsed")
-    assert javascript.index("layoutVisible();", applied) > applied
+    # The rank arithmetic lives in layout.py; the renderer only maps it.
+    assert 'mode === "evidence" ? "evidence_rank" : "rank"' in javascript
+    assert 'mode === "evidence" ? "evidence_order" : "order"' in javascript
+    assert "layoutVisible(" in javascript
+    # Every model change redraws through draw(), which re-runs layoutVisible.
+    drawn = javascript.index("const draw = ()")
+    assert javascript.index("layoutVisible(visible", drawn) > drawn
+    for handler in ("applyMode", "applyExpanded", "onSelectedNodeChange"):
+        assert f"const {handler} = () => draw();" in javascript
 
 
 def test_frontend_evidence_mode_filters_instead_of_showing_everything():
@@ -138,7 +145,7 @@ def test_frontend_cleanup_removes_only_its_registered_model_listeners():
 
     for event, callback in (
         ("change:mode", "applyMode"),
-        ("change:collapsed", "applyCollapsed"),
+        ("change:expanded", "applyExpanded"),
         ("change:selected_node", "onSelectedNodeChange"),
     ):
         on_call = f'model.on("{event}", {callback})'
@@ -151,7 +158,7 @@ def test_frontend_cleanup_removes_only_its_registered_model_listeners():
         assert off_call in teardown.group("body"), (
             f"{off_call} must run in the teardown callback"
         )
-    assert "cy.destroy()" in teardown.group("body")
+    assert "root.remove()" in teardown.group("body")
 
 
 def test_viewer_is_installed_without_resolving_its_own_dependencies():

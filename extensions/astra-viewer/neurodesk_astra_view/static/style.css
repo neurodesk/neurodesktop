@@ -1,67 +1,271 @@
 .astra-viewer {
-  --astra-border: #d6dde5;
+  --astra-border: #d5d2cb;
+  --astra-paper: #fffdfa;
+  --astra-ink: #1e1c19;
+  --astra-muted: #8a857a;
 
+  background: var(--astra-paper);
   border: 1px solid var(--astra-border);
-  border-radius: 8px;
-  color: var(--jp-ui-font-color1, #202833);
-  font-family: var(--jp-ui-font-family, system-ui, sans-serif);
-  min-height: 540px;
+  border-radius: 10px;
+  color: var(--astra-ink);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--jp-ui-font-family, "IBM Plex Sans", system-ui, sans-serif);
+  height: 100%;
   overflow: hidden;
+  position: relative;
 }
 
+/* Everything except the canvas keeps its natural height; the canvas takes
+   the rest and scrolls inside, so the graph is reachable in a
+   height-constrained JupyterLab tab. In a notebook output the host has no
+   fixed height, `height: 100%` resolves to auto, and the canvas simply
+   grows. */
 .astra-header,
-.astra-toolbar {
+.astra-toolbar,
+.astra-warnings,
+.astra-notice,
+.astra-errors,
+.astra-gaps { flex: 0 0 auto; }
+
+.astra-header {
   align-items: center;
-  border-bottom: 1px solid var(--astra-border);
+  border-bottom: 1px solid #eae7e0;
   display: flex;
   gap: 10px;
   justify-content: space-between;
-  padding: 8px 12px;
+  min-height: 43px;
+  padding: 9px 14px;
 }
-
-.astra-toolbar { justify-content: flex-start; }
-.astra-toolbar button {
-  background: transparent;
-  border: 1px solid var(--astra-border);
-  border-radius: 5px;
-  cursor: pointer;
-  padding: 4px 10px;
-}
-.astra-toolbar button.active { background: #2b6cb0; color: white; }
-
 .astra-title { align-items: baseline; display: flex; gap: 8px; min-width: 0; }
-.astra-universe { color: #66778a; font-size: 12px; }
+.astra-title strong { font-size: 14px; font-weight: 650; }
+.astra-universe {
+  background: #f6efe2;
+  border: 1px solid #e2d3b4;
+  border-radius: 4px;
+  color: #7a5410;
+  font: 10.5px/1.5 var(--jp-code-font-family, "IBM Plex Mono", monospace);
+  padding: 2px 7px;
+}
 .astra-provenance { align-items: center; display: flex; flex-shrink: 0; gap: 8px; }
-.astra-trust-message { color: #66778a; font-size: 12px; }
+.astra-trust-message { color: var(--astra-muted); font-size: 12px; }
 
 .astra-trust { border-radius: 999px; font-size: 12px; padding: 4px 9px; white-space: nowrap; }
-.astra-trust-spec-only { background: #e2e8f0; }
+.astra-trust-spec-only { background: #e9e6df; }
 .astra-trust-executed-unverified { background: #f6d98b; }
 .astra-trust-executed-verified { background: #a7ddb0; }
 .astra-trust-provenance-mismatch { background: #e99a9a; font-weight: 700; }
 
-.astra-body { display: grid; grid-template-columns: minmax(0, 1fr) 310px; min-height: 450px; }
-.astra-canvas { min-height: 450px; }
-.astra-inspector { border-left: 1px solid var(--astra-border); overflow: auto; padding: 12px; }
-.astra-inspector h3, .astra-inspector h4 { margin: 8px 0; }
-.astra-inspector pre { overflow: auto; white-space: pre-wrap; }
+.astra-toolbar {
+  align-items: center;
+  border-bottom: 1px solid #eae7e0;
+  display: flex;
+  gap: 8px;
+  padding: 8px 14px;
+}
+.astra-toolbar button {
+  background: #fff;
+  border: 1px solid var(--astra-border);
+  border-radius: 5px;
+  color: #5c584f;
+  cursor: pointer;
+  font: 11.5px/1.3 inherit;
+  padding: 4px 10px;
+}
+.astra-toolbar button:hover { background: #faf8f4; border-color: #a8a396; }
+.astra-toolbar button.active { background: #3b7f8c; border-color: #3b7f8c; color: #fff; }
+.astra-toolbar .astra-collapse-all { margin-left: auto; }
+.astra-toolbar .astra-collapse-all[hidden] { display: none; }
+
+.astra-canvas {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 460px;
+  /* The height:100% chain up through JupyterLab's layout does not reliably
+     resolve, and when it fails the canvas would grow to the full drawing
+     height and be clipped by a Lumino ancestor with no scrollbar anywhere.
+     Capping the canvas near the window height guarantees the viewport
+     itself scrolls a tall graph, whatever the ancestors do. */
+  max-height: max(460px, calc(100vh - 260px));
+  max-height: max(460px, calc(100dvh - 260px));
+  overflow: hidden;
+  position: relative;
+}
+.astra-viewport {
+  background: var(--astra-paper);
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  position: relative;
+}
+.astra-svg { display: block; max-width: none; }
+
+.astra-stage-label {
+  fill: var(--astra-muted);
+  font-size: 8.5px;
+  font-weight: 750;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+.astra-node { cursor: default; outline: none; }
+.astra-node.is-cluster { cursor: pointer; }
+.astra-node:focus-visible .astra-focus,
+.astra-node:hover .astra-focus,
+.astra-node.is-selected .astra-focus { opacity: 1; }
+.astra-label {
+  fill: #4a463e;
+  font-size: 11.5px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: var(--astra-paper);
+  stroke-linejoin: round;
+  stroke-width: 4px;
+}
+.astra-decision-label {
+  fill: #7a5410;
+  font: 500 10.5px var(--jp-code-font-family, "IBM Plex Mono", monospace);
+}
+.astra-edge { fill: none; }
+.astra-cluster-box {
+  fill: var(--astra-paper);
+  filter: drop-shadow(0 3px 7px rgba(40, 36, 28, 0.08));
+  stroke: #e2d3b4;
+}
+
+.astra-overlay {
+  background: #fff;
+  border: 1px solid var(--astra-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(40, 36, 28, 0.1);
+  position: absolute;
+  z-index: 5;
+}
+.astra-legend { right: 16px; top: 16px; width: 238px; }
+.astra-legend-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  text-align: left;
+  width: 100%;
+}
+.astra-legend-toggle:hover { background: #faf8f4; }
+.astra-legend-title {
+  color: #5c584f;
+  flex: 1;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.astra-legend-chevron { color: var(--astra-muted); font-size: 10px; }
+.astra-legend-body { border-top: 1px solid #f0ede6; padding: 0 12px 8px; }
+.astra-legend-row {
+  align-items: center;
+  color: #4a463e;
+  display: grid;
+  font-size: 10.5px;
+  gap: 7px;
+  grid-template-columns: 24px 1fr;
+  margin: 5px 0;
+}
+.astra-legend-line { border-top: 2px solid var(--edge); height: 0; }
+.astra-legend-line.dashed { border-top-style: dashed; }
+
+.astra-inspector {
+  bottom: 16px;
+  left: 16px;
+  max-height: 46%;
+  overflow: auto;
+  padding: 12px 14px;
+  width: 320px;
+}
+.astra-inspector-head { align-items: center; display: flex; gap: 7px; margin-bottom: 5px; }
+.astra-inspector-title { font-size: 13px; font-weight: 700; }
+.astra-inspector h3 { font-size: 13px; margin: 0; }
+.astra-inspector h4 { font-size: 11px; margin: 9px 0 4px; }
+.astra-inspector p { font-size: 11.5px; line-height: 1.55; margin: 6px 0 0; }
+.astra-inspector ul { font-size: 11px; margin: 4px 0; padding-left: 18px; }
+.astra-inspector pre {
+  font-size: 10.5px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
 .astra-inspector img { height: auto; max-width: 100%; }
-.astra-inspector table { border-collapse: collapse; font-size: 12px; width: 100%; }
-.astra-inspector th, .astra-inspector td { border: 1px solid var(--astra-border); padding: 3px; }
-.astra-kind { color: #596675; font-size: 12px; text-transform: uppercase; }
-.astra-muted, .astra-path { color: #66778a; font-size: 12px; }
+.astra-inspector table { border-collapse: collapse; font-size: 11px; width: 100%; }
+.astra-inspector th, .astra-inspector td {
+  border: 1px solid var(--astra-border);
+  padding: 3px;
+}
+.astra-kind {
+  border-radius: 3px;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  text-transform: uppercase;
+}
+.astra-meta {
+  color: var(--astra-muted);
+  font-size: 10.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.astra-options { border-top: 1px solid #f0ede6; margin-top: 8px; padding-top: 7px; }
+.astra-option { color: #5c584f; display: flex; font-size: 10.5px; gap: 6px; margin: 4px 0; }
+.astra-option.selected { color: #7a5410; font-weight: 650; }
+.astra-informed {
+  background: #fbf6eb;
+  border: 1px solid #eadbbd;
+  border-radius: 5px;
+  color: #7a5410;
+  font-size: 10.5px;
+  line-height: 1.45;
+  margin-top: 8px;
+  padding: 7px 8px;
+}
+.astra-informed-title {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin-bottom: 3px;
+  text-transform: uppercase;
+}
+.astra-muted, .astra-path { color: var(--astra-muted); font-size: 11px; }
 .astra-metric { font-size: 28px; font-variant-numeric: tabular-nums; }
-.astra-gaps, .astra-errors { border-top: 1px solid var(--astra-border); padding: 9px 12px; }
-.astra-errors { background: #fff0f0; color: #8b1d1d; }
-.astra-warnings { background: #fff7e0; border-bottom: 1px solid var(--astra-border); color: #7a5410; font-size: 13px; padding: 9px 12px; }
+
+.astra-gaps, .astra-errors { border-top: 1px solid var(--astra-border); padding: 9px 14px; }
+.astra-gaps { color: #5c584f; font-size: 11.5px; }
+.astra-gaps summary { cursor: pointer; font-weight: 600; }
+.astra-errors { background: #fff7f5; color: #8b433b; }
+.astra-warnings {
+  background: #fff7e0;
+  border-bottom: 1px solid var(--astra-border);
+  color: #7a5410;
+  font-size: 13px;
+  padding: 9px 12px;
+}
 .astra-warnings summary { cursor: pointer; font-weight: 600; }
 .astra-warnings details > div { margin-top: 4px; }
-.astra-notice { background: #eef2f7; border-bottom: 1px solid var(--astra-border); color: #47576b; font-size: 13px; padding: 9px 12px; }
+.astra-notice {
+  background: #f3f0e9;
+  border-bottom: 1px solid var(--astra-border);
+  color: #5c584f;
+  font-size: 13px;
+  padding: 9px 12px;
+}
 .astra-notice[hidden] { display: none; }
 
-@media (max-width: 760px) {
-  .astra-body { grid-template-columns: 1fr; }
-  .astra-inspector { border-left: 0; border-top: 1px solid var(--astra-border); }
+@media (max-width: 700px) {
+  .astra-overlay { width: 250px; }
+  .astra-legend { display: none; }
+  .astra-inspector { max-height: 38%; }
   .astra-header { align-items: flex-start; flex-direction: column; gap: 6px; }
   .astra-provenance { flex-wrap: wrap; }
 }

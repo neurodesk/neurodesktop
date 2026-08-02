@@ -402,7 +402,7 @@ class AstraDocumentContent extends Widget {
         graph,
         mode,
         selected_node: null,
-        collapsed: []
+        expanded: []
       });
       const cleanup = viewer.render({ model: this._model, el: this._host });
       this._cleanup = typeof cleanup === 'function' ? cleanup : null;

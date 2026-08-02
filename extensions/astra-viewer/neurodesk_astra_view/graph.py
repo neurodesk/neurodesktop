@@ -11,12 +11,14 @@ from .gaps import detect_gaps
 from .layout import assign_layout
 from .manifest import RunManifestError, load_run, spec_only_trust
 from .preview import PreviewError, preview_artifact
+from .projection import project_graph
 
 
 def _invalid(message: str) -> dict[str, Any]:
     return {
         "nodes": [],
         "edges": [],
+        "projection": {"nodes": [], "edges": []},
         "gaps": [],
         "warnings": [],
         "errors": [message],
@@ -386,21 +388,23 @@ def _build_valid_graph(project: dict[str, Any], run_path: str | Path | None):
     root_analysis = next(
         (item for item in project["analyses"] if item["parent"] is None), None
     )
+    meta = {
+        "valid": True,
+        "schema_version": project["schema_version"],
+        "universe_id": project["universe_id"],
+        "analysis_name": root_analysis["label"] if root_analysis else None,
+        "baseline": project["baseline"],
+        "run_source": overlay["source"] if overlay else None,
+    }
     return {
         "nodes": nodes,
         "edges": edges,
+        "projection": project_graph(nodes, edges, meta),
         "gaps": gaps,
         "warnings": list(project.get("version_warnings") or []),
         "errors": [],
         "trust": overlay["trust"] if overlay else spec_only_trust(),
-        "meta": {
-            "valid": True,
-            "schema_version": project["schema_version"],
-            "universe_id": project["universe_id"],
-            "analysis_name": root_analysis["label"] if root_analysis else None,
-            "baseline": project["baseline"],
-            "run_source": overlay["source"] if overlay else None,
-        },
+        "meta": meta,
     }
 
 

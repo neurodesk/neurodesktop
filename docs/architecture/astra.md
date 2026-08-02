@@ -4,7 +4,7 @@ description: The astra/lc command-line tools, the ASTRA agent skill for the
   bundled coding agents, and the read-only provenance viewer
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-07-31"
+last-reviewed: "2026-08-01"
 ---
 
 # ASTRA integration
@@ -141,21 +141,36 @@ retired spelling has been adopted, semantic validation runs on the resolved tree
 instead of the raw file, since the released validator would otherwise re-read
 the retired spelling straight off disk.
 
-The frontend concatenates the checked-in Cytoscape.js 3.34.0 distribution with
-the widget renderer at import time. It has no npm build, CDN import, fetch, or
-other runtime network path. Flow, Decisions, and Evidence modes filter the same
-Cytoscape instance, preserving each node's semantic rank and the selection.
-Prior Insights, findings, and their Evidence sources remain distinct nodes and
-only schema-authoritative links are drawn.
+The drawn picture is a *presentation projection* of that semantic graph,
+derived by `projection.py` so a complex workflow stays readable: one `stage`
+node stands in for each analysis (inputs flow into the stage, the stage
+produces its outputs, so input×output cross products collapse into paths);
+`from`-aliased inputs fold into their canonical source so a re-exported
+record draws once, inputs are grouped by id family and outputs by (type,
+recipe family, decision contract) once they would crowd a row, with a
+compaction pass that bounds the drawn output nodes; each stage's decisions
+fold into one collapsed, click-to-expand `decision-cluster` whose members
+carry their selected values;
+evidence folds into the finding or insight it backs; and a synthetic `result`
+node anchors the bottom, concluded by the findings. Every projection node
+carries `members` — the semantic node ids it stands for — and the inspector
+resolves those for run facts, recipes, artifacts, and previews.
 
-Node placement comes from `layout.py`, which ranks the graph by longest path so
+The frontend is a self-contained SVG renderer (`static/index.js`): no
+vendored graph library, no npm build, CDN import, fetch, or other runtime
+network path. Flow draws the dataflow skeleton, Decisions adds the decision
+clusters, and Evidence swaps to the claims subgraph — each mode is a strict
+filter, and the renderer rebuilds the drawing on every mode switch, cluster
+expansion, and selection, so each filter re-lays out exactly what it draws.
+
+Node placement comes from `layout.py`, which ranks a graph by longest path so
 a producer always outranks its consumers, pushes a node nothing feeds down to
 sit above the earliest thing it does feed, and orders each rank by barycenter
-to reduce crossings. The renderer turns that `rank`/`order` pair into `preset`
-coordinates, compacting rows over whatever the active mode draws. No Cytoscape
-layout algorithm is used: the vendored bundle ships none that layers a DAG, and
-`breadthfirst` ranks by hop count, which draws dataflow arrows backwards along
-a row.
+to reduce crossings. `projection.py` runs it once per view — a `rank`/`order`
+pair for the dataflow-centred modes and an `evidence_rank`/`evidence_order`
+pair for the Evidence subgraph — and the renderer only turns the active pair
+into coordinates, compacting rows over the visible nodes and placing decision
+clusters beside their stage. No layout arithmetic lives in the frontend.
 
 Without a run, the graph is grey `spec-only`. Lightcone manifests, `lc status`
 output, and Workflow Run RO-Crates are amber unless passing verification is

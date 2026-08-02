@@ -79,11 +79,7 @@ def test_a_symlink_out_of_the_root_is_rejected(tmp_path, serverext):
 def test_served_frontend_is_exactly_the_anywidget_frontend(serverext):
     """One frontend, two transports: nothing for the two viewers to drift on."""
     static = VIEWER / "neurodesk_astra_view/static"
-    expected_esm = (
-        (static / "vendor/cytoscape.min.js").read_text(encoding="utf-8")
-        + "\n"
-        + (static / "index.js").read_text(encoding="utf-8")
-    )
+    expected_esm = (static / "index.js").read_text(encoding="utf-8")
 
     assets = serverext._assets()
     assert assets["esm"][1] == expected_esm

@@ -1,12 +1,11 @@
 """Semantic layer assignment for the ASTRA provenance graph.
 
-Cytoscape's built-in ``breadthfirst`` layers a node by its hop count from the
-nearest root, which puts a producer and its consumer on the same row whenever
-they sit the same distance from *different* roots — the graph then draws
+Layering by hop count from the nearest root — what generic breadth-first
+graph layouts do — puts a producer and its consumer on the same row whenever
+they sit the same distance from *different* roots, so the graph draws
 dataflow arrows pointing backwards along a row, claiming an ordering it
-immediately contradicts. Its sibling ordering is discovery order too, so a
-decision that parameterizes several outputs crosses its own edges by
-construction.
+immediately contradicts. Discovery-order siblings are as bad: a decision that
+parameterizes several outputs crosses its own edges by construction.
 
 This module answers both with a rank and an order per node. Every ASTRA edge
 already points from the earlier node to the later one — a producer to its
@@ -15,11 +14,10 @@ decision it justifies, evidence to the claim it supports, an output to the
 artifact it publishes — so a single longest-path pass over the whole edge set
 lays the graph out correctly, and barycenter sweeps then order each rank.
 
-The renderer turns the pair into preset positions. Keeping the arithmetic here
-rather than in the frontend is what makes it testable, and it means the
-vendored Cytoscape bundle needs no layout extension: it ships only
-``breadthfirst``, ``concentric``, ``grid``, ``circle``, ``cose``, and
-``preset``.
+The SVG renderer only turns the pair into coordinates, compacting rows over
+whatever the active mode draws. Keeping the arithmetic here rather than in
+the frontend is what makes it testable; projection.py runs it once per view
+over that view's subgraph.
 """
 
 from __future__ import annotations
@@ -148,7 +146,8 @@ def assign_layout(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> N
     """Give every placed node a ``rank`` and an ``order``, in place.
 
     Compound ``analysis`` containers are sized by their children, so they are
-    ranked ``None`` and the renderer leaves them to Cytoscape.
+    ranked ``None``; the projection stands a placed ``stage`` node in for
+    each of them instead of drawing the container.
     """
     placed = [node for node in nodes if node["kind"] != _CONTAINER_KIND]
     ids = [node["id"] for node in placed]

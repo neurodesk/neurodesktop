@@ -30,9 +30,9 @@
 - When changing `print_access_url.sh` (the end-of-startup access-link banner)
   or how `before_notebook.sh` launches it, run `pytest
   tests/unit/test_print_access_url.py` from a checkout.
-- When changing the ASTRA viewer adapter, graph/gap model, layout ranks,
-  previews, widget, vendored Cytoscape.js, run-evidence ingestion, or package
-  pins, run `pytest tests/unit/test_astra_view_graph.py
+- When changing the ASTRA viewer adapter, graph/gap model, presentation
+  projection, layout ranks, previews, widget, SVG renderer, run-evidence
+  ingestion, or package pins, run `pytest tests/unit/test_astra_view_graph.py
   tests/unit/test_astra_view_packaging.py` from a checkout and `pytest
   /opt/tests/test_astra_view_image.py` in the built image. Keep every read path
   confined and keep `adapter.py` as the only released-schema-aware viewer
@@ -42,12 +42,15 @@
   every adoption must surface in `graph["warnings"]`; keep that confined to
   top-level keys and to references with no other possible target, so an
   authoring mistake inside a decision or output stays an error.
-  Node positions come from the `rank`/`order` pair `layout.py`
-  computes, never from a Cytoscape layout algorithm: the bundle ships no
-  layered layout, and `breadthfirst` ranks by hop count, which draws dataflow
-  arrows backwards along a row. The renderer must re-lay out on every filter
-  change, and each viewer mode must actually filter — a mode that shows
-  everything is indistinguishable from the one before it. `tests/fixtures/astra-bet` is the single canonical worked ASTRA spec:
+  The drawn graph is the presentation projection `projection.py` derives from
+  the semantic graph (stages, grouped inputs/outputs, per-stage decision
+  clusters, folded evidence, a synthetic result node); keep the frontend a
+  self-contained SVG renderer with no vendored graph library, and keep all
+  layout arithmetic in Python: node positions come from the per-view
+  `rank`/`order` pairs `projection.py` computes through `layout.py`, never
+  from the frontend. The renderer must re-lay out on every filter change, and
+  each viewer mode must actually filter — a mode that shows everything is
+  indistinguishable from the one before it. `tests/fixtures/astra-bet` is the single canonical worked ASTRA spec:
   the unit tests read it from the checkout, the image tests validate its
   installed copy at `/opt/neurodesktop/examples/astra-bet`, and users copy that
   installed copy as a starting point — do not fork a second source copy.

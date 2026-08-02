@@ -29,6 +29,7 @@ from neurodesk_astra_view.graph import build_graph  # noqa: E402
 from neurodesk_astra_view.layout import assign_layout  # noqa: E402
 from neurodesk_astra_view.manifest import _trust_label, spec_only_trust  # noqa: E402
 from neurodesk_astra_view.preview import PreviewError, preview_artifact  # noqa: E402
+from neurodesk_astra_view.projection import project_graph  # noqa: E402
 
 
 FIXTURES = repo_path("tests/fixtures/astra-viewer")
@@ -360,6 +361,243 @@ def test_a_cycle_is_ranked_rather_than_hung_on():
 
     assert set(placed) == {"a", "b", "c"}
     assert all(isinstance(rank, int) for rank, _ in placed.values())
+
+
+# ---------------------------------------------------------------------------
+# Presentation projection
+#
+# The drawn graph is derived from the semantic one: stages, grouped inputs and
+# outputs, one expandable decision cluster per stage, evidence folded into the
+# claim it backs, and a synthetic result node. See projection.py.
+
+
+def _view(projection, identifier):
+    return next(node for node in projection["nodes"] if node["id"] == identifier)
+
+
+def test_projection_draws_stages_clusters_and_a_result():
+    graph = build_graph(BET / "astra.yaml", BET / "universes/bet-f-0-5.yaml")
+    projection = graph["projection"]
+    kinds = {node["kind"] for node in projection["nodes"]}
+    edge_kinds = {edge["kind"] for edge in projection["edges"]}
+
+    assert {"stage", "input", "output", "decision-cluster", "decision",
+            "insight", "finding", "result"} <= kinds
+    assert {"flow", "produces", "configures", "informs", "supports",
+            "concludes"} <= edge_kinds
+
+    # The stage stands in for the analysis: its inputs flow into it and it
+    # produces its outputs, so cross products collapse into paths.
+    assert any(
+        edge["kind"] == "flow" and edge["target"] == "view:stage:root"
+        for edge in projection["edges"]
+    )
+    assert any(
+        edge["kind"] == "produces" and edge["source"] == "view:stage:root"
+        for edge in projection["edges"]
+    )
+
+    # The cluster is collapsed by default; its member carries the selected
+    # value so the collapsed picture still answers "what was chosen".
+    cluster = _view(projection, "view:decisions:analysis:root")
+    assert cluster["label"] == "1 decision"
+    member = _view(projection, cluster["members"][0])
+    assert member["label"].endswith("= f = 0.5")
+    assert member["parent"] == cluster["id"]
+
+    result = _view(projection, "view:result")
+    assert result["label"].startswith("BET threshold sensitivity")
+    assert any(
+        edge["kind"] == "concludes" and edge["target"] == "view:result"
+        for edge in projection["edges"]
+    )
+
+
+def test_projection_folds_evidence_into_the_claim_it_backs():
+    graph = build_graph(BET / "astra.yaml", BET / "universes/bet-f-0-5.yaml")
+    projection = graph["projection"]
+
+    assert not any(node["kind"] == "evidence" for node in projection["nodes"])
+    finding = _view(projection, "view:finding:root/boundary_is_inspectable")
+    assert any(line.startswith("evidence:") for line in finding["meta"])
+    assert any(member.startswith("evidence:") for member in finding["members"])
+    insight = _view(
+        projection, "view:insight:root/bet_threshold_affects_boundary"
+    )
+    assert "evidence: 10.1002/hbm.10062" in insight["meta"]
+
+
+def test_projection_primary_edges_point_down_their_view_ranks():
+    """The projection ships one rank/order pair per view, both from
+    layout.py, so each mode's picture keeps arrows pointing forward."""
+    graph = build_graph(BET / "astra.yaml", BET / "universes/bet-f-0-5.yaml")
+    projection = graph["projection"]
+    rank = {node["id"]: node.get("rank") for node in projection["nodes"]}
+    evidence = {
+        node["id"]: node.get("evidence_rank") for node in projection["nodes"]
+    }
+
+    for edge in projection["edges"]:
+        if edge["kind"] in ("flow", "produces", "supports", "concludes"):
+            assert rank[edge["source"]] < rank[edge["target"]], edge
+        if (
+            edge["kind"] in ("informs", "configures", "supports", "concludes")
+            and evidence[edge["source"]] is not None
+            and evidence[edge["target"]] is not None
+        ):
+            assert evidence[edge["source"]] < evidence[edge["target"]], edge
+
+    # Decision clusters are placed beside their stage by the renderer, never
+    # ranked into the dataflow rows.
+    cluster = _view(projection, "view:decisions:analysis:root")
+    assert cluster["rank"] is None and cluster["target"] == "view:stage:root"
+
+
+def _synthetic_project(inputs, outputs):
+    nodes = [
+        {
+            "id": "analysis:root",
+            "kind": "analysis",
+            "parent": None,
+            "label": "Pipeline",
+            "description": None,
+            "status": "unknown",
+        }
+    ]
+    edges = []
+    for index, local in enumerate(inputs):
+        nodes.append(
+            {
+                "id": f"input:root/{local}",
+                "kind": "input",
+                "parent": "analysis:root",
+                "label": local,
+                "sub_kind": "data",
+                "status": "unknown",
+            }
+        )
+    for local, recipe in outputs:
+        identifier = f"output:root/{local}"
+        nodes.append(
+            {
+                "id": identifier,
+                "kind": "output",
+                "parent": "analysis:root",
+                "label": local,
+                "sub_kind": "dataset",
+                "recipe": recipe,
+                "selected_decisions": [],
+                "status": "unknown",
+            }
+        )
+        for local_input in inputs:
+            edges.append(
+                {
+                    "id": f"dataflow:input:root/{local_input}->{identifier}",
+                    "kind": "dataflow",
+                    "source": f"input:root/{local_input}",
+                    "target": identifier,
+                }
+            )
+    projection = project_graph(
+        nodes, edges, {"analysis_name": "Pipeline", "universe_id": "baseline"}
+    )
+    return projection
+
+
+def test_projection_groups_crowded_outputs_by_recipe_family():
+    """A complex workflow's fan of same-recipe outputs draws as one node."""
+    projection = _synthetic_project(
+        ["catalog"],
+        [(f"xi_lrg{index}", "python src/compute_xi.py {output}") for index in range(6)],
+    )
+
+    groups = [n for n in projection["nodes"] if n["kind"] == "output-group"]
+    assert len(groups) == 1
+    assert len(groups[0]["members"]) == 6
+    assert groups[0]["label"].endswith("×6")
+    assert not any(node["kind"] == "output" for node in projection["nodes"])
+    assert any(
+        edge["kind"] == "produces" and edge["target"] == groups[0]["id"]
+        for edge in projection["edges"]
+    )
+    # With no findings, the terminal outputs conclude in the result.
+    assert any(
+        edge["kind"] == "concludes" and edge["source"] == groups[0]["id"]
+        for edge in projection["edges"]
+    )
+
+
+def test_projection_groups_crowded_inputs_by_family():
+    projection = _synthetic_project(
+        [f"cov_lrg{index}" for index in range(10)],
+        [("xi", "python src/compute_xi.py {output}")],
+    )
+
+    groups = [n for n in projection["nodes"] if n["kind"] == "input-group"]
+    assert len(groups) == 1
+    assert len(groups[0]["members"]) == 10
+    assert groups[0]["label"].endswith("×10")
+    # The whole family flows into the stage once, not ten times.
+    flows = [
+        edge
+        for edge in projection["edges"]
+        if edge["kind"] == "flow" and edge["source"] == groups[0]["id"]
+    ]
+    assert [edge["target"] for edge in flows] == ["view:stage:root"]
+
+
+def test_projection_folds_alias_inputs_into_their_canonical_source():
+    """A record a child scope re-exports draws once, not once per scope."""
+    nodes = [
+        {"id": "analysis:root", "kind": "analysis", "parent": None,
+         "label": "Pipeline", "description": None, "status": "unknown"},
+        {"id": "analysis:root/child", "kind": "analysis",
+         "parent": "analysis:root", "label": "Child", "description": None,
+         "status": "unknown"},
+        {"id": "input:root/catalog", "kind": "input", "parent": "analysis:root",
+         "label": "Catalog", "sub_kind": "data", "status": "unknown"},
+        {"id": "input:root/child/catalog", "kind": "input",
+         "parent": "analysis:root/child", "label": "Catalog", "sub_kind": "data",
+         "status": "unknown"},
+        {"id": "output:root/child/xi", "kind": "output",
+         "parent": "analysis:root/child", "label": "Xi", "sub_kind": "dataset",
+         "recipe": "python src/xi.py", "selected_decisions": [],
+         "status": "unknown"},
+    ]
+    edges = [
+        {"id": "a", "kind": "dataflow", "source": "input:root/catalog",
+         "target": "input:root/child/catalog"},
+        {"id": "b", "kind": "dataflow", "source": "input:root/child/catalog",
+         "target": "output:root/child/xi"},
+    ]
+
+    projection = project_graph(
+        nodes, edges, {"analysis_name": "Pipeline", "universe_id": "baseline"}
+    )
+
+    inputs = [node for node in projection["nodes"] if node["kind"] == "input"]
+    assert [node["id"] for node in inputs] == ["view:input:root/catalog"]
+    # The canonical input flows into the consuming stage directly.
+    assert any(
+        edge["kind"] == "flow"
+        and edge["source"] == "view:input:root/catalog"
+        and edge["target"] == "view:stage:root/child"
+        for edge in projection["edges"]
+    )
+
+
+def test_a_small_analysis_is_not_grouped():
+    """Grouping exists for crowded pictures; the worked example keeps every
+    output distinct."""
+    graph = build_graph(BET / "astra.yaml", BET / "universes/bet-f-0-5.yaml")
+    projection = graph["projection"]
+
+    assert not any(
+        node["kind"] in ("input-group", "output-group", "finding-group")
+        for node in projection["nodes"]
+    )
+    assert sum(node["kind"] == "output" for node in projection["nodes"]) == 4
 
 
 def test_external_analysis_and_child_universe_are_resolved_with_qualified_ids():

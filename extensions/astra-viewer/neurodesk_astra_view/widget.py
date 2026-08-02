@@ -11,11 +11,7 @@ from .graph import build_graph
 
 
 _STATIC = Path(__file__).with_name("static")
-_ESM = (
-    (_STATIC / "vendor" / "cytoscape.min.js").read_text(encoding="utf-8")
-    + "\n"
-    + (_STATIC / "index.js").read_text(encoding="utf-8")
-)
+_ESM = (_STATIC / "index.js").read_text(encoding="utf-8")
 _CSS = (_STATIC / "style.css").read_text(encoding="utf-8")
 
 
@@ -30,7 +26,8 @@ class AstraView(anywidget.AnyWidget):
         sync=True
     )
     selected_node = traitlets.Unicode(allow_none=True, default_value=None).tag(sync=True)
-    collapsed = traitlets.List(traitlets.Unicode(), default_value=[]).tag(sync=True)
+    #: Decision clusters the reader has expanded; everything starts collapsed.
+    expanded = traitlets.List(traitlets.Unicode(), default_value=[]).tag(sync=True)
 
     def __init__(
         self,

@@ -12,11 +12,10 @@ extension answers two questions for it over authenticated HTTP:
     project root) and turns parse failures into a renderable invalid graph.
 
 ``GET /neurodesk-astra-view/asset/(esm|css)``
-    The same frontend the anywidget inlines: the vendored Cytoscape bundle
-    concatenated with ``static/index.js``, and ``static/style.css``. Serving
-    them from this package is what keeps the file-browser viewer and the
-    notebook widget pixel-for-pixel the same code with no second copy to
-    drift.
+    The same frontend the anywidget inlines: the self-contained SVG renderer
+    in ``static/index.js`` and ``static/style.css``. Serving them from this
+    package is what keeps the file-browser viewer and the notebook widget
+    pixel-for-pixel the same code with no second copy to drift.
 """
 
 from __future__ import annotations
@@ -35,11 +34,7 @@ _STATIC = Path(__file__).with_name("static")
 
 def _assets() -> dict[str, tuple[str, str]]:
     """The two frontend assets, read fresh so tests see the shipped files."""
-    esm = (
-        (_STATIC / "vendor" / "cytoscape.min.js").read_text(encoding="utf-8")
-        + "\n"
-        + (_STATIC / "index.js").read_text(encoding="utf-8")
-    )
+    esm = (_STATIC / "index.js").read_text(encoding="utf-8")
     css = (_STATIC / "style.css").read_text(encoding="utf-8")
     return {
         "esm": ("text/javascript; charset=utf-8", esm),

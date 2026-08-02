@@ -1,3 +1,71 @@
+/**
+ * SVG renderer for the ASTRA provenance projection.
+ *
+ * The Python model ships two graphs: the semantic graph (one node per
+ * declared record — the inspector's source of truth) and a presentation
+ * projection (stages, grouped inputs/outputs, decision clusters, a synthetic
+ * result node) built by projection.py. This file draws the projection and
+ * never re-derives it: grouping and layout arithmetic live in Python where
+ * they are testable, and every node arrives with a rank/order pair per view.
+ *
+ * The renderer rebuilds the SVG from scratch on every mode change, cluster
+ * expansion, and selection, so each filter re-lays out what it actually
+ * draws — rows are compacted over the visible nodes, never inherited from a
+ * fuller picture.
+ */
+
+const RANK_GAP = 110;
+const COLUMN_GAP = 240;
+const MARGIN = 62;
+const MIN_HEIGHT = 420;
+
+const COLORS = {
+  stage: "#3b7f8c",
+  input: "#3563a8",
+  "input-group": "#3563a8",
+  output: "#2e7d5b",
+  "output-group": "#2e7d5b",
+  "decision-cluster": "#b07818",
+  decision: "#b07818",
+  finding: "#7a4fae",
+  "finding-group": "#7a4fae",
+  insight: "#8c72a8",
+  result: "#26241f",
+};
+
+const EDGE_STYLE = {
+  flow: { color: "#9b978e", width: 1.45 },
+  produces: { color: "#9b978e", width: 1.45 },
+  configures: { color: "#b07818", dash: "3 4", width: 1.35 },
+  supports: { color: "#7a4fae", dash: "6 3", width: 1.45 },
+  informs: { color: "#8c72a8", dash: "1 3", width: 1.3 },
+  concludes: { color: "#7a4fae", width: 1.8 },
+};
+
+const STATUS_RING = [
+  [/verif/, "#2f855a"],
+  [/fail|mismatch/, "#c53030"],
+  [/executed|run/, "#b7791f"],
+];
+
+/** Base node kinds drawn by the dataflow-centred views. */
+const BASE_KINDS = [
+  "stage",
+  "input",
+  "input-group",
+  "output",
+  "output-group",
+  "finding",
+  "finding-group",
+  "result",
+];
+
+/** Edge kinds drawn by the dataflow-centred views. */
+const BASE_EDGE_KINDS = ["flow", "produces", "supports", "concludes"];
+
+/** Claim-carrying kinds; the Evidence mode is built around these. */
+const CLAIM_KINDS = ["insight", "finding", "finding-group"];
+
 function appendText(parent, tag, text, className) {
   const element = document.createElement(tag);
   if (className) element.className = className;
@@ -5,6 +73,187 @@ function appendText(parent, tag, text, className) {
   parent.appendChild(element);
   return element;
 }
+
+function svgEl(name, attrs = {}) {
+  const element = document.createElementNS("http://www.w3.org/2000/svg", name);
+  for (const [key, value] of Object.entries(attrs)) {
+    element.setAttribute(key, String(value));
+  }
+  return element;
+}
+
+function shortLabel(label, max = 38) {
+  const text = label == null ? "" : String(label);
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+function statusRing(status) {
+  const value = status == null ? "" : String(status);
+  const entry = STATUS_RING.find(([pattern]) => pattern.test(value));
+  return entry ? entry[1] : null;
+}
+
+// ---------------------------------------------------------------------------
+// Mode filters
+//
+// A mode that shows everything is indistinguishable from the one before it,
+// so each mode is a strict filter over the projection: `flow` draws the
+// dataflow skeleton, `decisions` adds the decision clusters, `evidence`
+// swaps to the claims subgraph the evidence_rank layout covers.
+
+function visibleProjection(projection, mode, expanded) {
+  const nodes = projection.nodes.filter((node) => {
+    if (mode === "evidence") return node.evidence_rank != null;
+    if (node.kind === "decision-cluster") return mode === "decisions";
+    if (node.kind === "decision") {
+      return mode === "decisions" && expanded.has(node.parent);
+    }
+    if (node.kind === "insight") return false;
+    return node.rank != null;
+  });
+  const visible = new Set(nodes.map((node) => node.id));
+  const edges = projection.edges.filter((edge) => {
+    if (!visible.has(edge.source) || !visible.has(edge.target)) return false;
+    if (mode === "evidence") {
+      return ["informs", "configures", "supports", "concludes"].includes(
+        edge.kind,
+      );
+    }
+    if (edge.kind === "configures") {
+      if (edge.parent) return expanded.has(edge.parent);
+      // The cluster's own edge to its stage disappears once it is expanded:
+      // the member edges say more.
+      return !expanded.has(edge.source);
+    }
+    return BASE_EDGE_KINDS.includes(edge.kind);
+  });
+  return { nodes, edges };
+}
+
+// ---------------------------------------------------------------------------
+// Geometry
+//
+// Positions come from the rank/order pair layout.py computed for the active
+// view; this function only turns the pair into coordinates, compacting rows
+// over what is drawn. Decision clusters sit beside their stage and expand
+// into a box of rows — presentation relative to a ranked node, not layout.
+
+function layoutVisible(visible, mode, expanded) {
+  const rankKey = mode === "evidence" ? "evidence_rank" : "rank";
+  const orderKey = mode === "evidence" ? "evidence_order" : "order";
+  const ranked = visible.nodes.filter((node) => node[rankKey] != null);
+  const rows = new Map();
+  ranked.forEach((node) => {
+    const rank = node[rankKey];
+    if (!rows.has(rank)) rows.set(rank, []);
+    rows.get(rank).push(node);
+  });
+  const leftGutter = mode === "decisions" ? 300 : 60;
+  // A crowded rank breaks into staggered sub-rows: side labels need ~230px
+  // each, so past a handful per row the labels collide long before the dots
+  // do. Stacking order-adjacent nodes into short columns keeps every label
+  // readable, and the canvas widens to fit the widest rank instead of
+  // clamping nodes into a pile at the edges — the viewport scrolls anyway.
+  const SUBROW_GAP = 34;
+  const MAX_PER_SUBROW = 6;
+  const plans = [...rows.keys()]
+    .sort((left, right) => left - right)
+    .map((rank) => {
+      const members = rows
+        .get(rank)
+        .sort((left, right) => left[orderKey] - right[orderKey]);
+      const subrows = Math.ceil(members.length / MAX_PER_SUBROW);
+      return { members, subrows, columns: Math.ceil(members.length / subrows) };
+    });
+  const widestColumns = Math.max(1, ...plans.map((plan) => plan.columns));
+  const width = Math.max(720, leftGutter + (widestColumns - 1) * COLUMN_GAP + 340);
+  const positions = new Map();
+  let bandY = MARGIN;
+  plans.forEach(({ members, subrows, columns }) => {
+    const gap =
+      columns > 1
+        ? Math.min(COLUMN_GAP, (width - leftGutter - 340) / (columns - 1))
+        : COLUMN_GAP;
+    const span = (columns - 1) * gap;
+    const start = leftGutter + (width - leftGutter - span) / 2;
+    const labelMax = subrows > 1 ? 28 : 38;
+    members.forEach((node, index) => {
+      const column = Math.floor(index / subrows);
+      const subrow = index % subrows;
+      positions.set(node.id, {
+        node,
+        labelMax,
+        x: Math.max(46, start + column * gap + subrow * 16),
+        y: bandY + subrow * SUBROW_GAP,
+      });
+    });
+    bandY += RANK_GAP + (subrows - 1) * SUBROW_GAP;
+  });
+
+  const clusterBoxes = [];
+  visible.nodes
+    .filter((node) => node.kind === "decision-cluster")
+    .forEach((cluster) => {
+      const target = positions.get(cluster.target);
+      const anchorX = target ? target.x : leftGutter;
+      const anchorY = target ? target.y : MARGIN;
+      const members = visible.nodes.filter(
+        (node) => node.parent === cluster.id,
+      );
+      if (!expanded.has(cluster.id)) {
+        positions.set(cluster.id, {
+          node: cluster,
+          x: Math.max(38, anchorX - 190),
+          y: anchorY,
+        });
+        return;
+      }
+      const rowHeight = 27;
+      const boxHeight = 42 + members.length * rowHeight;
+      const boxY = Math.max(18, anchorY - boxHeight / 2);
+      const boxX = Math.max(20, anchorX - 470);
+      clusterBoxes.push({ x: boxX, y: boxY, width: 280, height: boxHeight });
+      positions.set(cluster.id, { node: cluster, x: boxX + 16, y: boxY + 20 });
+      members.forEach((member, index) => {
+        positions.set(member.id, {
+          node: member,
+          x: boxX + 24,
+          y: boxY + 49 + index * rowHeight,
+        });
+      });
+    });
+
+  const height = Math.max(
+    MIN_HEIGHT,
+    ...[...positions.values()].map((entry) => entry.y + 92),
+    ...clusterBoxes.map((box) => box.y + box.height + 30),
+  );
+  return { width, height, positions, clusterBoxes };
+}
+
+function edgePath(source, target) {
+  const radius = source.node.kind.startsWith("decision") ? 9 : 13;
+  const targetRadius = target.node.kind.startsWith("decision") ? 9 : 13;
+  if (Math.abs(source.y - target.y) < 35) {
+    const direction = source.x <= target.x ? 1 : -1;
+    return `M ${source.x + direction * radius} ${source.y} L ${
+      target.x - direction * targetRadius
+    } ${target.y}`;
+  }
+  const downward = target.y >= source.y;
+  const y1 = source.y + (downward ? radius : -radius);
+  const y2 = target.y - (downward ? targetRadius : -targetRadius);
+  const mid = y1 + (y2 - y1) * 0.52;
+  return `M ${source.x} ${y1} C ${source.x} ${mid}, ${target.x} ${mid}, ${target.x} ${y2}`;
+}
+
+// ---------------------------------------------------------------------------
+// Inspector
+//
+// The projection node names what is drawn; its `members` name the semantic
+// records behind it, and those carry the run facts, recipes, artifacts, and
+// previews. A single-record node inspects that record in full; a group lists
+// its members.
 
 function renderPreview(parent, preview) {
   if (!preview) return;
@@ -19,7 +268,11 @@ function renderPreview(parent, preview) {
     appendText(
       section,
       "div",
-      `${typeof preview.value === "object" ? JSON.stringify(preview.value) : preview.value}${preview.units ? ` ${preview.units}` : ""}`,
+      `${
+        typeof preview.value === "object"
+          ? JSON.stringify(preview.value)
+          : preview.value
+      }${preview.units ? ` ${preview.units}` : ""}`,
       "astra-metric",
     );
   } else if (preview.kind === "table") {
@@ -37,19 +290,17 @@ function renderPreview(parent, preview) {
     appendText(section, "pre", preview.text, "astra-report");
   }
   if (preview.path) {
-    appendText(section, "div", `${preview.path} · ${preview.size} bytes`, "astra-path");
+    appendText(
+      section,
+      "div",
+      `${preview.path} · ${preview.size} bytes`,
+      "astra-path",
+    );
   }
 }
 
-function renderInspector(panel, node) {
-  panel.replaceChildren();
-  if (!node) {
-    appendText(panel, "p", "Select a node to inspect its ASTRA and run facts.", "astra-muted");
-    return;
-  }
-  appendText(panel, "h3", node.label || node.id);
-  appendText(panel, "div", node.kind, "astra-kind");
-  if (node.description) appendText(panel, "p", node.description);
+function renderSemanticDetails(panel, node) {
+  if (!node) return;
   if (node.recipe) {
     appendText(panel, "h4", "Resolved recipe");
     appendText(panel, "pre", node.recipe);
@@ -58,15 +309,11 @@ function renderInspector(panel, node) {
     appendText(panel, "h4", "Selected decisions");
     const list = document.createElement("ul");
     node.selected_decisions.forEach((item) => {
-      appendText(list, "li", `${item.decision_id}: ${item.value == null ? "unresolved" : item.value}`);
-    });
-    panel.appendChild(list);
-  }
-  if ((node.options || []).length) {
-    appendText(panel, "h4", "Options");
-    const list = document.createElement("ul");
-    node.options.forEach((item) => {
-      appendText(list, "li", `${item.selected ? "✓ " : ""}${item.label}`);
+      appendText(
+        list,
+        "li",
+        `${item.decision_id}: ${item.value == null ? "unresolved" : item.value}`,
+      );
     });
     panel.appendChild(list);
   }
@@ -84,7 +331,12 @@ function renderInspector(panel, node) {
   }
   if (node.artifact) {
     appendText(panel, "h4", "Artifact");
-    appendText(panel, "div", `${node.artifact.path} · ${node.artifact.sha256 || "hash unavailable"}`, "astra-path");
+    appendText(
+      panel,
+      "div",
+      `${node.artifact.path} · ${node.artifact.sha256 || "hash unavailable"}`,
+      "astra-path",
+    );
     renderPreview(panel, node.artifact.preview);
   }
   if ((node.warnings || []).length) {
@@ -95,45 +347,117 @@ function renderInspector(panel, node) {
   }
 }
 
-/** Node kinds that carry a claim; the Evidence mode is built around these. */
-const CLAIM_KINDS = ["insight", "finding", "evidence"];
-/** Edges that attach a claim to what it rests on. */
-const CLAIM_EDGE_KINDS = ["supports", "claims", "justifies"];
-/** Classes that take an element out of the drawing, and so out of the layout. */
-const HIDDEN_CLASSES = ["astra-hidden", "astra-collapsed", "astra-empty"];
+function renderInspector(panel, view, context) {
+  panel.replaceChildren();
+  if (!view) {
+    appendText(panel, "h3", "Hover or select a node");
+    appendText(
+      panel,
+      "p",
+      "Its provenance role, selected option, run facts, and result preview appear here.",
+      "astra-muted",
+    );
+    return panel;
+  }
+  const head = appendText(panel, "div", "", "astra-inspector-head");
+  const chip = appendText(head, "span", view.kind.replace("-group", ""), "astra-kind");
+  chip.style.background = COLORS[view.kind] || "#5c584f";
+  appendText(head, "span", view.label, "astra-inspector-title");
+  if (view.description) appendText(panel, "p", view.description);
+  (view.meta || []).forEach((line) => appendText(panel, "div", line, "astra-meta"));
 
-const RANK_GAP = 132;
-const COLUMN_GAP = 180;
+  if ((view.options || []).length) {
+    const list = appendText(panel, "div", "", "astra-options");
+    view.options.forEach((option) => {
+      const row = appendText(
+        list,
+        "div",
+        "",
+        `astra-option${option.selected ? " selected" : ""}`,
+      );
+      appendText(row, "span", option.selected ? "●" : "○");
+      appendText(row, "span", option.label);
+      if (option.description) row.title = option.description;
+    });
+  }
 
-const isHidden = (element) =>
-  HIDDEN_CLASSES.some((name) => element.hasClass(name));
+  const informing = context.projection.edges
+    .filter((edge) => edge.kind === "informs" && edge.target === view.id)
+    .map((edge) => context.viewById.get(edge.source))
+    .filter(Boolean);
+  if (informing.length) {
+    const box = appendText(panel, "div", "", "astra-informed");
+    appendText(box, "div", "Informed by", "astra-informed-title");
+    informing.forEach((insight) => {
+      appendText(
+        box,
+        "div",
+        insight.description ? `${insight.label}: ${insight.description}` : insight.label,
+      );
+    });
+  }
 
-/**
- * A decision's selected value belongs to the decision, not to each of the
- * edges leaving it: repeating it per edge crowded the middle of the canvas
- * with labels that overlapped each other.
- */
-function decisionLabel(node) {
-  const chosen = (node.options || []).find((option) => option.selected);
-  const value = chosen ? chosen.label : node.selected;
-  return `${node.label}\n▸ ${value == null ? "unresolved" : value}`;
+  const members = (view.members || [])
+    .map((id) => context.nodeById.get(id))
+    .filter((node) => node && node.kind !== "evidence");
+  if (members.length === 1) {
+    renderSemanticDetails(panel, members[0]);
+  } else if (members.length > 1) {
+    appendText(panel, "h4", `${members.length} records`);
+    const list = document.createElement("ul");
+    members.forEach((member) => {
+      appendText(
+        list,
+        "li",
+        `${member.label}${
+          member.status && member.status !== "unknown" ? ` · ${member.status}` : ""
+        }`,
+      );
+    });
+    panel.appendChild(list);
+  }
+  return panel;
 }
 
-function cyElements(graph) {
-  const nodes = graph.nodes.map((node) => ({
-    data: {
-      ...node,
-      display_label:
-        node.kind === "decision" ? decisionLabel(node) : node.label,
-    },
-  }));
-  // Only some edges carry a label; without a default, the `data(label)`
-  // mapping warns once per unlabelled edge on every restyle.
-  const edges = graph.edges.map((edge) => ({
-    data: { label: "", ...edge },
-  }));
-  return [...nodes, ...edges];
+// ---------------------------------------------------------------------------
+// Legend
+
+function buildLegend(state, refresh) {
+  const panel = document.createElement("aside");
+  panel.className = "astra-overlay astra-legend";
+  const toggle = appendText(panel, "button", "", "astra-legend-toggle");
+  toggle.type = "button";
+  toggle.setAttribute("aria-expanded", String(state.legendOpen));
+  appendText(toggle, "span", "Graph grammar", "astra-legend-title");
+  appendText(
+    toggle,
+    "span",
+    state.legendOpen ? "▾ collapse" : "▸ expand",
+    "astra-legend-chevron",
+  );
+  toggle.addEventListener("click", () => {
+    state.legendOpen = !state.legendOpen;
+    refresh();
+  });
+  if (!state.legendOpen) return panel;
+  const body = appendText(panel, "div", "", "astra-legend-body");
+  [
+    ["#9b978e", "data / artifact flow", false],
+    ["#b07818", "decision configures", true],
+    ["#7a4fae", "supports a finding", true],
+    ["#8c72a8", "insight informs", true],
+    ["#7a4fae", "concludes in result", false],
+  ].forEach(([color, label, dashed]) => {
+    const row = appendText(body, "div", "", "astra-legend-row");
+    const line = appendText(row, "span", "", `astra-legend-line${dashed ? " dashed" : ""}`);
+    line.style.setProperty("--edge", color);
+    appendText(row, "span", label);
+  });
+  return panel;
 }
+
+// ---------------------------------------------------------------------------
+// Widget entry point
 
 export function render({ model, el }) {
   const graph = model.get("graph");
@@ -157,9 +481,7 @@ export function render({ model, el }) {
     // change, which is a wall of yellow above the graph the reader came for.
     // Past a handful they collapse behind a count that still names the cause.
     const host =
-      graph.warnings.length > 3
-        ? appendText(warnings, "details", "")
-        : warnings;
+      graph.warnings.length > 3 ? appendText(warnings, "details", "") : warnings;
     if (host !== warnings) {
       appendText(host, "summary", `${graph.warnings.length} schema warnings`);
     }
@@ -179,11 +501,13 @@ export function render({ model, el }) {
   // Trust is a claim about a graph that got drawn, so it is appended only
   // past the failure return: "Nothing here was executed" reads as a
   // description of the picture, and on the invalid path there is no picture.
-  // The badge names a run state, not a selection, and its message is the
-  // whole point of it — so it reads beside the badge rather than living in a
-  // tooltip nobody discovers.
   const provenance = appendText(header, "div", "", "astra-provenance");
-  const badge = appendText(provenance, "span", graph.trust.label, `astra-trust astra-trust-${graph.trust.level}`);
+  const badge = appendText(
+    provenance,
+    "span",
+    graph.trust.label,
+    `astra-trust astra-trust-${graph.trust.level}`,
+  );
   badge.title = graph.trust.message;
   appendText(provenance, "span", graph.trust.message, "astra-trust-message");
 
@@ -199,6 +523,13 @@ export function render({ model, el }) {
       model.save_changes();
     });
   });
+  const collapseAll = appendText(toolbar, "button", "Collapse decisions");
+  collapseAll.type = "button";
+  collapseAll.className = "astra-collapse-all";
+  collapseAll.addEventListener("click", () => {
+    model.set("expanded", []);
+    model.save_changes();
+  });
 
   // A mode that filters to nothing must say so; silently redrawing the
   // previous picture is what made the Evidence button look inert.
@@ -212,179 +543,241 @@ export function render({ model, el }) {
   );
   notice.hidden = true;
 
-  const body = document.createElement("div");
-  body.className = "astra-body";
-  root.appendChild(body);
+  // The canvas is the visible frame: the viewport scrolls both axes inside
+  // it, while the legend and inspector overlays are its direct children so
+  // they stay pinned to the visible corners instead of scrolling away with
+  // the drawing.
   const canvas = document.createElement("div");
   canvas.className = "astra-canvas";
-  body.appendChild(canvas);
-  const inspector = document.createElement("aside");
-  inspector.className = "astra-inspector";
-  body.appendChild(inspector);
+  root.appendChild(canvas);
 
-  const cy = globalThis.cytoscape({
-    container: canvas,
-    elements: cyElements(graph),
-    // Positions come from the rank and order the Python model computed; see
-    // layoutVisible below and neurodesk_astra_view/layout.py for why.
-    layout: { name: "preset" },
-    style: [
-      { selector: "node", style: { label: "data(display_label)", "font-size": 11, "text-wrap": "wrap", "text-max-width": 150, "background-color": "#4d6f8f", color: "#17202a", "text-valign": "bottom", "text-margin-y": 7, width: 38, height: 38 } },
-      { selector: 'node[kind = "input"]', style: { shape: "barrel", "background-color": "#5b8db8" } },
-      { selector: 'node[kind = "output"]', style: { shape: "round-rectangle", "background-color": "#77a86a" } },
-      { selector: 'node[kind = "decision"]', style: { shape: "hexagon", "background-color": "#d2a84a" } },
-      { selector: 'node[kind = "finding"], node[kind = "insight"], node[kind = "evidence"]', style: { shape: "round-tag", "background-color": "#a884bd" } },
-      // `document` is not a Cytoscape shape; it silently fell back to an
-      // ellipse, so artifacts drew the same as an unstyled node.
-      { selector: 'node[kind = "artifact"]', style: { shape: "cut-rectangle", "background-color": "#73a6a0" } },
-      // The container title sits above its border: the base rule pushes
-      // labels below a node, which drops a compound title onto the box edge.
-      { selector: 'node[kind = "analysis"]', style: { shape: "round-rectangle", "background-opacity": 0.08, "border-width": 1, "border-color": "#718096", padding: 22, "text-valign": "top", "text-margin-y": -10, "text-max-width": 320, "font-size": 12, "font-weight": "bold", color: "#3d4854" } },
-      { selector: "edge", style: { width: 2, "line-color": "#8996a3", "target-arrow-color": "#8996a3", "target-arrow-shape": "triangle", "curve-style": "bezier", label: "data(label)", "font-size": 9, "text-background-color": "#ffffff", "text-background-opacity": 0.85, "text-background-padding": 2 } },
-      // The selected value now rides on the decision node itself.
-      { selector: 'edge[kind = "parameterizes"]', style: { label: "", "line-style": "dashed", "line-color": "#bd8c26", "target-arrow-color": "#bd8c26" } },
-      { selector: 'edge[kind = "supports"], edge[kind = "claims"], edge[kind = "justifies"]', style: { "line-style": "dotted", "line-color": "#9168a6", "target-arrow-color": "#9168a6" } },
-      { selector: ".astra-hidden, .astra-collapsed, .astra-empty", style: { display: "none" } },
-      { selector: ":selected", style: { "border-width": 4, "border-color": "#2b6cb0" } },
-    ],
-  });
+  const projection = graph.projection || { nodes: [], edges: [] };
+  const context = {
+    projection,
+    nodeById: new Map(graph.nodes.map((node) => [node.id, node])),
+    viewById: new Map(projection.nodes.map((node) => [node.id, node])),
+  };
+  const state = { legendOpen: false, hovered: null };
+  const hasClaims = projection.nodes.some((node) => CLAIM_KINDS.includes(node.kind));
 
-  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const inspectorFor = (id) =>
+    renderInspector(
+      document.createElement("aside"),
+      id ? context.viewById.get(id) : null,
+      context,
+    );
 
-  /**
-   * Place the visible nodes on the semantic grid the Python model computed.
-   *
-   * Ranks are stable across modes, but a mode that hides a whole rank must
-   * not leave a band of empty canvas behind, so rows and columns are
-   * compacted over what is actually drawn. Re-running this on every filter
-   * change is what the old single breadthfirst pass never did.
-   */
-  const layoutVisible = () => {
-    const placed = cy
-      .nodes()
-      .filter((node) => node.data("rank") != null && !isHidden(node));
-    if (placed.length === 0) return;
-    const rows = new Map();
-    placed.forEach((node) => {
-      const rank = node.data("rank");
-      if (!rows.has(rank)) rows.set(rank, []);
-      rows.get(rank).push(node);
-    });
-    const positions = new Map();
-    [...rows.keys()]
-      .sort((left, right) => left - right)
-      .forEach((rank, row) => {
-        const members = rows
-          .get(rank)
-          .sort((left, right) => left.data("order") - right.data("order"));
-        members.forEach((node, column) => {
-          positions.set(node.id(), {
-            x: (column - (members.length - 1) / 2) * COLUMN_GAP,
-            y: row * RANK_GAP,
-          });
-        });
-      });
-    cy.layout({
-      name: "preset",
-      positions: (node) => positions.get(node.id()),
-      fit: true,
-      padding: 28,
-      animate: false,
-    }).run();
+  const updateInspector = () => {
+    const panel = viewport.querySelector(".astra-inspector");
+    if (!panel) return;
+    const shown = state.hovered || model.get("selected_node");
+    const replacement = inspectorFor(shown);
+    replacement.className = "astra-overlay astra-inspector";
+    panel.replaceWith(replacement);
   };
 
-  const applyCollapsed = () => {
-    const collapsed = new Set(model.get("collapsed") || []);
-    cy.elements().removeClass("astra-collapsed");
-    collapsed.forEach((analysisId) => {
-      cy.getElementById(analysisId).descendants().addClass("astra-collapsed");
-    });
-    // An analysis whose every member is filtered out would otherwise draw as
-    // an empty labelled box. A collapsed one keeps its box: that is the point.
-    cy.nodes('[kind = "analysis"]').removeClass("astra-empty");
-    cy.nodes('[kind = "analysis"]').forEach((container) => {
-      if (collapsed.has(container.id())) return;
-      const alive = container
-        .descendants()
-        .filter((node) => !isHidden(node));
-      if (alive.length === 0) container.addClass("astra-empty");
-    });
-    layoutVisible();
+  const activateNode = (node) => {
+    if (node.kind === "decision-cluster") {
+      const expanded = new Set(model.get("expanded") || []);
+      expanded.has(node.id) ? expanded.delete(node.id) : expanded.add(node.id);
+      model.set("expanded", [...expanded]);
+    }
+    model.set("selected_node", node.id);
+    model.save_changes();
+    draw();
   };
 
-  const applyMode = () => {
+  const drawNode = (svg, entry, selected, expanded) => {
+    const { node, x, y, labelMax } = entry;
+    const group = svgEl("g", {
+      class: `astra-node${node.kind === "decision-cluster" ? " is-cluster" : ""}${
+        selected === node.id ? " is-selected" : ""
+      }`,
+      transform: `translate(${x} ${y})`,
+      tabindex: 0,
+      role: node.kind === "decision-cluster" ? "button" : "img",
+      "aria-label": node.label,
+    });
+    const color = COLORS[node.kind] || "#5c584f";
+    const isDecision = node.kind === "decision" || node.kind === "decision-cluster";
+    const radius = node.kind === "stage" || node.kind === "result" ? 7.5 : 6;
+    group.appendChild(
+      svgEl("circle", {
+        class: "astra-focus",
+        r: radius + 5,
+        fill: "none",
+        stroke: color,
+        "stroke-width": 2,
+        opacity: 0,
+      }),
+    );
+    if (isDecision) {
+      const size = node.kind === "decision" ? 5 : 6;
+      group.appendChild(
+        svgEl("rect", {
+          x: -size,
+          y: -size,
+          width: size * 2,
+          height: size * 2,
+          fill: node.kind === "decision" ? "#fffdfa" : color,
+          stroke: color,
+          "stroke-width": node.kind === "decision" ? 2 : 0,
+          transform: "rotate(45)",
+        }),
+      );
+    } else {
+      const ring = statusRing(node.status);
+      if (ring) {
+        group.appendChild(
+          svgEl("circle", {
+            r: radius + 3.5,
+            fill: "none",
+            stroke: ring,
+            "stroke-width": 1.6,
+          }),
+        );
+      }
+      group.appendChild(svgEl("circle", { r: radius, fill: color }));
+    }
+    if (node.kind === "stage") {
+      const overline = svgEl("text", { class: "astra-stage-label", x: 11, y: -10 });
+      overline.textContent = "ANALYSIS STAGE";
+      group.appendChild(overline);
+    }
+    const text = svgEl("text", {
+      class: isDecision ? "astra-label astra-decision-label" : "astra-label",
+      x: 11,
+      y: 4,
+    });
+    const suffix =
+      node.kind === "decision-cluster"
+        ? expanded.has(node.id)
+          ? " ▾"
+          : " ▸"
+        : "";
+    text.textContent = shortLabel(node.label, labelMax || 38) + suffix;
+    group.appendChild(text);
+    group.addEventListener("mouseenter", () => {
+      state.hovered = node.id;
+      updateInspector();
+    });
+    group.addEventListener("mouseleave", () => {
+      state.hovered = null;
+      updateInspector();
+    });
+    group.addEventListener("click", () => activateNode(node));
+    group.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        activateNode(node);
+      }
+    });
+    svg.appendChild(group);
+  };
+
+  const draw = () => {
     const mode = model.get("mode");
-    toolbar.querySelectorAll("button").forEach((button) => {
+    const expanded = new Set(model.get("expanded") || []);
+    const selected = model.get("selected_node");
+    toolbar.querySelectorAll("button[data-mode]").forEach((button) => {
       button.classList.toggle("active", button.dataset.mode === mode);
     });
-    cy.elements().removeClass("astra-hidden");
-    const claims = cy
-      .nodes()
-      .filter((node) => CLAIM_KINDS.includes(node.data("kind")));
-    if (mode === "flow") {
-      cy.nodes().filter((node) => ["decision", ...CLAIM_KINDS].includes(node.data("kind"))).addClass("astra-hidden");
-      cy.edges().filter((edge) => ["parameterizes", ...CLAIM_EDGE_KINDS].includes(edge.data("kind"))).addClass("astra-hidden");
-    } else if (mode === "decisions") {
-      cy.nodes().filter((node) => CLAIM_KINDS.includes(node.data("kind"))).addClass("astra-hidden");
-      cy.edges().filter((edge) => CLAIM_EDGE_KINDS.includes(edge.data("kind"))).addClass("astra-hidden");
-    } else if (mode === "evidence") {
-      // Keep the claims and whatever they rest on; drop the dataflow
-      // plumbing no claim depends on. Showing everything, which is what this
-      // mode used to do, is not an evidence view.
-      const kept = new Set(
-        claims.union(claims.connectedEdges().connectedNodes()).map((node) => node.id()),
-      );
-      cy.nodes()
-        .filter((node) => node.data("kind") !== "analysis" && !kept.has(node.id()))
-        .addClass("astra-hidden");
-      cy.edges()
-        .filter((edge) => isHidden(edge.source()) || isHidden(edge.target()))
-        .addClass("astra-hidden");
+    collapseAll.hidden = expanded.size === 0 || mode !== "decisions";
+    notice.hidden = !(mode === "evidence" && !hasClaims);
+
+    const visible = visibleProjection(projection, mode, expanded);
+    const layout = layoutVisible(visible, mode, expanded);
+    canvas.replaceChildren();
+    const viewport = document.createElement("div");
+    viewport.className = "astra-viewport";
+
+    const svg = svgEl("svg", {
+      class: "astra-svg",
+      width: layout.width,
+      height: layout.height,
+      viewBox: `0 0 ${layout.width} ${layout.height}`,
+      role: "img",
+      "aria-label": `${graph.meta.analysis_name || "ASTRA"} provenance graph`,
+    });
+    const defs = svgEl("defs");
+    for (const [kind, style] of Object.entries(EDGE_STYLE)) {
+      const marker = svgEl("marker", {
+        id: `astra-arrow-${kind}`,
+        markerWidth: 7,
+        markerHeight: 7,
+        refX: 6,
+        refY: 3.5,
+        orient: "auto",
+      });
+      marker.appendChild(svgEl("path", { d: "M0,0 L7,3.5 L0,7 z", fill: style.color }));
+      defs.appendChild(marker);
     }
-    notice.hidden = !(mode === "evidence" && claims.length === 0);
-    applyCollapsed();
+    svg.appendChild(defs);
+
+    layout.clusterBoxes.forEach((box) => {
+      svg.appendChild(
+        svgEl("rect", {
+          class: "astra-cluster-box",
+          x: box.x,
+          y: box.y,
+          width: box.width,
+          height: box.height,
+          rx: 8,
+        }),
+      );
+    });
+
+    visible.edges.forEach((edge) => {
+      const source = layout.positions.get(edge.source);
+      const target = layout.positions.get(edge.target);
+      if (!source || !target) return;
+      const style = EDGE_STYLE[edge.kind] || EDGE_STYLE.flow;
+      const path = svgEl("path", {
+        class: "astra-edge",
+        d: edgePath(source, target),
+        stroke: style.color,
+        "stroke-width": style.width,
+        "marker-end": `url(#astra-arrow-${edge.kind})`,
+        opacity:
+          selected && edge.source !== selected && edge.target !== selected
+            ? 0.22
+            : 0.72,
+      });
+      if (style.dash) path.setAttribute("stroke-dasharray", style.dash);
+      svg.appendChild(path);
+    });
+
+    layout.positions.forEach((entry) => drawNode(svg, entry, selected, expanded));
+    viewport.appendChild(svg);
+    canvas.appendChild(viewport);
+    canvas.appendChild(buildLegend(state, draw));
+    const inspector = inspectorFor(state.hovered || selected);
+    inspector.className = "astra-overlay astra-inspector";
+    canvas.appendChild(inspector);
   };
 
-  const onTap = (event) => {
-    const id = event.target.id();
-    model.set("selected_node", id);
-    model.save_changes();
-    renderInspector(inspector, nodeById.get(id));
-  };
-  cy.on("tap", "node", onTap);
-  const onCxttap = (event) => {
-    const id = event.target.id();
-    const collapsed = new Set(model.get("collapsed") || []);
-    collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
-    model.set("collapsed", [...collapsed]);
-    model.save_changes();
-    applyCollapsed();
-  };
-  cy.on("cxttap", 'node[kind = "analysis"]', onCxttap);
-  const onSelectedNodeChange = () => {
-    const id = model.get("selected_node");
-    cy.elements().unselect();
-    if (id && nodeById.has(id)) cy.getElementById(id).select();
-    renderInspector(inspector, nodeById.get(id));
-  };
+  const applyMode = () => draw();
+  const applyExpanded = () => draw();
+  const onSelectedNodeChange = () => draw();
   model.on("change:mode", applyMode);
-  model.on("change:collapsed", applyCollapsed);
+  model.on("change:expanded", applyExpanded);
   model.on("change:selected_node", onSelectedNodeChange);
-  applyMode();
-  renderInspector(inspector, nodeById.get(model.get("selected_node")));
+  draw();
 
   if ((graph.gaps || []).length) {
     const details = document.createElement("details");
     details.className = "astra-gaps";
     appendText(details, "summary", `Provenance gaps (${graph.gaps.length})`);
-    graph.gaps.forEach((gap) => appendText(details, "div", `${gap.id} · ${gap.severity} · ${gap.message}`));
+    graph.gaps.forEach((gap) =>
+      appendText(details, "div", `${gap.id} · ${gap.severity} · ${gap.message}`),
+    );
     root.appendChild(details);
   }
 
   return () => {
     model.off("change:mode", applyMode);
-    model.off("change:collapsed", applyCollapsed);
+    model.off("change:expanded", applyExpanded);
     model.off("change:selected_node", onSelectedNodeChange);
-    cy.destroy();
+    root.remove();
   };
 }

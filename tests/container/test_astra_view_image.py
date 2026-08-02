@@ -49,6 +49,19 @@ def test_shipped_bet_example_validates_and_builds_all_three_viewer_modes():
         assert rank[edge["source"]] < rank[edge["target"]], edge["id"]
     assert graph["meta"]["analysis_name"] == "BET threshold sensitivity"
 
+    # The drawn picture is the presentation projection: stages, decision
+    # clusters, a synthetic result — with its own per-view layered ranking.
+    projection = graph["projection"]
+    assert {node["kind"] for node in projection["nodes"]} >= {
+        "stage",
+        "decision-cluster",
+        "result",
+    }
+    view_rank = {node["id"]: node.get("rank") for node in projection["nodes"]}
+    for edge in projection["edges"]:
+        if edge["kind"] in ("flow", "produces", "supports", "concludes"):
+            assert view_rank[edge["source"]] < view_rank[edge["target"]], edge
+
     for mode in ("flow", "decisions", "evidence"):
         widget = AstraView(
             EXAMPLE / "astra.yaml",
@@ -59,10 +72,13 @@ def test_shipped_bet_example_validates_and_builds_all_three_viewer_modes():
         assert widget.graph["errors"] == []
 
 
-def test_widget_frontend_is_vendored_and_contains_no_network_loader():
+def test_widget_frontend_is_self_contained_with_no_network_loader():
     import neurodesk_astra_view.widget as widget_module
 
-    assert "Cytoscape Consortium" in widget_module.AstraView._esm
+    # The frontend is a self-contained SVG renderer: no vendored graph
+    # library, no runtime fetch, no dynamic network import.
+    assert "createElementNS" in widget_module.AstraView._esm
+    assert "cytoscape" not in widget_module.AstraView._esm.lower()
     assert "fetch(" not in widget_module.AstraView._esm
     assert "import(\"http" not in widget_module.AstraView._esm
     assert "import('http" not in widget_module.AstraView._esm
