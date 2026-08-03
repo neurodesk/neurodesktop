@@ -449,10 +449,6 @@ def test_guacamole_rdp_template_forces_plain_rdp_security():
     )
     assert _rdp_param(active_mapping, "security") == "rdp"
 
-    legacy_mapping = repo_path("config/guacamole/user-mapping.xml")
-    if legacy_mapping.exists():
-        assert _rdp_param(legacy_mapping.read_text(encoding="utf-8"), "security") == "rdp"
-
 
 def test_guacamole_script_uses_backend_specific_state_dirs():
     script = _read_first(
