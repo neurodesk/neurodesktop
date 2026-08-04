@@ -36,6 +36,22 @@ are listed at the end. The subsystems themselves are described in
 - `OFFLINE_MODULES`: local Lmod module path derived from
   `NEURODESKTOP_LOCAL_CONTAINERS`
 
+## Apptainer session directories
+
+- `TMPDIR`: Apptainer derives its session directory from `TMPDIR`. Podman
+  (unlike Docker) passes the host's `TMPDIR` through to the container, and a
+  host value that is empty or relative makes every `module load` fail with
+  `FATAL:   container creation failed: failed to add  as session directory:
+  path . is not an absolute path`. `environment_variables.sh` therefore
+  forces `TMPDIR` to an absolute path (defaulting to `/tmp` when the inherited
+  value is unset or relative) so module loads never depend on a host-provided
+  value that can be relative or missing
+- `APPTAINER_CACHEDIR`, `APPTAINER_TMPDIR`, `APPTAINER_WORKDIR`: Apptainer
+  cache, temporary, and work directories. `environment_variables.sh` pins them
+  under `TMPDIR` (`$TMPDIR/apptainer-cache`, `$TMPDIR/apptainer-tmp`,
+  `$TMPDIR/apptainer-work`) by default so they inherit the absolute-path
+  guarantee; explicitly set any of them to override
+
 ## Startup
 
 - `NB_UID`, `NB_GID`: user and group IDs for permission matching

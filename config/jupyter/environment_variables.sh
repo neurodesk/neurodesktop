@@ -93,6 +93,25 @@ fi
 export APPTAINER_BINDPATH=/data,/mnt,/neurodesktop-storage,/tmp,/cvmfs
 # This also needs to be set in the Dockerfile, so it is available in a jupyter notebook
 
+# Apptainer resolves its session/work/cache directories from TMPDIR and the
+# APPTAINER_*DIR environment variables. Podman (unlike Docker) passes the
+# host's TMPDIR through to the container, and a host TMPDIR that is empty or
+# relative makes Apptainer fail every container/module load with
+#   FATAL:   container creation failed: failed to add  as session directory:
+#   path . is not an absolute path
+# because Apptainer defaults the session dir to "." when TMPDIR is unset/empty
+# and rejects the non-absolute result. Guarantee an absolute TMPDIR inside the
+# container and pin the Apptainer cache/tmp/work directories under it so module
+# loads never depend on a host-provided value that can be relative or missing.
+case "${TMPDIR:-}" in
+    /*) ;;
+    *) TMPDIR="/tmp" ;;
+esac
+export TMPDIR
+export APPTAINER_CACHEDIR="${APPTAINER_CACHEDIR:-${TMPDIR}/apptainer-cache}"
+export APPTAINER_TMPDIR="${APPTAINER_TMPDIR:-${TMPDIR}/apptainer-tmp}"
+export APPTAINER_WORKDIR="${APPTAINER_WORKDIR:-${TMPDIR}/apptainer-work}"
+
 export APPTAINERENV_SUBJECTS_DIR=${HOME}/freesurfer-subjects-dir
 export MPLCONFIGDIR=${HOME}/.config/matplotlib-mpldir
 export NBI_TOUR_CONFIG_PATH="${NBI_TOUR_CONFIG_PATH:-/opt/jovyan_defaults/.jupyter/nbi/tour_config.json}"
