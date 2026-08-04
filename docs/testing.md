@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-07-31"
+last-reviewed: "2026-08-03"
 ---
 
 # Testing
@@ -78,7 +78,7 @@ non-obvious tiers protect.
 | Access-URL banner (`print_access_url.sh`) | `pytest tests/unit/test_print_access_url.py` | — |
 | ASTRA viewer core (adapter, graph, widget, previews) | `pytest tests/unit/test_astra_view_graph.py tests/unit/test_astra_view_packaging.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py` | `pytest /opt/tests/test_astra_view_image.py` |
-| `astra`/`lc` installs, ASTRA agent skill | `pytest tests/unit/test_astra_jupyter_ai_tooling.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
+| `astra`/`lc` installs, Lightcone skills and hooks | `pytest tests/unit/test_astra_jupyter_ai_tooling.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
 | Jupyter AI, ACP personas, server-documents workaround | see [below](#jupyter-ai-and-acp-personas) | `pytest /opt/tests/test_astra_jupyter_ai_image.py` |
 | Notebook Intelligence / MyST pins and rebuilds | `pytest tests/unit/test_nbi_settings_patch.py tests/unit/test_myst_build_workaround.py` | `pytest /opt/tests/test_nbi_labextension_patch.py` |
 | Launcher extension, workspace link routing | `pytest tests/unit/test_workspace_link_routing.py` | `pytest /opt/tests/test_workspace_link_routing_image.py` |
@@ -111,13 +111,15 @@ disabled. Those factory names are upstream strings; if a JupyterLab upgrade
 renames one, a clicked report quietly falls back to the text editor rather
 than failing, which is exactly why the image tier pins them.
 
-### ASTRA CLIs and agent skill
+### ASTRA CLIs, Lightcone skills, and hooks
 
 The image tier is the one that matters here: it drives the real hook scripts
 end to end (so a missing `jq` fails loudly), asserts that exactly one `astra`
 answers on `PATH`, checks that the pinned marketplace commit teaches the
 schema version the installed `astra validate` speaks, and restores a throwaway
-home to prove OpenCode's skill actually reaches a user.
+home to prove all four reproduction skills reach OpenCode. It also drives the
+OpenCode adapter directly and checks that session, read, and edit hook context
+is returned to the model-facing system prompt or tool output.
 
 ### Jupyter AI and ACP personas
 

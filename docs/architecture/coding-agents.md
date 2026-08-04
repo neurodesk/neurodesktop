@@ -4,7 +4,7 @@ description: Claude Code installation, the OpenCode terminal wrapper, and
   OpenCode session pruning
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-07-31"
+last-reviewed: "2026-08-03"
 ---
 
 # Coding agents
@@ -51,7 +51,9 @@ interactively prompts for `NEURODESK_API_KEY` and persists it to `~/.bashrc`,
 rewrites `~/.config/opencode/opencode.json`, optionally sets up the Brain
 Researcher MCP token, and mirrors provider settings into Notebook
 Intelligence via [nbi_setup.sh](../../config/agents/nbi_setup.sh) before
-exec-ing the real binary as a TUI.
+exec-ing the real binary as a TUI. Its Lightcone reproduction skills and the
+native adapter for their ASTRA hooks are described in
+[ASTRA integration](astra.md#lightcone-agent-skills).
 
 Session sharing is disabled by default in
 [`config/agents/opencode_config.json`](../../config/agents/opencode_config.json)

@@ -1097,6 +1097,7 @@ RUN --mount=type=bind,source=config/itksnap/UserPreferences.xml,target=/tmp/itks
     --mount=type=bind,source=config/agents/claude_settings.local.json,target=/tmp/agents/claude_settings.local.json,ro \
     --mount=type=bind,source=config/agents/claude_mcp_config.json,target=/tmp/agents/claude_mcp_config.json,ro \
     --mount=type=bind,source=config/agents/opencode_config.json,target=/tmp/agents/opencode_config.json,ro \
+    --mount=type=bind,source=config/agents/opencode_lightcone_hooks.js,target=/tmp/agents/opencode_lightcone_hooks.js,ro \
     --mount=type=bind,source=config/agents/codex_config.toml,target=/tmp/agents/codex_config.toml,ro \
     --mount=type=bind,source=config/agents/AGENTS_nbi.md,target=/tmp/agents/AGENTS_nbi.md,ro \
     --mount=type=bind,source=config/agents/nbi_config.json,target=/tmp/agents/nbi_config.json,ro \
@@ -1132,6 +1133,7 @@ RUN --mount=type=bind,source=config/itksnap/UserPreferences.xml,target=/tmp/itks
     && install -m 0644 /tmp/agents/claude_settings.local.json /opt/jovyan_defaults/.claude/settings.local.json \
     && install -m 0644 /tmp/agents/claude_mcp_config.json /opt/jovyan_defaults/.claude/mcp_config.json \
     && install -m 0644 /tmp/agents/opencode_config.json /opt/jovyan_defaults/.config/opencode/opencode.json \
+    && install -D -m 0644 /tmp/agents/opencode_lightcone_hooks.js /opt/jovyan_defaults/.config/opencode/plugins/lightcone-hooks.js \
     && install -m 0644 /tmp/agents/codex_config.toml /opt/jovyan_defaults/.codex/config.toml \
     && install -m 0644 /tmp/sshd_config /opt/jovyan_defaults/.ssh/sshd_config \
     && install -m 0644 /tmp/page_config.json /opt/jovyan_defaults/.jupyter/labconfig/page_config.json \
@@ -1149,11 +1151,9 @@ RUN --mount=type=bind,source=config/itksnap/UserPreferences.xml,target=/tmp/itks
 # Register a fixed local checkout so image builds do not follow a moving
 # marketplace branch and runtime use does not require a network fetch.
 #
-# Only the `astra` plugin is enabled. The marketplace also ships `reproduction`
-# (assess-reproducibility, reproduce, figure-comparison), which is deliberately
-# left out: its workflows drive long autonomous replication loops that are not
-# appropriate to enable by default in a shared scientific image. Users can add
-# it themselves from the same local marketplace, with no network access needed.
+# The self-contained `reproduction` plugin bundles the `astra` skill and hooks
+# alongside assess-reproducibility, reproduce, and figure-comparison. Install
+# it instead of installing both plugins, which would duplicate ASTRA.
 # Fetch the pinned commit directly rather than cloning a branch: GitHub
 # serves any commit still reachable from a ref (including PR refs), so this
 # keeps working after the source branch is merged and deleted, and pulls no
@@ -1167,21 +1167,21 @@ RUN git init -q /opt/neurodesktop/agent-skills \
     && HOME=/opt/jovyan_defaults CODEX_HOME=/opt/jovyan_defaults/.codex \
     /usr/bin/codex plugin marketplace add /opt/neurodesktop/agent-skills \
     && HOME=/opt/jovyan_defaults CODEX_HOME=/opt/jovyan_defaults/.codex \
-    /usr/bin/codex plugin add astra@lightcone-research \
+    /usr/bin/codex plugin add reproduction@lightcone-research \
     && HOME=/opt/jovyan_defaults DISABLE_TELEMETRY=1 \
     /opt/jovyan_defaults/.local/bin/claude plugin marketplace add /opt/neurodesktop/agent-skills \
     && HOME=/opt/jovyan_defaults DISABLE_TELEMETRY=1 \
-    /opt/jovyan_defaults/.local/bin/claude plugin install astra@lightcone-research \
-    # OpenCode has no marketplace client, but it discovers Claude-format skills
-    # from ~/.config/opencode/skills. Copy the skill out of the same pinned
-    # checkout so all three agents read identical guidance from one source of
-    # truth. The plugin's hooks are Claude/Codex-only and are not copied:
-    # OpenCode gets the skill, not the on-save validation hook.
+    /opt/jovyan_defaults/.local/bin/claude plugin install reproduction@lightcone-research \
+    # OpenCode has no Lightcone marketplace client, but it discovers portable
+    # skills from ~/.config/opencode/skills. Copy the reproduction plugin's
+    # complete skill closure so all three agents read identical guidance.
     && install -d -m 0755 /opt/jovyan_defaults/.config/opencode/skills \
-    && cp -a /opt/neurodesktop/agent-skills/plugins/astra/skills/astra \
-    /opt/jovyan_defaults/.config/opencode/skills/astra \
-    && test -f /opt/jovyan_defaults/.config/opencode/skills/astra/SKILL.md \
-    && grep -qx 'name: astra' /opt/jovyan_defaults/.config/opencode/skills/astra/SKILL.md \
+    && cp -a /opt/neurodesktop/agent-skills/plugins/reproduction/skills/. \
+    /opt/jovyan_defaults/.config/opencode/skills/ \
+    && for skill in astra assess-reproducibility reproduce figure-comparison; do \
+    test -f "/opt/jovyan_defaults/.config/opencode/skills/${skill}/SKILL.md"; \
+    grep -qx "name: ${skill}" "/opt/jovyan_defaults/.config/opencode/skills/${skill}/SKILL.md"; \
+    done \
     # Plugin registration creates machine-specific onboarding state that must
     # not be copied into every user's home.
     && rm -f /opt/jovyan_defaults/.claude.json \

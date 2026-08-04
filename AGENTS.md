@@ -104,7 +104,12 @@
   `astra-tools` installed exactly once so the CLI cannot drift from the schema
   the viewer imports, keep `jq` installed for the plugin hooks, and bump
   `AGENT_SKILLS_REF` together with the ASTRA pins so the skill teaches the
-  schema `astra validate` speaks.
+  schema `astra validate` speaks. The Lightcone `reproduction` plugin already
+  bundles ASTRA, so install it instead of installing both plugins. OpenCode
+  receives the plugin's complete skill closure and adapts the same pinned hook
+  scripts through `config/agents/opencode_lightcone_hooks.js`; keep hook
+  failures non-blocking and return their context through the system prompt or
+  tool output so the model actually sees it.
 - When changing Jupyter AI, Jupyter Collaboration, its ACP personas,
   the Jupyter Server Documents workaround, or the jupyter-server-mcp
   banner patch,

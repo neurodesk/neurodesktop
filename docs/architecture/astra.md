@@ -1,10 +1,10 @@
 ---
 title: ASTRA integration
-description: The astra/lc command-line tools, the ASTRA agent skill for the
-  bundled coding agents, and the read-only provenance viewer
+description: The astra/lc command-line tools, Lightcone agent skills and hooks
+  for the bundled coding agents, and the read-only provenance viewer
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-01"
+last-reviewed: "2026-08-03"
 ---
 
 # ASTRA integration
@@ -65,24 +65,32 @@ earn. The [integration record](../designs/astra-lightcone-integration.md)
 covers why execution was left out of the first pass and what upstream work
 would raise the ceiling.
 
-## ASTRA agent skill
+## Lightcone agent skills
 
 A commit-pinned checkout of the Lightcone Research agent marketplace is stored
-at `/opt/neurodesktop/agent-skills`. All three bundled coding agents get the
-same ASTRA skill from it, without a first-run marketplace download:
+at `/opt/neurodesktop/agent-skills`. The self-contained `reproduction` plugin
+provides `astra`, `assess-reproducibility`, `reproduce`, and
+`figure-comparison`; all three bundled coding agents get the same four skills
+without a first-run marketplace download:
 
 | Agent | Mechanism | Hooks |
 | --- | --- | --- |
-| Codex | `codex plugin add astra@lightcone-research` | yes |
-| Claude Code | `claude plugin install astra@lightcone-research` | yes |
-| OpenCode | `SKILL.md` copied to `~/.config/opencode/skills/astra` | no |
+| Codex | `codex plugin add reproduction@lightcone-research` | yes |
+| Claude Code | `claude plugin install reproduction@lightcone-research` | yes |
+| OpenCode | skills copied to `~/.config/opencode/skills`; local adapter in `~/.config/opencode/plugins` | yes |
 
-OpenCode has no marketplace client, but it discovers Claude-format skills from
-`~/.config/opencode/skills`, `~/.claude/skills`, and `~/.agents/skills`. The
-skill is copied out of the same pinned checkout, so all three agents read
-identical guidance from one source of truth. The plugin's hooks are a
-Claude/Codex mechanism and are not copied — OpenCode gets the skill, not the
-on-save validation hook.
+The reproduction plugin already bundles ASTRA, so the standalone `astra`
+plugin is not installed alongside it. That avoids registering the same skill
+and hooks twice.
+
+OpenCode does not consume the marketplace's Claude/Codex hook manifest. The
+image therefore installs
+[`opencode_lightcone_hooks.js`](../../config/agents/opencode_lightcone_hooks.js)
+as a native OpenCode plugin. It executes the hook scripts from the same pinned
+`reproduction` checkout: `SessionStart` context is added through OpenCode's
+system transform, while the read reminder and write/edit validation results
+are appended to the corresponding tool output so the model sees them. Hook
+failures stay non-blocking, matching the upstream informational hooks.
 
 Those hooks parse their payloads with `jq`, which the image installs for that
 purpose. Without it every hook exits non-zero and silently contributes no
@@ -91,12 +99,6 @@ drives the real hook scripts end to end rather than only checking that the
 plugin is listed. That test also asserts that the pinned marketplace commit's
 `astra-pins.sh` matches the installed `astra-tools` and `astra-spec`: the skill
 must teach the schema version that `astra validate` actually speaks.
-
-Only the `astra` plugin is enabled. The marketplace also ships `reproduction`
-(`assess-reproducibility`, `reproduce`, `figure-comparison`), which is
-deliberately left out because its workflows drive long autonomous replication
-loops that should not be on by default in a shared scientific image. Users can
-add it themselves from the same local marketplace with no network access.
 
 ## ASTRA provenance viewer
 

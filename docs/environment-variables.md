@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-07-31"
+last-reviewed: "2026-08-03"
 ---
 
 # Environment Variables
@@ -187,7 +187,8 @@ reviewed; the Dockerfile itself is authoritative.
   installed in the image; defaults to `0.11.8`, `0.2.11`, `0.0.12`, `0.11.0`,
   and `0.4.0`
 - `AGENT_SKILLS_REF`: exact commit of
-  `LightconeResearch/agent-skills` used for the Codex and Claude ASTRA plugin;
+  `LightconeResearch/agent-skills` used for the Codex and Claude reproduction
+  plugin and OpenCode's copied skills and hook adapter;
   defaults to `4ded682be8487d8aa05831678ef84ef12068d50d`
 - `JUPYTER_AI_VERSION`: Jupyter AI metapackage release;
   defaults to `3.1.1`, with its direct pre-1.0 extensions pinned alongside it

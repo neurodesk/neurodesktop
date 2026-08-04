@@ -1,10 +1,11 @@
-"""Behavioral contract for the ASTRA agent skill across all three agents.
+"""Behavioral contract for the Lightcone skills across all three agents.
 
 The registration commands in the Dockerfile only prove that a plugin is listed.
 These tests prove the parts that actually break in use: that the hooks' `jq`
 dependency is present, that exactly one `astra` answers on PATH, that the skill
 teaches the same schema version `astra validate` speaks, and that OpenCode --
-which has no marketplace client -- still finds the skill in a restored home.
+which has no Lightcone marketplace client -- still finds every skill and runs
+the upstream hooks from a restored home.
 """
 
 import importlib.metadata
@@ -20,9 +21,12 @@ from testlib import run_cmd
 ASTRA_TOOLS_VERSION = "0.2.11"
 
 SKILLS_CHECKOUT = Path("/opt/neurodesktop/agent-skills")
-HOOK_SCRIPTS = SKILLS_CHECKOUT / "plugins/astra/hooks/scripts"
-OPENCODE_SKILL = Path(
-    "/opt/jovyan_defaults/.config/opencode/skills/astra/SKILL.md"
+HOOK_SCRIPTS = SKILLS_CHECKOUT / "plugins/reproduction/hooks/scripts"
+OPENCODE_SKILLS = Path(
+    "/opt/jovyan_defaults/.config/opencode/skills"
+)
+OPENCODE_HOOKS = Path(
+    "/opt/jovyan_defaults/.config/opencode/plugins/lightcone-hooks.js"
 )
 BET_PROJECT = Path("/opt/neurodesktop/examples/astra-bet")
 
@@ -90,10 +94,10 @@ def test_skill_toolchain_pins_match_the_installed_toolchain():
     assert spec_pin == importlib.metadata.version("astra-spec")
 
 
-def test_astra_plugin_is_installed_and_enabled_for_codex_and_claude():
+def test_reproduction_plugin_is_installed_and_enabled_for_codex_and_claude():
     code, output = run_cmd("codex plugin list", env=CODEX_ENV, timeout=30)
     assert code == 0, output
-    assert "astra@lightcone-research" in output
+    assert "reproduction@lightcone-research" in output
     assert "installed, enabled" in output
 
     code, output = run_cmd(
@@ -102,7 +106,7 @@ def test_astra_plugin_is_installed_and_enabled_for_codex_and_claude():
         timeout=30,
     )
     assert code == 0, output
-    assert "astra@lightcone-research" in output
+    assert "reproduction@lightcone-research" in output
     assert "enabled" in output
 
 
@@ -133,7 +137,7 @@ def test_codex_wrapper_preserves_plugin_registration_after_mcp_refresh(tmp_path)
     )
     assert code == 0, output
     code, output = run_cmd(
-        "/usr/bin/codex plugin add astra@lightcone-research",
+        "/usr/bin/codex plugin add reproduction@lightcone-research",
         cwd=work,
         env=env,
         timeout=30,
@@ -152,12 +156,12 @@ def test_codex_wrapper_preserves_plugin_registration_after_mcp_refresh(tmp_path)
             "/usr/local/sbin/codex plugin list", cwd=work, env=env, timeout=30
         )
         assert code == 0, output
-        assert "astra@lightcone-research" in output
+        assert "reproduction@lightcone-research" in output
         assert "installed, enabled" in output
 
 
-def test_only_the_astra_plugin_is_installed_by_default():
-    """`reproduction` drives long autonomous loops and is opt-in, not default."""
+def test_reproduction_is_the_only_lightcone_plugin_installed_by_default():
+    """The self-contained plugin avoids a second ASTRA registration."""
     installed = json.loads(
         Path(
             "/opt/jovyan_defaults/.claude/plugins/installed_plugins.json"
@@ -165,26 +169,25 @@ def test_only_the_astra_plugin_is_installed_by_default():
     )
 
     names = json.dumps(installed)
-    assert "astra" in names
-    assert "reproduction" not in names
+    assert "reproduction" in names
+    assert "astra@lightcone-research" not in names
 
-    # The marketplace it came from still offers it, so enabling it stays a
-    # local, offline operation for a user who wants it.
-    marketplace = json.loads(
-        (SKILLS_CHECKOUT / ".claude-plugin/marketplace.json").read_text(
-            encoding="utf-8"
+
+def test_opencode_finds_every_reproduction_skill_in_a_restored_home(tmp_path):
+    """OpenCode discovers the portable skills from HOME."""
+    skill_names = {
+        "astra",
+        "assess-reproducibility",
+        "reproduce",
+        "figure-comparison",
+    }
+    for skill in skill_names:
+        source = OPENCODE_SKILLS / skill / "SKILL.md"
+        assert source.is_file()
+        assert not source.is_symlink(), (
+            "restore_home_defaults.sh copies regular files only (find -type f), "
+            "so a symlink here would never reach a user's home"
         )
-    )
-    assert "reproduction" in json.dumps(marketplace)
-
-
-def test_opencode_finds_the_astra_skill_in_a_restored_home(tmp_path):
-    """OpenCode has no marketplace client; it discovers SKILL.md from HOME."""
-    assert OPENCODE_SKILL.is_file()
-    assert not OPENCODE_SKILL.is_symlink(), (
-        "restore_home_defaults.sh copies regular files only (find -type f), so "
-        "a symlink here would never reach a user's home"
-    )
 
     home = tmp_path / "home"
     home.mkdir()
@@ -195,12 +198,75 @@ def test_opencode_finds_the_astra_skill_in_a_restored_home(tmp_path):
     )
     assert code == 0, output
 
-    restored = home / ".config/opencode/skills/astra/SKILL.md"
-    assert restored.is_file(), output
+    for skill in skill_names:
+        restored = home / f".config/opencode/skills/{skill}/SKILL.md"
+        assert restored.is_file(), output
+        frontmatter = restored.read_text(encoding="utf-8").split("---")[1]
+        assert re.search(rf"^name: {re.escape(skill)}$", frontmatter, re.MULTILINE)
+        assert re.search(r"^description:", frontmatter, re.MULTILINE)
+    restored_hooks = home / ".config/opencode/plugins/lightcone-hooks.js"
+    assert restored_hooks.is_file(), output
+    assert not restored_hooks.is_symlink()
 
-    frontmatter = restored.read_text(encoding="utf-8").split("---")[1]
-    assert re.search(r"^name: astra$", frontmatter, re.MULTILINE)
-    assert re.search(r"^description:", frontmatter, re.MULTILINE)
+    code, output = run_cmd(
+        "/usr/bin/opencode debug skill", env={"HOME": str(home)}, timeout=30
+    )
+    assert code == 0, output
+    discovered = {skill["name"] for skill in json.loads(output)}
+    assert skill_names <= discovered
+
+
+def test_opencode_adapter_runs_the_upstream_astra_hooks(tmp_path):
+    """The adapter must return hook context to the model, not only run a script."""
+    assert OPENCODE_HOOKS.is_file()
+    assert not OPENCODE_HOOKS.is_symlink()
+    home = tmp_path / "home"
+    home.mkdir()
+    code, output = run_cmd(
+        "bash /opt/neurodesktop/restore_home_defaults.sh",
+        env={"HOME": str(home)},
+        timeout=300,
+    )
+    assert code == 0, output
+    restored_hooks = home / ".config/opencode/plugins/lightcone-hooks.js"
+    assert restored_hooks.is_file(), output
+    project = tmp_path / "project"
+    shutil.copytree(BET_PROJECT, project)
+    runner = tmp_path / "run-hooks.mjs"
+    runner.write_text(
+        f'''import {{ LightconeHooks }} from "file://{restored_hooks}"
+const directory = process.argv[2]
+const filePath = `${{directory}}/astra.yaml`
+const hooks = await LightconeHooks({{ directory }})
+const system = {{ system: [] }}
+await hooks["experimental.chat.system.transform"]({{}}, system)
+const edited = {{ output: "Edited", metadata: {{ filepath: filePath }} }}
+await hooks["tool.execute.after"](
+  {{ tool: "edit", sessionID: "image-edit", callID: "1", args: {{ filePath }} }},
+  edited,
+)
+const read = {{ output: "Read", metadata: {{}} }}
+await hooks["tool.execute.after"](
+  {{ tool: "read", sessionID: "image-read", callID: "2", args: {{ filePath }} }},
+  read,
+)
+const readAgain = {{ output: "Read again", metadata: {{}} }}
+await hooks["tool.execute.after"](
+  {{ tool: "read", sessionID: "image-read", callID: "3", args: {{ filePath }} }},
+  readAgain,
+)
+console.log(JSON.stringify({{ system, edited, read, readAgain }}))
+''',
+        encoding="utf-8",
+    )
+
+    code, output = run_cmd(f"node {runner} {project}", timeout=120)
+    assert code == 0, output
+    result = json.loads(output)
+    assert "ASTRA project" in "\n".join(result["system"]["system"])
+    assert "validation passed" in result["edited"]["output"]
+    assert "astra skill" in result["read"]["output"]
+    assert result["readAgain"]["output"] == "Read again"
 
 
 def test_validate_on_save_hook_reports_a_passing_project(tmp_path):

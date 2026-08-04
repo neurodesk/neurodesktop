@@ -14,6 +14,9 @@ from testlib import repo_path
 
 
 DOCKERFILE = repo_path("Dockerfile").read_text(encoding="utf-8")
+OPENCODE_HOOKS = repo_path(
+    "config/agents/opencode_lightcone_hooks.js"
+).read_text(encoding="utf-8")
 
 
 def test_jq_is_installed_for_the_astra_agent_hooks():
@@ -36,16 +39,35 @@ def test_astra_version_arguments_are_declared_once_per_stage():
         assert DOCKERFILE.count(f"ARG {argument}=") == 1, argument
 
 
-def test_the_astra_skill_reaches_all_three_agents():
-    assert "codex plugin add astra@lightcone-research" in DOCKERFILE
-    assert "claude plugin install astra@lightcone-research" in DOCKERFILE
-    # OpenCode has no marketplace client; it reads SKILL.md from HOME.
-    assert "/opt/jovyan_defaults/.config/opencode/skills/astra" in DOCKERFILE
+def test_the_reproduction_skills_reach_all_three_agents():
+    assert "codex plugin add reproduction@lightcone-research" in DOCKERFILE
+    assert "claude plugin install reproduction@lightcone-research" in DOCKERFILE
+    # The reproduction plugin is self-contained and already bundles ASTRA.
+    assert "plugin add astra@lightcone-research" not in DOCKERFILE
+    assert "plugin install astra@lightcone-research" not in DOCKERFILE
+    for skill in (
+        "astra",
+        "assess-reproducibility",
+        "reproduce",
+        "figure-comparison",
+    ):
+        assert skill in DOCKERFILE
 
 
-def test_only_the_astra_plugin_is_installed_by_default():
-    """`reproduction` drives long autonomous loops; it stays opt-in."""
-    assert "reproduction@lightcone-research" not in DOCKERFILE
+def test_opencode_adapts_the_pinned_lightcone_hooks():
+    assert (
+        "/opt/jovyan_defaults/.config/opencode/plugins/lightcone-hooks.js"
+        in DOCKERFILE
+    )
+    assert "plugins/reproduction" in OPENCODE_HOOKS
+    assert '"experimental.chat.system.transform"' in OPENCODE_HOOKS
+    assert '"tool.execute.after"' in OPENCODE_HOOKS
+    for script in (
+        "astra-session-start.sh",
+        "activate-on-read.sh",
+        "validate-on-save.sh",
+    ):
+        assert script in OPENCODE_HOOKS
 
 
 def test_codex_warmup_state_is_scrubbed_from_the_defaults_tree():
@@ -58,7 +80,7 @@ def test_codex_warmup_state_is_scrubbed_from_the_defaults_tree():
     assert "chmod 0644 /opt/jovyan_defaults/.codex/config.toml" in DOCKERFILE
     # The scrub belongs to the warm-up layer itself, before ownership is
     # normalised at the end of that layer.
-    warmup = DOCKERFILE.index("codex plugin add astra@lightcone-research")
+    warmup = DOCKERFILE.index("codex plugin add reproduction@lightcone-research")
     scrub = DOCKERFILE.index("rm -rf /opt/jovyan_defaults/.codex/tmp", warmup)
     chown = DOCKERFILE.index(
         "chown -R root:users /opt/neurodesktop/agent-skills", warmup
