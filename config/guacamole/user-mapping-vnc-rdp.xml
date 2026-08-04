@@ -6,7 +6,7 @@
             <param name="username">jovyan</param>
             <param name="password">password</param>
             <param name="port">3389</param>
-            <param name="security">any</param>
+            <param name="security">rdp</param>
             <param name="ignore-cert">true</param>
             <param name="resize-method">reconnect</param>
             <param name="enable-drive">true</param>

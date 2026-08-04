@@ -3,17 +3,73 @@
 # Copies AGENTS.md, discovers working model backends, updates OpenCode config,
 # lets the user choose a default model, then starts OpenCode.
 
+# Jupyter AI uses both commands as machine-facing probes/transports. In
+# particular, `opencode acp` speaks JSON-RPC over stdout, so the interactive
+# model setup and status banners below would corrupt the protocol stream.
+# The ACP transport still needs the credentials the interactive setup
+# persists to ~/.bashrc: the Jupyter server that spawns `opencode acp` never
+# sources that file, so `{env:NEURODESK_API_KEY}` and `{env:BR_MCP_TOKEN}`
+# in opencode.json would resolve empty and every request against those
+# providers would fail auth. Load the exported keys here without writing
+# anything to stdout or stderr.
+load_bashrc_export_silently() {
+    local var_name="$1"
+    local bashrc_file="${HOME}/.bashrc"
+    local value
+
+    if [ -n "${!var_name:-}" ]; then
+        return 0
+    fi
+
+    if [ ! -f "${bashrc_file}" ]; then
+        return 0
+    fi
+
+    value=$(sed -nE \
+        -e "s/^[[:space:]]*export[[:space:]]+${var_name}='([^']+)'[[:space:]]*$/\1/p" \
+        -e "s/^[[:space:]]*export[[:space:]]+${var_name}=\"([^\"]+)\"[[:space:]]*$/\1/p" \
+        -e "s/^[[:space:]]*export[[:space:]]+${var_name}=([^[:space:]#]+)[[:space:]]*$/\1/p" \
+        "${bashrc_file}" | tail -n 1)
+
+    # Same sanitisation as the interactive loaders: strip control characters
+    # and surrounding whitespace so a pasted key cannot break HTTP headers.
+    value=$(printf "%s" "${value}" | tr -d '\000-\010\013\014\016-\037\177')
+    value="${value//$'\r'/}"
+    value="${value//$'\n'/}"
+    value=$(printf "%s" "${value}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
+    if [ -n "${value}" ]; then
+        export "${var_name}=${value}"
+    fi
+}
+
+case "${1:-}" in
+    --version)
+        exec /usr/bin/opencode "$@"
+        ;;
+    acp)
+        load_bashrc_export_silently NEURODESK_API_KEY
+        load_bashrc_export_silently BR_MCP_TOKEN
+        exec /usr/bin/opencode "$@"
+        ;;
+esac
+
 OPENCODE_CONFIG_DIR="${HOME}/.config/opencode"
 OPENCODE_CONFIG_FILE="${OPENCODE_CONFIG_DIR}/opencode.json"
 OPENCODE_DEFAULT_CONFIG_FILE="/opt/jovyan_defaults/.config/opencode/opencode.json"
+OPENCODE_STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/opencode"
+OPENCODE_TUI_KV_FILE="${OPENCODE_STATE_DIR}/kv.json"
 
 JETSTREAM_BASE_URL="https://llm.jetstream-cloud.org/v1"
 JETSTREAM_MODEL_ID="gpt-oss-120b"
 NEURODESK_BASE_URL="https://llm.neurodesk.org/openai"
 NEURODESK_BASE_URL="${NEURODESK_BASE_URL%/}"
-NEURODESK_DEFAULT_MODEL_ID="gpt-oss"
+# llm.neurodesk.org's curated default alias. Preferred when the "neurodesk"
+# profile is requested, and assumed to exist when the model listing is hidden.
+NEURODESK_DEFAULT_MODEL_ID="neurodesk"
 BRAIN_RESEARCHER_MCP_URL="https://brain-researcher.com/mcp"
 BRAIN_RESEARCHER_SIGNUP_URL="https://brain-researcher.com/settings"
+NBI_SETUP_SCRIPT="${NBI_SETUP_SCRIPT:-/opt/neurodesktop/nbi_setup.sh}"
 OPENCODE_STARTUP_VERBOSE="${OPENCODE_STARTUP_VERBOSE:-0}"
 OPENCODE_COLOR_ENABLED=0
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
@@ -54,6 +110,44 @@ ensure_opencode_config_file() {
     if [ ! -f "${OPENCODE_CONFIG_FILE}" ] && [ -f "${OPENCODE_DEFAULT_CONFIG_FILE}" ]; then
         cp "${OPENCODE_DEFAULT_CONFIG_FILE}" "${OPENCODE_CONFIG_FILE}"
     fi
+}
+
+# Hide the TUI sidebar until the user asks for it: it costs 42 columns on
+# wide terminals. OpenCode persists the ctrl+x b toggle under the "sidebar"
+# key of kv.json, so only seed the key when it is absent and never touch a
+# choice the user has already made.
+ensure_opencode_tui_defaults() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        return 0
+    fi
+    mkdir -p "${OPENCODE_STATE_DIR}" 2>/dev/null || return 0
+    python3 - "${OPENCODE_TUI_KV_FILE}" <<'PY'
+import json
+import os
+import sys
+
+kv_path = sys.argv[1]
+
+kv = {}
+try:
+    with open(kv_path, "r", encoding="utf-8") as f:
+        kv = json.load(f)
+except (OSError, json.JSONDecodeError):
+    kv = {}
+
+if not isinstance(kv, dict):
+    kv = {}
+
+if "sidebar" in kv:
+    sys.exit(0)
+
+kv["sidebar"] = "hide"
+
+tmp_path = f"{kv_path}.tmp"
+with open(tmp_path, "w", encoding="utf-8") as f:
+    json.dump(kv, f)
+os.replace(tmp_path, kv_path)
+PY
 }
 
 array_contains() {
@@ -391,6 +485,19 @@ load_neurodesk_api_key_from_bashrc() {
     fi
 }
 
+write_bashrc_from_temp() {
+    local bashrc_file="$1"
+    local tmp_bashrc="$2"
+
+    if cp "${tmp_bashrc}" "${bashrc_file}"; then
+        rm -f "${tmp_bashrc}"
+        return 0
+    fi
+
+    rm -f "${tmp_bashrc}"
+    return 1
+}
+
 persist_neurodesk_api_key_to_bashrc() {
     local key="$1"
     local escaped_key
@@ -399,7 +506,7 @@ persist_neurodesk_api_key_to_bashrc() {
 
     escaped_key=$(printf "%s" "${key}" | sed "s/'/'\"'\"'/g")
 
-    touch "${bashrc_file}"
+    touch "${bashrc_file}" || return 1
     tmp_bashrc=$(mktemp) || return 1
 
     grep -vE '^[[:space:]]*export[[:space:]]+NEURODESK_API_KEY=|^[[:space:]]*#[[:space:]]*Neurodesk API key for OpenCode[[:space:]]*$' "${bashrc_file}" > "${tmp_bashrc}" || true
@@ -409,7 +516,7 @@ persist_neurodesk_api_key_to_bashrc() {
         printf "export NEURODESK_API_KEY='%s'\n" "${escaped_key}"
     } >> "${tmp_bashrc}"
 
-    mv "${tmp_bashrc}" "${bashrc_file}"
+    write_bashrc_from_temp "${bashrc_file}" "${tmp_bashrc}"
 }
 
 sanitize_br_mcp_token() {
@@ -469,7 +576,7 @@ persist_br_mcp_token_to_bashrc() {
 
     escaped_token=$(printf "%s" "${token}" | sed "s/'/'\"'\"'/g")
 
-    touch "${bashrc_file}"
+    touch "${bashrc_file}" || return 1
     tmp_bashrc=$(mktemp) || return 1
 
     grep -vE '^[[:space:]]*export[[:space:]]+BR_MCP_TOKEN=|^[[:space:]]*#[[:space:]]*BR_MCP_DECLINED[[:space:]]*$|^[[:space:]]*#[[:space:]]*Brain Researcher MCP token[[:space:]]*$' "${bashrc_file}" > "${tmp_bashrc}" || true
@@ -479,14 +586,14 @@ persist_br_mcp_token_to_bashrc() {
         printf "export BR_MCP_TOKEN='%s'\n" "${escaped_token}"
     } >> "${tmp_bashrc}"
 
-    mv "${tmp_bashrc}" "${bashrc_file}"
+    write_bashrc_from_temp "${bashrc_file}" "${tmp_bashrc}"
 }
 
 persist_br_mcp_decline_to_bashrc() {
     local bashrc_file="${HOME}/.bashrc"
     local tmp_bashrc
 
-    touch "${bashrc_file}"
+    touch "${bashrc_file}" || return 1
     tmp_bashrc=$(mktemp) || return 1
 
     grep -vE '^[[:space:]]*#[[:space:]]*BR_MCP_DECLINED[[:space:]]*$' "${bashrc_file}" > "${tmp_bashrc}" || true
@@ -495,7 +602,7 @@ persist_br_mcp_decline_to_bashrc() {
         echo "# BR_MCP_DECLINED"
     } >> "${tmp_bashrc}"
 
-    mv "${tmp_bashrc}" "${bashrc_file}"
+    write_bashrc_from_temp "${bashrc_file}" "${tmp_bashrc}"
 }
 
 # Step 1: Check if Jetstream's gpt-oss-120b model API call works.
@@ -911,6 +1018,22 @@ config_path, default_path, selected_model = sys.argv[1:4]
 with open(config_path, "r", encoding="utf-8") as f:
     cfg = json.load(f)
 
+# The Neurodesk guidance is delivered as the AGENTS.md this wrapper copies into
+# the working directory, so users can edit it for their own project. Earlier
+# releases also pinned the read-only /opt/AGENTS.md into "instructions", which
+# put a second, uneditable copy into every prompt and overrode local edits.
+# Drop that legacy entry while keeping any instruction the user added.
+instructions = cfg.get("instructions")
+if isinstance(instructions, list):
+    kept = [
+        entry for entry in instructions
+        if not (isinstance(entry, str) and entry.strip() == "/opt/AGENTS.md")
+    ]
+    if kept:
+        cfg["instructions"] = kept
+    else:
+        cfg.pop("instructions", None)
+
 default_cfg = {}
 if os.path.exists(default_path):
     with open(default_path, "r", encoding="utf-8") as f:
@@ -1123,6 +1246,16 @@ resolve_requested_model_override() {
 
     case "${requested}" in
         neurodesk|jetstream|ollama)
+            # Prefer the provider's curated default alias over the listing
+            # order: llm.neurodesk.org publishes a "neurodesk" model that is
+            # its recommended default, but /models returns it last.
+            if [ "${requested}" = "neurodesk" ] \
+                && array_contains "neurodesk/${NEURODESK_DEFAULT_MODEL_ID}" \
+                    "${WORKING_MODELS[@]}"; then
+                SELECTED_MODEL="neurodesk/${NEURODESK_DEFAULT_MODEL_ID}"
+                echo "OPENCODE_MODEL_PROFILE=${requested} requested; using ${SELECTED_MODEL}."
+                return 0
+            fi
             for model_ref in "${WORKING_MODELS[@]}"; do
                 case "${model_ref}" in
                     "${requested}/"*)
@@ -1540,9 +1673,27 @@ ensure_opencode_model_selection() {
     echo "OpenCode default model set to ${SELECTED_MODEL}."
 }
 
+# Mirror the model selection, NEURODESK_API_KEY, and BR_MCP_TOKEN into
+# Notebook Intelligence so the JupyterLab AI assistant follows whatever was
+# chosen here instead of waiting for the next JupyterLab restart
+# (nbi_setup.sh reads the selection back out of opencode.json and asks any
+# running JupyterLab server to re-read the refreshed config from disk).
+sync_notebook_intelligence_config() {
+    if [ ! -x "${NBI_SETUP_SCRIPT}" ]; then
+        return 0
+    fi
+    if "${NBI_SETUP_SCRIPT}" >/dev/null 2>&1; then
+        echo "Notebook Intelligence follows the OpenCode model selection (reload any already-open NBI Settings tab before saving there)."
+    else
+        echo "Warning: failed to sync Notebook Intelligence config via ${NBI_SETUP_SCRIPT}." >&2
+    fi
+}
+
 ensure_opencode_model_selection
 prompt_brain_researcher_mcp_setup
 apply_brain_researcher_mcp_to_opencode_config
+sync_notebook_intelligence_config
+ensure_opencode_tui_defaults
 
 if [ -n "${BR_MCP_TOKEN:-}" ]; then
     echo "Brain Researcher MCP server: ACTIVE (using BR_MCP_TOKEN from env/~/.bashrc)"

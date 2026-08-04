@@ -6,4 +6,4 @@
 * text=auto eol=lf
 *.png binary
 *.run binary
-
+.github/workflows/*.lock.yml linguist-generated=true merge=ours

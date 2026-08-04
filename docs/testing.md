@@ -1,16 +1,90 @@
+---
+title: Testing
+description: Two-tier test suite, per-area focused test commands, container
+  build/run modes, and the negative-test convention
+parent: index.md
+status: current
+last-reviewed: "2026-08-03"
+---
+
 # Testing
 
-When making changes to the project, add tests for new functionality, build the
-container, and run the tests inside the container under `/opt/tests/` to ensure
-that changes do not break existing functionality.
+The suite has two tiers, and which one a new test belongs in is decided by a
+single question: **does it need a running container to answer?**
+
+| | `tests/unit/` | `tests/container/` |
+| --- | --- | --- |
+| Runs on | a repository checkout | inside the built image |
+| Command | `pytest tests/unit` | `pytest /opt/tests/` |
+| Run by | the `Unit tests` workflow, on every push and pull request | the build workflows, once per test profile |
+| Covers | repository sources, importable Python modules, shell scripts driven against a temporary `HOME` | mounts, installed kernels, running services, CVMFS, the shipped binaries |
+
+Default to `tests/unit/`. Reach for `tests/container/` only when the assertion
+genuinely cannot be made without the image — a service must be running, a
+package must be installed, a mount must be present. A test that reads the
+`Dockerfile`, parses a config file, or drives a script against `tmp_path` is a
+unit test even when the thing it describes only exists in the image. The
+rationale for this split is recorded in the
+[test suite audit](designs/test-suite-audit.md).
+
+Only `tests/container/` is copied into the image (together with
+`conftest.py`, `testlib.py`, and `pytest.ini`), so nothing under
+`tests/unit/` is available at `/opt/tests/`.
 
 ```bash
-pytest /opt/tests/
+pytest tests/unit          # from a checkout, no container needed
+pytest /opt/tests/         # inside the built image
 ```
 
-The image packages a copy of the build `Dockerfile` as `/opt/tests/Dockerfile`
-so source-shape regression tests under `/opt/tests/` can run in the same
-container-only layout as CI.
+Running `tests/unit` needs `pytest`, `httpx`, `traitlets`, and `ssh-keygen`
+(`openssh-client`); see `.github/workflows/unit-tests.yml`.
+
+Two modules need heavier optional dependencies and skip cleanly when they are
+absent rather than failing a plain checkout; CI installs them, so they always
+run there:
+
+- `tests/unit/test_astra_view_graph.py` needs `astra-spec==0.0.12`,
+  `astra-tools==0.2.11`, and `anywidget==0.11.0`, because it runs the released
+  ASTRA validators. Those pull in ~50 further packages.
+- `tests/unit/test_astra_view_filebrowser.py` needs `jupyter-server` to drive
+  the file-browser server extension.
+
+## Shared helpers
+
+`tests/testlib.py` resolves a test's subject in whichever layout it is running
+in, and is installed next to the container tier at `/opt/tests/testlib.py`
+(the installed `conftest.py` puts it on the import path in the image layout):
+
+- `resolve_source(installed, relative)` — the path the image installs it to,
+  falling back to its path in the checkout. Use this for anything that ships
+  both ways.
+- `repo_path(relative)` — a repository source with no installed counterpart
+  (the `Dockerfile`, `.github/**`). Only valid in the unit tier; it raises with
+  a pointer to `tests/unit/` if called from the image.
+- `load_source_module(name, installed, relative)` — import a Python source file
+  resolved the same way.
+- `run_cmd(cmd, cwd=, env=, timeout=)` — shell out and return
+  `(exit_code, combined_output)`. `env` overlays the caller's environment.
+
+## Focused tests by area
+
+AGENTS.md defines which tests each area change must run; this table is the
+same routing in one place. Every entry lists the checkout command first and
+the in-image command second. The sections that follow explain what the
+non-obvious tiers protect.
+
+| Area | On a checkout | In the built image |
+| --- | --- | --- |
+| Access-URL banner (`print_access_url.sh`) | `pytest tests/unit/test_print_access_url.py` | — |
+| ASTRA viewer core (adapter, graph, widget, previews) | `pytest tests/unit/test_astra_view_graph.py tests/unit/test_astra_view_packaging.py` | `pytest /opt/tests/test_astra_view_image.py` |
+| File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py` | `pytest /opt/tests/test_astra_view_image.py` |
+| `astra`/`lc` installs, Lightcone skills and hooks | `pytest tests/unit/test_astra_jupyter_ai_tooling.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
+| Jupyter AI, ACP personas, server-documents workaround | see [below](#jupyter-ai-and-acp-personas) | `pytest /opt/tests/test_astra_jupyter_ai_image.py` |
+| Notebook Intelligence / MyST pins and rebuilds | `pytest tests/unit/test_nbi_settings_patch.py tests/unit/test_myst_build_workaround.py` | `pytest /opt/tests/test_nbi_labextension_patch.py` |
+| Launcher extension, workspace link routing | `pytest tests/unit/test_workspace_link_routing.py` | `pytest /opt/tests/test_workspace_link_routing_image.py` |
+| Agentic workflows under `.github/workflows/*.md` | `pytest tests/unit/test_report_job_failure_action.py tests/unit/test_agentic_maintenance_workflows.py` | — |
+
+### Desktop tests
 
 Desktop smoke tests keep Guacamole, Tomcat, VNC, and credential state in
 temporary per-test homes by default. Tests that need to start the global xrdp
@@ -26,11 +100,59 @@ docker buildx build --check .
 docker buildx build --target apptainer --progress=plain .
 ```
 
-For focused CI workflow source-shape checks from a repository checkout:
+### Workspace link routing
+
+The unit tier asserts the interception guards in the TypeScript source; the
+image tier asserts the plugin survived the labextension build, that JupyterLab
+accepts it, that `jupyterlab_server` still publishes the `serverRoot` page
+config option the mapping depends on, and that the `Markdown Preview` and
+`HTML Viewer` factories a clicked report opens with are registered and not
+disabled. Those factory names are upstream strings; if a JupyterLab upgrade
+renames one, a clicked report quietly falls back to the text editor rather
+than failing, which is exactly why the image tier pins them.
+
+### ASTRA CLIs, Lightcone skills, and hooks
+
+The image tier is the one that matters here: it drives the real hook scripts
+end to end (so a missing `jq` fails loudly), asserts that exactly one `astra`
+answers on `PATH`, checks that the pinned marketplace commit teaches the
+schema version the installed `astra validate` speaks, and restores a throwaway
+home to prove all four reproduction skills reach OpenCode. It also drives the
+OpenCode adapter directly and checks that session, read, and edit hook context
+is returned to the model-facing system prompt or tool output.
+
+### Jupyter AI and ACP personas
 
 ```bash
-pytest tests/test_github_workflows.py
+pytest tests/unit/test_jupyter_ai_workspace.py
+pytest tests/unit/test_astra_jupyter_ai_tooling.py
+pytest tests/unit/test_jupyter_server_documents_patch.py
+pytest tests/unit/test_jupyter_ai_acp_client_patch.py
+pytest tests/unit/test_coding_agents.py -k opencode_machine_commands
+# In the rebuilt image:
+pytest /opt/tests/test_astra_jupyter_ai_image.py
+pip check
+jupyter server extension list
+jupyter labextension list --verbose
 ```
+
+The workspace test covers the checkout-safe hook behavior: only ``.chat``
+saves seed ``AGENTS.md``, project-authored guidance is never overwritten, and
+seed failures do not block chat creation. The image test drives a real
+``FileContentsManager.new_untitled(..., ext=".chat")`` call against the shipped
+hook and ``/opt/AGENTS.md``.
+
+### ASTRA viewer
+
+The unit tier uses the released ASTRA validators against checked-in projects,
+tests external-analysis and child-universe confinement, and covers G1-G7 and
+the trust states the viewer derives from run evidence.
+`tests/fixtures/astra-bet` is the canonical worked spec both tiers read: the
+unit tier reads it from the checkout and the image tier validates its installed
+copy at `/opt/neurodesktop/examples/astra-bet`, so a broken example fails the
+build rather than reaching a user. The image tier is otherwise intentionally
+small — the installed package and pins, the real vendored frontend, and the
+file-browser server extension.
 
 ## Negative Test Convention
 
@@ -41,6 +163,21 @@ that the workflow fails with a non-zero exit code and does not produce output.
 
 This guards against silent failures caused by `set +euo pipefail` and `|| true`
 patterns in workflow scripts.
+
+A non-zero exit code on its own is **not** enough. `module load` also exits
+non-zero when Lmod is not installed at all, so a negative test that asserts only
+on the exit status passes on a machine with no Lmod, no CVMFS, and no pipeline
+tool — which is exactly how
+`test_nipype.py::test_nipype_nonexistent_module_fails` used to pass outside the
+container. Every negative test must therefore:
+
+1. assert the environment it is about is really present (e.g.
+   `/usr/share/lmod/lmod/init/bash` exists), and
+2. assert the pipeline produced **no output file**, not just that something
+   returned non-zero.
+
+`test_nextflow.py::test_nextflow_nonexistent_module_fails` is the reference
+shape.
 
 ## Building the Container
 

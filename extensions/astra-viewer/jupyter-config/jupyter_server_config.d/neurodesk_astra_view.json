@@ -1,0 +1,7 @@
+{
+  "ServerApp": {
+    "jpserver_extensions": {
+      "neurodesk_astra_view.serverext": true
+    }
+  }
+}

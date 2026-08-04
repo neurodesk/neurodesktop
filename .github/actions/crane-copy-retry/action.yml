@@ -1,0 +1,114 @@
+name: Crane copy with retry
+description: Copy an image reference with bounded retries for transient registry upload failures.
+
+inputs:
+  source:
+    description: Source image reference to copy from.
+    required: true
+  destination:
+    description: Destination image reference to copy to.
+    required: true
+  max-attempts:
+    description: Maximum copy attempts before failing.
+    required: false
+    default: "3"
+  attempt-timeout-seconds:
+    description: Timeout for each crane copy attempt.
+    required: false
+    default: "1200"
+
+runs:
+  using: composite
+  steps:
+    - name: Copy image reference
+      shell: bash
+      env:
+        SOURCE: ${{ inputs.source }}
+        DESTINATION: ${{ inputs.destination }}
+        MAX_ATTEMPTS: ${{ inputs.max-attempts }}
+        ATTEMPT_TIMEOUT_SECONDS: ${{ inputs.attempt-timeout-seconds }}
+      run: |
+        set -euo pipefail
+
+        require_positive_integer() {
+          local name="$1"
+          local value="$2"
+          if ! [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::${name} must be a positive integer; got '${value}'."
+            exit 2
+          fi
+        }
+
+        require_non_empty() {
+          local name="$1"
+          local value="$2"
+          if [ -z "$value" ]; then
+            echo "::error::${name} must not be empty."
+            exit 2
+          fi
+        }
+
+        is_auth_failure() {
+          local log_file="$1"
+          grep -Eiq \
+            '(unauthorized|unauthenticated|authentication required|incorrect username|invalid username|forbidden|denied:|requested access.*denied)' \
+            "$log_file"
+        }
+
+        retry_delay_seconds() {
+          local attempt="$1"
+          case "$attempt" in
+            1) echo 30 ;;
+            2) echo 60 ;;
+            *) echo 120 ;;
+          esac
+        }
+
+        require_non_empty "source" "$SOURCE"
+        require_non_empty "destination" "$DESTINATION"
+        require_positive_integer "max-attempts" "$MAX_ATTEMPTS"
+        require_positive_integer "attempt-timeout-seconds" "$ATTEMPT_TIMEOUT_SECONDS"
+
+        if ! command -v crane >/dev/null 2>&1; then
+          echo "::error::crane is required but was not found on PATH."
+          exit 127
+        fi
+
+        for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
+          echo "crane copy ${SOURCE} -> ${DESTINATION}: attempt ${attempt}/${MAX_ATTEMPTS}"
+
+          copy_log="$(mktemp)"
+          set +e
+          timeout "${ATTEMPT_TIMEOUT_SECONDS}s" crane copy "$SOURCE" "$DESTINATION" >"$copy_log" 2>&1
+          copy_rc=$?
+          set -e
+
+          cat "$copy_log"
+          if [ "$copy_rc" -eq 0 ]; then
+            rm -f "$copy_log"
+            echo "crane copy ${SOURCE} -> ${DESTINATION} succeeded on attempt ${attempt}."
+            exit 0
+          fi
+
+          if is_auth_failure "$copy_log"; then
+            rm -f "$copy_log"
+            echo "::error::crane copy ${SOURCE} -> ${DESTINATION} failed with an authentication or authorization error; not retrying."
+            exit "$copy_rc"
+          fi
+          rm -f "$copy_log"
+
+          if [ "$copy_rc" -eq 124 ]; then
+            echo "::warning::crane copy ${SOURCE} -> ${DESTINATION} timed out after ${ATTEMPT_TIMEOUT_SECONDS}s."
+          else
+            echo "::warning::crane copy ${SOURCE} -> ${DESTINATION} failed with exit code ${copy_rc}."
+          fi
+
+          if [ "$attempt" -lt "$MAX_ATTEMPTS" ]; then
+            delay="$(retry_delay_seconds "$attempt")"
+            echo "Retrying crane copy ${SOURCE} -> ${DESTINATION} in ${delay}s."
+            sleep "$delay"
+          else
+            echo "::error::crane copy ${SOURCE} -> ${DESTINATION} failed after ${MAX_ATTEMPTS} attempts."
+            exit "$copy_rc"
+          fi
+        done

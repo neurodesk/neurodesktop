@@ -201,6 +201,14 @@ restore_defaults() {
             continue
         fi
 
+        # Skip the claude binary (~230MB): /usr/local/sbin/claude (first in
+        # PATH) replaces this path with a symlink to the image-owned binary on
+        # first use. Copying it into every possibly network-mounted home would
+        # only slow startup and leave persistent users on a stale version.
+        if [[ "$src_file" == *"/.local/bin/claude" ]]; then
+            continue
+        fi
+
         # Calculate relative path and destination
         rel_path="${src_file#${DEFAULTS_DIR}/}"
         dest_file="${HOME_DIR}/${rel_path}"

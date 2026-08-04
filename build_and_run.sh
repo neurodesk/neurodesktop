@@ -2,8 +2,8 @@
 set -e
 
 if [ "${1:-}" != "test" ] && [ "${1:-}" != "fulltest" ] && [ "${1:-}" != "fulltest_verbose" ] && [ "${1:-}" != "hpctest" ] && [ "${1:-}" != "hpc" ]; then
-    if docker ps --all | grep -w neurodesktop; then
-        if docker ps --all | grep neurodeskapp; then
+    if docker container inspect neurodesktop >/dev/null 2>&1; then
+        if docker container inspect neurodeskapp >/dev/null 2>&1; then
             echo "detected a Neurodeskapp container and ignoring it!"
         else
             bash stop_and_clean.sh
@@ -267,8 +267,8 @@ if [ "${1:-}" = "hpc" ]; then
     exit $?
 fi
 
-# Detached HPC session + run pytest inside. Container is left running so the
-# user can `docker exec -it neurodesktop-hpctest bash` for further inspection.
+# Detached HPC session + run pytest inside. Container and temp passwd/group/
+# home files are torn down on exit.
 #
 # Usage: build_and_run.sh hpctest [USERNAME] [UID] [GID]
 if [ "${1:-}" = "hpctest" ]; then

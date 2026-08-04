@@ -1,1 +1,49 @@
 /* Required by JupyterLab builder */
+
+/* Layout for the file-browser ASTRA document; the viewer's own styles are
+   injected from /neurodesk-astra-view/asset/css so they cannot drift from the
+   notebook widget. */
+.nd-astra-document {
+  background: var(--jp-layout-color0);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: auto;
+}
+
+.nd-astra-universe-bar {
+  align-items: center;
+  border-bottom: 1px solid var(--jp-border-color2);
+  display: flex;
+  flex: 0 0 auto;
+  font-size: var(--jp-ui-font-size1);
+  gap: 8px;
+  padding: 4px 8px;
+}
+
+.nd-astra-universe-bar label {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.nd-astra-refresh {
+  background: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 2px;
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+  font-size: var(--jp-ui-font-size1);
+  padding: 2px 8px;
+}
+
+.nd-astra-refresh:hover {
+  background: var(--jp-layout-color2);
+}
+
+.nd-astra-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px;
+}

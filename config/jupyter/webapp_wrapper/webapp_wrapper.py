@@ -1337,6 +1337,18 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(content)
 
+    def _iter_request_body(self, content_length):
+        """Yield exactly ``content_length`` request bytes in bounded chunks."""
+        remaining = content_length
+        while remaining:
+            chunk = self.rfile.read(min(STREAM_CHUNK_SIZE, remaining))
+            if not chunk:
+                raise ConnectionError(
+                    f"Client request body ended with {remaining} bytes remaining"
+                )
+            remaining -= len(chunk)
+            yield chunk
+
     def _proxy_request(self, method):
         """Proxy request to the actual webapp server."""
         target_port = config.target_port
@@ -1351,17 +1363,27 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
             # Build the target URL (add back query string)
             target_url = f"http://localhost:{target_port}{path}{query_string}"
 
-            # Read request body if present
-            content_length = self.headers.get("Content-Length")
+            # Stream request bodies to the backend instead of buffering the
+            # complete upload in the wrapper process.
+            content_length_header = self.headers.get("Content-Length")
+            content_length = None
             body = None
-            if content_length:
-                body = self.rfile.read(int(content_length))
+            if content_length_header is not None:
+                content_length = int(content_length_header)
+                if content_length < 0:
+                    raise ValueError("Content-Length must not be negative")
+                body = self._iter_request_body(content_length)
 
             # Copy relevant headers (preserve duplicates like Cookie)
             proxy_headers = [
                 (h, v) for h, v in self.headers.items()
                 if h.lower() not in ("host", "content-length")
             ]
+            if content_length is not None:
+                # An iterable request body would otherwise make httpx use
+                # chunked transfer encoding. Preserve the browser's validated
+                # length so backends that require fixed-length uploads work.
+                proxy_headers.append(("Content-Length", str(content_length)))
 
             # As a transparent proxy we must only forward the browser's cookies
             # (already in proxy_headers), not cookies httpx accumulated from

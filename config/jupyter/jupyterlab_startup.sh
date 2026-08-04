@@ -152,6 +152,13 @@ fi
 # Default ACLs ensure future keys created in .ssh get owner-only permissions
 setfacl -dRm u::rw,g::0,o::0 "${HOME}/.ssh" 2>/dev/null || true
 
+# Pre-generate the SSH keypairs guacamole.sh needs for the SFTP side-channel
+# so the first desktop open does not pay two RSA-4096 generations (~3s).
+# ensure_ssh_keys.sh serialises against a concurrent guacamole.sh via flock.
+if [ -x /opt/neurodesktop/ensure_ssh_keys.sh ]; then
+    /opt/neurodesktop/ensure_ssh_keys.sh >/dev/null 2>&1 &
+fi
+
 # Create a symlink in home if /data is mounted
 if mountpoint -q /data; then
     if [ ! -L "${HOME}/data" ]; then
@@ -246,8 +253,20 @@ mkdir -p ${HOME}/.config/goose
 # ensure opencode config directory exists
 mkdir -p ${HOME}/.config/opencode
 
-# Align Notebook Intelligence's provider with OpenCode (Neurodesk LiteLLM
-# gpt-oss) and inject NEURODESK_API_KEY from env or ~/.bashrc if available.
+# Drop OpenCode sessions whose working directory has been deleted. OpenCode
+# stores session history in a database beside its config, never prunes it, and
+# lists every session on its Home page - so removing a project directory
+# leaves its sessions behind pointing at a path that no longer exists, and
+# opening one replays that dead directory back into the API. Set
+# NEURODESKTOP_OPENCODE_PRUNE_SESSIONS=0 to keep every session forever.
+if [ -x /opt/neurodesktop/opencode_prune_sessions.py ]; then
+    /opt/neurodesktop/opencode_prune_sessions.py --apply || \
+        echo "[WARN] OpenCode session prune failed; leaving session history untouched."
+fi
+
+# Align Notebook Intelligence's provider/model with the model selected in
+# OpenCode (~/.config/opencode/opencode.json) and inject NEURODESK_API_KEY
+# from env or ~/.bashrc if available.
 if [ -x /opt/neurodesktop/nbi_setup.sh ]; then
     /opt/neurodesktop/nbi_setup.sh || \
         echo "[WARN] nbi_setup.sh failed; Notebook Intelligence may require manual configuration."

@@ -1,0 +1,18 @@
+version: "0.0.12"
+name: "External child"
+inputs:
+  - id: child_input
+    type: data
+decisions:
+  child_choice:
+    label: "Child choice"
+    default: a
+    options:
+      a: {label: "A"}
+      b: {label: "B"}
+outputs:
+  - id: child_result
+    type: metric
+    inputs: [child_input]
+    decisions: [child_choice]
+

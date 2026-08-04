@@ -1,7 +1,7 @@
 {
   "name": "neurodesk-launcher",
   "version": "0.1.0",
-  "description": "JupyterLab extension for Neurodesk launcher with custom category icons",
+  "description": "JupyterLab extension for the Neurodesk launcher and for opening agent-authored workspace paths in the main panel",
   "license": "BSD-3-Clause",
   "author": "Neurodesk Project",
   "main": "lib/index.js",
@@ -17,10 +17,14 @@
   },
   "dependencies": {
     "@jupyterlab/application": "^4.0.0",
+    "@jupyterlab/apputils": "^4.0.0",
+    "@jupyterlab/coreutils": "^6.0.0",
+    "@jupyterlab/docmanager": "^4.0.0",
+    "@jupyterlab/docregistry": "^4.0.0",
     "@jupyterlab/launcher": "^4.0.0",
     "@jupyterlab/services": "^7.0.0",
     "@jupyterlab/ui-components": "^4.0.0",
-    "@jupyterlab/coreutils": "^6.0.0"
+    "@lumino/widgets": "^2.0.0"
   },
   "devDependencies": {
     "@jupyterlab/builder": "^4.0.0",

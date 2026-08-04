@@ -1,0 +1,8 @@
+version: "0.0.12"
+name: "External analysis fixture"
+inputs: []
+outputs: []
+analyses:
+  child:
+    path: child
+

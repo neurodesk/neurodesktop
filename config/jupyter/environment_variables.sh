@@ -14,6 +14,28 @@ fi
 
 fi
 
+# The Jupyter AI ACP adapters' vendored agent binaries are deleted in the
+# Dockerfile (npm ignores --omit=optional for global installs); these
+# variables point the adapters at the agent CLIs already in this image
+# instead. The adapter subprocesses inherit the Jupyter server environment,
+# which sources this file via before_notebook.sh. The image-owned claude
+# copy comes first: restore_home_defaults.sh skips copying the ~230 MB
+# binary into $HOME, so the home path only exists on user-managed installs.
+export CODEX_PATH="${CODEX_PATH:-/usr/bin/codex}"
+# Start the Codex persona in "Agent (full access)"; codex-acp otherwise
+# hardcodes the sandboxed "Agent" preset regardless of ~/.codex/config.toml,
+# while this image already runs Codex without approval prompts inside the
+# container boundary. Only codex-acp reads this variable, and users can still
+# pick another mode per session in the chat's mode selector.
+export INITIAL_AGENT_MODE="${INITIAL_AGENT_MODE:-agent-full-access}"
+if [ -z "${CLAUDE_CODE_EXECUTABLE}" ]; then
+    if [ -x "/opt/jovyan_defaults/.local/bin/claude" ]; then
+        export CLAUDE_CODE_EXECUTABLE="/opt/jovyan_defaults/.local/bin/claude"
+    else
+        export CLAUDE_CODE_EXECUTABLE="${HOME}/.local/bin/claude"
+    fi
+fi
+
 # MODULEPATH and CVMFS detection run on every source so that new shells
 # pick up CVMFS after a deferred (lazy) mount completes.
 export NEURODESKTOP_LOCAL_CONTAINERS="${NEURODESKTOP_LOCAL_CONTAINERS:-/neurodesktop-storage/containers}"
@@ -100,7 +122,7 @@ path_append_if_missing "/opt/conda/condabin"
 export PATH
 
 # Default to host Ollama from inside Docker unless explicitly overridden.
-# Local Ollama mode (START_LOCAL_LLMS=1) overrides this in before_notebook.sh.
+# before_notebook.sh repoints this at 127.0.0.1 when the host is unreachable.
 if [ -z "${OLLAMA_HOST}" ]; then
         export OLLAMA_HOST="http://host.docker.internal:11434"
 fi

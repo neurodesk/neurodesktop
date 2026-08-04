@@ -1,13 +1,15 @@
 #!/bin/bash
 # nbi_setup.sh
 # Keep Notebook Intelligence's chat/inline-completion provider aligned with
-# the OpenCode default (llm.neurodesk.org gpt-oss) and inject the shared
-# NEURODESK_API_KEY (the one OpenCode persists to ~/.bashrc) so NBI can
-# authenticate without the user re-entering the key in the Settings UI.
+# the model the user selected in OpenCode (~/.config/opencode/opencode.json
+# is the source of truth) and inject the shared NEURODESK_API_KEY (the one
+# OpenCode persists to ~/.bashrc) so NBI can authenticate without the user
+# re-entering the key in the Settings UI.
 #
 # Called from jupyterlab_startup.sh after restore_home_defaults.sh has
 # dropped the default /opt/jovyan_defaults/.jupyter/nbi/config.json into
-# the user's home.
+# the user's home, and from the OpenCode wrapper right after a model is
+# selected or a fresh API key is saved, so NBI never lags behind.
 
 set -u
 
@@ -15,6 +17,8 @@ NBI_CONFIG_FILE="${HOME}/.jupyter/nbi/config.json"
 NBI_DEFAULT_CONFIG="/opt/jovyan_defaults/.jupyter/nbi/config.json"
 NBI_MCP_FILE="${HOME}/.jupyter/nbi/mcp.json"
 NBI_DEFAULT_MCP="/opt/jovyan_defaults/.jupyter/nbi/mcp.json"
+OPENCODE_CONFIG_FILE="${HOME}/.config/opencode/opencode.json"
+NBI_MCP_SYNC_CHANGED=0
 
 mkdir -p "$(dirname "${NBI_CONFIG_FILE}")" 2>/dev/null || true
 
@@ -96,7 +100,8 @@ sync_mcp_brain_researcher() {
         cp "${NBI_DEFAULT_MCP}" "${NBI_MCP_FILE}" 2>/dev/null || true
     fi
 
-    NBI_MCP_FILE="${NBI_MCP_FILE}" \
+    local sync_result
+    sync_result=$(NBI_MCP_FILE="${NBI_MCP_FILE}" \
     BR_MCP_TOKEN_VALUE="${BR_MCP_TOKEN_VALUE}" \
     python3 - <<'PY'
 import json, os, sys
@@ -139,7 +144,12 @@ with open(tmp, "w", encoding="utf-8") as fh:
     json.dump(cfg, fh, indent=2)
     fh.write("\n")
 os.replace(tmp, path)
+print("changed")
 PY
+)
+    if [ "${sync_result}" = "changed" ]; then
+        NBI_MCP_SYNC_CHANGED=1
+    fi
 }
 
 sync_mcp_brain_researcher
@@ -231,16 +241,154 @@ if changed:
 PY
 fi
 
-if [ -z "${NEURODESK_API_KEY_VALUE}" ]; then
-    # No key yet; NBI will boot with an empty key. The user can run opencode
-    # once to set it up, or paste it into the NBI Settings dialog.
-    exit 0
+# Mirror the OpenCode model selection into NBI. The OpenCode wrapper stores
+# the chosen model as "provider/model_id" in opencode.json together with each
+# provider's baseURL, so that file is the single source of truth for which
+# model/endpoint the coding agents use. Sections the user pointed at an
+# endpoint OpenCode does not manage (via the NBI Settings UI) are left alone,
+# as are sections using a non-openai-compatible provider (claude, ollama...).
+if command -v python3 >/dev/null 2>&1 && [ -f "${OPENCODE_CONFIG_FILE}" ]; then
+    NBI_CONFIG_FILE="${NBI_CONFIG_FILE}" \
+    OPENCODE_CONFIG_FILE="${OPENCODE_CONFIG_FILE}" \
+    NEURODESK_API_KEY_VALUE="${NEURODESK_API_KEY_VALUE}" \
+    python3 - <<'PY'
+import json
+import os
+import sys
+
+cfg_path = os.environ["NBI_CONFIG_FILE"]
+opencode_path = os.environ["OPENCODE_CONFIG_FILE"]
+neurodesk_key = os.environ.get("NEURODESK_API_KEY_VALUE", "")
+
+def load_json(path):
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+opencode_cfg = load_json(opencode_path)
+cfg = load_json(cfg_path)
+if not isinstance(opencode_cfg, dict) or not isinstance(cfg, dict):
+    sys.exit(0)
+
+model_ref = opencode_cfg.get("model")
+if not isinstance(model_ref, str) or "/" not in model_ref:
+    sys.exit(0)
+provider_key, model_id = model_ref.split("/", 1)
+
+providers = opencode_cfg.get("provider")
+if not isinstance(providers, dict):
+    sys.exit(0)
+provider_cfg = providers.get(provider_key)
+if not isinstance(provider_cfg, dict):
+    sys.exit(0)
+# Only OpenAI-compatible providers map onto NBI's openai-compatible sections.
+if provider_cfg.get("npm") != "@ai-sdk/openai-compatible":
+    sys.exit(0)
+
+options = provider_cfg.get("options")
+if not isinstance(options, dict):
+    options = {}
+base_url = str(options.get("baseURL") or "").rstrip("/")
+if not base_url or not model_id:
+    sys.exit(0)
+
+def resolve_api_key(raw):
+    # OpenCode stores keys as "{env:VAR}" placeholders and resolves them from
+    # the environment itself; NBI needs the literal value.
+    raw = str(raw or "")
+    if raw.startswith("{env:") and raw.endswith("}"):
+        var_name = raw[5:-1]
+        if var_name == "NEURODESK_API_KEY":
+            return neurodesk_key
+        return os.environ.get(var_name, "")
+    return raw
+
+api_key = resolve_api_key(options.get("apiKey"))
+
+# Every baseURL OpenCode knows about counts as managed; an NBI section
+# pointing anywhere else was configured by hand and is left untouched.
+managed_urls = {"https://llm.neurodesk.org/openai"}
+for candidate in providers.values():
+    if not isinstance(candidate, dict):
+        continue
+    candidate_options = candidate.get("options")
+    if isinstance(candidate_options, dict):
+        url = str(candidate_options.get("baseURL") or "").rstrip("/")
+        if url:
+            managed_urls.add(url)
+
+context_window = ""
+models_cfg = provider_cfg.get("models")
+if isinstance(models_cfg, dict):
+    model_cfg = models_cfg.get(model_id)
+    if isinstance(model_cfg, dict):
+        limit_cfg = model_cfg.get("limit")
+        if isinstance(limit_cfg, dict):
+            try:
+                context_limit = int(limit_cfg.get("context"))
+            except (TypeError, ValueError):
+                context_limit = 0
+            if context_limit > 0:
+                context_window = str(context_limit)
+
+def get_prop(props, prop_id):
+    for prop in props:
+        if isinstance(prop, dict) and prop.get("id") == prop_id:
+            return str(prop.get("value") or "")
+    return ""
+
+def set_prop(props, prop_id, value):
+    for prop in props:
+        if isinstance(prop, dict) and prop.get("id") == prop_id:
+            if prop.get("value") != value:
+                prop["value"] = value
+                return True
+            return False
+    props.append({"id": prop_id, "value": value})
+    return True
+
+changed = False
+for section in ("chat_model", "inline_completion_model"):
+    model_section = cfg.get(section)
+    if not isinstance(model_section, dict):
+        continue
+    if model_section.get("provider") != "openai-compatible":
+        continue
+    props = model_section.get("properties")
+    if not isinstance(props, list):
+        props = []
+        model_section["properties"] = props
+    current_url = get_prop(props, "base_url").rstrip("/")
+    if current_url and current_url not in managed_urls:
+        continue
+    if set_prop(props, "base_url", base_url):
+        changed = True
+    if set_prop(props, "model_id", model_id):
+        changed = True
+    # Never wipe an existing key with an empty one (e.g. before first setup).
+    if api_key and set_prop(props, "api_key", api_key):
+        changed = True
+    if context_window and set_prop(props, "context_window", context_window):
+        changed = True
+
+if changed:
+    tmp = f"{cfg_path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(cfg, fh, indent=2)
+        fh.write("\n")
+    os.replace(tmp, cfg_path)
+    print(
+        f"nbi_setup.sh: synced Notebook Intelligence to OpenCode selection {provider_key}/{model_id}",
+        file=sys.stderr,
+    )
+PY
 fi
 
-if ! command -v python3 >/dev/null 2>&1; then
-    exit 0
-fi
-
+# If there is no key yet, NBI boots with an empty key. The user can run
+# opencode once to set it up, or paste it into the NBI Settings dialog.
+if [ -n "${NEURODESK_API_KEY_VALUE}" ] && command -v python3 >/dev/null 2>&1; then
 NBI_API_KEY="${NEURODESK_API_KEY_VALUE}" NBI_CONFIG_FILE="${NBI_CONFIG_FILE}" \
 python3 - <<'PY'
 import json
@@ -290,3 +438,94 @@ if changed:
         fh.write("\n")
     os.replace(tmp, path)
 PY
+fi
+
+# A running JupyterLab keeps config.json/mcp.json cached in memory: it renders
+# the Settings dialog from that cache and writes the whole cache back to disk
+# on the next Settings save, which would both hide and then revert everything
+# synced above. Ask each live Jupyter server to re-read the files instead:
+# GET /notebook-intelligence/capabilities reloads the config and rebuilds the
+# model objects server-side without writing anything back, and when the
+# brain-researcher MCP entry changed, POST /notebook-intelligence/
+# reload-mcp-servers makes the MCP connections follow too. Best-effort: at
+# container boot no server is up yet and stale jpserver-*.json files from
+# earlier sessions point at dead hosts, so failures are silently ignored.
+refresh_running_nbi() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        return 0
+    fi
+
+    NBI_MCP_SYNC_CHANGED="${NBI_MCP_SYNC_CHANGED}" python3 - <<'PY'
+import glob
+import json
+import os
+import sys
+from urllib import error, request
+
+runtime_dir = os.environ.get("JUPYTER_RUNTIME_DIR") or os.path.join(
+    os.path.expanduser("~"), ".local", "share", "jupyter", "runtime"
+)
+mcp_changed = os.environ.get("NBI_MCP_SYNC_CHANGED", "0") == "1"
+
+
+def call_nbi(base_url, token, path, method):
+    req = request.Request(f"{base_url}/{path}", method=method)
+    if token:
+        req.add_header("Authorization", f"token {token}")
+    if method == "POST":
+        req.add_header("Content-Type", "application/json")
+        req.data = b"{}"
+    with request.urlopen(req, timeout=5) as resp:
+        return resp.status
+
+
+def file_mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
+refreshed = 0
+# Newest first: the live server's runtime file is the most recent one, and
+# persistent homes accumulate stale jpserver files from earlier sessions.
+server_files = sorted(
+    glob.glob(os.path.join(runtime_dir, "jpserver-*.json")),
+    key=file_mtime,
+    reverse=True,
+)
+for server_file in server_files[:10]:
+    try:
+        with open(server_file, "r", encoding="utf-8") as fh:
+            info = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        continue
+    if not isinstance(info, dict):
+        continue
+    base_url = str(info.get("url") or "").rstrip("/")
+    if not base_url:
+        continue
+    token = str(info.get("token") or "")
+    try:
+        call_nbi(base_url, token, "notebook-intelligence/capabilities", "GET")
+    except (error.URLError, TimeoutError, OSError, ValueError):
+        continue
+    refreshed += 1
+    if mcp_changed:
+        try:
+            call_nbi(
+                base_url, token, "notebook-intelligence/reload-mcp-servers", "POST"
+            )
+        except (error.URLError, TimeoutError, OSError, ValueError):
+            pass
+
+if refreshed:
+    print(
+        f"nbi_setup.sh: refreshed Notebook Intelligence in {refreshed} running "
+        "JupyterLab server(s)",
+        file=sys.stderr,
+    )
+PY
+}
+
+refresh_running_nbi

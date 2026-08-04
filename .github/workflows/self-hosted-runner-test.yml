@@ -1,15 +1,35 @@
 name: Self-hosted Runner Test
 
+# Two modes, one workflow:
+#   sanity        — ~15s smoke test. "Is the pool alive and does DinD work?"
+#   ca-validation — multi-node Cluster Autoscaler soak. Run this after a cluster
+#                   rebuild, before trusting the pool with real builds.
+#
+# Neither mode builds or pushes anything. Manual dispatch only.
+
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "sanity = quick smoke test | ca-validation = multi-node autoscaler soak"
+        type: choice
+        options:
+          - sanity
+          - ca-validation
+        default: sanity
+      soak_minutes:
+        description: "ca-validation only: minutes the LONG job holds its node (needs > CA scale-down-unneeded-time, ~10m)"
+        type: number
+        default: 20
 
 jobs:
   sanity-base:
+    if: ${{ inputs.mode == 'sanity' }}
     name: Sanity (Sydney neurodesktop pool)
-    # Phase 1 smoke test: target the scale-set name directly (bypasses
-    # runner group). Once stable, promote to `runs-on: { group: runner-neurodesktop }`
-    # per cluster team's two-phase guidance.
-    runs-on: neurodesk-syd-arcrunner-neurodesktop
+    # Target the scale-set name directly (bypasses runner group). Once stable,
+    # promote to `runs-on: { group: runner-neurodesktop }` per cluster team's
+    # two-phase guidance.
+    runs-on: neurodesk-syd2-arcrunner-neurodesktop
     timeout-minutes: 20
     steps:
       - name: Runner identity
@@ -42,46 +62,117 @@ jobs:
           docker build -t dind-base-smoke:latest .
           docker run --rm dind-base-smoke:latest
 
-  scale-cpu:
-    name: Scale-from-zero (cpu pool) + quick stress
-    # runs-on: [self-hosted, linux, x64]
-    #target a specific self-hosted runner group
-    runs-on:
-      group: arc-cpu
-      # labels: [self-hosted, linux, x64]
-    timeout-minutes: 20
+  # ───────────────────────────────────────────────────────────────────────────
+  # Cluster Autoscaler validation.
+  #
+  # WHY THREE JOBS OF DIFFERENT LENGTHS: the two behaviours we need to prove are
+  # coupled in time and cannot be tested separately.
+  #   - short-a / short-b finish early -> their nodes go idle -> CA gets something
+  #     it is allowed to reclaim (proves GRANULAR scale-down).
+  #   - long is still working while that happens (proves CA does NOT evict a
+  #     busy node — the `cluster-autoscaler.kubernetes.io/safe-to-evict: "false"`
+  #     annotation on the runner pod).
+  # One runner per node (runner CPU request ~9 cores), so parallelism == nodes.
+  #
+  # EXPECTED RESULT (written before the first run, so we cannot rationalise later):
+  #   peak 3 nodes -> settles at 2, NOT 1. minRunners:1 means ARC immediately
+  #   replaces a finished runner with a fresh idle one, and that idle runner pins
+  #   its node. Only the genuinely EMPTY node is reclaimed.
+  #   FAILURE LOOKS LIKE: the long job dying mid-heartbeat, or a collapse to 1.
+  # ───────────────────────────────────────────────────────────────────────────
+  ca-validation:
+    if: ${{ inputs.mode == 'ca-validation' }}
+    name: CA ${{ matrix.role }}
+    runs-on: neurodesk-syd2-arcrunner-neurodesktop
+    timeout-minutes: 45
+    strategy:
+      # A job dying is the SIGNAL, not a reason to cancel the rest.
+      fail-fast: false
+      matrix:
+        role: [long, short-a, short-b]
+    env:
+      HOLD_MINUTES: ${{ matrix.role == 'long' && inputs.soak_minutes || 3 }}
     steps:
-      - name: Runner identity
+      - name: Identity (correlate with the cluster-side watcher)
         run: |
-          echo "RUNNER_NAME=$RUNNER_NAME"
-          echo "hostname=$(hostname)"
-          uname -a
+          echo "role=${{ matrix.role }} hold=${HOLD_MINUTES}m"
+          echo "pod=$(hostname)"
+          echo "runner=$RUNNER_NAME"
+          echo "start=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-      - name: DinD + parallel pulls (bounded)
-        shell: bash
+      # Parity checks. Recorded, NOT failed here — a CVMFS or MTU problem must
+      # not abort the job before the autoscaler measurement completes. The final
+      # step fails the job if any of these were wrong.
+      - name: Parity diagnostics (non-fatal here; asserted at the end)
+        run: |
+          : > /tmp/parity_fail
+
+          echo "::group::MTU (expect 1400 — Calico VXLAN overlay convention)"
+          MTU=$(cat /sys/class/net/eth0/mtu 2>/dev/null || echo unknown)
+          echo "eth0 mtu=$MTU"
+          [ "$MTU" = "1400" ] || echo "MTU expected 1400, got $MTU" >> /tmp/parity_fail
+          echo "::endgroup::"
+
+          echo "::group::Docker (expect Server 29.x — the docker:29-dind pin)"
+          docker version --format 'client={{.Client.Version}} server={{.Server.Version}}' || true
+          SV=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo unknown)
+          case "$SV" in 29.*) echo "docker server $SV ok" ;; *) echo "docker server expected 29.x, got $SV" >> /tmp/parity_fail ;; esac
+          echo "::endgroup::"
+
+          # NOTE: the CVMFS check is deliberately NOT here — see the dedicated step
+          # after the DinD build. Running it this early races the docker daemon
+          # coming up and reports a false "CVMFS missing" (hit twice, 2026-08-02).
+
+          echo "::group::Registry mirror reachable from the runner"
+          curl -sS -o /dev/null -m 10 -w "registry-mirror http=%{http_code}\n" \
+            http://registry-mirror.arc-gha-system.svc.cluster.local:5000/v2/ \
+            || echo "(registry mirror unreachable — informational)"
+          echo "::endgroup::"
+
+          echo "::group::Storage (work PVC + docker-lib PVC)"
+          df -h /home/runner/_work 2>/dev/null || true
+          docker info --format 'docker-root={{.DockerRootDir}} driver={{.Driver}}' || true
+          echo "::endgroup::"
+
+          if [ -s /tmp/parity_fail ]; then
+            echo "::warning::parity issues found (asserted after the soak):"; cat /tmp/parity_fail
+          else
+            echo "all parity checks passed"
+          fi
+
+      - name: Real work — DinD build (exercises the docker sidecar + PVCs)
         run: |
           set -euo pipefail
-          docker version
-          docker info
+          printf 'FROM alpine:3.19\nRUN dd if=/dev/zero of=/blob bs=1M count=128 status=none && sha256sum /blob\n' > Dockerfile
+          docker build -t ca-soak:${{ matrix.role }} .
 
-          # Parallel pulls to stress registry/network a bit, but keep it bounded.
-          images=(
-            alpine:3.19
-            ubuntu:24.04
-            node:20-alpine
-            python:3.11-slim
-          )
-
-          printf "%s\n" "${images[@]}" | xargs -P 4 -n 1 docker pull
-
-      - name: Small build (bounded)
-        shell: bash
+      # Runs AFTER the build so the docker daemon is provably warm. CVMFS is
+      # mounted into the DinD (docker) container, NOT the runner — by design, so
+      # containers the daemon spawns can bind-mount it. Checking from the runner,
+      # or before the daemon is ready, both give FALSE failures (hit both, 2026-08-02).
+      - name: CVMFS reachable from a DinD container
         run: |
-          set -euo pipefail
-          cat > Dockerfile <<'EOF'
-          FROM alpine:3.19
-          RUN dd if=/dev/zero of=/blob bs=1M count=64 status=none && sha256sum /blob | head -n1
-          CMD ["sh","-lc","echo cpu pool build ok; uname -a"]
-          EOF
-          docker build -t dind-cpu-smoke:latest .
-          docker run --rm dind-cpu-smoke:latest
+          if docker run --rm -v /cvmfs:/cvmfs:ro alpine:3.19 ls /cvmfs/neurodesk.ardc.edu.au >/dev/null 2>&1; then
+            echo "cvmfs entries: $(docker run --rm -v /cvmfs:/cvmfs:ro alpine:3.19 ls /cvmfs/neurodesk.ardc.edu.au | wc -l)"
+          else
+            echo "CVMFS /cvmfs/neurodesk.ardc.edu.au not listable from a DinD container" >> /tmp/parity_fail
+          fi
+
+      # The heartbeat is the instrument. If CA evicts this node the log simply
+      # stops — the last timestamp tells us exactly when, to line up against the
+      # cluster-side ToBeDeletedByClusterAutoscaler taint.
+      - name: Hold the node (heartbeat every 30s)
+        run: |
+          END=$(( $(date +%s) + HOLD_MINUTES * 60 ))
+          while [ "$(date +%s)" -lt "$END" ]; do
+            echo "heartbeat $(date -u +%H:%M:%SZ) role=${{ matrix.role }} pod=$(hostname)"
+            sleep 30
+          done
+
+      - name: Survived — assert parity
+        run: |
+          echo "role=${{ matrix.role }} completed at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -s /tmp/parity_fail ]; then
+            echo "::error::parity checks failed:"; cat /tmp/parity_fail; exit 1
+          fi
+          echo "node survived the full hold and all parity checks passed"
