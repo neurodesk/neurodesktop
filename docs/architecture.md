@@ -109,6 +109,7 @@ failures are retried at login, manifest-check, and registry-copy boundaries
 without turning registry timeouts into false cache misses.
 
 ## Apptainer
+
 `APPTAINER_HOME` is exported so Apptainer takes the home directory as a
 user-supplied path. Apptainer otherwise resolves the default home with
 `getpwuid()` on the *host* uid it derives from `/proc/self/uid_map`. Under a
