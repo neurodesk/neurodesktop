@@ -19,6 +19,10 @@ are listed at the end. The subsystems themselves are described in
 - `CVMFS_MODULES`: CVMFS module catalogue path used when refreshing
   `MODULEPATH`. Fixed to `/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/` by
   `environment_variables.sh`; not a user override
+- `APPTAINER_HOME`: home directory passed to Apptainer. Set to `$HOME` by
+  `environment_variables.sh` so Apptainer does not have to resolve the home
+  directory through a password-database lookup on the host uid, which fails
+  under uid-remapping runtimes such as rootless Podman.
 - `NEURODESKTOP_CVMFS_SELECTION_TTL_SECONDS`: lifetime of the cached CVMFS
   server ranking produced by `cvmfs_server_select.sh`; defaults to `604800`
   (7 days). Set to `0` to re-probe on every startup

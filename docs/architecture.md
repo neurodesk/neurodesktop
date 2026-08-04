@@ -107,3 +107,13 @@ build paths use local composite actions under
 [`.github/actions/`](../.github/actions/) so transient registry transport
 failures are retried at login, manifest-check, and registry-copy boundaries
 without turning registry timeouts into false cache misses.
+
+## Apptainer
+`APPTAINER_HOME` is exported so Apptainer takes the home directory as a
+user-supplied path. Apptainer otherwise resolves the default home with
+`getpwuid()` on the *host* uid it derives from `/proc/self/uid_map`. Under a
+uid-remapping runtime - rootless Podman, rootless Docker, Kubernetes user
+namespaces - container uid 1000 maps to a host uid such as 100999 that has no
+`/etc/passwd` entry inside the container, the lookup fails silently, and every
+tool container aborts with `failed to add  as session directory: path . is not
+an absolute path`.
