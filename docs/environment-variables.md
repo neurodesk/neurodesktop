@@ -130,8 +130,8 @@ are listed at the end. The subsystems themselves are described in
   unreachable, so a black-holed host cannot block server startup while
   Notebook Intelligence enumerates Ollama models
 - `OLLAMA_DEFAULT_CONTEXT_LIMIT`, `OLLAMA_DEFAULT_OUTPUT_LIMIT`: context and
-  output token limits the OpenCode wrapper assumes for Ollama models;
-  default to `16384` and half the context limit
+  output token limits the OpenCode wrapper assumes for Ollama models that do
+  not declare an explicit `limit`; default to `32768` and `8192`
 - `OPENCODE_MODEL_PROFILE`: set to `ollama`, `neurodesk`, `jetstream`, or
   `provider/model` to skip the interactive OpenCode model picker. The
   `neurodesk` profile prefers llm.neurodesk.org's curated `neurodesk` alias
