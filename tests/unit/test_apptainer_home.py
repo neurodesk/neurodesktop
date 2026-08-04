@@ -56,6 +56,10 @@ def test_explicit_apptainer_home_is_preserved(tmp_path):
     )
 
 
+def test_empty_apptainer_home_defaults_to_home(tmp_path):
+    assert _source_environment(home=tmp_path, apptainer_home="") == str(tmp_path)
+
+
 @pytest.mark.parametrize("home", [None, ""])
 def test_missing_home_does_not_set_apptainer_home(home):
     assert _source_environment(home=home) == UNSET
