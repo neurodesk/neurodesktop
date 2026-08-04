@@ -4,7 +4,7 @@ description: Startup flow, services, directory layout, and the map of
   per-subsystem architecture pages
 parent: index.md
 status: current
-last-reviewed: "2026-07-31"
+last-reviewed: "2026-08-04"
 ---
 
 # Architecture
@@ -107,3 +107,15 @@ build paths use local composite actions under
 [`.github/actions/`](../.github/actions/) so transient registry transport
 failures are retried at login, manifest-check, and registry-copy boundaries
 without turning registry timeouts into false cache misses.
+
+## Apptainer
+
+When `HOME` names an existing directory and
+[`APPTAINER_HOME`](environment-variables.md#apptainer) is unset or empty,
+`environment_variables.sh` defaults `APPTAINER_HOME` to `HOME`; an explicit
+override is preserved. This makes Apptainer use a supplied home path instead
+of resolving one from the host uid in `/proc/self/uid_map`. In the rootless
+Podman setup reported in issue #804, that uid has no `/etc/passwd` entry inside
+the container, leaving the default home empty and causing nested tool
+containers to abort with `failed to add  as session directory: path . is not
+an absolute path`.

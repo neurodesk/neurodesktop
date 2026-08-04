@@ -93,6 +93,22 @@ fi
 export APPTAINER_BINDPATH=/data,/mnt,/neurodesktop-storage,/tmp,/cvmfs
 # This also needs to be set in the Dockerfile, so it is available in a jupyter notebook
 
+# Tell Apptainer the home directory explicitly instead of letting it look one
+# up in the password database.
+#
+# Apptainer resolves the default home with getpwuid() on the host uid it derives
+# from /proc/self/uid_map, not on the uid inside the container. Under the
+# rootless Podman setup reported in issue #804, that mapped uid has no
+# /etc/passwd entry inside the container. The lookup then fails silently, the
+# home path comes out empty, and nested tool containers die with:
+#   FATAL: container creation failed: failed to add  as session directory:
+#          path . is not an absolute path
+# Defaulting APPTAINER_HOME to an existing HOME makes the home a user-supplied
+# path and skips the failed lookup while preserving any explicit override.
+if [ -n "${HOME:-}" ] && [ -d "${HOME}" ] && [ -z "${APPTAINER_HOME:-}" ]; then
+        export APPTAINER_HOME="${HOME}"
+fi
+
 export APPTAINERENV_SUBJECTS_DIR=${HOME}/freesurfer-subjects-dir
 export MPLCONFIGDIR=${HOME}/.config/matplotlib-mpldir
 export NBI_TOUR_CONFIG_PATH="${NBI_TOUR_CONFIG_PATH:-/opt/jovyan_defaults/.jupyter/nbi/tour_config.json}"

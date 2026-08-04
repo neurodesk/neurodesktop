@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-08-03"
+last-reviewed: "2026-08-04"
 ---
 
 # Environment Variables
@@ -35,6 +35,14 @@ are listed at the end. The subsystems themselves are described in
   `OFFLINE_MODULES`; defaults to `/neurodesktop-storage/containers`
 - `OFFLINE_MODULES`: local Lmod module path derived from
   `NEURODESKTOP_LOCAL_CONTAINERS`
+
+## Apptainer
+
+- `APPTAINER_HOME`: home directory passed to Apptainer. When this variable is
+  unset or empty and `HOME` names an existing directory,
+  `environment_variables.sh` defaults it to `HOME`; an explicit override is
+  preserved. This avoids a failed password-database lookup on the mapped host
+  uid in the rootless Podman setup reported in issue #804.
 
 ## Startup
 
