@@ -9,6 +9,8 @@ server root it maps paths against, and the document manager it opens them with.
 import json
 from pathlib import Path
 
+import jupyterlab_server
+
 from testlib import run_cmd
 
 
@@ -128,12 +130,7 @@ def test_page_config_still_publishes_the_server_root_the_plugin_reads():
     quietly fall through to the browser and 404 again, so pin the upstream
     seam rather than discovering it from a bug report.
     """
-    code, output = run_cmd(
-        "grep -rn 'serverRoot' "
-        "$(python -c 'import jupyterlab_server, pathlib; "
-        "print(pathlib.Path(jupyterlab_server.__file__).parent)')/handlers.py",
-        timeout=60,
-    )
-
-    assert code == 0, output
-    assert 'page_config.setdefault("serverRoot"' in output, output
+    handlers = Path(jupyterlab_server.__file__).parent / "handlers.py"
+    assert handlers.is_file(), handlers
+    source = handlers.read_text(encoding="utf-8")
+    assert 'page_config.setdefault("serverRoot"' in source

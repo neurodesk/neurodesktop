@@ -38,7 +38,7 @@ def test_nipype_importable():
     assert code == 0, f"Failed to import nipype: {output}"
     assert len(output) > 0, "No version output string found"
 
-def test_nipype_fslmaths(tmp_path):
+def test_nipype_fslmaths(tmp_path, monkeypatch):
     """Verify we can build a simple FSLMaths command via nipype."""
     cvmfs_disable = os.environ.get("CVMFS_DISABLE", "false").lower()
     if cvmfs_disable in ["true", "1"]:
@@ -60,7 +60,10 @@ def test_nipype_fslmaths(tmp_path):
             if key in ("PATH", "LD_LIBRARY_PATH", "MODULEPATH",
                        "FSLDIR", "FSLOUTPUTTYPE", "neurodesk_singularity_opts",
                        "APPTAINER_BINDPATH"):
-                os.environ[key] = val
+                # Restore the process environment after this test. Leaking the
+                # FSL module's PATH makes later tests invoke FSL's Python rather
+                # than the image's Python.
+                monkeypatch.setenv(key, val)
 
     code, _ = run_cmd("command -v fslmaths")
     if code != 0:

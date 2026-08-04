@@ -952,6 +952,7 @@ RUN set -eux; \
         rm -rf "${node_tar_dir}"; \
         mkdir -p "${node_tar_dir}"; \
         tar -xzf "${node_tar_package}" -C "${node_tar_dir}" --strip-components=1; \
+        find "${node_tar_dir}" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete; \
     done; \
     rm -f "${node_tar_package}"; \
     test "$(node -p 'require("/opt/code-server/lib/vscode/node_modules/tar/package.json").version')" = "${NODE_TAR_VERSION}"; \
