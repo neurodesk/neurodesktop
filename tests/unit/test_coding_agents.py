@@ -31,6 +31,15 @@ def claude_wrapper_path():
     return resolve_source("/usr/local/sbin/claude", "config/agents/claude")
 
 
+def test_agent_slurm_template_uses_the_submission_directory():
+    guidance = resolve_source("/opt/AGENTS.md", "config/agents/AGENTS.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'PROJECT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"' in guidance
+    assert "Slurm executes a spool copy" in guidance
+
+
 @pytest.mark.parametrize("args", [["--version"], ["acp"]])
 def test_opencode_machine_commands_bypass_interactive_setup(tmp_path, args):
     """ACP discovery and stdio transport must reach the real binary directly."""
@@ -63,6 +72,53 @@ def test_opencode_machine_commands_bypass_interactive_setup(tmp_path, args):
     assert result.stdout.strip() == f"REAL_ARG:{args[0]}"
     assert not (tmp_path / "AGENTS.md").exists()
     assert not (home_dir / ".config/opencode/opencode.json").exists()
+
+
+def test_opencode_acp_exports_lmod_to_child_bash_shells(tmp_path):
+    """ACP tool shells inherit Lmod without sourcing an interactive bashrc."""
+    module_init = tmp_path / "module.sh"
+    module_init.write_text(
+        "echo 'module init must stay off the ACP protocol'\n"
+        "module() { printf 'MODULE:%s\\n' \"$*\"; }\n"
+        "export -f module\n",
+        encoding="utf-8",
+    )
+
+    fake_opencode = tmp_path / "fake-opencode"
+    fake_opencode.write_text(
+        "#!/bin/bash\n"
+        "/bin/bash -c 'type module >/dev/null && module spider fsl'\n",
+        encoding="utf-8",
+    )
+    fake_opencode.chmod(0o755)
+
+    test_wrapper = tmp_path / "opencode-wrapper-test"
+    wrapper_contents = opencode_wrapper_path().read_text(encoding="utf-8")
+    wrapper_contents = wrapper_contents.replace("/usr/bin/opencode", str(fake_opencode))
+    wrapper_contents = wrapper_contents.replace(
+        "/usr/share/module.sh", str(module_init)
+    )
+    test_wrapper.write_text(wrapper_contents, encoding="utf-8")
+    test_wrapper.chmod(0o755)
+
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    result = subprocess.run(
+        [str(test_wrapper), "acp"],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "HOME": str(home_dir),
+        },
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=5,
+    )
+
+    assert result.returncode == 0, result.stdout
+    assert result.stdout.strip() == "MODULE:spider fsl"
+
 
 def run_pty_command(args, input_text, cwd, env, timeout=15):
     """Run an interactive wrapper under a PTY and collect combined output."""

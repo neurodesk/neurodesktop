@@ -4,7 +4,7 @@ description: The ACP-native Jupyter AI chat surface, its Claude/Codex/OpenCode
   personas, workspace seeding, and the collaboration-stack workarounds
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-07-31"
+last-reviewed: "2026-08-04"
 ---
 
 # Jupyter AI
@@ -21,7 +21,11 @@ the interactive terminal wrapper so their output remains protocol-safe; the
 `acp` branch still silently loads `NEURODESK_API_KEY` and `BR_MCP_TOKEN` from
 `~/.bashrc` before exec, because the Jupyter server that spawns it never
 sources that file and the `{env:...}` references in `opencode.json` would
-otherwise resolve empty and fail auth in the chat. The
+otherwise resolve empty and fail auth in the chat. It also silently sources
+`/usr/share/module.sh` before exec. Lmod exports its `module` and `ml`
+functions, so OpenCode's non-interactive child Bash shells inherit the module
+system even though they do not read `~/.bashrc`; all initialization output is
+discarded so the ACP JSON-RPC stream stays clean. The
 Codex persona starts sessions in "Agent (full access)" via the
 `INITIAL_AGENT_MODE` variable exported in `environment_variables.sh`, because
 codex-acp otherwise hardcodes its sandboxed "Agent" preset and ignores the

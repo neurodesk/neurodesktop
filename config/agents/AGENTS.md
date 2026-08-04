@@ -10,6 +10,7 @@
 6. Always use the astra skill to document analysis in an astra.yaml spec.
 7. **Submit jobs as their own command.** NEVER chain `sbatch` behind validation, linting, or git commands with `&&`.
 8. **Confirm, don't assume.** A job is submitted only when you have its job ID; it is finished only when you have read its log. Never report an analysis as run, complete, or successful on the strength of having written the script.
+9. **Resolve the project through Slurm's submission directory.** Submit from the project root and set `PROJECT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"` inside every job. Slurm executes a spool copy of the script, so deriving the project from `BASH_SOURCE[0]` points at `/var/spool/slurmd`, not the workspace.
 
 
 ## Workflow
@@ -80,6 +81,10 @@ Slurm Script Template - fill in sensible guesses for time,mem,cpu need!
 #SBATCH --time=HH:MM:SS
 #SBATCH --mem=<X>G
 #SBATCH --cpus-per-task=<N>
+
+# Slurm executes a spool copy; the submission directory is the project root.
+PROJECT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"
+cd "${PROJECT_DIR}"
 
 # Load required software
 module load <tool>/<version>

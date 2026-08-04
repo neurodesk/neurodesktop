@@ -43,6 +43,22 @@ load_bashrc_export_silently() {
     fi
 }
 
+load_module_system_silently() {
+    local module_init="/usr/share/module.sh"
+
+    if declare -F module >/dev/null 2>&1 || [ ! -r "${module_init}" ]; then
+        return 0
+    fi
+
+    # OpenCode runs tool commands in non-interactive child shells, which do not
+    # read ~/.bashrc. Lmod exports its module/ml functions when initialised, so
+    # sourcing it once in the ACP transport makes those functions available to
+    # every child Bash without adding anything to the JSON-RPC protocol stream.
+    # Keep this best-effort so an image without Lmod can still start OpenCode.
+    # shellcheck disable=SC1090
+    . "${module_init}" >/dev/null 2>&1 || true
+}
+
 case "${1:-}" in
     --version)
         exec /usr/bin/opencode "$@"
@@ -50,6 +66,7 @@ case "${1:-}" in
     acp)
         load_bashrc_export_silently NEURODESK_API_KEY
         load_bashrc_export_silently BR_MCP_TOKEN
+        load_module_system_silently
         exec /usr/bin/opencode "$@"
         ;;
 esac

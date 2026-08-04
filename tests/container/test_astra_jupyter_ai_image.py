@@ -7,6 +7,8 @@ The `astra` CLI and the ASTRA agent skill are covered by
 import asyncio
 import importlib.metadata
 import logging
+import os
+import subprocess
 from pathlib import Path
 
 from testlib import load_source_module, run_cmd
@@ -32,6 +34,39 @@ def test_jupyter_ai_acp_stack_registers_neurodesktop_agent_personas():
     for command in ("claude-agent-acp", "codex-acp"):
         code, output = run_cmd(f"command -v {command}")
         assert code == 0, output
+
+
+def test_opencode_acp_exports_real_lmod_to_child_bash_shells(tmp_path):
+    """The image's Lmod init reaches tool shells without protocol output."""
+    wrapper = Path("/usr/local/sbin/opencode")
+    fake_opencode = tmp_path / "fake-opencode"
+    fake_opencode.write_text(
+        "#!/bin/bash\n"
+        "/bin/bash -c 'type module >/dev/null && printf MODULE_OK'\n",
+        encoding="utf-8",
+    )
+    fake_opencode.chmod(0o755)
+
+    test_wrapper = tmp_path / "opencode-wrapper-test"
+    test_wrapper.write_text(
+        wrapper.read_text(encoding="utf-8").replace(
+            "/usr/bin/opencode", str(fake_opencode)
+        ),
+        encoding="utf-8",
+    )
+    test_wrapper.chmod(0o755)
+
+    result = subprocess.run(
+        [str(test_wrapper), "acp"],
+        env={**os.environ, "HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "MODULE_OK"
+    assert result.stderr == ""
 
 
 def test_new_jupyter_ai_chat_seeds_editable_agents_file(tmp_path):
@@ -123,8 +158,6 @@ def test_jupyter_server_mcp_banner_respects_fastmcp_setting():
     """The anchored build-time patch gates jupyter_server_mcp's unconditional
     FastMCP banner on FASTMCP_SHOW_SERVER_BANNER, which the image sets to 0;
     see patch_jupyter_server_mcp.py."""
-    import os
-
     import jupyter_server_mcp
 
     assert os.environ.get("FASTMCP_SHOW_SERVER_BANNER") == "0"

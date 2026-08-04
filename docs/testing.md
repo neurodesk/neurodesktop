@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-08-03"
+last-reviewed: "2026-08-04"
 ---
 
 # Testing
@@ -128,7 +128,7 @@ pytest tests/unit/test_jupyter_ai_workspace.py
 pytest tests/unit/test_astra_jupyter_ai_tooling.py
 pytest tests/unit/test_jupyter_server_documents_patch.py
 pytest tests/unit/test_jupyter_ai_acp_client_patch.py
-pytest tests/unit/test_coding_agents.py -k opencode_machine_commands
+pytest tests/unit/test_coding_agents.py -k 'opencode_machine_commands or opencode_acp_exports_lmod'
 # In the rebuilt image:
 pytest /opt/tests/test_astra_jupyter_ai_image.py
 pip check
