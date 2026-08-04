@@ -15,6 +15,7 @@ permissions:
 engine:
   id: codex
   model: ${{ vars.GH_AW_MODEL_AGENT_CODEX || vars.GH_AW_DEFAULT_MODEL_CODEX || 'neurodesk' }}
+  args: ["-c", "features.multi_agent=false"]
   env:
     OPENAI_BASE_URL: "https://llm.neurodesk.org/openai"
     OPENAI_API_KEY: ${{ secrets.CODEX_API_KEY || secrets.OPENAI_API_KEY }}
@@ -78,6 +79,20 @@ request. `maintenance-updates` consumes this radar and applies at most one
 verified update per week, so the radar's job is to keep an accurate, ranked
 candidate list rather than to change anything.
 
+## Completion Guard
+
+- First, use the GitHub tool to search for the existing open radar issue.
+  Never use the shell `gh` CLI; it is not authenticated in the agent job.
+- Work directly without sub-agents, progress narration, or a todo list.
+- The run is complete only after exactly one safe-output tool call:
+  `create_issue`, `add_comment`, `noop`, `missing_tool`, or `missing_data`.
+  Never finish with a plan, progress message, checklist, or ordinary assistant
+  response.
+- If a budget below is exhausted or evidence is incomplete, stop researching
+  and publish the best partial report. Mark unresolved components `unknown`
+  and list skipped surfaces under `Coverage`; partial coverage is preferable
+  to producing no safe output.
+
 ## Inventory Surfaces
 
 Cover every surface that pins a third-party version:
@@ -101,17 +116,24 @@ its transitive lockfile entries.
 
 ## Evidence Budget
 
-- Build the inventory from repository files first. Use at most 15 read commands
-  for the whole inventory pass.
-- Use at most 20 upstream version probes per run, one per tracked component.
+- Build the inventory from repository files first. Use at most 4
+  repository-read shell commands for the whole inventory pass. Batch related
+  searches with `rg`; never print a whole file or an unfiltered registry
+  response.
+- Use at most 12 upstream version probes per run, one per tracked component.
   Prefer a single authoritative source per component: the GitHub releases API,
   the PyPI or npm registry JSON, the distribution package index, or the
   container registry tag list.
 - Never probe the same component twice. If a probe fails or is ambiguous,
-  record the component as `unknown` with the reason and move on.
+  record the component as `unknown` with the reason and move on; do not try a
+  fallback source. Filter every response to the version and evidence URL needed
+  for the report.
 - If the inventory is larger than the probe budget, probe the components that
   the previous radar issue ranked highest, note the surfaces you skipped, and
   say explicitly that coverage was truncated.
+- As soon as either budget is reached, perform no more research. Rank the
+  evidence already collected, build the report, and make the required
+  safe-output call.
 
 ## Ranking Rules
 
@@ -151,8 +173,9 @@ or unknown. Do not pad it with components that are already current.
 
 ## Output Contract
 
-Search open issues for one labeled `agentic-workflow` whose title starts with
-the `[package-updates]` prefix.
+Use the GitHub-tool search performed before the inventory to identify an open
+issue labeled `agentic-workflow` whose title starts with the
+`[package-updates]` prefix.
 
 - If no such issue is open, call `create-issue` with the title
   `Pinned dependency radar` and the report as the body. The workflow adds the
@@ -166,3 +189,8 @@ one run.
 
 Call `noop` with a concise reason when the survey finds no component behind its
 latest upstream release and no open radar issue needs correcting.
+
+If the GitHub read tool is unavailable, call `missing_tool`. If upstream data
+cannot be read well enough to produce even a partial report, call
+`missing_data`. These are terminal safe outputs; do not merely describe the
+failure in a normal response.

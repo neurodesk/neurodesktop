@@ -24,11 +24,17 @@ MAINTENANCE_WORKFLOWS = {
 
 def test_weekly_maintenance_workflows_share_the_bounded_pr_contract():
     shared_workflow = SHARED_WORKFLOW.read_text()
+    normalized_workflow = " ".join(shared_workflow.split())
 
     assert "Search open pull requests" in shared_workflow
     assert "Make at most one coherent maintenance change per run" in shared_workflow
     assert "call `noop`" in shared_workflow
     assert 'title-prefix: "[maintenance] "' in shared_workflow
+    assert "Never use the shell `gh` CLI" in shared_workflow
+    assert "Work directly without sub-agents" in shared_workflow
+    assert "The run is complete only after exactly one safe-output tool call" in shared_workflow
+    assert "Never finish with a plan, progress message" in shared_workflow
+    assert "stop investigating and make the required safe-output call" in normalized_workflow
     assert "labels: [agentic-workflow]" in shared_workflow
     assert "draft: true" in shared_workflow
     assert "max-patch-files: 20" in shared_workflow
@@ -45,12 +51,14 @@ def test_weekly_maintenance_sources_are_scheduled_scoped_and_compiled():
     for workflow_id, category in MAINTENANCE_WORKFLOWS.items():
         source = (WORKFLOW_DIR / f"{workflow_id}.md").read_text()
         lock = (WORKFLOW_DIR / f"{workflow_id}.lock.yml").read_text()
+        normalized_lock = " ".join(lock.split())
 
         assert "schedule: weekly" in source
         assert "schedule: daily" not in source
         assert "workflow_dispatch:" in source
         assert "actions: read" in source
         assert "id: codex" in source
+        assert 'args: ["-c", "features.multi_agent=false"]' in source
         assert "max-daily-ai-credits: -1" in source
         assert 'OPENAI_BASE_URL: "https://llm.neurodesk.org/openai"' in source
         assert "uses: .github/workflows/shared/agentic-models.md" in source
@@ -64,6 +72,11 @@ def test_weekly_maintenance_sources_are_scheduled_scoped_and_compiled():
         assert f"agentic/maintenance-{category}-" in lock
         assert "agentic-workflow" in lock
         assert MODEL_ALIAS_JSON in lock
+        assert "features.multi_agent=false" in lock
+        assert (
+            "The run is complete only after exactly one safe-output tool call"
+            in normalized_lock
+        )
 
         cron_lines = [
             line.strip()
@@ -89,6 +102,7 @@ def test_package_update_radar_reports_without_write_access():
     assert "workflow_dispatch:" in source
     assert "actions: read" in source
     assert "id: codex" in source
+    assert 'args: ["-c", "features.multi_agent=false"]' in source
     assert "max-daily-ai-credits: -1" in source
     assert 'OPENAI_BASE_URL: "https://llm.neurodesk.org/openai"' in source
     assert "uses: .github/workflows/shared/agentic-models.md" in source
@@ -108,6 +122,18 @@ def test_package_update_radar_reports_without_write_access():
     assert "add_comment" in lock
     assert "[package-updates] " in lock
     assert "agentic-workflow" in lock
+    assert "features.multi_agent=false" in lock
+    assert "{{#runtime-import .github/workflows/package-update-radar.md}}" in lock
+
+    # Keep the survey short enough to reserve a final model turn for its
+    # mandatory safe output. Run 30836841541 exhausted itself on large,
+    # sequential reads and ended with an ordinary progress message.
+    assert "Never use the shell `gh` CLI" in source
+    assert "Use at most 4\n  repository-read shell commands" in source
+    assert "Use at most 12 upstream version probes" in source
+    assert "never print a whole file or an unfiltered registry" in source
+    assert "The run is complete only after exactly one safe-output tool call" in source
+    assert "partial coverage is preferable" in source
 
 
 def test_package_update_radar_keeps_a_distinct_weekly_slot():

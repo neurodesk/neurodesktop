@@ -26,6 +26,7 @@ permissions:
 engine:
   id: codex
   model: ${{ vars.GH_AW_MODEL_AGENT_CODEX || vars.GH_AW_DEFAULT_MODEL_CODEX || 'neurodesk' }}
+  args: ["-c", "features.multi_agent=false"]
   env:
     OPENAI_BASE_URL: "https://llm.neurodesk.org/openai"
     OPENAI_API_KEY: ${{ secrets.CODEX_API_KEY || secrets.OPENAI_API_KEY }}
@@ -124,6 +125,19 @@ Investigate the issue for this run and decide whether the repository needs a cod
 For an `issues` event, use `${{ github.event.issue.number }}` as the issue number. For a `workflow_dispatch` run, use `${{ github.event.inputs.issue-number }}` and treat `${{ github.event.inputs.retry-reason }}` as prior context.
 
 Use `gh` through the GitHub tool to read the issue, comments, linked pull requests, related checks, and relevant repository files. Pull only the context needed for the reported symptom. Reproduce the issue locally when practical, then run the smallest focused validation that gives useful evidence.
+
+## Completion Guard
+
+- Never use the shell `gh` CLI; it is not authenticated in the agent job. Use
+  only the configured GitHub tool for GitHub reads.
+- Work directly without sub-agents, progress narration, or a todo list.
+- The run is complete only after exactly one safe-output tool call:
+  `create_pull_request`, `add_comment`, `dispatch_workflow`, or `noop`.
+  Never finish with a plan, progress message, checklist, or ordinary assistant
+  response.
+- If a budget is exhausted or evidence remains incomplete, stop investigating
+  and publish the best supported partial conclusion with the appropriate
+  safe-output tool. Do not spend the final turn narrating unfinished work.
 
 ## Evidence Collection Budget
 

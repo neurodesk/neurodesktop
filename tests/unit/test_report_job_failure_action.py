@@ -72,7 +72,16 @@ def test_issue_investigator_routes_codex_through_neurodesk_gateway():
 
 def test_issue_investigator_has_bounded_evidence_collection_guardrails():
     workflow = WORKFLOW.read_text()
+    lock = LOCK.read_text()
+    normalized_workflow = " ".join(workflow.split())
 
+    assert 'args: ["-c", "features.multi_agent=false"]' in workflow
+    assert "features.multi_agent=false" in lock
+    assert "Never use the shell `gh` CLI" in workflow
+    assert "Work directly without sub-agents" in workflow
+    assert "The run is complete only after exactly one safe-output tool call" in workflow
+    assert "{{#runtime-import .github/workflows/issue-investigator.md}}" in lock
+    assert "Never finish with a plan, progress message" in normalized_workflow
     assert "## Evidence Collection Budget" in workflow
     assert "Use a maximum of 8 read commands" in workflow
     assert "one representative failing job log" in workflow

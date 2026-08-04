@@ -15,6 +15,7 @@ permissions:
 engine:
   id: codex
   model: ${{ vars.GH_AW_MODEL_AGENT_CODEX || vars.GH_AW_DEFAULT_MODEL_CODEX || 'neurodesk' }}
+  args: ["-c", "features.multi_agent=false"]
   env:
     OPENAI_BASE_URL: "https://llm.neurodesk.org/openai"
     OPENAI_API_KEY: ${{ secrets.CODEX_API_KEY || secrets.OPENAI_API_KEY }}
