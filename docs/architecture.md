@@ -4,7 +4,7 @@ description: Startup flow, services, directory layout, and the map of
   per-subsystem architecture pages
 parent: index.md
 status: current
-last-reviewed: "2026-07-31"
+last-reviewed: "2026-08-04"
 ---
 
 # Architecture
@@ -110,11 +110,12 @@ without turning registry timeouts into false cache misses.
 
 ## Apptainer
 
-`APPTAINER_HOME` is exported so Apptainer takes the home directory as a
-user-supplied path. Apptainer otherwise resolves the default home with
-`getpwuid()` on the *host* uid it derives from `/proc/self/uid_map`. Under a
-uid-remapping runtime - rootless Podman, rootless Docker, Kubernetes user
-namespaces - container uid 1000 maps to a host uid such as 100999 that has no
-`/etc/passwd` entry inside the container, the lookup fails silently, and every
-tool container aborts with `failed to add  as session directory: path . is not
+When `HOME` names an existing directory and
+[`APPTAINER_HOME`](environment-variables.md#apptainer) is unset or empty,
+`environment_variables.sh` defaults `APPTAINER_HOME` to `HOME`; an explicit
+override is preserved. This makes Apptainer use a supplied home path instead
+of resolving one from the host uid in `/proc/self/uid_map`. In the rootless
+Podman setup reported in issue #804, that uid has no `/etc/passwd` entry inside
+the container, leaving the default home empty and causing nested tool
+containers to abort with `failed to add  as session directory: path . is not
 an absolute path`.

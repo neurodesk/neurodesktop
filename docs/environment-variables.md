@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-08-03"
+last-reviewed: "2026-08-04"
 ---
 
 # Environment Variables
@@ -19,10 +19,6 @@ are listed at the end. The subsystems themselves are described in
 - `CVMFS_MODULES`: CVMFS module catalogue path used when refreshing
   `MODULEPATH`. Fixed to `/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/` by
   `environment_variables.sh`; not a user override
-- `APPTAINER_HOME`: home directory passed to Apptainer. Set to `$HOME` by
-  `environment_variables.sh` so Apptainer does not have to resolve the home
-  directory through a password-database lookup on the host uid, which fails
-  under uid-remapping runtimes such as rootless Podman.
 - `NEURODESKTOP_CVMFS_SELECTION_TTL_SECONDS`: lifetime of the cached CVMFS
   server ranking produced by `cvmfs_server_select.sh`; defaults to `604800`
   (7 days). Set to `0` to re-probe on every startup
@@ -39,6 +35,14 @@ are listed at the end. The subsystems themselves are described in
   `OFFLINE_MODULES`; defaults to `/neurodesktop-storage/containers`
 - `OFFLINE_MODULES`: local Lmod module path derived from
   `NEURODESKTOP_LOCAL_CONTAINERS`
+
+## Apptainer
+
+- `APPTAINER_HOME`: home directory passed to Apptainer. When this variable is
+  unset or empty and `HOME` names an existing directory,
+  `environment_variables.sh` defaults it to `HOME`; an explicit override is
+  preserved. This avoids a failed password-database lookup on the mapped host
+  uid in the rootless Podman setup reported in issue #804.
 
 ## Startup
 
