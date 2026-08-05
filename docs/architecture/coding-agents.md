@@ -95,6 +95,12 @@ OpenCode persists the `ctrl+x b` toggle under the same key, so the wrapper
 only writes it when absent and a user who re-enables the sidebar keeps that
 choice.
 
+The machine-facing `opencode acp` path also exports
+`BASH_ENV=/opt/neurodesktop/opencode_bash_env.sh`. OpenCode tools use
+non-interactive Bash shells, which do not read `.bashrc`; the initializer
+quietly refreshes Neurodesk's module paths and loads Lmod for every tool shell
+without writing into the ACP JSON-RPC stream.
+
 ## OpenCode session pruning
 
 OpenCode keeps session history in `~/.local/share/opencode/opencode.db`, not in

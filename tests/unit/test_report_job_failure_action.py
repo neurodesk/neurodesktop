@@ -2,6 +2,7 @@ from testlib import repo_path
 
 
 ACTION = repo_path(".github/actions/report-job-failure/action.yml")
+BUILD_WORKFLOW = repo_path(".github/workflows/build-neurodesktop.yml")
 WORKFLOW = repo_path(".github/workflows/issue-investigator.md")
 LOCK = repo_path(".github/workflows/issue-investigator.lock.yml")
 REVIEW_WORKFLOW = repo_path(".github/workflows/issue-investigator-review.md")
@@ -9,6 +10,32 @@ REVIEW_LOCK = repo_path(".github/workflows/issue-investigator-review.lock.yml")
 CODERABBIT_CONFIG = repo_path(".coderabbit.yaml")
 SHARED_MODELS_WORKFLOW = repo_path(".github/workflows/shared/agentic-models.md")
 MODEL_ALIAS_JSON = '"neurodesk":["openai/glm-5.2","openai/kimi-k2.7","openai/minimax-m2"]'
+
+
+def _job_block(workflow, job_name, next_job_name=None):
+    start = workflow.index(f"  {job_name}:\n")
+    end = (
+        workflow.index(f"  {next_job_name}:\n", start)
+        if next_job_name
+        else len(workflow)
+    )
+    return workflow[start:end]
+
+
+def test_production_build_jobs_report_failures():
+    workflow = BUILD_WORKFLOW.read_text()
+    jobs = (
+        ("build-image", "merge-manifests", "${{ matrix.platform.arch }}"),
+        ("merge-manifests", "test-image", "merge-manifests"),
+        ("test-image", "scan-image", "${{ matrix.test_profile }}"),
+        ("scan-image", None, "${{ matrix.arch }}"),
+    )
+
+    for job_name, next_job_name, details in jobs:
+        job = _job_block(workflow, job_name, next_job_name)
+        assert job.count("uses: ./.github/actions/report-job-failure") == 1, job_name
+        assert "if: always() && failure()" in job, job_name
+        assert f"details: {details}" in job, job_name
 
 
 def test_report_job_failure_gates_issue_investigator_dispatch():

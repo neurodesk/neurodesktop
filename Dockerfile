@@ -1210,6 +1210,7 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     --mount=type=bind,source=config/agents/AGENTS.md,target=/tmp/agents/AGENTS.md,ro \
     --mount=type=bind,source=config/agents/claude,target=/tmp/agents/claude,ro \
     --mount=type=bind,source=config/agents/opencode,target=/tmp/agents/opencode,ro \
+    --mount=type=bind,source=config/agents/opencode_bash_env.sh,target=/tmp/agents/opencode_bash_env.sh,ro \
     --mount=type=bind,source=config/agents/codex,target=/tmp/agents/codex,ro \
     --mount=type=bind,source=config/agents/opencode_prune_sessions.py,target=/tmp/agents/opencode_prune_sessions.py,ro \
     --mount=type=bind,source=config/agents/patch_nbi.py,target=/tmp/agents/patch_nbi.py,ro \
@@ -1218,6 +1219,7 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     && install -D -m 0644 /tmp/agents/AGENTS.md /opt/AGENTS.md \
     && install -m 0755 -o root -g root /tmp/agents/claude /usr/local/sbin/claude \
     && install -m 0755 -o root -g root /tmp/agents/opencode /usr/local/sbin/opencode \
+    && install -m 0644 -o root -g users /tmp/agents/opencode_bash_env.sh /opt/neurodesktop/opencode_bash_env.sh \
     && install -m 0755 -o root -g root /tmp/agents/codex /usr/local/sbin/codex \
     # Startup cleanup: drop sessions whose working directory has been deleted.
     && install -m 0755 -o root -g users /tmp/agents/opencode_prune_sessions.py /opt/neurodesktop/opencode_prune_sessions.py \

@@ -42,7 +42,13 @@ def test_opencode_acp_exports_real_lmod_to_child_bash_shells(tmp_path):
     fake_opencode = tmp_path / "fake-opencode"
     fake_opencode.write_text(
         "#!/bin/bash\n"
-        "/bin/bash -c 'type module >/dev/null && printf MODULE_OK'\n",
+        "output_file=\"${TMPDIR:-/tmp}/funny-name-tool.out\"\n"
+        "/bin/bash -c '\n"
+        "type module >/dev/null || exit 1\n"
+        "if module load funny-name-tool >\"$1\" 2>/dev/null; then exit 1; fi\n"
+        "test ! -s \"$1\"\n"
+        "printf MODULE_OK\n"
+        "' _ \"$output_file\"\n",
         encoding="utf-8",
     )
     fake_opencode.chmod(0o755)

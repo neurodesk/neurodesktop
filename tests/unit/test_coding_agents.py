@@ -142,18 +142,27 @@ def test_opencode_machine_commands_bypass_interactive_setup(tmp_path, args):
 
 def test_opencode_acp_exports_lmod_to_child_bash_shells(tmp_path):
     """ACP tool shells inherit Lmod without sourcing an interactive bashrc."""
-    module_init = tmp_path / "module.sh"
-    module_init.write_text(
-        "echo 'module init must stay off the ACP protocol'\n"
-        "module() { printf 'MODULE:%s\\n' \"$*\"; }\n"
-        "export -f module\n",
+    bash_env = tmp_path / "opencode_bash_env.sh"
+    bash_env.write_text(
+        "module() {\n"
+        "  if [ \"$1\" = load ] && [ \"$2\" = funny-name-tool ]; then\n"
+        "    return 1\n"
+        "  fi\n"
+        "  printf 'MODULE:%s\\n' \"$*\"\n"
+        "}\n",
         encoding="utf-8",
     )
 
     fake_opencode = tmp_path / "fake-opencode"
     fake_opencode.write_text(
         "#!/bin/bash\n"
-        "/bin/bash -c 'type module >/dev/null && module spider fsl'\n",
+        "output_file=\"${TMPDIR:-/tmp}/funny-name-tool.out\"\n"
+        "/bin/bash -c '\n"
+        "type module >/dev/null || exit 1\n"
+        "module spider fsl\n"
+        "if module load funny-name-tool >\"$1\" 2>/dev/null; then exit 1; fi\n"
+        "test ! -s \"$1\"\n"
+        "' _ \"$output_file\"\n",
         encoding="utf-8",
     )
     fake_opencode.chmod(0o755)
@@ -162,7 +171,7 @@ def test_opencode_acp_exports_lmod_to_child_bash_shells(tmp_path):
     wrapper_contents = opencode_wrapper_path().read_text(encoding="utf-8")
     wrapper_contents = wrapper_contents.replace("/usr/bin/opencode", str(fake_opencode))
     wrapper_contents = wrapper_contents.replace(
-        "/usr/share/module.sh", str(module_init)
+        "/opt/neurodesktop/opencode_bash_env.sh", str(bash_env)
     )
     test_wrapper.write_text(wrapper_contents, encoding="utf-8")
     test_wrapper.chmod(0o755)

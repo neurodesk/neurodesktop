@@ -486,6 +486,18 @@ jobs:
           rm -rf "$HPC_HOME_DIR" "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
           exit $test_rc
 
+      - name: Checkout repository for failure issue template
+        if: always() && failure()
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.ref }}
+      - name: Report job failure
+        if: always() && failure()
+        uses: ./.github/actions/report-job-failure
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          details: ${{ matrix.test_profile }}
+
   scan-image:
     needs: build-image
     runs-on: ubuntu-22.04
