@@ -75,6 +75,8 @@ def test_validate_url_accepts_absolute_http_urls(url):
         "ftp://example.com/",
         "/relative/path",
         "//example.com/no-scheme",
+        "https://",
+        "http:///path",
         "",
     ],
 )
