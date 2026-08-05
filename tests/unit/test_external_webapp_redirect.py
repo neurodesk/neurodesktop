@@ -12,6 +12,8 @@ redirect to a ``javascript:`` or ``file:`` target. The handler must then emit a
 ``302`` redirecting to the validated target, ignoring the request path.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 from testlib import load_source_module
@@ -82,13 +84,22 @@ def test_validate_url_rejects_unsafe_or_schemeless_redirects(url):
         module.validate_url(url)
 
 
-def test_parse_args_requires_url_and_port(monkeypatch):
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["external_webapp_redirect.py", "--url", "https://example.com/"],
+        ["external_webapp_redirect.py", "--port", "8090"],
+    ],
+)
+def test_parse_args_requires_url_and_port(monkeypatch, argv):
     module = _load_redirect_module()
-    # parse_args reads sys.argv and must require both --url and --port.
-    monkeypatch.setattr("sys.argv", ["external_webapp_redirect.py"])
+    monkeypatch.setattr("sys.argv", argv)
     with pytest.raises(SystemExit):
         module.parse_args()
 
+
+def test_parse_args_accepts_url_and_port(monkeypatch):
+    module = _load_redirect_module()
     monkeypatch.setattr(
         "sys.argv",
         ["external_webapp_redirect.py", "--url", "https://example.com/", "--port", "8090"],
@@ -96,6 +107,23 @@ def test_parse_args_requires_url_and_port(monkeypatch):
     args = module.parse_args()
     assert args.url == "https://example.com/"
     assert args.port == 8090
+
+
+def test_main_rejects_unsafe_url_before_starting_server(monkeypatch):
+    module = _load_redirect_module()
+    monkeypatch.setattr(
+        module,
+        "parse_args",
+        lambda: SimpleNamespace(url="javascript:alert(1)", port=8090),
+    )
+
+    def unexpected_server_start(*_args, **_kwargs):
+        pytest.fail("server must not be constructed for an unsafe redirect URL")
+
+    monkeypatch.setattr(module, "ThreadingHTTPServer", unexpected_server_start)
+
+    with pytest.raises(SystemExit, match="Invalid redirect URL"):
+        module.main()
 
 
 def test_get_redirects_to_validated_target_url():
