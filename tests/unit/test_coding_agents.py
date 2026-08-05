@@ -40,6 +40,72 @@ def test_agent_slurm_template_uses_the_submission_directory():
     assert "Slurm executes a spool copy" in guidance
 
 
+def agent_guidance():
+    """The workspace contract installed as /opt/AGENTS.md."""
+    return resolve_source("/opt/AGENTS.md", "config/agents/AGENTS.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_agent_guidance_has_a_non_blocking_discovery_and_decision_fast_path():
+    guidance = agent_guidance()
+    compact = " ".join(guidance.split())
+
+    assert "blocking question" in compact
+    assert "A universe is not a job" in compact
+    assert "metadata-only DataLad clones" in compact
+    assert "analysis_00_download_data.sh" in guidance
+    assert "alternative spellings and acronyms" in compact
+    assert "git rev-parse --is-inside-work-tree" in guidance
+    assert "Always ask the user which tool" not in guidance
+
+
+def test_agent_guidance_prevents_stale_outputs_and_false_job_success():
+    guidance = agent_guidance()
+    compact = " ".join(guidance.split())
+
+    assert "atomically rename" in compact
+    assert "`test -s`" in compact
+    assert "Queue disappearance is not success" in compact
+    assert "`sacct`" in compact
+    assert "`ExitCode` `0:0`" in compact
+    # `--wait` waits out queue time too, so the recommended form must be bounded
+    # and must say the job survives the timeout.
+    assert "timeout 300 sbatch --parsable --wait" in compact
+    assert "recovered through the ID `--parsable` already printed" in compact
+
+
+def test_agent_guidance_separates_astra_validation_execution_and_provenance():
+    guidance = agent_guidance()
+    compact = " ".join(guidance.split())
+
+    assert "does not execute or verify its recipe commands" in compact
+    assert "save hook" in compact
+    assert "**Specification:**" in guidance
+    assert "**Execution:**" in guidance
+    assert "**Provenance:**" in guidance
+    assert "`spec-only`" in compact
+
+
+def test_agent_guidance_keeps_the_environment_and_schema_lookup_facts():
+    """Facts an agent cannot rediscover from the worked example alone."""
+    guidance = agent_guidance()
+    compact = " ".join(guidance.split())
+
+    # `findings:` entries are Insight objects; `astra spec finding` returns
+    # nothing, and this is the only place the repo records that.
+    assert "astra spec insight" in guidance
+    assert "no `Finding` class" in compact
+
+    assert "await module.load(" in guidance
+    assert "module help <name>" in guidance
+    assert "mamba" in guidance and "uv" in guidance
+
+    # A download step that is only a script leaves the input unexplained.
+    assert "invisible in the graph" in compact
+    assert "declare it as an output with its own recipe" in compact
+
+
 @pytest.mark.parametrize("args", [["--version"], ["acp"]])
 def test_opencode_machine_commands_bypass_interactive_setup(tmp_path, args):
     """ACP discovery and stdio transport must reach the real binary directly."""

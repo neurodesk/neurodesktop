@@ -4,7 +4,7 @@ description: Claude Code installation, the OpenCode terminal wrapper, and
   OpenCode session pruning
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-03"
+last-reviewed: "2026-08-04"
 ---
 
 # Coding agents
@@ -13,6 +13,34 @@ Part of [Architecture](../architecture.md). Related environment variables are
 listed in [Environment variables](../environment-variables.md); focused tests
 in [Testing](../testing.md#focused-tests-by-area). The ASTRA skill all
 three agents share is described in [ASTRA integration](astra.md).
+
+## Analysis workspace contract
+
+The image installs [`config/agents/AGENTS.md`](../../config/agents/AGENTS.md)
+as `/opt/AGENTS.md` and seeds it into agent-authored workspaces. It keeps
+substantive data retrieval and neuroimaging computation in retained Slurm
+scripts while allowing lightweight module, command-interface, dataset-metadata,
+ASTRA, and file-format discovery in the active shell.
+
+The contract has a bounded fast path: an explicit user tool choice is not
+reopened, a conventional demonstration default is recorded in ASTRA without an
+automatic blocking question, a matching worked project is reused, and short
+same-resource universes may share one script or Slurm array. Jobs publish
+validated temporary outputs atomically, and completion requires Slurm
+accounting (`COMPLETED`, exit code `0:0`), inspected logs, and fresh expected
+artifacts. The final report distinguishes a valid ASTRA specification, actual
+script execution, and recognised run provenance; plain `sbatch` execution does
+not turn the viewer's `spec-only` badge into run evidence.
+
+Alongside the rules the contract carries the environment facts and schema
+gotchas an agent cannot rediscover from the worked example: Lmod and notebook
+module loading, the Miniconda/`pip`/`uv` install paths, retrying a missed
+`module spider` with alternative spellings, and that `findings:` entries are
+`Insight` objects, so the schema term to read is `astra spec insight` and
+never `astra spec finding`. It also keeps data acquisition visible in the
+graph — a download that exists only as a script leaves its input arriving from
+nowhere, so the step is declared as an output with a recipe or named in the
+input's `description`.
 
 A browser-based "OpenCode Web" launcher tile — a rewriting reverse proxy
 around `opencode web` — shipped until July 2026 and was removed. Upstream
