@@ -69,6 +69,8 @@ def test_validate_url_accepts_absolute_http_urls(url):
 @pytest.mark.parametrize(
     "url",
     [
+        "https://",
+        "http:///path",
         "javascript:alert(document.cookie)",
         "file:///etc/passwd",
         "data:text/html,<script>1</script>",
