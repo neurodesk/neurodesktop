@@ -44,6 +44,9 @@ strict: true
 # The runtime AIC catalog does not consume custom model pricing overlays yet.
 # Retain the pricing above for reporting, but disable enforcement for this alias.
 max-ai-credits: -1
+# Leave enough room for a bounded diagnosis and small fix while preventing the
+# runaway 105-turn investigation observed in issue #810.
+max-turns: 40
 max-turn-cache-misses: 2000
 imports:
   - uses: .github/workflows/shared/agentic-models.md
@@ -124,12 +127,12 @@ Investigate the issue for this run and decide whether the repository needs a cod
 
 For an `issues` event, use `${{ github.event.issue.number }}` as the issue number. For a `workflow_dispatch` run, use `${{ github.event.inputs.issue-number }}` and treat `${{ github.event.inputs.retry-reason }}` as prior context.
 
-Use `gh` through the GitHub tool to read the issue, comments, linked pull requests, related checks, and relevant repository files. Pull only the context needed for the reported symptom. Reproduce the issue locally when practical, then run the smallest focused validation that gives useful evidence.
+Use the pre-authenticated shell `gh` CLI through the GitHub read proxy to read the issue, comments, linked pull requests, related checks, and relevant repository files. Use the `safeoutputs` CLI only for GitHub writes and completion signaling. Pull only the context needed for the reported symptom. Reproduce the issue locally when practical, then run the smallest focused validation that gives useful evidence.
 
 ## Completion Guard
 
-- Never use the shell `gh` CLI; it is not authenticated in the agent job. Use
-  only the configured GitHub tool for GitHub reads.
+- Use the pre-authenticated shell `gh` CLI for GitHub reads and never for
+  writes. Use `safeoutputs` for every GitHub write and completion signal.
 - Work directly without sub-agents, progress narration, or a todo list.
 - The run is complete only after exactly one safe-output tool call:
   `create_pull_request`, `add_comment`, `dispatch_workflow`, or `noop`.
@@ -148,13 +151,23 @@ Before choosing an output action, collect only bounded evidence:
 - For matrix CI failures, do not inspect every matrix entry. Classify the failure from the common pattern and mention the sampled jobs in the output.
 - Use a maximum of 2 live network probes such as `curl`, `wget`, `dig`, package-manager commands, or registry checks. If those probes are inconclusive, treat the remaining question as infrastructure evidence and add a comment instead of probing more.
 - Do not retry a failing read or probe more than once unless the retry is the final action needed to decide.
-- If you hit any budget, stop investigating and call a safe-output tool immediately. Use `create-pull-request` when you already have a focused repository fix, `add-comment` when the issue needs human or infrastructure follow-up, `dispatch-workflow` only for a likely transient failure that one allowed rerun can verify, and `noop` only when no visible repository or issue action is needed.
+- If you hit any budget, stop investigating and call a safe-output tool immediately. Use `create_pull_request` when you already have a focused repository fix, `add_comment` when the issue needs human or infrastructure follow-up, `dispatch_workflow` only for a likely transient failure that one allowed rerun can verify, and `noop` only when no visible repository or issue action is needed.
+
+## Hard Output Deadline
+
+- The eighth read command is a hard decision deadline. Do not start another
+  hypothesis or gather supporting evidence after it; choose the best-supported
+  output action with the evidence already collected.
+- If you choose a repository fix, use at most 24 additional command or tool
+  calls for editing and focused validation, then call `create_pull_request`.
+- Call the selected safe-output tool before turn 40. A supported partial
+  conclusion is better than exhausting the turn budget without an output.
 
 ## Decision Rules
 
-- If the issue describes an actionable bug or maintenance problem that can be fixed within the allowed files, make the smallest coherent change, add or update focused tests when appropriate, run relevant validation, and use `create-pull-request`.
-- If the issue is unclear, duplicate, out of scope, or needs a human product or infrastructure decision, use `add-comment` with the evidence, the current blocker, and the next concrete question or owner action.
-- If the evidence shows the issue was probably a transient CI, registry, network, or service failure and no repository change is needed, use `dispatch-workflow` to rerun the most relevant allow-listed workflow once, then use `add-comment` explaining what was transient and what was rerun.
+- If the issue describes an actionable bug or maintenance problem that can be fixed within the allowed files, make the smallest coherent change, add or update focused tests when appropriate, run relevant validation, and use `create_pull_request`.
+- If the issue is unclear, duplicate, out of scope, or needs a human product or infrastructure decision, use `add_comment` with the evidence, the current blocker, and the next concrete question or owner action.
+- If the evidence shows the issue was probably a transient CI, registry, network, or service failure and no repository change is needed, use `dispatch_workflow` as the single safe output to rerun the most relevant allow-listed workflow once. Put the evidence and rerun reason in that call rather than adding a second output.
 - Do not dispatch recursively or rerun unrelated workflows. If this run was started by `workflow_dispatch`, dispatch another workflow only when the new evidence still points to a transient failure that an allow-listed workflow can verify.
 - If no visible repository or issue action is needed, call `noop` with a concise reason.
 

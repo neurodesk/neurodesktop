@@ -89,6 +89,9 @@ def test_issue_investigator_routes_codex_through_neurodesk_gateway():
     assert 'GH_AW_MAX_AI_CREDITS: "-1"' in lock
     assert '"maxAiCredits":' not in lock
     assert '\\"maxAiCredits\\":' not in lock
+    assert "max-turns: 40\n" in workflow
+    assert "GH_AW_MAX_TURNS: 40" in lock
+    assert '"maxRuns":40,"maxCacheMisses":2000' in lock
     assert "max-turn-cache-misses: 2000\n" in workflow
     assert "openai_base_url=" not in workflow
     assert "openai_base_url=" not in lock
@@ -104,7 +107,9 @@ def test_issue_investigator_has_bounded_evidence_collection_guardrails():
 
     assert 'args: ["-c", "features.multi_agent=false"]' in workflow
     assert "features.multi_agent=false" in lock
-    assert "Never use the shell `gh` CLI" in workflow
+    assert "Use the pre-authenticated shell `gh` CLI for GitHub reads" in workflow
+    assert "Use `safeoutputs` for every GitHub write and completion signal" in workflow
+    assert "Never use the shell `gh` CLI" not in workflow
     assert "Work directly without sub-agents" in workflow
     assert "The run is complete only after exactly one safe-output tool call" in workflow
     assert "{{#runtime-import .github/workflows/issue-investigator.md}}" in lock
@@ -117,6 +122,14 @@ def test_issue_investigator_has_bounded_evidence_collection_guardrails():
     assert "Use a maximum of 2 live network probes" in workflow
     assert "Do not retry a failing read or probe more than once" in workflow
     assert "call a safe-output tool immediately" in workflow
+    assert "The eighth read command is a hard decision deadline" in workflow
+    assert "use at most 24 additional command or tool" in normalized_workflow
+    assert "Call the selected safe-output tool before turn 40" in workflow
+    assert "use `dispatch_workflow` as the single safe output" in workflow
+    assert "then use `add-comment`" not in workflow
+    assert "`create-pull-request`" not in workflow
+    assert "`add-comment`" not in workflow
+    assert "`dispatch-workflow`" not in workflow
 
 
 def test_coderabbit_auto_reviews_draft_agentic_pull_requests():
