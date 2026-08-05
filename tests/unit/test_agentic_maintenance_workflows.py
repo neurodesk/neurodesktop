@@ -93,6 +93,22 @@ def test_weekly_maintenance_sources_are_scheduled_scoped_and_compiled():
     assert len(compiled_crons) == len(MAINTENANCE_WORKFLOWS)
 
 
+def test_test_coverage_filters_only_recovered_attempt_timeout_signals():
+    source = (WORKFLOW_DIR / "maintenance-test-coverage.md").read_text()
+    lock = (WORKFLOW_DIR / "maintenance-test-coverage.lock.yml").read_text()
+
+    step_name = "Install recovered-attempt timeout filter"
+    wrapper = "scripts/gh_aw_detect_agent_errors_wrapper.cjs"
+
+    assert "pre-agent-steps:" in source
+    assert step_name in source
+    assert wrapper in source
+    assert step_name in lock
+    assert wrapper in lock
+    assert lock.index(step_name) < lock.index("Execute Codex CLI")
+    assert lock.index(step_name) < lock.index("Detect agent errors")
+
+
 def test_package_update_radar_reports_without_write_access():
     source = (WORKFLOW_DIR / f"{RADAR_WORKFLOW}.md").read_text()
     lock = (WORKFLOW_DIR / f"{RADAR_WORKFLOW}.lock.yml").read_text()

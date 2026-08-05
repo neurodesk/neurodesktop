@@ -39,16 +39,22 @@ def test_jupyter_ai_acp_stack_registers_neurodesktop_agent_personas():
 def test_opencode_acp_exports_real_lmod_to_child_bash_shells(tmp_path):
     """The image's Lmod init reaches tool shells without protocol output."""
     wrapper = Path("/usr/local/sbin/opencode")
+    # A missing-module lookup across the live CVMFS catalogue is network- and
+    # cache-sensitive. Isolate the negative assertion after BASH_ENV has loaded
+    # the real Lmod function so this remains a fast, deterministic smoke test.
+    isolated_modulepath = tmp_path / "modules"
+    isolated_modulepath.mkdir()
     fake_opencode = tmp_path / "fake-opencode"
     fake_opencode.write_text(
         "#!/bin/bash\n"
         "output_file=\"${TMPDIR:-/tmp}/funny-name-tool.out\"\n"
         "/bin/bash -c '\n"
         "type module >/dev/null || exit 1\n"
-        "if module load funny-name-tool >\"$1\" 2>/dev/null; then exit 1; fi\n"
-        "test ! -s \"$1\"\n"
+        "export MODULEPATH=\"$1\"\n"
+        "if module load funny-name-tool >\"$2\" 2>/dev/null; then exit 1; fi\n"
+        "test ! -s \"$2\"\n"
         "printf MODULE_OK\n"
-        "' _ \"$output_file\"\n",
+        "' _ \"$2\" \"$output_file\"\n",
         encoding="utf-8",
     )
     fake_opencode.chmod(0o755)
@@ -63,7 +69,7 @@ def test_opencode_acp_exports_real_lmod_to_child_bash_shells(tmp_path):
     test_wrapper.chmod(0o755)
 
     result = subprocess.run(
-        [str(test_wrapper), "acp"],
+        [str(test_wrapper), "acp", str(isolated_modulepath)],
         env={**os.environ, "HOME": str(tmp_path)},
         capture_output=True,
         text=True,
