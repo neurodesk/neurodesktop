@@ -60,11 +60,15 @@ Work only on maintenance category `${{ github.aw.import-inputs.category }}`.
 
 ## Completion Guard
 
-- Search open pull requests first with one direct invocation of the
-  pre-authenticated shell `gh` CLI through the generated GitHub read proxy.
-  Use `gh` only for reads and `safeoutputs` for every write or completion
-  signal. Do not pipe this initial read through another command that can hide
-  its exit status.
+- Search open pull requests first with exactly one direct invocation of the
+  pre-authenticated shell `gh` CLI through the generated GitHub read proxy:
+  `gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json
+  number,title,headRefName,labels`. Do not add `--search` or `--label`; those
+  filters trigger the proxy's broken GitHub Enterprise version-check path.
+  Inspect the returned JSON yourself for the required title and label. Use
+  `gh` only for reads and `safeoutputs` for every write or completion signal.
+  Do not pipe this initial read through another command that can hide its exit
+  status.
 - If that initial `gh` read exits non-zero or returns malformed output, call
   `report_incomplete` immediately and stop. Do not retry with `gh api`, inspect
   authentication, or fall back to unauthenticated `curl` requests.
@@ -82,8 +86,8 @@ Work only on maintenance category `${{ github.aw.import-inputs.category }}`.
 1. Read `AGENTS.md` and the relevant sections of `docs/testing.md`,
    `docs/architecture.md`, and `docs/environment-variables.md` before changing
    behavior they govern.
-2. Use the initial GitHub-tool search to identify an `agentic-workflow` PR
-   whose title starts with
+2. Use the initial PR-list JSON to identify an `agentic-workflow` PR whose
+   title starts with
    `[maintenance] ${{ github.aw.import-inputs.category }}:`. If one exists, call
    `noop`; do not create a competing or follow-up pull request.
 3. Inspect only enough code, tests, history, and recent Actions evidence to

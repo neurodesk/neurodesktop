@@ -31,6 +31,12 @@ def test_weekly_maintenance_workflows_share_the_bounded_pr_contract():
     assert "call `noop`" in shared_workflow
     assert 'title-prefix: "[maintenance] "' in shared_workflow
     assert "pre-authenticated shell `gh` CLI" in shared_workflow
+    assert (
+        'gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 100 '
+        "--json number,title,headRefName,labels"
+        in normalized_workflow
+    )
+    assert "Do not add `--search` or `--label`" in normalized_workflow
     assert "Do not pipe this initial read" in normalized_workflow
     assert "call `report_incomplete` immediately and stop" in normalized_workflow
     assert "fall back to unauthenticated `curl`" in normalized_workflow
@@ -84,6 +90,12 @@ def test_weekly_maintenance_sources_are_scheduled_scoped_and_compiled():
             in normalized_lock
         )
         assert "call `report_incomplete` immediately and stop" in normalized_lock
+        assert (
+            'gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 100 '
+            "--json number,title,headRefName,labels"
+            in normalized_lock
+        )
+        assert "Do not add `--search` or `--label`" in normalized_lock
 
         cron_lines = [
             line.strip()

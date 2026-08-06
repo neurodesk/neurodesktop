@@ -199,23 +199,23 @@ jobs:
         run: |
           bash "${RUNNER_TEMP}/gh-aw/actions/create_prompt_first.sh"
           {
-          cat << 'GH_AW_PROMPT_329499eb27163e2a_EOF'
+          cat << 'GH_AW_PROMPT_f8bc53542b566acb_EOF'
           <system>
-          GH_AW_PROMPT_329499eb27163e2a_EOF
+          GH_AW_PROMPT_f8bc53542b566acb_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/xpia.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/temp_folder_prompt.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/markdown.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/safe_outputs_prompt.md"
-          cat << 'GH_AW_PROMPT_329499eb27163e2a_EOF'
+          cat << 'GH_AW_PROMPT_f8bc53542b566acb_EOF'
           <safe-output-tools>
           Tools: create_pull_request, missing_tool, missing_data, noop
-          GH_AW_PROMPT_329499eb27163e2a_EOF
+          GH_AW_PROMPT_f8bc53542b566acb_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/safe_outputs_create_pull_request.md"
-          cat << 'GH_AW_PROMPT_329499eb27163e2a_EOF'
+          cat << 'GH_AW_PROMPT_f8bc53542b566acb_EOF'
           </safe-output-tools>
-          GH_AW_PROMPT_329499eb27163e2a_EOF
+          GH_AW_PROMPT_f8bc53542b566acb_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/mcp_cli_tools_prompt.md"
-          cat << 'GH_AW_PROMPT_329499eb27163e2a_EOF'
+          cat << 'GH_AW_PROMPT_f8bc53542b566acb_EOF'
           <github-context>
           The following GitHub context information is available for this workflow:
           {{#if github.actor}}
@@ -244,9 +244,9 @@ jobs:
           {{/if}}
           </github-context>
 
-          GH_AW_PROMPT_329499eb27163e2a_EOF
+          GH_AW_PROMPT_f8bc53542b566acb_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/cli_proxy_with_safeoutputs_prompt.md"
-          cat << 'GH_AW_PROMPT_329499eb27163e2a_EOF'
+          cat << 'GH_AW_PROMPT_f8bc53542b566acb_EOF'
           </system>
           {{#runtime-import .github/workflows/shared/agentic-models.md}}
           # Shared Weekly Maintenance Contract
@@ -255,11 +255,15 @@ jobs:
 
           ## Completion Guard
 
-          - Search open pull requests first with one direct invocation of the
-            pre-authenticated shell `gh` CLI through the generated GitHub read proxy.
-            Use `gh` only for reads and `safeoutputs` for every write or completion
-            signal. Do not pipe this initial read through another command that can hide
-            its exit status.
+          - Search open pull requests first with exactly one direct invocation of the
+            pre-authenticated shell `gh` CLI through the generated GitHub read proxy:
+            `gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json
+            number,title,headRefName,labels`. Do not add `--search` or `--label`; those
+            filters trigger the proxy's broken GitHub Enterprise version-check path.
+            Inspect the returned JSON yourself for the required title and label. Use
+            `gh` only for reads and `safeoutputs` for every write or completion signal.
+            Do not pipe this initial read through another command that can hide its exit
+            status.
           - If that initial `gh` read exits non-zero or returns malformed output, call
             `report_incomplete` immediately and stop. Do not retry with `gh api`, inspect
             authentication, or fall back to unauthenticated `curl` requests.
@@ -277,8 +281,8 @@ jobs:
           1. Read `AGENTS.md` and the relevant sections of `docs/testing.md`,
              `docs/architecture.md`, and `docs/environment-variables.md` before changing
              behavior they govern.
-          2. Use the initial GitHub-tool search to identify an `agentic-workflow` PR
-             whose title starts with
+          2. Use the initial PR-list JSON to identify an `agentic-workflow` PR whose
+             title starts with
              `[maintenance] docs-drift:`. If one exists, call
              `noop`; do not create a competing or follow-up pull request.
           3. Inspect only enough code, tests, history, and recent Actions evidence to
@@ -319,7 +323,7 @@ jobs:
           `report_incomplete` with the failing command and error. Infrastructure failure
           is not evidence that no maintenance is needed, so do not convert it to `noop`.
           {{#runtime-import .github/workflows/maintenance-docs-drift.md}}
-          GH_AW_PROMPT_329499eb27163e2a_EOF
+          GH_AW_PROMPT_f8bc53542b566acb_EOF
           } > "$GH_AW_PROMPT"
       - name: Interpolate variables and render templates
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
