@@ -20,6 +20,11 @@ engine:
     OPENAI_BASE_URL: "https://llm.neurodesk.org/openai"
     OPENAI_API_KEY: ${{ secrets.CODEX_API_KEY || secrets.OPENAI_API_KEY }}
 
+sandbox:
+  agent:
+    id: awf
+    model-fallback: false
+
 models:
   providers:
     openai:

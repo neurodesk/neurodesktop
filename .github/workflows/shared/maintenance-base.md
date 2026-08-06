@@ -60,13 +60,18 @@ Work only on maintenance category `${{ github.aw.import-inputs.category }}`.
 
 ## Completion Guard
 
-- Search open pull requests first with the GitHub tool to identify an existing
-  maintenance PR. Never use the shell `gh` CLI; it is not authenticated in the
-  agent job.
+- Search open pull requests first with one direct invocation of the
+  pre-authenticated shell `gh` CLI through the generated GitHub read proxy.
+  Use `gh` only for reads and `safeoutputs` for every write or completion
+  signal. Do not pipe this initial read through another command that can hide
+  its exit status.
+- If that initial `gh` read exits non-zero or returns malformed output, call
+  `report_incomplete` immediately and stop. Do not retry with `gh api`, inspect
+  authentication, or fall back to unauthenticated `curl` requests.
 - Work directly without sub-agents, progress narration, or a todo list.
 - The run is complete only after exactly one safe-output tool call:
-  `create_pull_request` or `noop`. Never finish with a plan, progress message,
-  checklist, or ordinary assistant response.
+  `create_pull_request`, `noop`, or `report_incomplete`. Never finish with a
+  plan, progress message, checklist, or ordinary assistant response.
 - If an evidence budget is exhausted, stop investigating and make the required
   safe-output call. Use `create_pull_request` only for an already validated
   change; otherwise call `noop` with the best evidence collected and identify
@@ -98,6 +103,8 @@ Work only on maintenance category `${{ github.aw.import-inputs.category }}`.
   and run the smallest relevant test set plus any mandated container or
   workflow validation. If required validation cannot be completed, revert the
   candidate and call `noop`.
+- Never start the complete checkout test suite as discovery. Run only the
+  smallest named test module or node that owns an already evidenced candidate.
 - Review the final diff for accidental generated files, caches, lockfile drift,
   secrets, and unrelated formatting before requesting a pull request.
 
@@ -112,3 +119,7 @@ apply validated findings. Never mark the pull request ready or merge it.
 If there is no proven, safely testable improvement, call `noop` with a concise
 reason. Never create a cosmetic or empty pull request merely because the
 workflow ran.
+
+If the GitHub read proxy or another required tool fails, call
+`report_incomplete` with the failing command and error. Infrastructure failure
+is not evidence that no maintenance is needed, so do not convert it to `noop`.

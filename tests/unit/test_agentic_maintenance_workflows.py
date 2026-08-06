@@ -30,10 +30,14 @@ def test_weekly_maintenance_workflows_share_the_bounded_pr_contract():
     assert "Make at most one coherent maintenance change per run" in shared_workflow
     assert "call `noop`" in shared_workflow
     assert 'title-prefix: "[maintenance] "' in shared_workflow
-    assert "Never use the shell `gh` CLI" in shared_workflow
+    assert "pre-authenticated shell `gh` CLI" in shared_workflow
+    assert "Do not pipe this initial read" in normalized_workflow
+    assert "call `report_incomplete` immediately and stop" in normalized_workflow
+    assert "fall back to unauthenticated `curl`" in normalized_workflow
     assert "Work directly without sub-agents" in shared_workflow
     assert "The run is complete only after exactly one safe-output tool call" in shared_workflow
-    assert "Never finish with a plan, progress message" in shared_workflow
+    assert "`create_pull_request`, `noop`, or `report_incomplete`" in normalized_workflow
+    assert "Never finish with a plan, progress message" in normalized_workflow
     assert "stop investigating and make the required safe-output call" in normalized_workflow
     assert "labels: [agentic-workflow]" in shared_workflow
     assert "draft: true" in shared_workflow
@@ -61,6 +65,7 @@ def test_weekly_maintenance_sources_are_scheduled_scoped_and_compiled():
         assert 'args: ["-c", "features.multi_agent=false"]' in source
         assert "max-daily-ai-credits: -1" in source
         assert 'OPENAI_BASE_URL: "https://llm.neurodesk.org/openai"' in source
+        assert "sandbox:\n  agent:\n    id: awf\n    model-fallback: false" in source
         assert "uses: .github/workflows/shared/agentic-models.md" in source
         assert "uses: .github/workflows/shared/maintenance-base.md" in source
         assert f"category: {category}" in source
@@ -72,11 +77,13 @@ def test_weekly_maintenance_sources_are_scheduled_scoped_and_compiled():
         assert f"agentic/maintenance-{category}-" in lock
         assert "agentic-workflow" in lock
         assert MODEL_ALIAS_JSON in lock
+        assert '"modelFallback":{"enabled":false}' in lock
         assert "features.multi_agent=false" in lock
         assert (
             "The run is complete only after exactly one safe-output tool call"
             in normalized_lock
         )
+        assert "call `report_incomplete` immediately and stop" in normalized_lock
 
         cron_lines = [
             line.strip()
@@ -91,6 +98,23 @@ def test_weekly_maintenance_sources_are_scheduled_scoped_and_compiled():
         compiled_crons.add(cron_lines[0])
 
     assert len(compiled_crons) == len(MAINTENANCE_WORKFLOWS)
+
+
+def test_flaky_test_maintenance_has_a_hard_evidence_and_output_deadline():
+    source = (WORKFLOW_DIR / "maintenance-flaky-tests.md").read_text()
+    lock = (WORKFLOW_DIR / "maintenance-flaky-tests.lock.yml").read_text()
+    normalized_source = " ".join(source.split())
+
+    assert "max-turns: 30" in source
+    assert "GH_AW_MAX_TURNS: 30" in lock
+    assert "Use one `gh run list` read" in source
+    assert "at most 2 representative failed job logs" in source
+    assert "call `report_incomplete` immediately" in normalized_source
+    assert "same failure signature in at least two independent logs" in source
+    assert "within 10 read commands, call `noop`" in normalized_source
+    assert "Never run `pytest tests/unit`" in source
+    assert "install dependencies ad hoc as a discovery strategy" in source
+    assert "Call the selected terminal safe-output tool before turn 30" in source
 
 
 def test_test_coverage_filters_only_recovered_attempt_timeout_signals():

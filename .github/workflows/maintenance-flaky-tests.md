@@ -20,6 +20,11 @@ engine:
     OPENAI_BASE_URL: "https://llm.neurodesk.org/openai"
     OPENAI_API_KEY: ${{ secrets.CODEX_API_KEY || secrets.OPENAI_API_KEY }}
 
+sandbox:
+  agent:
+    id: awf
+    model-fallback: false
+
 models:
   providers:
     openai:
@@ -32,6 +37,9 @@ models:
 strict: true
 max-ai-credits: -1
 max-daily-ai-credits: -1
+# Bound the investigation so it must emit a terminal safe output instead of
+# repeating broad CI and local-test searches as run 30994458736 did.
+max-turns: 30
 max-turn-cache-misses: 2000
 timeout-minutes: 35
 
@@ -47,13 +55,24 @@ imports:
 Inspect a bounded sample of recent Actions runs and fix one recurring,
 reproducible test flake at its root cause.
 
-Inspect at most the 20 most recent relevant runs and at most 2 representative
-failed job logs. Require the same failure signature in at least two independent
-runs, then reproduce it locally or construct a deterministic test that exposes
-the race, leaked state, ordering dependency, clock dependency, or environment
-assumption.
+Use one `gh run list` read to inspect at most the 20 most recent relevant runs,
+then read at most 2 representative failed job logs. If the initial `gh` read or
+either required log read fails, call `report_incomplete` immediately; do not
+retry through `gh api`, unauthenticated `curl`, or authentication probes.
+
+Require the same failure signature in at least two independent logs before
+running any local test. If no recurring signature is proven within 10 read
+commands, call `noop` and stop. Once a signature is proven, reproduce it with
+only the smallest owning test module or node, or construct a deterministic test
+that exposes the race, leaked state, ordering dependency, clock dependency, or
+environment assumption. Never run `pytest tests/unit`, the complete checkout
+test suite, or install dependencies ad hoc as a discovery strategy. A failure
+caused only by the agent job's incomplete host environment is not a test flake.
 
 Fix the underlying nondeterminism. Do not skip or quarantine the test, weaken
 its assertions, add an unconditional retry, add arbitrary sleeps, or merely
 increase a timeout. If the evidence points to external infrastructure or a
 one-off failure rather than repository behavior, call `noop`.
+
+Call the selected terminal safe-output tool before turn 30. Do not spend the
+last turn describing another diagnostic step.
