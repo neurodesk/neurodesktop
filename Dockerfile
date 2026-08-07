@@ -574,7 +574,7 @@ RUN apt-install-retry build-essential \
     osfclient \
     watermark \
     ipyniivue \
-    jupyter-server-proxy \
+    jupyter-server-proxy==4.5.0 \
     jupyterlmod \
     jupyterlab-git \
     # The 5.3.0 wheel omits its compiled frontend. A source rebuild below
@@ -1331,6 +1331,14 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     /opt/neurodesktop/webapps.json \
     && chown -R root:users /opt/config /opt/neurodesktop /opt/tests
 
+
+# jupyter-server-proxy 4.5.0 constructs SimpleAsyncHTTPClient directly for
+# Unix-socket webapps, bypassing the configured 1024 MiB factory defaults.
+# Keep this anchored workaround until upstream routes that branch through the
+# AsyncHTTPClient factory and a fixed release is pinned and validated.
+RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_proxy.py,target=/tmp/patch_jupyter_server_proxy.py,ro \
+    install -m 0755 -o root -g users /tmp/patch_jupyter_server_proxy.py /opt/neurodesktop/patch_jupyter_server_proxy.py \
+    && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_server_proxy.py
 
 # Upstream issue #271: a stale client frame can terminate a Jupyter AI chat
 # room's message queue. Keep this anchored workaround until a fixed

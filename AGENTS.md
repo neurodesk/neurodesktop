@@ -31,11 +31,15 @@
   or how `before_notebook.sh` launches it, run `pytest
   tests/unit/test_print_access_url.py` from a checkout.
 - When changing Jupyter Server Proxy response buffering or the Tornado HTTP
-  client limits in `jupyter_server_config_extra.py`, run `pytest
-  tests/unit/test_jupyter_server_proxy_limits.py` from a checkout and proxy a
-  response larger than 100 MiB through the built image. Keep
+  client limits in `jupyter_server_config_extra.py` or
+  `patch_jupyter_server_proxy.py`, run `pytest
+  tests/unit/test_jupyter_server_proxy_limits.py` from a checkout, `pytest
+  /opt/tests/test_jupyter_server_proxy_limits.py` in the built image, and proxy
+  a response larger than 100 MiB through that image. Keep
   `max_buffer_size` and `max_body_size` aligned at the bounded 1024 MiB limit;
   ordinary proxy responses are buffered in the single-user Jupyter process.
+  Unix-socket webapps must construct their client through the configured
+  `AsyncHTTPClient` factory while preserving `UnixResolver`.
 - When changing the ASTRA viewer adapter, graph/gap model, presentation
   projection, layout ranks, previews, widget, SVG renderer, run-evidence
   ingestion, or package pins, run `pytest tests/unit/test_astra_view_graph.py

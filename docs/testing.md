@@ -76,7 +76,7 @@ non-obvious tiers protect.
 | Area | On a checkout | In the built image |
 | --- | --- | --- |
 | Access-URL banner (`print_access_url.sh`) | `pytest tests/unit/test_print_access_url.py` | — |
-| Jupyter Server Proxy response limits | `pytest tests/unit/test_jupyter_server_proxy_limits.py` | real large-response proxy check |
+| Jupyter Server Proxy response limits | `pytest tests/unit/test_jupyter_server_proxy_limits.py` | `pytest /opt/tests/test_jupyter_server_proxy_limits.py`, then real large-response proxy check |
 | ASTRA viewer core (adapter, graph, widget, previews) | `pytest tests/unit/test_astra_view_graph.py tests/unit/test_astra_view_packaging.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | `astra`/`lc` installs, Lightcone skills and hooks | `pytest tests/unit/test_astra_jupyter_ai_tooling.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
@@ -87,11 +87,12 @@ non-obvious tiers protect.
 
 ### Jupyter Server Proxy response limits
 
-The unit test executes the single-load Jupyter server configuration and asserts
-that Tornado receives matching 1024 MiB buffer and body limits. A runtime check
-must proxy a response larger than Tornado's 100 MiB default through a built
-image; a source assertion alone cannot prove the installed Jupyter Server Proxy
-uses the configured client.
+The unit test executes the single-load Jupyter server configuration, applies
+the anchored Jupyter Server Proxy patch to its upstream seam, and instantiates
+the Unix-socket client to assert matching 1024 MiB buffer and body limits. A
+runtime check must proxy a response larger than Tornado's 100 MiB default
+through a built image; the unit construction test does not prove the full
+installed proxy request succeeds.
 
 ### Desktop tests
 
