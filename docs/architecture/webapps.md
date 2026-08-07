@@ -4,7 +4,7 @@ description: Container-backed and hosted webapps, launcher tiles and icons,
   and the build-time Jupyter config generation that wires them up
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-07-31"
+last-reviewed: "2026-08-07"
 ---
 
 # Webapp System
@@ -34,6 +34,16 @@ SVG or PNG files in
 them into the image before Jupyter config generation. The custom Neurodesk
 launcher reads icons through the server-proxy icon endpoint and wraps raster
 images as SVGs for JupyterLab `LabIcon` support.
+
+Jupyter Server Proxy buffers ordinary webapp responses through Tornado's HTTP
+client. Neurodesktop raises Tornado's matching `max_buffer_size` and
+`max_body_size` defaults from 100 MiB to 1024 MiB in
+[`jupyter_server_config_extra.py`](../../config/jupyter/jupyter_server_config_extra.py),
+so large binary responses such as ezBIDS ZIP exports can complete. This is a
+per-response ceiling, not reserved memory: each concurrent buffered download
+can make the single-user Jupyter process consume up to the response size, so
+the limit must remain finite and deployment memory limits must account for
+concurrent large downloads.
 
 ## Build-time config generation
 

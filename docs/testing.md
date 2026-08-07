@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-08-04"
+last-reviewed: "2026-08-07"
 ---
 
 # Testing
@@ -76,6 +76,7 @@ non-obvious tiers protect.
 | Area | On a checkout | In the built image |
 | --- | --- | --- |
 | Access-URL banner (`print_access_url.sh`) | `pytest tests/unit/test_print_access_url.py` | — |
+| Jupyter Server Proxy response limits | `pytest tests/unit/test_jupyter_server_proxy_limits.py` | real large-response proxy check |
 | ASTRA viewer core (adapter, graph, widget, previews) | `pytest tests/unit/test_astra_view_graph.py tests/unit/test_astra_view_packaging.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | `astra`/`lc` installs, Lightcone skills and hooks | `pytest tests/unit/test_astra_jupyter_ai_tooling.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
@@ -83,6 +84,14 @@ non-obvious tiers protect.
 | Notebook Intelligence / MyST pins and rebuilds | `pytest tests/unit/test_nbi_settings_patch.py tests/unit/test_myst_build_workaround.py` | `pytest /opt/tests/test_nbi_labextension_patch.py` |
 | Launcher extension, workspace link routing | `pytest tests/unit/test_workspace_link_routing.py` | `pytest /opt/tests/test_workspace_link_routing_image.py` |
 | Agentic workflows under `.github/workflows/*.md` | `pytest tests/unit/test_report_job_failure_action.py tests/unit/test_agentic_maintenance_workflows.py` | — |
+
+### Jupyter Server Proxy response limits
+
+The unit test executes the single-load Jupyter server configuration and asserts
+that Tornado receives matching 1024 MiB buffer and body limits. A runtime check
+must proxy a response larger than Tornado's 100 MiB default through a built
+image; a source assertion alone cannot prove the installed Jupyter Server Proxy
+uses the configured client.
 
 ### Desktop tests
 

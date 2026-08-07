@@ -6,6 +6,22 @@
 # re-applications through notebook_shim's per-extension-app loads.
 import sys
 
+from tornado.httpclient import AsyncHTTPClient
+
+
+# jupyter-server-proxy buffers ordinary HTTP responses through Tornado's
+# AsyncHTTPClient. Tornado otherwise caps both the buffer and response body at
+# 100 MiB, which truncates larger webapp downloads such as ezBIDS ZIP exports.
+# Both limits must move together because buffered responses are constrained by
+# the smaller value. Keep this bounded: each concurrent proxy response can use
+# memory up to this ceiling in the single-user Jupyter server process.
+_JUPYTER_SERVER_PROXY_RESPONSE_LIMIT = 1024 * 1024 * 1024
+AsyncHTTPClient.configure(
+    None,
+    max_buffer_size=_JUPYTER_SERVER_PROXY_RESPONSE_LIMIT,
+    max_body_size=_JUPYTER_SERVER_PROXY_RESPONSE_LIMIT,
+)
+
 if '/opt/neurodesktop' not in sys.path:
     sys.path.insert(0, '/opt/neurodesktop')
 
