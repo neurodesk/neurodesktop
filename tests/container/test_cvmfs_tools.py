@@ -11,6 +11,12 @@ _ENV_PREAMBLE = (
     "source /usr/share/lmod/lmod/init/bash 2>/dev/null; "
 )
 
+# A negative Lmod lookup must traverse every MODULEPATH entry. On a fresh
+# runner those entries are backed by a cold CVMFS catalogue and can take longer
+# than the normal command limit; five minutes still bounds a genuinely stuck
+# mount while avoiding a false failure during the first catalogue traversal.
+_CVMFS_COLD_CACHE_TIMEOUT = 300
+
 
 def run_cmd(cmd, timeout=120):
     """Run a shell command and return (exit_code, output). Kills process group on timeout."""
@@ -117,7 +123,10 @@ class TestFslMaths:
         """Loading a non-existent module should fail with non-zero exit code."""
         _skip_if_cvmfs_disabled()
 
-        code, output = run_neuro_cmd("module load funny-name-tool")
+        code, output = run_neuro_cmd(
+            "module load funny-name-tool",
+            timeout=_CVMFS_COLD_CACHE_TIMEOUT,
+        )
         assert code != 0, (
             f"Loading non-existent module should have failed but exited 0: {output}"
         )
