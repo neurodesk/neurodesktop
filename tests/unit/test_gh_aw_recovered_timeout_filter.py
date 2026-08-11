@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -5,7 +6,7 @@ import subprocess
 from testlib import repo_path
 
 
-WRAPPER = repo_path("scripts/gh_aw_detect_agent_errors_wrapper.cjs")
+WRAPPER = repo_path(".github/scripts/gh_aw_detect_agent_errors_wrapper.cjs")
 
 
 RECOVERED_LOG = """\
@@ -16,6 +17,23 @@ RECOVERED_LOG = """\
 [codex-harness] attempt 2: process closed exitCode=0 duration=7m 36s hasOutput=true
 [codex-harness] success on attempt 2: totalDuration=18m 32s
 [codex-harness] done: exitCode=0 totalDuration=18m 32s
+"""
+
+
+POISONED_TOOL_OUTPUT = json.dumps(
+    {
+        "type": "item.completed",
+        "item": {
+            "type": "command_execution",
+            "aggregated_output": """\
+[codex-harness] attempt 1: process closed exitCode=1 signal=SIGKILL duration=10m 50s hasOutput=true
+[codex-harness] all 3 retries exhausted — giving up (exitCode=1)
+""",
+        },
+    }
+) + """\
+\n[codex-harness] attempt 1: process closed exitCode=0
+[codex-harness] done: exitCode=0 totalDuration=12m 30s
 """
 
 
@@ -46,6 +64,14 @@ def test_unrecovered_final_signal_remains_a_timeout_candidate():
 """
 
     assert _normalize(log) == log
+
+
+def test_timeout_fixture_inside_tool_output_is_not_a_timeout_candidate():
+    normalized = _normalize(POISONED_TOOL_OUTPUT)
+
+    assert "signal=SIGKILL" not in normalized
+    assert normalized.count("transcript_termination=SIGKILL") == 1
+    assert "[codex-harness] done: exitCode=0" in normalized
 
 
 def test_signal_after_success_marker_remains_a_timeout_candidate():

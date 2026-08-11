@@ -40,8 +40,18 @@ models:
 strict: true
 max-ai-credits: -1
 max-daily-ai-credits: -1
+max-turns: 30
 max-turn-cache-misses: 2000
 timeout-minutes: 35
+pre-agent-steps:
+  - name: Install provenance-aware agent timeout filter
+    run: |
+      detector_dir="${RUNNER_TEMP}/gh-aw/actions"
+      mv "${detector_dir}/detect_agent_errors.cjs" \
+        "${detector_dir}/detect_agent_errors.upstream.cjs"
+      install -m 0644 .github/scripts/gh_aw_detect_agent_errors_wrapper.cjs \
+        "${detector_dir}/detect_agent_errors.cjs"
+
 imports:
   - uses: .github/workflows/shared/agentic-models.md
 network:
@@ -151,4 +161,5 @@ does not hold.
 
 If no active actionable findings remain, call `noop` with a concise reason. Do
 not make speculative changes, request another review, mark the draft ready,
-approve it, or merge it.
+approve it, or merge it. Make the selected terminal safe-output call before
+turn 30.

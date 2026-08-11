@@ -20,6 +20,29 @@ const HARNESS_DONE_PATTERN =
   /^\[([a-z0-9_-]+-harness)\].*\bdone: exitCode=0\b/i;
 const PROCESS_SIGNAL_PATTERN =
   /\bprocess (?:exit event|closed)\b.*\bsignal=(SIG(?:TERM|KILL|INT))\b/;
+const TRUSTED_HARNESS_SIGNAL_LINE_PATTERN =
+  /^\[[a-z0-9_-]+-harness\].*\bprocess (?:exit event|closed)\b.*\bsignal=SIG(?:TERM|KILL|INT)\b/i;
+const ANY_PROCESS_SIGNAL_PATTERN = /\bsignal=(SIG(?:TERM|KILL|INT))\b/g;
+
+/**
+ * The upstream detector scans the complete mixed transcript for signal text.
+ * Repository files, test fixtures, and command output are untrusted content,
+ * so preserve a signal only when it is carried by a bare harness lifecycle
+ * record. Otherwise a fixture containing `signal=SIGKILL` can manufacture a
+ * timeout even after the harness reports `done: exitCode=0`.
+ */
+function neutralizeTranscriptSignals(logContent) {
+  return logContent
+    .split(/(?<=\n)/)
+    .map((line) => {
+      if (TRUSTED_HARNESS_SIGNAL_LINE_PATTERN.test(line)) return line;
+      return line.replace(
+        ANY_PROCESS_SIGNAL_PATTERN,
+        "transcript_termination=$1",
+      );
+    })
+    .join("");
+}
 
 /**
  * Hide timeout-like signals from attempts that the harness demonstrably
@@ -70,10 +93,16 @@ function normalizeRecoveredAttemptSignals(logContent) {
     .join("");
 }
 
+function normalizeTimeoutSignals(logContent) {
+  return normalizeRecoveredAttemptSignals(
+    neutralizeTranscriptSignals(logContent),
+  );
+}
+
 function runUpstreamDetector() {
   const logFile = process.env.GH_AW_AGENT_STDIO_LOG || DEFAULT_LOG_FILE;
   const original = fs.readFileSync(logFile, "utf8");
-  const normalized = normalizeRecoveredAttemptSignals(original);
+  const normalized = normalizeTimeoutSignals(original);
 
   if (!fs.existsSync(UPSTREAM_DETECTOR)) {
     throw new Error(`Upstream gh-aw detector not found: ${UPSTREAM_DETECTOR}`);
@@ -97,11 +126,16 @@ function runUpstreamDetector() {
 if (require.main === module) {
   if (process.argv[2] === "--normalize") {
     process.stdout.write(
-      normalizeRecoveredAttemptSignals(fs.readFileSync(0, "utf8")),
+      normalizeTimeoutSignals(fs.readFileSync(0, "utf8")),
     );
   } else {
     process.exitCode = runUpstreamDetector();
   }
 }
 
-module.exports = { normalizeRecoveredAttemptSignals, runUpstreamDetector };
+module.exports = {
+  neutralizeTranscriptSignals,
+  normalizeRecoveredAttemptSignals,
+  normalizeTimeoutSignals,
+  runUpstreamDetector,
+};

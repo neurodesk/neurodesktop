@@ -166,3 +166,14 @@
   `.github/workflows/shared/agentic-models.md`. Keep GLM 5.2 ahead of Kimi 2.7,
   compile every affected workflow, and verify the generated model map in the
   focused agentic workflow tests.
+- Every Codex workflow installs
+  `.github/scripts/gh_aw_detect_agent_errors_wrapper.cjs` in
+  `pre-agent-steps`. When
+  changing that wrapper or its hooks, run `pytest
+  tests/unit/test_gh_aw_recovered_timeout_filter.py
+  tests/unit/test_agentic_maintenance_workflows.py`. Preserve real bare harness
+  lifecycle signals, recovered-attempt handling, and byte-for-byte transcript
+  restoration; timeout-shaped repository and tool output is untrusted data and
+  must not affect failure classification. Keep a hard `max-turns` ceiling on
+  every Codex workflow. Keep the wrapper under `.github/` so PR review runs
+  restore the trusted base-branch copy before installing it.

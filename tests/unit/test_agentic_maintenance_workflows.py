@@ -129,20 +129,50 @@ def test_flaky_test_maintenance_has_a_hard_evidence_and_output_deadline():
     assert "Call the selected terminal safe-output tool before turn 30" in source
 
 
-def test_test_coverage_filters_only_recovered_attempt_timeout_signals():
-    source = (WORKFLOW_DIR / "maintenance-test-coverage.md").read_text()
-    lock = (WORKFLOW_DIR / "maintenance-test-coverage.lock.yml").read_text()
+def test_all_codex_workflows_install_provenance_aware_timeout_filter():
+    step_name = "Install provenance-aware agent timeout filter"
+    wrapper = ".github/scripts/gh_aw_detect_agent_errors_wrapper.cjs"
 
-    step_name = "Install recovered-attempt timeout filter"
-    wrapper = "scripts/gh_aw_detect_agent_errors_wrapper.cjs"
+    codex_sources = [
+        path
+        for path in WORKFLOW_DIR.glob("*.md")
+        if "id: codex" in path.read_text()
+    ]
+    assert len(codex_sources) == 11
 
-    assert "pre-agent-steps:" in source
-    assert step_name in source
-    assert wrapper in source
-    assert step_name in lock
-    assert wrapper in lock
-    assert lock.index(step_name) < lock.index("Execute Codex CLI")
-    assert lock.index(step_name) < lock.index("Detect agent errors")
+    for source_path in codex_sources:
+        source = source_path.read_text()
+        lock = source_path.with_suffix(".lock.yml").read_text()
+
+        assert "uses: .github/workflows/shared/agentic-models.md" in source
+        assert "pre-agent-steps:" in source, source_path.name
+        assert step_name in source, source_path.name
+        assert wrapper in source, source_path.name
+        assert step_name in lock, source_path.name
+        assert wrapper in lock, source_path.name
+        assert (
+            'GH_AW_AGENT_FOLDERS: ".agents .antigravity .claude .codex '
+            '.crush .gemini .github .opencode .pi"'
+            in lock
+        )
+        assert lock.index("Restore agent config folders from base branch") < lock.index(
+            step_name
+        )
+        assert lock.index(step_name) < lock.index("Execute Codex CLI")
+        assert lock.index(step_name) < lock.index("Detect agent errors")
+
+
+def test_all_codex_workflows_have_a_hard_turn_ceiling():
+    for source_path in WORKFLOW_DIR.glob("*.md"):
+        source = source_path.read_text()
+        if "id: codex" not in source:
+            continue
+
+        expected = 40 if source_path.name == "issue-investigator.md" else 30
+        lock = source_path.with_suffix(".lock.yml").read_text()
+
+        assert f"max-turns: {expected}\n" in source, source_path.name
+        assert f"GH_AW_MAX_TURNS: {expected}" in lock, source_path.name
 
 
 def test_package_update_radar_reports_without_write_access():

@@ -48,6 +48,15 @@ max-ai-credits: -1
 # runaway 105-turn investigation observed in issue #810.
 max-turns: 40
 max-turn-cache-misses: 2000
+pre-agent-steps:
+  - name: Install provenance-aware agent timeout filter
+    run: |
+      detector_dir="${RUNNER_TEMP}/gh-aw/actions"
+      mv "${detector_dir}/detect_agent_errors.cjs" \
+        "${detector_dir}/detect_agent_errors.upstream.cjs"
+      install -m 0644 .github/scripts/gh_aw_detect_agent_errors_wrapper.cjs \
+        "${detector_dir}/detect_agent_errors.cjs"
+
 imports:
   - uses: .github/workflows/shared/agentic-models.md
 network:

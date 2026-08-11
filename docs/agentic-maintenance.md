@@ -4,7 +4,7 @@ description: Weekly agentic maintenance checks, the package-update radar, and
   the CodeRabbit pull-request review loop
 parent: index.md
 status: current
-last-reviewed: "2026-07-31"
+last-reviewed: "2026-08-10"
 ---
 
 # Agentic Maintenance Workflows
@@ -82,8 +82,16 @@ no actionable findings remain. It never marks a PR ready or merges it.
 ## Operational Limits
 
 - Each category permits one open PR and one coherent change per run.
+- Every Codex workflow has a hard model-turn ceiling: 30 turns for maintenance,
+  radar, and review work, and 40 for the issue investigator. The prompt must
+  reserve the final turn for its terminal safe output; the runner enforces the
+  ceiling even when the model ignores the prose evidence budget.
 - Investigation and network reads are bounded in the shared contract (for the
   radar, in its own workflow body).
+- All Codex workflows install the shared provenance-aware timeout filter before
+  execution. Only bare harness lifecycle records may report a process signal;
+  repository files, test fixtures, and command output are untrusted transcript
+  content and cannot manufacture a timeout.
 - Product behavior changes require focused regression tests and the validation
   described in `docs/testing.md`.
 - Protected or out-of-scope files require human review instead of an automated

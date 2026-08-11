@@ -32,8 +32,18 @@ models:
 strict: true
 max-ai-credits: -1
 max-daily-ai-credits: -1
+max-turns: 30
 max-turn-cache-misses: 2000
 timeout-minutes: 40
+
+pre-agent-steps:
+  - name: Install provenance-aware agent timeout filter
+    run: |
+      detector_dir="${RUNNER_TEMP}/gh-aw/actions"
+      mv "${detector_dir}/detect_agent_errors.cjs" \
+        "${detector_dir}/detect_agent_errors.upstream.cjs"
+      install -m 0644 .github/scripts/gh_aw_detect_agent_errors_wrapper.cjs \
+        "${detector_dir}/detect_agent_errors.cjs"
 
 imports:
   - uses: .github/workflows/shared/agentic-models.md
@@ -87,7 +97,7 @@ candidate list rather than to change anything.
 - The run is complete only after exactly one safe-output tool call:
   `create_issue`, `add_comment`, `noop`, `missing_tool`, or `missing_data`.
   Never finish with a plan, progress message, checklist, or ordinary assistant
-  response.
+  response. Make that terminal call before turn 30.
 - If a budget below is exhausted or evidence is incomplete, stop researching
   and publish the best partial report. Mark unresolved components `unknown`
   and list skipped surfaces under `Coverage`; partial coverage is preferable

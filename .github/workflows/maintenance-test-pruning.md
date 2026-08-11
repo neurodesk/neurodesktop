@@ -37,8 +37,18 @@ models:
 strict: true
 max-ai-credits: -1
 max-daily-ai-credits: -1
+max-turns: 30
 max-turn-cache-misses: 2000
 timeout-minutes: 30
+
+pre-agent-steps:
+  - name: Install provenance-aware agent timeout filter
+    run: |
+      detector_dir="${RUNNER_TEMP}/gh-aw/actions"
+      mv "${detector_dir}/detect_agent_errors.cjs" \
+        "${detector_dir}/detect_agent_errors.upstream.cjs"
+      install -m 0644 .github/scripts/gh_aw_detect_agent_errors_wrapper.cjs \
+        "${detector_dir}/detect_agent_errors.cjs"
 
 imports:
   - uses: .github/workflows/shared/agentic-models.md

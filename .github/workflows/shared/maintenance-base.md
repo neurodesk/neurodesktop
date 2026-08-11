@@ -75,7 +75,8 @@ Work only on maintenance category `${{ github.aw.import-inputs.category }}`.
 - Work directly without sub-agents, progress narration, or a todo list.
 - The run is complete only after exactly one safe-output tool call:
   `create_pull_request`, `noop`, or `report_incomplete`. Never finish with a
-  plan, progress message, checklist, or ordinary assistant response.
+  plan, progress message, checklist, or ordinary assistant response. Make that
+  terminal call before turn 30.
 - If an evidence budget is exhausted, stop investigating and make the required
   safe-output call. Use `create_pull_request` only for an already validated
   change; otherwise call `noop` with the best evidence collected and identify

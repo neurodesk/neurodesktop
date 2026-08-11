@@ -4,7 +4,7 @@ description: The agentic issue-investigation workflow and the weekly
   maintenance suite that keep the repository healthy
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-07-31"
+last-reviewed: "2026-08-10"
 ---
 
 # Agentic CI workflows
@@ -36,7 +36,13 @@ Every Codex agentic workflow imports
 [`agentic-models.md`](../../.github/workflows/shared/agentic-models.md). Its
 `neurodesk` model alias lists GLM 5.2 first and Kimi 2.7 second, giving the
 workflow firewall an ordered secondary candidate when resolving the model from
-the available-model catalog.
+the available-model catalog. Each Codex source also installs the pre-agent
+timeout detector wrapper: process signals count only on bare harness lifecycle
+records, never when the same text appears in repository or tool output. Every
+workflow has a hard turn ceiling so prompt-only research budgets cannot grow
+without bound. The wrapper lives under `.github/`, which review runs restore
+from the base branch before executing pre-agent steps; a pull-request branch
+cannot replace this failure-classification code.
 
 ## Weekly agentic maintenance
 
