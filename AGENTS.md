@@ -38,7 +38,9 @@
   a response larger than 100 MiB through that image. Keep
   `max_buffer_size` and `max_body_size` aligned at the bounded 1024 MiB limit;
   ordinary proxy responses are buffered in the single-user Jupyter process.
-  Unix-socket webapps must construct their client through the configured
+  Pass both limits directly to the TCP and Unix-socket client constructors so
+  JupyterHub's later `AsyncHTTPClient.configure()` call cannot reset them.
+  Unix-socket webapps must still construct their client through the configured
   `AsyncHTTPClient` factory while preserving `UnixResolver`.
 - When changing the ASTRA viewer adapter, graph/gap model, presentation
   projection, layout ranks, previews, widget, SVG renderer, run-evidence

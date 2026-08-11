@@ -1,4 +1,4 @@
-"""Runtime contract for Jupyter Server Proxy's Unix-socket HTTP client."""
+"""Runtime contract for Jupyter Server Proxy's bounded HTTP clients."""
 
 import asyncio
 from pathlib import Path
@@ -9,12 +9,13 @@ from jupyter_server_proxy.unixsock import UnixResolver
 from tornado.httpclient import AsyncHTTPClient
 
 
-def test_installed_unix_socket_path_uses_configured_factory():
+def test_installed_proxy_clients_remain_bounded_after_jupyterhub_reset():
     import jupyter_server_proxy
 
     handlers_path = Path(jupyter_server_proxy.__file__).parent / "handlers.py"
     handlers = handlers_path.read_text(encoding="utf-8")
-    assert "neurodesktop-configured-unix-http-client" in handlers
+    assert "neurodesktop-bounded-unix-http-client" in handlers
+    assert "neurodesktop-bounded-tcp-http-client" in handlers
     assert (
         "from tornado.simple_httpclient import SimpleAsyncHTTPClient"
         not in handlers
@@ -27,15 +28,19 @@ def test_installed_unix_socket_path_uses_configured_factory():
         max_buffer_size=one_gibibyte,
         max_body_size=one_gibibyte,
     )
+    AsyncHTTPClient.configure(
+        AsyncHTTPClient.configured_class(),
+        defaults={"validate_cert": True},
+    )
 
-    async def exercise_proxy_branch():
+    async def exercise_proxy_branch(unix_socket):
         captured = {}
 
         async def capture_buffered(_host, _port, _path, _body, client):
             captured["client"] = client
 
         handler = SimpleNamespace(
-            unix_socket="/tmp/ezbids.sock",
+            unix_socket=unix_socket,
             request=SimpleNamespace(headers={}, body=None, method="GET"),
             log=SimpleNamespace(debug=lambda *_args: None),
             _check_host_allowlist=lambda _host: True,
@@ -48,12 +53,14 @@ def test_installed_unix_socket_path_uses_configured_factory():
         try:
             assert client.max_buffer_size == one_gibibyte
             assert client.max_body_size == one_gibibyte
-            assert isinstance(client.resolver, UnixResolver)
-            assert client.resolver.socket_path == "/tmp/ezbids.sock"
+            if unix_socket is not None:
+                assert isinstance(client.resolver, UnixResolver)
+                assert client.resolver.socket_path == unix_socket
         finally:
             client.close()
 
     try:
-        asyncio.run(exercise_proxy_branch())
+        asyncio.run(exercise_proxy_branch(None))
+        asyncio.run(exercise_proxy_branch("/tmp/ezbids.sock"))
     finally:
         AsyncHTTPClient._restore_configuration(saved_configuration)

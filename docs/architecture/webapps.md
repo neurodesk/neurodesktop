@@ -36,15 +36,17 @@ launcher reads icons through the server-proxy icon endpoint and wraps raster
 images as SVGs for JupyterLab `LabIcon` support.
 
 Jupyter Server Proxy buffers ordinary webapp responses through Tornado's HTTP
-client. Neurodesktop raises Tornado's matching `max_buffer_size` and
+client. Neurodesktop initially raises Tornado's matching `max_buffer_size` and
 `max_body_size` defaults from 100 MiB to 1024 MiB in
 [`jupyter_server_config_extra.py`](../../config/jupyter/jupyter_server_config_extra.py),
-so large binary responses such as ezBIDS ZIP exports can complete. Since
-container-backed webapps use Unix sockets, an anchored build-time patch in
+but JupyterHub replaces those mutable defaults later in single-user startup.
+An anchored build-time patch in
 [`patch_jupyter_server_proxy.py`](../../config/jupyter/patch_jupyter_server_proxy.py)
-routes that branch through the configured `AsyncHTTPClient` factory while
-preserving its `UnixResolver`; constructing `SimpleAsyncHTTPClient` directly
-would retain Tornado's 100 MiB default. This is a per-response ceiling, not
+therefore passes the bounded limits directly to both TCP and Unix-socket proxy
+clients. The Unix branch still uses the configured `AsyncHTTPClient` factory
+and preserves its `UnixResolver`; constructing `SimpleAsyncHTTPClient` directly
+would retain Tornado's 100 MiB default. This lets large binary responses such
+as ezBIDS ZIP exports complete. The limit is a per-response ceiling, not
 reserved memory: each concurrent buffered download can make the single-user
 Jupyter process consume up to the response size, so the limit must remain
 finite and deployment memory limits must account for concurrent large

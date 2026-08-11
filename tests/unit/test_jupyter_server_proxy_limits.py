@@ -85,8 +85,10 @@ def test_server_proxy_response_limit_is_one_gibibyte(monkeypatch):
     ]
 
 
-def test_unix_socket_client_uses_configured_limits(tmp_path, monkeypatch):
-    """Exercise the constructor used by jupyter-server-proxy's Unix branch."""
+def test_proxy_clients_keep_bounded_limits_after_jupyterhub_reset(
+    tmp_path, monkeypatch
+):
+    """Exercise both constructors after JupyterHub replaces factory defaults."""
     patcher = load_patcher_module()
     package_dir = tmp_path / "jupyter_server_proxy"
     write_upstream_fixture(package_dir)
@@ -101,21 +103,29 @@ def test_unix_socket_client_uses_configured_limits(tmp_path, monkeypatch):
     saved_configuration = AsyncHTTPClient._save_configuration()
     try:
         install_server_config(monkeypatch)
+        AsyncHTTPClient.configure(
+            AsyncHTTPClient.configured_class(),
+            defaults={"validate_cert": True},
+        )
 
-        async def inspect_client():
-            handler = namespace["ProxyHandler"]("/tmp/ezbids.sock")
+        async def inspect_client(unix_socket):
+            handler = namespace["ProxyHandler"](unix_socket)
             client = handler.make_client()
             try:
                 return (
                     client.max_buffer_size,
                     client.max_body_size,
-                    client.resolver.path,
+                    getattr(client.resolver, "path", None),
                 )
             finally:
                 client.close()
 
         one_gibibyte = 1024 * 1024 * 1024
-        assert asyncio.run(inspect_client()) == (
+        assert asyncio.run(inspect_client(None))[:2] == (
+            one_gibibyte,
+            one_gibibyte,
+        )
+        assert asyncio.run(inspect_client("/tmp/ezbids.sock")) == (
             one_gibibyte,
             one_gibibyte,
             "/tmp/ezbids.sock",
@@ -124,19 +134,22 @@ def test_unix_socket_client_uses_configured_limits(tmp_path, monkeypatch):
         AsyncHTTPClient._restore_configuration(saved_configuration)
 
 
-def test_unix_socket_patch_is_idempotent_and_removes_direct_client(tmp_path):
+def test_proxy_patch_is_idempotent_and_bounds_both_clients(tmp_path):
     patcher = load_patcher_module()
     package_dir = tmp_path / "jupyter_server_proxy"
     write_upstream_fixture(package_dir)
 
     assert patcher.patch_package(package_dir)
     handlers = (package_dir / "handlers.py").read_text(encoding="utf-8")
-    assert patcher.MARKER in handlers
+    assert patcher.UNIX_MARKER in handlers
+    assert patcher.TCP_MARKER in handlers
     assert (
         "from tornado.simple_httpclient import SimpleAsyncHTTPClient"
         not in handlers
     )
-    assert "client = httpclient.AsyncHTTPClient(" in handlers
+    assert handlers.count("client = httpclient.AsyncHTTPClient(") == 2
+    assert handlers.count("max_buffer_size=1024 * 1024 * 1024") == 2
+    assert handlers.count("max_body_size=1024 * 1024 * 1024") == 2
     compile(handlers, "handlers.py", "exec")
 
     assert not patcher.patch_package(package_dir)
@@ -155,6 +168,23 @@ def test_unix_socket_patch_refuses_anchor_drift(tmp_path):
     )
 
     with pytest.raises(ValueError, match="Unix-socket client anchor"):
+        patcher.patch_package(package_dir)
+
+
+def test_proxy_patch_refuses_tcp_anchor_drift(tmp_path):
+    patcher = load_patcher_module()
+    package_dir = tmp_path / "jupyter_server_proxy"
+    write_upstream_fixture(package_dir)
+    handlers_path = package_dir / "handlers.py"
+    handlers_path.write_text(
+        HANDLERS_SOURCE.replace(
+            "client = httpclient.AsyncHTTPClient(force_instance=True)",
+            "client = httpclient.AsyncHTTPClient()",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="TCP client anchor"):
         patcher.patch_package(package_dir)
 
 

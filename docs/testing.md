@@ -87,12 +87,13 @@ non-obvious tiers protect.
 
 ### Jupyter Server Proxy response limits
 
-The unit test executes the single-load Jupyter server configuration, applies
-the anchored Jupyter Server Proxy patch to its upstream seam, and instantiates
-the Unix-socket client to assert matching 1024 MiB buffer and body limits. A
+The unit test executes the single-load Jupyter server configuration, simulates
+JupyterHub replacing Tornado's mutable client defaults, applies the anchored
+Jupyter Server Proxy patch to its upstream seam, and instantiates both TCP and
+Unix-socket clients to assert matching 1024 MiB buffer and body limits. A
 runtime check must proxy a response larger than Tornado's 100 MiB default
-through a built image; the unit construction test does not prove the full
-installed proxy request succeeds.
+through a fully initialized single-user server in a built image; the unit
+construction test does not prove the full installed proxy request succeeds.
 
 ### Desktop tests
 

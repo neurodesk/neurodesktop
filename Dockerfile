@@ -1333,9 +1333,9 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
 
 
 # jupyter-server-proxy 4.5.0 constructs SimpleAsyncHTTPClient directly for
-# Unix-socket webapps, bypassing the configured 1024 MiB factory defaults.
-# Keep this anchored workaround until upstream routes that branch through the
-# AsyncHTTPClient factory and a fixed release is pinned and validated.
+# Unix-socket webapps, and JupyterHub later replaces AsyncHTTPClient's configured
+# defaults. Keep this anchored workaround, which bounds both proxy constructors
+# explicitly, until a fixed upstream release is pinned and validated.
 RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_proxy.py,target=/tmp/patch_jupyter_server_proxy.py,ro \
     install -m 0755 -o root -g users /tmp/patch_jupyter_server_proxy.py /opt/neurodesktop/patch_jupyter_server_proxy.py \
     && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_server_proxy.py
