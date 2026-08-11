@@ -75,8 +75,13 @@ Work only on maintenance category `${{ github.aw.import-inputs.category }}`.
 - Work directly without sub-agents, progress narration, or a todo list.
 - The run is complete only after exactly one safe-output tool call:
   `create_pull_request`, `noop`, or `report_incomplete`. Never finish with a
-  plan, progress message, checklist, or ordinary assistant response. Make that
-  terminal call before turn 30.
+  plan, progress message, checklist, or ordinary assistant response. In this
+  Codex workflow these names are CLI subcommands, not native function tools.
+  Complete the run on or before turn 24 with one shell command that invokes
+  `safeoutputs create_pull_request`, `safeoutputs noop`, or
+  `safeoutputs report_incomplete`; never emit a direct function-tool call for
+  any of them. This deadline reserves six of the 30 model invocations for one
+  CLI-format recovery and orderly completion.
 - If an evidence budget is exhausted, stop investigating and make the required
   safe-output call. Use `create_pull_request` only for an already validated
   change; otherwise call `noop` with the best evidence collected and identify
@@ -93,7 +98,10 @@ Work only on maintenance category `${{ github.aw.import-inputs.category }}`.
    `noop`; do not create a competing or follow-up pull request.
 3. Inspect only enough code, tests, history, and recent Actions evidence to
    prove one candidate. Use at most 12 read commands and at most 2 external
-   version or service probes before choosing an output.
+   version or service probes before choosing an output. Count the initial PR
+   read and every shell invocation that reads repository, history, or Actions
+   evidence as one read command, and batch related reads. At the twelfth read,
+   choose a candidate or call `noop`; do not issue a thirteenth discovery read.
 
 ## Change Contract
 

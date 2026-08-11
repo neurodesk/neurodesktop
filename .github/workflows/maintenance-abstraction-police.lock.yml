@@ -199,23 +199,23 @@ jobs:
         run: |
           bash "${RUNNER_TEMP}/gh-aw/actions/create_prompt_first.sh"
           {
-          cat << 'GH_AW_PROMPT_27d9da0e0f7d6a8b_EOF'
+          cat << 'GH_AW_PROMPT_92a9d2f6b251c325_EOF'
           <system>
-          GH_AW_PROMPT_27d9da0e0f7d6a8b_EOF
+          GH_AW_PROMPT_92a9d2f6b251c325_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/xpia.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/temp_folder_prompt.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/markdown.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/safe_outputs_prompt.md"
-          cat << 'GH_AW_PROMPT_27d9da0e0f7d6a8b_EOF'
+          cat << 'GH_AW_PROMPT_92a9d2f6b251c325_EOF'
           <safe-output-tools>
           Tools: create_pull_request, missing_tool, missing_data, noop
-          GH_AW_PROMPT_27d9da0e0f7d6a8b_EOF
+          GH_AW_PROMPT_92a9d2f6b251c325_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/safe_outputs_create_pull_request.md"
-          cat << 'GH_AW_PROMPT_27d9da0e0f7d6a8b_EOF'
+          cat << 'GH_AW_PROMPT_92a9d2f6b251c325_EOF'
           </safe-output-tools>
-          GH_AW_PROMPT_27d9da0e0f7d6a8b_EOF
+          GH_AW_PROMPT_92a9d2f6b251c325_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/mcp_cli_tools_prompt.md"
-          cat << 'GH_AW_PROMPT_27d9da0e0f7d6a8b_EOF'
+          cat << 'GH_AW_PROMPT_92a9d2f6b251c325_EOF'
           <github-context>
           The following GitHub context information is available for this workflow:
           {{#if github.actor}}
@@ -244,9 +244,9 @@ jobs:
           {{/if}}
           </github-context>
           
-          GH_AW_PROMPT_27d9da0e0f7d6a8b_EOF
+          GH_AW_PROMPT_92a9d2f6b251c325_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/cli_proxy_with_safeoutputs_prompt.md"
-          cat << 'GH_AW_PROMPT_27d9da0e0f7d6a8b_EOF'
+          cat << 'GH_AW_PROMPT_92a9d2f6b251c325_EOF'
           </system>
           {{#runtime-import .github/workflows/shared/agentic-models.md}}
           # Shared Weekly Maintenance Contract
@@ -270,8 +270,13 @@ jobs:
           - Work directly without sub-agents, progress narration, or a todo list.
           - The run is complete only after exactly one safe-output tool call:
             `create_pull_request`, `noop`, or `report_incomplete`. Never finish with a
-            plan, progress message, checklist, or ordinary assistant response. Make that
-            terminal call before turn 30.
+            plan, progress message, checklist, or ordinary assistant response. In this
+            Codex workflow these names are CLI subcommands, not native function tools.
+            Complete the run on or before turn 24 with one shell command that invokes
+            `safeoutputs create_pull_request`, `safeoutputs noop`, or
+            `safeoutputs report_incomplete`; never emit a direct function-tool call for
+            any of them. This deadline reserves six of the 30 model invocations for one
+            CLI-format recovery and orderly completion.
           - If an evidence budget is exhausted, stop investigating and make the required
             safe-output call. Use `create_pull_request` only for an already validated
             change; otherwise call `noop` with the best evidence collected and identify
@@ -288,7 +293,10 @@ jobs:
              `noop`; do not create a competing or follow-up pull request.
           3. Inspect only enough code, tests, history, and recent Actions evidence to
              prove one candidate. Use at most 12 read commands and at most 2 external
-             version or service probes before choosing an output.
+             version or service probes before choosing an output. Count the initial PR
+             read and every shell invocation that reads repository, history, or Actions
+             evidence as one read command, and batch related reads. At the twelfth read,
+             choose a candidate or call `noop`; do not issue a thirteenth discovery read.
           
           ## Change Contract
           
@@ -324,7 +332,7 @@ jobs:
           `report_incomplete` with the failing command and error. Infrastructure failure
           is not evidence that no maintenance is needed, so do not convert it to `noop`.
           {{#runtime-import .github/workflows/maintenance-abstraction-police.md}}
-          GH_AW_PROMPT_27d9da0e0f7d6a8b_EOF
+          GH_AW_PROMPT_92a9d2f6b251c325_EOF
           } > "$GH_AW_PROMPT"
       - name: Interpolate variables and render templates
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0

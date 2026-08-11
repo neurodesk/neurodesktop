@@ -44,7 +44,12 @@ def test_weekly_maintenance_workflows_share_the_bounded_pr_contract():
     assert "The run is complete only after exactly one safe-output tool call" in shared_workflow
     assert "`create_pull_request`, `noop`, or `report_incomplete`" in normalized_workflow
     assert "Never finish with a plan, progress message" in normalized_workflow
+    assert "Complete the run on or before turn 24" in normalized_workflow
+    assert "shell command that invokes `safeoutputs" in normalized_workflow
+    assert "not native function tools" in normalized_workflow
+    assert "reserves six of the 30 model invocations" in normalized_workflow
     assert "stop investigating and make the required safe-output call" in normalized_workflow
+    assert "do not issue a thirteenth discovery read" in normalized_workflow
     assert "labels: [agentic-workflow]" in shared_workflow
     assert "draft: true" in shared_workflow
     assert "max-patch-files: 20" in shared_workflow
@@ -89,6 +94,11 @@ def test_weekly_maintenance_sources_are_scheduled_scoped_and_compiled():
             "The run is complete only after exactly one safe-output tool call"
             in normalized_lock
         )
+        assert "Complete the run on or before turn 24" in normalized_lock
+        assert "shell command that invokes `safeoutputs" in normalized_lock
+        assert "not native function tools" in normalized_lock
+        assert "reserves six of the 30 model invocations" in normalized_lock
+        assert "do not issue a thirteenth discovery read" in normalized_lock
         assert "call `report_incomplete` immediately and stop" in normalized_lock
         assert (
             'gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 100 '
