@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-08-07"
+last-reviewed: "2026-08-10"
 ---
 
 # Testing
@@ -80,7 +80,7 @@ non-obvious tiers protect.
 | ASTRA viewer core (adapter, graph, widget, previews) | `pytest tests/unit/test_astra_view_graph.py tests/unit/test_astra_view_packaging.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | `astra`/`lc` installs, Lightcone skills and hooks | `pytest tests/unit/test_astra_jupyter_ai_tooling.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
-| Jupyter AI, ACP personas, server-documents workaround | see [below](#jupyter-ai-and-acp-personas) | `pytest /opt/tests/test_astra_jupyter_ai_image.py` |
+| Jupyter AI, ACP personas, server-documents/jupyter-server-mcp patches | see [below](#jupyter-ai-and-acp-personas) | `pytest /opt/tests/test_astra_jupyter_ai_image.py` |
 | Notebook Intelligence / MyST pins and rebuilds | `pytest tests/unit/test_nbi_settings_patch.py tests/unit/test_myst_build_workaround.py` | `pytest /opt/tests/test_nbi_labextension_patch.py` |
 | Launcher extension, workspace link routing | `pytest tests/unit/test_workspace_link_routing.py` | `pytest /opt/tests/test_workspace_link_routing_image.py` |
 | Agentic workflows under `.github/workflows/*.md` | `pytest tests/unit/test_report_job_failure_action.py tests/unit/test_agentic_maintenance_workflows.py` | — |
@@ -138,6 +138,7 @@ pytest tests/unit/test_jupyter_ai_workspace.py
 pytest tests/unit/test_astra_jupyter_ai_tooling.py
 pytest tests/unit/test_jupyter_server_documents_patch.py
 pytest tests/unit/test_jupyter_ai_acp_client_patch.py
+pytest tests/unit/test_jupyter_server_mcp_patch.py
 pytest tests/unit/test_coding_agents.py -k 'opencode_machine_commands or opencode_acp_exports_lmod'
 # In the rebuilt image:
 pytest /opt/tests/test_astra_jupyter_ai_image.py
