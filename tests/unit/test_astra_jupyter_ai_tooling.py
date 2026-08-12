@@ -176,10 +176,7 @@ def test_upstream_checkouts_are_pinned_to_an_exact_commit():
     exist: a reference that disappears has to fail here rather than reduce
     this to a vacuous pass.
     """
-    references = [
-        "AGENT_SKILLS_REF",
-        "JUPYTER_COLLABORATION_REF",
-    ]
+    references = ["AGENT_SKILLS_REF"]
 
     for reference in references:
         assert f"ARG {reference}=" in DOCKERFILE, reference

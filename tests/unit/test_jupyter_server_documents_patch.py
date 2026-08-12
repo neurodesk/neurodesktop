@@ -90,7 +90,7 @@ def test_patch_refuses_anchor_drift_without_partial_changes(tmp_path):
 def test_dockerfile_applies_workaround_after_pinned_package_install():
     dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
 
-    package_pin = dockerfile.index("jupyter-server-documents==0.3.2")
+    package_pin = dockerfile.index("jupyter-server-documents==0.3.3")
     patch_install = dockerfile.index(
         "/opt/neurodesktop/patch_jupyter_server_documents.py"
     )

@@ -1,10 +1,10 @@
 ---
 title: Jupyter AI
 description: The ACP-native Jupyter AI chat surface, its Claude/Codex/OpenCode
-  personas, workspace seeding, and the collaboration-stack workarounds
+  personas, workspace seeding, and anchored server workarounds
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-04"
+last-reviewed: "2026-08-11"
 ---
 
 # Jupyter AI
@@ -63,16 +63,15 @@ reassignment even when the hook is unchanged, so the snippet suppresses
 exactly that duplicate self-registration warning next to the single
 registration site; a different hook overriding ours still warns.
 
-## Collaboration-stack workarounds
+## Collaboration stack and server workarounds
 
-Jupyter AI 3.1.1 resolves Jupyter Collaboration 4.4.1 bundles whose published
-metadata supports `@jupyter/ydoc` only through version 3. Neurodesktop rebuilds
-the collaboration and document-provider frontends against its JupyterLab 4.6
-YDoc 4.1.1 contract, then replaces only those two incompatible wheel artifacts.
-The image test requires both to report `OK` in `jupyter labextension list
---verbose`.
+Jupyter AI 3.1.2 is installed with Jupyter Collaboration 5.0.0. Its published
+collaboration and document-provider frontends support the JupyterLab 4.6 YDoc
+4.1.1 contract directly, so Neurodesktop no longer rebuilds those two bundles.
+The image test requires both published extensions to report `OK` in
+`jupyter labextension list --verbose`.
 
-`jupyter-server-documents` 0.3.2 has an upstream stale-client race in which one
+`jupyter-server-documents` 0.3.3 still has an upstream stale-client race in which one
 queued update can terminate a chat room's background message processor.
 Neurodesktop applies an exact-source, build-time workaround for upstream issue
 271: missing-client lookup fails cleanly, and one rejected frame cannot stop the

@@ -78,7 +78,7 @@ def test_exactly_one_astra_cli_answers_on_path_at_the_pinned_version():
     # environment so its Dask/Snakemake graph cannot perturb JupyterLab.
     code, output = run_cmd("uv --version")
     assert code == 0, output
-    assert output.startswith("uv 0.11.8")
+    assert output.startswith("uv 0.12.3")
 
 
 def test_skill_toolchain_pins_match_the_installed_toolchain():

@@ -11,8 +11,8 @@
     "style/**/*.css"
   ],
   "scripts": {
-    "build": "tsc && node build_ext.js",
-    "build:prod": "tsc && node build_ext.js",
+    "build": "tsc --build --force && node build_ext.js",
+    "build:prod": "tsc --build --force && node build_ext.js",
     "clean": "rimraf lib tsconfig.tsbuildinfo"
   },
   "dependencies": {

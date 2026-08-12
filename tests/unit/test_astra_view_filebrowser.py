@@ -146,6 +146,25 @@ def test_viewer_plugin_is_registered_alongside_the_launcher():
     assert "id: 'neurodesk-launcher:astra-viewer'" in FRONTEND
 
 
+def test_image_build_cannot_reuse_stale_launcher_artifacts():
+    """The wheel must compile the checkout, not ignored local build output."""
+    package = json.loads((LAUNCHER / "package.json").read_text(encoding="utf-8"))
+    dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
+
+    assert package["scripts"]["build"] == (
+        "tsc --build --force && node build_ext.js"
+    )
+    assert package["scripts"]["build:prod"] == (
+        "tsc --build --force && node build_ext.js"
+    )
+    for generated in (
+        "/tmp/neurodesk-launcher/lib",
+        "/tmp/neurodesk-launcher/neurodesk_launcher/labextension",
+        "/tmp/neurodesk-launcher/tsconfig.tsbuildinfo",
+    ):
+        assert generated in dockerfile, generated
+
+
 def test_filename_pattern_claims_astra_specs_and_nothing_else():
     """`name.match(pattern)` in the registry is an unanchored search."""
     pattern = re.compile(frontend_pattern())

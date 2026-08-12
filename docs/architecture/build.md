@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-07-31"
+last-reviewed: "2026-08-11"
 ---
 
 # Build-Time Behaviors
@@ -87,13 +87,13 @@ build when a `notebook_intelligence` upgrade changes it, so the workarounds
 cannot silently regress; re-verify and update (or drop) them when bumping
 the pin.
 
-Notebook Intelligence 5.3.0's published Python wheel omits its compiled
-JupyterLab frontend. The Dockerfile therefore rebuilds the matching source tag,
-replaces its older dependency graph with the checked-in, JupyterLab
+Notebook Intelligence 5.3.1's published frontend targets JupyterLab 4.2.
+The Dockerfile therefore rebuilds the matching source tag, replaces its older
+dependency graph with the checked-in, JupyterLab
 4.6-compatible Yarn lockfile, installs that graph immutably, installs the
 resulting federated extension, and only then applies the settings patch. The
 build asserts that a `remoteEntry` bundle exists before continuing. Regenerate
-`config/jupyter/notebook-intelligence-5.3.0.yarn.lock` when changing the NBI or
+`config/jupyter/notebook-intelligence-5.3.1.yarn.lock` when changing the NBI or
 JupyterLab builder pins.
 
 ## MyST and RISE Extension Build

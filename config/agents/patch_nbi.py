@@ -52,7 +52,7 @@ DEFAULT_OLLAMA_PROVIDER_GLOB = (
     "llm_providers/ollama_llm_provider.py"
 )
 
-# The context-window lookup as shipped in notebook_intelligence 5.3.0's
+# The context-window lookup as shipped in notebook_intelligence 5.3.1's
 # update_chat_model_list(); model_family comes from the `ollama list`
 # response and is empty for safetensors/mlx imports.
 OLLAMA_ANCHOR = (

@@ -31,7 +31,7 @@ def dockerfile() -> str:
 def test_myst_build_uses_pinned_release_and_frozen_lockfile(dockerfile: str) -> None:
     """MyST 2.7.0 ships pnpm-lock.yaml, so reproduce it with pinned pnpm."""
     assert "jupyterlab_myst==2.7.0" in DOCKERFILE.read_text()
-    assert 'ARG MYST_PNPM_VERSION="11.17.0"' in dockerfile
+    assert 'ARG MYST_PNPM_VERSION="11.21.0"' in dockerfile
     assert "pnpm@${MYST_PNPM_VERSION} install --frozen-lockfile" in dockerfile
     assert "npm install" not in dockerfile
     assert "npx --yes" not in dockerfile

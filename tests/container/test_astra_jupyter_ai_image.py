@@ -15,7 +15,7 @@ from testlib import load_source_module, run_cmd
 
 
 def test_jupyter_ai_acp_stack_registers_neurodesktop_agent_personas():
-    assert importlib.metadata.version("jupyter_ai") == "3.1.1"
+    assert importlib.metadata.version("jupyter_ai") == "3.1.2"
     assert importlib.metadata.version("jupyter-ai-acp-client") == "0.2.1"
 
     from jupyter_ai_acp_client.acp_personas.claude import ClaudeAcpPersona
@@ -196,8 +196,8 @@ def test_jupyter_ai_server_and_frontend_extensions_are_compatible():
 
     code, lab_output = run_cmd("jupyter labextension list --verbose", timeout=60)
     assert code == 0, lab_output
-    assert "@jupyter/collaboration-extension v4.4.1" in lab_output
-    assert "@jupyter/docprovider-extension v4.4.1" in lab_output
+    assert "@jupyter/collaboration-extension v5.0.0" in lab_output
+    assert "@jupyter/docprovider-extension v5.0.0" in lab_output
     assert "not compatible with the current JupyterLab" not in lab_output
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Apply Neurodesktop's anchored workaround for upstream issue #271.
 
-``jupyter-server-documents==0.3.2`` can process a queued update after its
+``jupyter-server-documents==0.3.3`` can process a queued update after its
 client has disconnected. The missing-client lookup then references an
 unassigned local, and the exception escapes the room's background queue task.
 That leaves the room connected but unable to process any later messages.

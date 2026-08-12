@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-08-04"
+last-reviewed: "2026-08-11"
 ---
 
 # Environment Variables
@@ -179,7 +179,7 @@ reviewed; the Dockerfile itself is authoritative.
 
 - `OPENCODE_VERSION`: the OpenCode release installed into
   the image; defaults to the validated pin in the Dockerfile (currently
-  `1.18.7`). Override to bump the pin, or set it to an empty value to
+  `1.18.16`). Override to bump the pin, or set it to an empty value to
   install the latest release
 - `CVMFS_VERSION`: exact Ubuntu CVMFS client package version;
   defaults to `2.13.3+ubuntu24.04`
@@ -187,43 +187,41 @@ reviewed; the Dockerfile itself is authoritative.
   version and SHA-256 digest of the CVMFS apt repository bootstrap package;
   defaults to release `4.9` and its validated digest
 - `NBI_JUPYTERLAB_BUILDER_VERSION`: JupyterLab builder used
-  to reconstruct Notebook Intelligence's missing frontend; defaults to
+  to reconstruct Notebook Intelligence's JupyterLab 4.6-compatible frontend;
+  defaults to
   `4.5.10`
 - `UV_VERSION`, `ASTRA_TOOLS_VERSION`, `ASTRA_SPEC_VERSION`,
   `ANYWIDGET_VERSION`, `LIGHTCONE_CLI_VERSION`: exact `uv`,
   ASTRA CLI/schema, viewer runtime, and isolated Lightcone CLI releases
-  installed in the image; defaults to `0.11.8`, `0.2.11`, `0.0.12`, `0.11.0`,
+  installed in the image; defaults to `0.12.3`, `0.2.11`, `0.0.12`, `0.11.0`,
   and `0.4.0`
 - `AGENT_SKILLS_REF`: exact commit of
   `LightconeResearch/agent-skills` used for the Codex and Claude reproduction
   plugin and OpenCode's copied skills and hook adapter;
   defaults to `4ded682be8487d8aa05831678ef84ef12068d50d`
 - `JUPYTER_AI_VERSION`: Jupyter AI metapackage release;
-  defaults to `3.1.1`, with its direct pre-1.0 extensions pinned alongside it
+  defaults to `3.1.2`, with its direct pre-1.0 extensions and Jupyter
+  Collaboration 5.0.0 pinned alongside it
 - `CODEX_ACP_VERSION`, `CLAUDE_AGENT_ACP_VERSION`: pinned
   ACP adapters that expose the Codex and Claude personas in Jupyter AI;
-  defaults to `1.1.7` and `0.64.0`. They install without their vendored agent
+  defaults to `1.1.14` and `0.66.0`. They install without their vendored agent
   binaries and drive the image's own CLIs through `CODEX_PATH` and
   `CLAUDE_CODE_EXECUTABLE` (runtime variables exported by
   `environment_variables.sh`)
 - `CODEX_CLI_VERSION`: the `@openai/codex` CLI release
-  installed globally; defaults to `0.145.0` and must stay inside the range the
+  installed globally; defaults to `0.147.0` and must stay inside the range the
   pinned codex-acp adapter declares, because the adapter drives this binary
-- `JUPYTER_COLLABORATION_VERSION`, `JUPYTER_COLLABORATION_REF`: release and
-  exact source commit used to rebuild Jupyter AI's
-  collaboration frontends for JupyterLab 4.6; defaults to `4.4.1` and
-  `df6c4a325db80bed9df4cd5f768f3699adf7a6dd`
 - `MYST_PNPM_VERSION`, `MYST_YDOC_VERSION`: pnpm and Jupyter
   YDoc releases used for the MyST/RISE compatibility rebuild; defaults to
-  `11.17.0` and `4.1.1`
+  `11.21.0` and `4.1.1`
 - `APPTAINER_VERSION`, `APPTAINER_GO_VERSION`, `APPTAINER_GRPC_VERSION`:
   Apptainer source release and the Go toolchain/grpc module versions used in
-  its dedicated build stage; defaults to `1.5.3`, `1.26.5`, and `1.82.1`
+  its dedicated build stage; defaults to `1.5.3`, `1.26.5`, and `1.83.0`
 - `BASE_IMAGE_TAG`: tag of the upstream Jupyter Docker base image
 - `GUACAMOLE_VERSION`, `TOMCAT_REL`, `TOMCAT_VERSION`,
   `TOMCAT_MIGRATION_VERSION`: Guacamole release (`1.6.0`) and the Tomcat
   major/exact/migration-tool versions serving it (`11`, `11.0.24`, `1.0.12`)
-- `CODE_SERVER_VERSION`: code-server release; defaults to `4.130.0`
+- `CODE_SERVER_VERSION`: code-server release; defaults to `4.132.0`
 - `NEUROCOMMAND_REF`: neurocommand git ref cloned during the build; CI passes
   a resolved `main` SHA so neurocommand changes invalidate the install layer
 - `NODE_TAR_VERSION`: patched `node-tar` version applied to every bundled

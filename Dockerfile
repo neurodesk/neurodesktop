@@ -2,10 +2,10 @@
 
 # Pin to a specific jupyter/base-notebook date for reproducibility.
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
-ARG BASE_IMAGE_TAG=2026-07-28
+ARG BASE_IMAGE_TAG=2026-08-10
 ARG APPTAINER_VERSION=1.5.3
 ARG APPTAINER_GO_VERSION=1.26.5
-ARG APPTAINER_GRPC_VERSION=1.82.1
+ARG APPTAINER_GRPC_VERSION=1.83.0
 ARG CVMFS_VERSION=2.13.3+ubuntu24.04
 ARG CVMFS_RELEASE_VERSION=4.9
 ARG CVMFS_RELEASE_SHA256=88f4bb658c2c85e77aec39181f61dea8ab641b3481a0db2b00f453beabb05395
@@ -84,7 +84,7 @@ USER root
 
 ARG BUILD_ONLY_APT_PACKAGES="build-essential libcairo2-dev libjpeg-turbo8-dev libpng-dev libtool-bin freerdp2-dev libvncserver-dev libssl-dev libwebp-dev libssh2-1-dev libpango1.0-dev"
 ARG GUACAMOLE_VERSION="1.6.0"
-ARG CODE_SERVER_VERSION="4.130.0"
+ARG CODE_SERVER_VERSION="4.132.0"
 
 COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
 
@@ -139,14 +139,14 @@ RUN set -eux; \
     npm update --no-audit --no-fund basic-ftp; \
     # Ensure bundled tar is patched against CVE-2026-59873 until code-server ships 7.5.19+.
     npm update --no-audit --no-fund tar; \
-    # Patch VS Code's nested shell-quote copy until code-server bundles 1.8.4+.
-    shell_quote_tar="$(npm pack --silent shell-quote@1.8.4)"; \
+    # Keep VS Code's nested shell-quote copy on the current audited release.
+    shell_quote_tar="$(npm pack --silent shell-quote@1.10.0)"; \
     shell_quote_dir="/opt/code-server/lib/vscode/node_modules/shell-quote"; \
     rm -rf "${shell_quote_dir}"; \
     mkdir -p "${shell_quote_dir}"; \
     tar -xzf "${shell_quote_tar}" -C "${shell_quote_dir}" --strip-components=1; \
     rm -f "${shell_quote_tar}"; \
-    test "$(node -p 'require("/opt/code-server/lib/vscode/node_modules/shell-quote/package.json").version')" = "1.8.4"; \
+    test "$(node -p 'require("/opt/code-server/lib/vscode/node_modules/shell-quote/package.json").version')" = "1.10.0"; \
     # Strip bundled sourcemaps in the stage that unpacks them so the runtime
     # copy layer never carries them; they only serve devtools debugging.
     find /opt/code-server -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete; \
@@ -552,8 +552,8 @@ RUN retry conda install -c conda-forge nb_conda_kernels \
 # `env PATH=` restores the conda-first PATH that runuser resets (the
 # jupyterlab-slurm source build needs jlpm and node on PATH).
 ARG BUST_CACHE_PIP=3
-ARG UV_VERSION="0.11.8"
-ARG JUPYTER_AI_VERSION="3.1.1"
+ARG UV_VERSION="0.12.3"
+ARG JUPYTER_AI_VERSION="3.1.2"
 ARG ASTRA_SPEC_VERSION="0.0.12"
 ARG ASTRA_TOOLS_VERSION="0.2.11"
 ARG ANYWIDGET_VERSION="0.11.0"
@@ -577,9 +577,9 @@ RUN apt-install-retry build-essential \
     jupyter-server-proxy==4.5.0 \
     jupyterlmod \
     jupyterlab-git \
-    # The 5.3.0 wheel omits its compiled frontend. A source rebuild below
-    # installs and patches the matching labextension bundle.
-    notebook_intelligence==5.3.0 \
+    # The published bundle targets JupyterLab 4.2. A source rebuild below
+    # installs and patches a matching JupyterLab 4.6 labextension bundle.
+    notebook_intelligence==5.3.1 \
     # Jupyter AI's ACP-native chat surface. Pin the direct extension packages
     # because their independent pre-1.0 releases otherwise drift underneath
     # the stable jupyter_ai metapackage.
@@ -587,15 +587,16 @@ RUN apt-install-retry build-essential \
     jupyter-ai-acp-client==0.2.1 \
     jupyter-ai-chat-commands==0.0.4 \
     jupyter-ai-persona-manager==0.1.2 \
-    jupyter-ai-router==0.0.6 \
+    jupyter-ai-router==0.0.7 \
     jupyter-ai-tools==0.6.1 \
     # 0.3.2 still ships the issue #271 bug; the anchored build-time patch
     # below verifies its seams against every bump and fails loudly on a fix.
-    jupyter-server-documents==0.3.2 \
+    jupyter-server-documents==0.3.3 \
     jupyter-server-mcp==0.2.1 \
-    jupyterlab-chat==0.23.0 \
+    jupyterlab-chat==0.23.2 \
     jupyterlab-commands-toolkit==0.1.6 \
     jupyterlab-notebook-awareness==0.2.0 \
+    jupyter-collaboration==5.0.0 \
     jupyterlab_rise \
     jupyterlab-niivue==0.2.7 \
     jupyterlab_myst==2.7.0 \
@@ -675,14 +676,14 @@ RUN apt-mark manual autofs cvmfs libc6-dev linux-libc-dev uuid-dev \
     libgpgme-dev libossp-uuid-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# The three from-source labextension rebuilds below are the most expensive
+# The two from-source labextension rebuilds below are the most expensive
 # layers in the image. They live here — before neurocommand, the local
 # extension builds, and every config/tests layer — so that config, test,
 # webapp-link, and extension churn never invalidates them; their only cache
 # inputs are the pip layer and the two bind-mounted files.
 
-# Rebuild Notebook Intelligence's frontend because the 5.3.0 PyPI wheel
-# contains only style.js. Build from the matching tag.
+# Rebuild Notebook Intelligence's frontend because the 5.3.1 PyPI wheel's
+# published launcher metadata targets JupyterLab 4.2. Build from the matching tag.
 # Its upstream lockfile pins the JupyterLab 4.2 builder stack. Use the checked-in
 # JupyterLab 4.6-compatible lockfile before selecting the current builder;
 # otherwise webpack's old license plugin crashes and launcher tokens are
@@ -691,7 +692,7 @@ RUN apt-mark manual autofs cvmfs libc6-dev linux-libc-dev uuid-dev \
 # patch_nbi.py is bind-mounted rather than read from /opt/neurodesktop so this
 # layer does not depend on the config/agents install layer further down.
 ARG NBI_JUPYTERLAB_BUILDER_VERSION="4.5.10"
-RUN --mount=type=bind,source=config/jupyter/notebook-intelligence-5.3.0.yarn.lock,target=/tmp/nbi-yarn.lock,ro \
+RUN --mount=type=bind,source=config/jupyter/notebook-intelligence-5.3.1.yarn.lock,target=/tmp/nbi-yarn.lock,ro \
     --mount=type=bind,source=config/agents/patch_nbi.py,target=/tmp/patch_nbi.py,ro \
     NBI_PACKAGE_DIR="$(/opt/conda/bin/pip show notebook_intelligence | awk '/^Location:/ {print $2 "/notebook_intelligence"}')" \
     && test -d "${NBI_PACKAGE_DIR}" \
@@ -729,7 +730,7 @@ RUN --mount=type=bind,source=config/jupyter/notebook-intelligence-5.3.0.yarn.loc
 # MyST 2.7.0 uses pnpm. Its published metadata requests @jupyter/ydoc 3.x,
 # while JupyterLab 4.6 provides 4.x, so compile against an exact current YDoc
 # and retain that exact version in both the manifest and lockfile.
-ARG MYST_PNPM_VERSION="11.17.0"
+ARG MYST_PNPM_VERSION="11.21.0"
 ARG MYST_YDOC_VERSION="4.1.1"
 RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
     && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
@@ -751,60 +752,6 @@ RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {
     && rm -rf "${APP_MYST_DIR}" \
     && cp -a "${MYST_LABEXT_DIR}" "${APP_MYST_DIR}" \
     && rm -rf /tmp/myst /tmp/rise /tmp/myst-corepack /tmp/myst-pnpm-store /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
-
-# Jupyter AI currently resolves the Jupyter Collaboration 4.4.1 frontend,
-# whose published bundles advertise @jupyter/ydoc <4 and are rejected by
-# JupyterLab 4.6. Rebuild only the two frontend packages against the exact YDoc
-# already used by the image. The two casts bridge duplicate protected
-# TypeScript identities created by the workspace; they do not change runtime
-# code or the document factory implementations.
-# Upstream main is already on @jupyter/ydoc ^4 (5.0.0a0 on PyPI): delete this
-# entire layer once a fixed stable release can be pinned and validated.
-ARG JUPYTER_COLLABORATION_VERSION="4.4.1"
-ARG JUPYTER_COLLABORATION_REF="df6c4a325db80bed9df4cd5f768f3699adf7a6dd"
-RUN retry git clone --depth 1 --branch "v${JUPYTER_COLLABORATION_VERSION}" \
-    https://github.com/jupyterlab/jupyter-collaboration.git /tmp/jupyter-collaboration \
-    && test "$(git -C /tmp/jupyter-collaboration rev-parse HEAD)" = "${JUPYTER_COLLABORATION_REF}" \
-    && cd /tmp/jupyter-collaboration \
-    && npm pkg set "resolutions.@jupyter/ydoc=${MYST_YDOC_VERSION}" \
-    && for package_dir in \
-    packages/collaboration-extension \
-    packages/collaborative-drive \
-    packages/docprovider-extension \
-    packages/docprovider; do \
-    npm pkg set "dependencies.@jupyter/ydoc=^${MYST_YDOC_VERSION}" --prefix "${package_dir}"; \
-    done \
-    && npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}" \
-    --prefix packages/collaboration-extension \
-    && npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}" \
-    --prefix packages/docprovider-extension \
-    && sed -i \
-    -e 's/^      yFileFactory$/      yFileFactory as never/' \
-    -e 's/^      yNotebookFactory$/      yNotebookFactory as never/' \
-    packages/docprovider-extension/src/filebrowser.ts \
-    && YARN_ENABLE_IMMUTABLE_INSTALLS=0 retry jlpm install \
-    && jlpm lerna run build \
-    --scope @jupyter/collaboration \
-    --scope @jupyter/collaborative-drive \
-    --scope @jupyter/docprovider \
-    && jlpm lerna run build:lib:prod \
-    && /opt/conda/bin/jupyter labextension build \
-    --core-path=/opt/conda/share/jupyter/lab packages/collaboration-extension \
-    && /opt/conda/bin/jupyter labextension build \
-    --core-path=/opt/conda/share/jupyter/lab packages/docprovider-extension \
-    && COLLAB_SRC=/tmp/jupyter-collaboration/projects/jupyter-collaboration-ui/jupyter_collaboration_ui/labextension \
-    && DOCPROVIDER_SRC=/tmp/jupyter-collaboration/projects/jupyter-docprovider/jupyter_docprovider/labextension \
-    && COLLAB_DEST=/opt/conda/share/jupyter/labextensions/@jupyter/collaboration-extension \
-    && DOCPROVIDER_DEST=/opt/conda/share/jupyter/labextensions/@jupyter/docprovider-extension \
-    && rm -rf "${COLLAB_DEST}" "${DOCPROVIDER_DEST}" \
-    && cp -a "${COLLAB_SRC}" "${COLLAB_DEST}" \
-    && cp -a "${DOCPROVIDER_SRC}" "${DOCPROVIDER_DEST}" \
-    # Strip the rebuild's sourcemaps in the layer that installs the bundles.
-    && find "${COLLAB_DEST}/static" "${DOCPROVIDER_DEST}/static" \
-    -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
-    && test "$(node -p "require('${COLLAB_DEST}/package.json').dependencies['@jupyter/ydoc']")" = "^${MYST_YDOC_VERSION}" \
-    && test "$(node -p "require('${DOCPROVIDER_DEST}/package.json').dependencies['@jupyter/ydoc']")" = "^${MYST_YDOC_VERSION}" \
-    && rm -rf /tmp/jupyter-collaboration /root/.cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
 
 # The layers from here to the local extension builds are keyed only on pinned
 # versions/refs (no local files), so they change on explicit bumps and never
@@ -844,7 +791,7 @@ RUN echo "Installing neurocommand ref ${NEUROCOMMAND_REF}" \
 # frontend assets. CODEX_CLI_VERSION must stay inside the @openai/codex range
 # pinned by the codex-acp adapter (CODEX_ACP_VERSION below): the adapter is
 # installed without its bundled binary and drives this install via CODEX_PATH.
-ARG CODEX_CLI_VERSION="0.145.0"
+ARG CODEX_CLI_VERSION="0.147.0"
 RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_CLI_VERSION}" \
     && find "$(npm root -g)/@openai" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
     && rm -rf /root/.npm /tmp/npm-root-cache /home/${NB_USER}/.npm \
@@ -863,7 +810,7 @@ RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_C
 # the release so the terminal wrapper and the default config are tested as a
 # set; override at build time to bump it, or set it to an empty value to
 # install the latest release.
-ARG OPENCODE_VERSION="1.18.7"
+ARG OPENCODE_VERSION="1.18.16"
 RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash -s -- ${OPENCODE_VERSION:+--version "${OPENCODE_VERSION}"}' \
     && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
@@ -880,8 +827,8 @@ RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash -s 
 # supported range for that binary is what pins CODEX_CLI_VERSION above. The
 # size assertion fails the build if a future adapter release relocates its
 # vendored binary and reintroduces the duplicate.
-ARG CODEX_ACP_VERSION="1.1.7"
-ARG CLAUDE_AGENT_ACP_VERSION="0.64.0"
+ARG CODEX_ACP_VERSION="1.1.14"
+ARG CLAUDE_AGENT_ACP_VERSION="0.66.0"
 RUN npm_config_cache=/tmp/npm-acp-cache retry npm install -g \
     "@agentclientprotocol/codex-acp@${CODEX_ACP_VERSION}" \
     "@agentclientprotocol/claude-agent-acp@${CLAUDE_AGENT_ACP_VERSION}" \
@@ -924,6 +871,9 @@ RUN --mount=type=bind,source=extensions/neurodesk-launcher,target=/tmp/neurodesk
     rm -rf /tmp/neurodesk-launcher \
     && mkdir -p /tmp/neurodesk-launcher \
     && cp -R /tmp/neurodesk-launcher-src/. /tmp/neurodesk-launcher/ \
+    && rm -rf /tmp/neurodesk-launcher/lib \
+        /tmp/neurodesk-launcher/neurodesk_launcher/labextension \
+        /tmp/neurodesk-launcher/tsconfig.tsbuildinfo \
     && cd /tmp/neurodesk-launcher \
     && npm_config_cache=/tmp/neurodesk-launcher-npm-cache /opt/conda/bin/pip install . \
     && /opt/conda/bin/jupyter labextension disable @jupyterhub/jupyter-server-proxy \

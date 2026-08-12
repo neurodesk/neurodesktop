@@ -27,7 +27,7 @@ def load_patcher_module():
     )
 
 
-# Verbatim excerpts matching the notebook_intelligence 5.3.0 source-built
+# Verbatim excerpts matching the notebook_intelligence 5.3.1 source-built
 # labextension bundle:
 # the NBI API class holding fetchCapabilities, and the settings command whose
 # execute callback shows a panel built from the stale client-side cache.
@@ -44,7 +44,7 @@ BUNDLE_FIXTURE = (
     "e.shell.activateById(U.id)}})"
 )
 
-# Verbatim excerpt matching notebook_intelligence 5.3.0's
+# Verbatim excerpt matching notebook_intelligence 5.3.1's
 # ollama_llm_provider.py update_chat_model_list().
 OLLAMA_FIXTURE = (
     "class OllamaLLMProvider:\n"
@@ -255,16 +255,16 @@ def test_main_without_args_patches_both_targets(tmp_path, monkeypatch):
     assert patcher.OLLAMA_MARKER in provider.read_text(encoding="utf-8")
 
 
-def test_dockerfile_rebuilds_the_nbi_530_frontend():
-    """The 5.3.0 wheel omits the executable frontend chunks, so the image must
-    rebuild the tagged source before applying the settings patch.
+def test_dockerfile_rebuilds_the_nbi_531_frontend():
+    """The 5.3.1 wheel targets JupyterLab 4.2, so the image must rebuild the
+    tagged source for JupyterLab 4.6 before applying the settings patch.
     """
     dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
 
-    assert "notebook_intelligence==5.3.0" in dockerfile
+    assert "notebook_intelligence==5.3.1" in dockerfile
     assert 'ARG NBI_JUPYTERLAB_BUILDER_VERSION="4.5.10"' in dockerfile
     assert 'branch "v${NBI_VERSION}"' in dockerfile
-    assert "source=config/jupyter/notebook-intelligence-5.3.0.yarn.lock" in dockerfile
+    assert "source=config/jupyter/notebook-intelligence-5.3.1.yarn.lock" in dockerfile
     assert "install -m 0644 /tmp/nbi-yarn.lock yarn.lock" in dockerfile
     assert "jlpm install --immutable" in dockerfile
     assert 'npm pkg set "dependencies.@jupyterlab/launcher=^4.0.0"' in dockerfile
