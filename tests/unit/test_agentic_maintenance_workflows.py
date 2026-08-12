@@ -139,6 +139,46 @@ def test_flaky_test_maintenance_has_a_hard_evidence_and_output_deadline():
     assert "Call the selected terminal safe-output tool before turn 30" in source
 
 
+def test_test_pruning_has_bounded_discovery_and_runnable_validation():
+    source = (WORKFLOW_DIR / "maintenance-test-pruning.md").read_text()
+    lock = (WORKFLOW_DIR / "maintenance-test-pruning.lock.yml").read_text()
+    normalized_source = " ".join(source.split())
+
+    python_step = "Set up Python for focused checkout tests"
+    dependency_step = "Install focused checkout test dependencies"
+    setup_python = (
+        "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"
+    )
+    install_command = "python -m pip install pytest httpx traitlets"
+
+    assert "max-turns: 30" in source
+    assert "GH_AW_MAX_TURNS: 30" in lock
+    assert python_step in source and python_step in lock
+    assert dependency_step in source and dependency_step in lock
+    assert setup_python in source and setup_python in lock
+    assert install_command in source and install_command in lock
+    assert lock.index(python_step) < lock.index(dependency_step)
+    assert lock.index(dependency_step) < lock.index("Execute Codex CLI")
+
+    assert "use one batched inventory command" in normalized_source
+    assert "inspect at most 3 candidate modules" in normalized_source
+    assert "By the sixth repository-read command" in normalized_source
+    assert "never spend the remaining turns searching" in normalized_source
+    assert "{{#runtime-import .github/workflows/maintenance-test-pruning.md}}" in lock
+
+    assert "python -m pytest <module> -q" in source
+    assert "without piping its output" in normalized_source
+    assert "enable `set -o pipefail` first" in normalized_source
+    assert "call `report_incomplete` immediately" in normalized_source
+    assert "do not probe other Python installations" in normalized_source
+    assert (
+        "Never run the complete checkout or container test suite"
+        in normalized_source
+    )
+    assert "Stop discovery before turn 20" in normalized_source
+    assert "safe-output call on or before turn 24" in normalized_source
+
+
 def test_all_codex_workflows_install_provenance_aware_timeout_filter():
     step_name = "Install provenance-aware agent timeout filter"
     wrapper = ".github/scripts/gh_aw_detect_agent_errors_wrapper.cjs"
