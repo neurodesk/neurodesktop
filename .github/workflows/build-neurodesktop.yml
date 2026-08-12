@@ -13,6 +13,13 @@ permissions:
   pull-requests: write
   packages: write
 
+# Every production run writes the same architecture, dated, and latest tags.
+# Serialize the whole workflow so overlapping dispatches cannot race while
+# publishing those shared references.
+concurrency:
+  group: build-neurodesktop-publish
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
     inputs:
@@ -69,7 +76,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
       - name: Set environment variables
         run: |
           IMAGENAME="neurodesktop"
@@ -144,7 +151,7 @@ jobs:
         if: always() && failure()
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
       - name: Report job failure
         if: always() && failure()
         uses: ./.github/actions/report-job-failure
@@ -174,7 +181,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
       - name: Check if image exists
         if: github.event_name == 'schedule'
         id: check_image
@@ -252,10 +259,39 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Delete existing tag if present (ignore errors if it doesn't exist)
-          gh api --method DELETE -H "Accept: application/vnd.github+json" "/repos/${GITHUB_REPOSITORY}/git/refs/tags/${BUILDDATE}" 2>/dev/null || true
-          echo "Creating tag ${BUILDDATE}"
-          gh api --method POST -H "Accept: application/vnd.github+json" "/repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${BUILDDATE}" -f sha="${GITHUB_SHA}"
+          set -euo pipefail
+
+          tag_path="tags/${BUILDDATE}"
+          set +e
+          lookup_output=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${GITHUB_REPOSITORY}/git/ref/${tag_path}" \
+            --jq '.object.sha' 2>&1)
+          lookup_rc=$?
+          set -e
+
+          if [ "$lookup_rc" -eq 0 ]; then
+            if [ "$lookup_output" = "$GITHUB_SHA" ]; then
+              echo "Tag ${BUILDDATE} already points to ${GITHUB_SHA}."
+            else
+              echo "Updating tag ${BUILDDATE} from ${lookup_output} to ${GITHUB_SHA}."
+              gh api --method PATCH \
+                -H "Accept: application/vnd.github+json" \
+                "/repos/${GITHUB_REPOSITORY}/git/refs/${tag_path}" \
+                -f sha="${GITHUB_SHA}" \
+                -F force=true
+            fi
+          elif grep -Eq '\(HTTP 404\)|"status"[[:space:]]*:[[:space:]]*"?404"?' <<<"$lookup_output"; then
+            echo "Creating tag ${BUILDDATE} at ${GITHUB_SHA}."
+            gh api --method POST \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${BUILDDATE}" \
+              -f sha="${GITHUB_SHA}"
+          else
+            printf '%s\n' "$lookup_output" >&2
+            exit "$lookup_rc"
+          fi
       - name: Write image publish summary
         run: |
           if [ "${{ steps.check_image.outputs.exists }}" = "true" ]; then
@@ -291,7 +327,7 @@ jobs:
         if: always() && failure()
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
       - name: Report job failure
         if: always() && failure()
         uses: ./.github/actions/report-job-failure
@@ -351,7 +387,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
       - name: Login to GHCR
         uses: ./.github/actions/docker-login-retry
         with:
@@ -490,7 +526,7 @@ jobs:
         if: always() && failure()
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
       - name: Report job failure
         if: always() && failure()
         uses: ./.github/actions/report-job-failure
@@ -523,7 +559,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
       - name: Login to GHCR
         uses: ./.github/actions/docker-login-retry
         with:
@@ -546,7 +582,7 @@ jobs:
         if: always() && failure()
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
       - name: Report job failure
         if: always() && failure()
         uses: ./.github/actions/report-job-failure
