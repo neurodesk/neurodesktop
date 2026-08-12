@@ -22,4 +22,4 @@ jobs:
       - name: Codespell
         uses: codespell-project/actions-codespell@406322ec52dd7b488e48c1c4b82e2a8b3a1bf630
         with:
-          skip: ./extensions/neurodesk-launcher/package-lock.json,./config/jupyter/notebook-intelligence-5.3.0.yarn.lock,./extensions/astra-viewer/neurodesk_astra_view/static/vendor/cytoscape.min.js
+          skip: ./extensions/neurodesk-launcher/package-lock.json,./config/jupyter/notebook-intelligence-*.yarn.lock,./extensions/astra-viewer/neurodesk_astra_view/static/vendor/cytoscape.min.js
