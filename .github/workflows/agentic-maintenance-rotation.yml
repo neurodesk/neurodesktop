@@ -1,0 +1,74 @@
+name: Agentic Maintenance Rotation
+
+on:
+  schedule:
+    - cron: "23 4 * * 3"
+  workflow_dispatch:
+    inputs:
+      workflow:
+        description: Maintenance workflow to dispatch, or auto for the rotation.
+        required: true
+        type: choice
+        default: auto
+        options:
+          - auto
+          - maintenance-test-pruning
+          - maintenance-test-coverage
+          - maintenance-updates
+          - maintenance-abstraction-police
+          - maintenance-dead-code
+          - maintenance-docs-drift
+          - maintenance-flaky-tests
+          - package-update-radar
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: agentic-maintenance-rotation
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REQUESTED_WORKFLOW: ${{ inputs.workflow || 'auto' }}
+    steps:
+      - name: Select and dispatch one maintenance workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          workflows=(
+            "maintenance-test-pruning.lock.yml"
+            "maintenance-test-coverage.lock.yml"
+            "maintenance-updates.lock.yml"
+            "maintenance-abstraction-police.lock.yml"
+            "maintenance-dead-code.lock.yml"
+            "maintenance-docs-drift.lock.yml"
+            "maintenance-flaky-tests.lock.yml"
+            "package-update-radar.lock.yml"
+          )
+
+          if [[ "${REQUESTED_WORKFLOW}" == "auto" ]]; then
+            epoch_week=$(( $(date -u +%s) / 604800 ))
+            selected_workflow="${workflows[$(( epoch_week % ${#workflows[@]} ))]}"
+          else
+            selected_workflow="${REQUESTED_WORKFLOW}.lock.yml"
+          fi
+
+          case " ${workflows[*]} " in
+            *" ${selected_workflow} "*) ;;
+            *)
+              echo "Unsupported maintenance workflow: ${selected_workflow}" >&2
+              exit 1
+              ;;
+          esac
+
+          gh workflow run "${selected_workflow}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref "${GITHUB_REF_NAME}"
+          echo "Dispatched ${selected_workflow}." >> "${GITHUB_STEP_SUMMARY}"

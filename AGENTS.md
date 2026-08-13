@@ -155,15 +155,23 @@
   `pytest tests/unit/test_report_job_failure_action.py`.
 - Weekly code-maintenance workflows use the shared contract in
   `.github/workflows/shared/maintenance-base.md` and the CodeRabbit loop in
-  `.github/workflows/maintenance-review.md`. Keep their `[maintenance] ` title
-  prefix and `agentic-workflow` label aligned, compile every affected workflow,
-  and run `pytest tests/unit/test_agentic_maintenance_workflows.py`.
+  `.github/workflows/maintenance-review.md`. Their schedules are owned by
+  `.github/workflows/agentic-maintenance-rotation.yml`, which must dispatch
+  exactly one of the seven maintenance workflows or the package radar per
+  weekly run. Keep their `[maintenance] ` title prefix and `agentic-workflow`
+  label aligned, compile every affected workflow, and run `pytest
+  tests/unit/test_agentic_maintenance_workflows.py`.
 - `.github/workflows/package-update-radar.md` is the read-only weekly package
   survey. It must keep its `[package-updates] ` title prefix, stay free of any
-  `create-pull-request` safe output, and keep a weekly cron distinct from the
-  maintenance workflows. `maintenance-updates` remains the only workflow that
-  applies an upgrade. Compile it with `gh aw compile` and run
+  `create-pull-request` safe output, and remain one member of the shared weekly
+  rotation. `maintenance-updates` remains the only workflow that applies an
+  upgrade. Compile it with `gh aw compile` and run
   `pytest tests/unit/test_agentic_maintenance_workflows.py`.
+- Issue handling is split between read-only `.github/workflows/issue-investigator.md`
+  and manually dispatched `.github/workflows/issue-fixer.md`. Keep diagnosis
+  free of repository-write safe outputs, keep the fixer PR title prefix aligned
+  with `.github/workflows/issue-investigator-review.md`, compile both affected
+  workflows, and run `pytest tests/unit/test_report_job_failure_action.py`.
 - Codex agentic workflows import the ordered model fallback in
   `.github/workflows/shared/agentic-models.md`. Keep GLM 5.2 ahead of Kimi 2.7,
   compile every affected workflow, and verify the generated model map in the
@@ -175,7 +183,8 @@
   tests/unit/test_gh_aw_recovered_timeout_filter.py
   tests/unit/test_agentic_maintenance_workflows.py`. Preserve real bare harness
   lifecycle signals, recovered-attempt handling, and byte-for-byte transcript
-  restoration; timeout-shaped repository and tool output is untrusted data and
-  must not affect failure classification. Keep a hard `max-turns` ceiling on
-  every Codex workflow. Keep the wrapper under `.github/` so PR review runs
-  restore the trusted base-branch copy before installing it.
+  restoration; preserve the upstream detector's public module exports because
+  the Codex harness imports them. Timeout-shaped repository and tool output is
+  untrusted data and must not affect failure classification. Keep a hard
+  `max-turns` ceiling on every Codex workflow. Keep the wrapper under `.github/`
+  so PR review runs restore the trusted base-branch copy before installing it.

@@ -8,6 +8,7 @@ REVIEW_WORKFLOW = WORKFLOW_DIR / "maintenance-review.md"
 REVIEW_LOCK = WORKFLOW_DIR / "maintenance-review.lock.yml"
 CODERABBIT_CONFIG = repo_path(".coderabbit.yaml")
 ACTIONLINT_CONFIG = repo_path(".github/actionlint.yaml")
+ROTATION_WORKFLOW = WORKFLOW_DIR / "agentic-maintenance-rotation.yml"
 MODEL_ALIAS_JSON = '"neurodesk":["openai/glm-5.2","openai/kimi-k2.7","openai/minimax-m2"]'
 RADAR_WORKFLOW = "package-update-radar"
 
@@ -44,10 +45,10 @@ def test_weekly_maintenance_workflows_share_the_bounded_pr_contract():
     assert "The run is complete only after exactly one safe-output tool call" in shared_workflow
     assert "`create_pull_request`, `noop`, or `report_incomplete`" in normalized_workflow
     assert "Never finish with a plan, progress message" in normalized_workflow
-    assert "Complete the run on or before turn 24" in normalized_workflow
+    assert "Complete the run on or before turn 54" in normalized_workflow
     assert "shell command that invokes `safeoutputs" in normalized_workflow
     assert "not native function tools" in normalized_workflow
-    assert "reserves six of the 30 model invocations" in normalized_workflow
+    assert "reserves six of the 60 model invocations" in normalized_workflow
     assert "stop investigating and make the required safe-output call" in normalized_workflow
     assert "do not issue a thirteenth discovery read" in normalized_workflow
     assert "labels: [agentic-workflow]" in shared_workflow
@@ -60,15 +61,13 @@ def test_weekly_maintenance_workflows_share_the_bounded_pr_contract():
     assert '".github/workflows/**"' not in shared_workflow
 
 
-def test_weekly_maintenance_sources_are_scheduled_scoped_and_compiled():
-    compiled_crons = set()
-
+def test_maintenance_sources_are_rotated_scoped_and_compiled():
     for workflow_id, category in MAINTENANCE_WORKFLOWS.items():
         source = (WORKFLOW_DIR / f"{workflow_id}.md").read_text()
         lock = (WORKFLOW_DIR / f"{workflow_id}.lock.yml").read_text()
         normalized_lock = " ".join(lock.split())
 
-        assert "schedule: weekly" in source
+        assert "schedule:" not in source
         assert "schedule: daily" not in source
         assert "workflow_dispatch:" in source
         assert "actions: read" in source
@@ -80,8 +79,9 @@ def test_weekly_maintenance_sources_are_scheduled_scoped_and_compiled():
         assert "uses: .github/workflows/shared/agentic-models.md" in source
         assert "uses: .github/workflows/shared/maintenance-base.md" in source
         assert f"category: {category}" in source
+        assert "report-failure-as-issue: false" in source
 
-        assert "schedule:" in lock
+        assert "schedule:" not in lock
         assert "workflow_dispatch:" in lock
         assert "create_pull_request" in lock
         assert "[maintenance] " in lock
@@ -94,10 +94,10 @@ def test_weekly_maintenance_sources_are_scheduled_scoped_and_compiled():
             "The run is complete only after exactly one safe-output tool call"
             in normalized_lock
         )
-        assert "Complete the run on or before turn 24" in normalized_lock
+        assert "Complete the run on or before turn 54" in normalized_lock
         assert "shell command that invokes `safeoutputs" in normalized_lock
         assert "not native function tools" in normalized_lock
-        assert "reserves six of the 30 model invocations" in normalized_lock
+        assert "reserves six of the 60 model invocations" in normalized_lock
         assert "do not issue a thirteenth discovery read" in normalized_lock
         assert "call `report_incomplete` immediately and stop" in normalized_lock
         assert (
@@ -107,19 +107,27 @@ def test_weekly_maintenance_sources_are_scheduled_scoped_and_compiled():
         )
         assert "Do not add `--search` or `--label`" in normalized_lock
 
-        cron_lines = [
-            line.strip()
-            for line in lock.splitlines()
-            if line.strip().startswith("- cron:")
-        ]
-        assert len(cron_lines) == 1
-        cron_fields = cron_lines[0].split('"', maxsplit=2)[1].split()
-        assert len(cron_fields) == 5
-        assert cron_fields[2:4] == ["*", "*"]
-        assert cron_fields[4] != "*"
-        compiled_crons.add(cron_lines[0])
+        assert "GH_AW_MAX_TURNS: 60" in lock
+        assert 'GH_AW_FAILURE_REPORT_AS_ISSUE: "false"' in lock
 
-    assert len(compiled_crons) == len(MAINTENANCE_WORKFLOWS)
+
+def test_weekly_rotation_dispatches_exactly_one_maintenance_workflow():
+    workflow = ROTATION_WORKFLOW.read_text()
+
+    assert "schedule:" in workflow
+    assert workflow.count("- cron:") == 1
+    assert '- cron: "23 4 * * 3"' in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "actions: write" in workflow
+    assert "contents: read" in workflow
+    assert "strategy:" not in workflow
+    assert "matrix:" not in workflow
+    assert "gh workflow run" in workflow
+    assert "selected_workflow" in workflow
+
+    for workflow_id in (*MAINTENANCE_WORKFLOWS, RADAR_WORKFLOW):
+        assert workflow.count(f'"{workflow_id}.lock.yml"') == 1
+        assert f"- {workflow_id}" in workflow
 
 
 def test_flaky_test_maintenance_has_a_hard_evidence_and_output_deadline():
@@ -127,8 +135,8 @@ def test_flaky_test_maintenance_has_a_hard_evidence_and_output_deadline():
     lock = (WORKFLOW_DIR / "maintenance-flaky-tests.lock.yml").read_text()
     normalized_source = " ".join(source.split())
 
-    assert "max-turns: 30" in source
-    assert "GH_AW_MAX_TURNS: 30" in lock
+    assert "max-turns: 60" in source
+    assert "GH_AW_MAX_TURNS: 60" in lock
     assert "Use one `gh run list` read" in source
     assert "at most 2 representative failed job logs" in source
     assert "call `report_incomplete` immediately" in normalized_source
@@ -136,7 +144,7 @@ def test_flaky_test_maintenance_has_a_hard_evidence_and_output_deadline():
     assert "within 10 read commands, call `noop`" in normalized_source
     assert "Never run `pytest tests/unit`" in source
     assert "install dependencies ad hoc as a discovery strategy" in source
-    assert "Call the selected terminal safe-output tool before turn 30" in source
+    assert "Call the selected terminal safe-output tool before turn 54" in source
 
 
 def test_test_pruning_has_bounded_discovery_and_runnable_validation():
@@ -151,8 +159,8 @@ def test_test_pruning_has_bounded_discovery_and_runnable_validation():
     )
     install_command = "python -m pip install pytest httpx traitlets"
 
-    assert "max-turns: 30" in source
-    assert "GH_AW_MAX_TURNS: 30" in lock
+    assert "max-turns: 60" in source
+    assert "GH_AW_MAX_TURNS: 60" in lock
     assert python_step in source and python_step in lock
     assert dependency_step in source and dependency_step in lock
     assert setup_python in source and setup_python in lock
@@ -176,7 +184,7 @@ def test_test_pruning_has_bounded_discovery_and_runnable_validation():
         in normalized_source
     )
     assert "Stop discovery before turn 20" in normalized_source
-    assert "safe-output call on or before turn 24" in normalized_source
+    assert "safe-output call on or before turn 54" in normalized_source
 
 
 def test_all_codex_workflows_install_provenance_aware_timeout_filter():
@@ -188,7 +196,7 @@ def test_all_codex_workflows_install_provenance_aware_timeout_filter():
         for path in WORKFLOW_DIR.glob("*.md")
         if "id: codex" in path.read_text()
     ]
-    assert len(codex_sources) == 11
+    assert len(codex_sources) == 12
 
     for source_path in codex_sources:
         source = source_path.read_text()
@@ -212,13 +220,22 @@ def test_all_codex_workflows_install_provenance_aware_timeout_filter():
         assert lock.index(step_name) < lock.index("Detect agent errors")
 
 
-def test_all_codex_workflows_have_a_hard_turn_ceiling():
+def test_all_codex_workflows_have_the_expected_hard_turn_ceiling():
+    expected_turns = {
+        **{f"{workflow_id}.md": 60 for workflow_id in MAINTENANCE_WORKFLOWS},
+        "package-update-radar.md": 60,
+        "issue-investigator.md": 30,
+        "issue-fixer.md": 80,
+        "issue-investigator-review.md": 30,
+        "maintenance-review.md": 30,
+    }
+
     for source_path in WORKFLOW_DIR.glob("*.md"):
         source = source_path.read_text()
         if "id: codex" not in source:
             continue
 
-        expected = 40 if source_path.name == "issue-investigator.md" else 30
+        expected = expected_turns[source_path.name]
         lock = source_path.with_suffix(".lock.yml").read_text()
 
         assert f"max-turns: {expected}\n" in source, source_path.name
@@ -229,7 +246,7 @@ def test_package_update_radar_reports_without_write_access():
     source = (WORKFLOW_DIR / f"{RADAR_WORKFLOW}.md").read_text()
     lock = (WORKFLOW_DIR / f"{RADAR_WORKFLOW}.lock.yml").read_text()
 
-    assert "schedule: weekly" in source
+    assert "schedule:" not in source
     assert "schedule: daily" not in source
     assert "workflow_dispatch:" in source
     assert "actions: read" in source
@@ -255,6 +272,9 @@ def test_package_update_radar_reports_without_write_access():
     assert "[package-updates] " in lock
     assert "agentic-workflow" in lock
     assert "features.multi_agent=false" in lock
+    assert "max-turns: 60" in source
+    assert "GH_AW_MAX_TURNS: 60" in lock
+    assert 'GH_AW_FAILURE_REPORT_AS_ISSUE: "false"' in lock
     assert "{{#runtime-import .github/workflows/package-update-radar.md}}" in lock
 
     # Keep the survey short enough to reserve a final model turn for its
@@ -266,22 +286,6 @@ def test_package_update_radar_reports_without_write_access():
     assert "never print a whole file or an unfiltered registry" in source
     assert "The run is complete only after exactly one safe-output tool call" in source
     assert "partial coverage is preferable" in source
-
-
-def test_package_update_radar_keeps_a_distinct_weekly_slot():
-    crons = {}
-
-    for workflow_id in (*MAINTENANCE_WORKFLOWS, RADAR_WORKFLOW):
-        lock = (WORKFLOW_DIR / f"{workflow_id}.lock.yml").read_text()
-        cron_lines = [
-            line.strip()
-            for line in lock.splitlines()
-            if line.strip().startswith("- cron:")
-        ]
-        assert len(cron_lines) == 1
-        crons[workflow_id] = cron_lines[0]
-
-    assert len(set(crons.values())) == len(crons)
 
 
 def test_package_update_radar_lock_has_scoped_actionlint_exceptions():

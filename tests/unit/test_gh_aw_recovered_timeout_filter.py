@@ -97,8 +97,11 @@ def test_wrapper_restores_original_transcript_after_detection(tmp_path):
     upstream_detector.write_text(
         """
 const fs = require("fs");
-const log = fs.readFileSync(process.env.GH_AW_AGENT_STDIO_LOG, "utf8");
-process.stdout.write(log.includes("signal=SIG") ? "timeout=true" : "timeout=false");
+if (require.main === module) {
+  const log = fs.readFileSync(process.env.GH_AW_AGENT_STDIO_LOG, "utf8");
+  process.stdout.write(log.includes("signal=SIG") ? "timeout=true" : "timeout=false");
+}
+module.exports = { MODEL_NOT_SUPPORTED_PATTERN: /model not supported/i };
 """.lstrip()
     )
     stdio_log.write_text(RECOVERED_LOG)
@@ -113,3 +116,29 @@ process.stdout.write(log.includes("signal=SIG") ? "timeout=true" : "timeout=fals
 
     assert result.stdout == "timeout=false"
     assert stdio_log.read_text() == RECOVERED_LOG
+
+
+def test_wrapper_preserves_upstream_module_exports(tmp_path):
+    installed_wrapper = tmp_path / "detect_agent_errors.cjs"
+    upstream_detector = tmp_path / "detect_agent_errors.upstream.cjs"
+
+    shutil.copyfile(WRAPPER, installed_wrapper)
+    upstream_detector.write_text(
+        'module.exports = { MODEL_NOT_SUPPORTED_PATTERN: /model not supported/i };\n'
+    )
+
+    script = """
+const detector = require(process.argv[1]);
+process.stdout.write(JSON.stringify({
+  type: typeof detector.MODEL_NOT_SUPPORTED_PATTERN,
+  matches: detector.MODEL_NOT_SUPPORTED_PATTERN.test("Model not supported"),
+}));
+"""
+    result = subprocess.run(
+        ["node", "-e", script, str(installed_wrapper)],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert json.loads(result.stdout) == {"type": "object", "matches": True}

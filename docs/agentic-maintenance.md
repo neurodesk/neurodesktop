@@ -4,7 +4,7 @@ description: Weekly agentic maintenance checks, the package-update radar, and
   the CodeRabbit pull-request review loop
 parent: index.md
 status: current
-last-reviewed: "2026-08-10"
+last-reviewed: "2026-08-13"
 ---
 
 # Agentic Maintenance Workflows
@@ -13,11 +13,12 @@ The architecture context for these workflows (including the issue
 investigator they share their review loop with) is in
 [Agentic CI workflows](architecture/agentic-workflows.md).
 
-Neurodesktop runs seven agentic maintenance checks and one read-only package
-survey once per week. Each source workflow uses gh-aw's fuzzy `weekly`
-schedule, which gives it a stable scattered day and run time instead of
-launching the whole suite at once. Every workflow also supports manual
-dispatch.
+Neurodesktop has seven agentic maintenance checks and one read-only package
+survey. A conventional `agentic-maintenance-rotation.yml` controller dispatches
+exactly one of them each week, so adding a maintenance category does not create
+another independent schedule. Every member also supports manual dispatch; use
+that path to canary one workflow before a shared harness, model, or compiler
+change is rolled across the fleet.
 
 All maintenance, package-survey, and issue-investigation workflows import the
 shared `.github/workflows/shared/agentic-models.md` alias. The ordered
@@ -82,16 +83,22 @@ no actionable findings remain. It never marks a PR ready or merges it.
 ## Operational Limits
 
 - Each category permits one open PR and one coherent change per run.
-- Every Codex workflow has a hard model-turn ceiling: 30 turns for maintenance,
-  radar, and review work, and 40 for the issue investigator. The prompt must
-  reserve the final turn for its terminal safe output; the runner enforces the
-  ceiling even when the model ignores the prose evidence budget.
+- Maintenance and radar runs have a hard 60 model-invocation ceiling. The
+  read-only issue diagnosis has 30, the separately dispatched fix phase has 80,
+  and PR review loops retain 30. Prompts begin terminal output before the hard
+  boundary, but the firewall ceiling remains authoritative when prose budgets
+  are ignored.
 - Investigation and network reads are bounded in the shared contract (for the
   radar, in its own workflow body).
+- Scheduled maintenance and radar runs set `report-failure-as-issue: false`;
+  setup, service, and budget failures remain visible in Actions without
+  creating indistinguishable noise issues. Event-driven diagnosis and review
+  workflows retain failure reporting.
 - All Codex workflows install the shared provenance-aware timeout filter before
   execution. Only bare harness lifecycle records may report a process signal;
   repository files, test fixtures, and command output are untrusted transcript
-  content and cannot manufacture a timeout.
+  content and cannot manufacture a timeout. The wrapper must also forward all
+  upstream detector exports used by the Codex harness.
 - Product behavior changes require focused regression tests and the validation
   described in `docs/testing.md`.
 - Protected or out-of-scope files require human review instead of an automated
@@ -101,6 +108,9 @@ no actionable findings remain. It never marks a PR ready or merges it.
 - `package-update-radar` permits one open tracking issue and no code changes.
   Its upstream probes are capped per run; a truncated survey must say so in the
   report's `Coverage` section rather than silently narrowing.
+- Compiler, harness, or model migrations are deployed through one manually
+  selected workflow first. Expand only after that run reaches a terminal safe
+  output and its failure class is unambiguous.
 
 ## Further Candidates
 

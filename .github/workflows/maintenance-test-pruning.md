@@ -3,7 +3,6 @@ name: Weekly Maintenance - Test Pruning
 description: Remove redundant or obsolete tests without reducing behavioral protection.
 labels: [automation, maintenance, tests]
 on:
-  schedule: weekly
   workflow_dispatch:
 
 permissions:
@@ -37,9 +36,9 @@ models:
 strict: true
 max-ai-credits: -1
 max-daily-ai-credits: -1
-max-turns: 30
+max-turns: 60
 max-turn-cache-misses: 2000
-timeout-minutes: 30
+timeout-minutes: 60
 
 pre-agent-steps:
   - name: Set up Python for focused checkout tests
@@ -61,6 +60,9 @@ imports:
   - uses: .github/workflows/shared/maintenance-base.md
     with:
       category: test-pruning
+
+safe-outputs:
+  report-failure-as-issue: false
 ---
 
 # Test Pruning
@@ -100,4 +102,4 @@ that Python or pytest invocation is still unavailable, call
 other Python installations, search the filesystem, inspect package lists, or
 install dependencies ad hoc. Never run the complete checkout or container test
 suite. Stop discovery before turn 20 and make the required terminal safe-output
-call on or before turn 24.
+call on or before turn 54.

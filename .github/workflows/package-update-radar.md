@@ -3,7 +3,6 @@ name: Weekly Package Update Radar
 description: Survey every pinned package, tool, action, and base image, then report the available upgrades in one tracking issue.
 labels: [automation, maintenance, dependencies]
 on:
-  schedule: weekly
   workflow_dispatch:
 
 permissions:
@@ -32,9 +31,9 @@ models:
 strict: true
 max-ai-credits: -1
 max-daily-ai-credits: -1
-max-turns: 30
+max-turns: 60
 max-turn-cache-misses: 2000
-timeout-minutes: 40
+timeout-minutes: 60
 
 pre-agent-steps:
   - name: Install provenance-aware agent timeout filter
@@ -64,6 +63,7 @@ tools:
     toolsets: [default]
 
 safe-outputs:
+  report-failure-as-issue: false
   threat-detection:
     engine: false
   create-issue:
@@ -97,7 +97,7 @@ candidate list rather than to change anything.
 - The run is complete only after exactly one safe-output tool call:
   `create_issue`, `add_comment`, `noop`, `missing_tool`, or `missing_data`.
   Never finish with a plan, progress message, checklist, or ordinary assistant
-  response. Make that terminal call before turn 30.
+  response. Make that terminal call before turn 54.
 - If a budget below is exhausted or evidence is incomplete, stop researching
   and publish the best partial report. Mark unresolved components `unknown`
   and list skipped surfaces under `Coverage`; partial coverage is preferable

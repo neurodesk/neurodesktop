@@ -3,7 +3,6 @@ name: Weekly Maintenance - Flaky Tests
 description: Stabilize one recurring test failure by fixing its proven root cause.
 labels: [automation, maintenance, tests, ci]
 on:
-  schedule: weekly
   workflow_dispatch:
 
 permissions:
@@ -37,11 +36,10 @@ models:
 strict: true
 max-ai-credits: -1
 max-daily-ai-credits: -1
-# Bound the investigation so it must emit a terminal safe output instead of
-# repeating broad CI and local-test searches as run 30994458736 did.
-max-turns: 30
+# Keep a hard ceiling above the measured size of productive maintenance runs.
+max-turns: 60
 max-turn-cache-misses: 2000
-timeout-minutes: 35
+timeout-minutes: 60
 
 pre-agent-steps:
   - name: Install provenance-aware agent timeout filter
@@ -57,6 +55,9 @@ imports:
   - uses: .github/workflows/shared/maintenance-base.md
     with:
       category: flaky-tests
+
+safe-outputs:
+  report-failure-as-issue: false
 ---
 
 # Flaky Tests
@@ -83,5 +84,5 @@ its assertions, add an unconditional retry, add arbitrary sleeps, or merely
 increase a timeout. If the evidence points to external infrastructure or a
 one-off failure rather than repository behavior, call `noop`.
 
-Call the selected terminal safe-output tool before turn 30. Do not spend the
-last turn describing another diagnostic step.
+Call the selected terminal safe-output tool before turn 54. Do not spend the
+remaining turns describing another diagnostic step.

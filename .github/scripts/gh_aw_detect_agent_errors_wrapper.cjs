@@ -11,6 +11,9 @@ const UPSTREAM_DETECTOR = path.join(
   __dirname,
   "detect_agent_errors.upstream.cjs",
 );
+const upstreamExports = fs.existsSync(UPSTREAM_DETECTOR)
+  ? require(UPSTREAM_DETECTOR)
+  : {};
 
 const HARNESS_ATTEMPT_PATTERN =
   /^\[([a-z0-9_-]+-harness)\].*\battempt (\d+):/i;
@@ -134,6 +137,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  ...upstreamExports,
   neutralizeTranscriptSignals,
   normalizeRecoveredAttemptSignals,
   normalizeTimeoutSignals,

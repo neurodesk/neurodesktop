@@ -3,7 +3,6 @@ name: Weekly Maintenance - Test Coverage
 description: Add focused tests at important unprotected behavioral boundaries.
 labels: [automation, maintenance, tests]
 on:
-  schedule: weekly
   workflow_dispatch:
 
 permissions:
@@ -37,9 +36,9 @@ models:
 strict: true
 max-ai-credits: -1
 max-daily-ai-credits: -1
-max-turns: 30
+max-turns: 60
 max-turn-cache-misses: 2000
-timeout-minutes: 30
+timeout-minutes: 60
 
 pre-agent-steps:
   - name: Install provenance-aware agent timeout filter
@@ -55,6 +54,9 @@ imports:
   - uses: .github/workflows/shared/maintenance-base.md
     with:
       category: test-coverage
+
+safe-outputs:
+  report-failure-as-issue: false
 ---
 
 # Test Coverage

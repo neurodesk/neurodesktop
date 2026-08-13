@@ -1,10 +1,10 @@
 ---
 title: Agentic CI workflows
-description: The agentic issue-investigation workflow and the weekly
+description: The split agentic issue workflow and the weekly
   maintenance suite that keep the repository healthy
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-10"
+last-reviewed: "2026-08-13"
 ---
 
 # Agentic CI workflows
@@ -13,14 +13,19 @@ Part of [Architecture](../architecture.md). The workflow catalog, guardrails,
 and operating contract are in
 [Agentic maintenance workflows](../agentic-maintenance.md).
 
-## Agentic issue investigation
+## Agentic issue diagnosis and fixing
 
 The source workflow in
-[`issue-investigator.md`](../../.github/workflows/issue-investigator.md) investigates
-new issues and may open a draft pull request labeled `agentic-workflow`. The
-generated `issue-investigator.lock.yml` is the executable GitHub Actions
-workflow and must be regenerated with `gh aw compile` whenever the Markdown
-source changes.
+[`issue-investigator.md`](../../.github/workflows/issue-investigator.md) reads
+new issues, classifies the failure from exact run and repository evidence, and
+adds a diagnosis comment. It cannot edit repository files, dispatch another
+workflow, or open a pull request. A human who accepts a repository-defect
+diagnosis manually dispatches
+[`issue-fixer.md`](../../.github/workflows/issue-fixer.md) with the issue number.
+That separate workflow owns implementation, focused validation, and creation of
+one draft pull request labeled `agentic-workflow`. Each generated `.lock.yml`
+is the executable GitHub Actions workflow and must be regenerated with `gh aw
+compile` whenever its Markdown source changes.
 
 CodeRabbit reviews those pull requests while they are still drafts. Its summary
 comment updates trigger the companion
@@ -38,18 +43,22 @@ Every Codex agentic workflow imports
 workflow firewall an ordered secondary candidate when resolving the model from
 the available-model catalog. Each Codex source also installs the pre-agent
 timeout detector wrapper: process signals count only on bare harness lifecycle
-records, never when the same text appears in repository or tool output. Every
-workflow has a hard turn ceiling so prompt-only research budgets cannot grow
-without bound. The wrapper lives under `.github/`, which review runs restore
-from the base branch before executing pre-agent steps; a pull-request branch
-cannot replace this failure-classification code.
+records, never when the same text appears in repository or tool output. The
+wrapper re-exports the upstream detector API because the Codex harness imports
+its model-support pattern. Every workflow has a hard model-invocation ceiling
+so prompt-only research budgets cannot grow without bound. The wrapper lives
+under `.github/`, which review runs restore from the base branch before
+executing pre-agent steps; a pull-request branch cannot replace this
+failure-classification code.
 
 ## Weekly agentic maintenance
 
-Seven independently scattered weekly workflows inspect test redundancy, missing
-coverage, available updates, duplicate abstractions, dead code, documentation
-drift, and recurring test flakes. They share the bounded pull-request contract
-in
+The conventional
+[`agentic-maintenance-rotation.yml`](../../.github/workflows/agentic-maintenance-rotation.yml)
+controller dispatches exactly one agentic maintenance workflow per week. It
+rotates across seven code-maintenance categories and the package radar; every
+member remains manually dispatchable for a bounded canary. The seven code
+workflows share the pull-request contract in
 [`maintenance-base.md`](../../.github/workflows/shared/maintenance-base.md): each
 category allows one open draft PR, one evidence-backed change per run, and no PR
 when the candidate cannot be validated.

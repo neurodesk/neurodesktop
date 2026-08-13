@@ -77,10 +77,10 @@ Work only on maintenance category `${{ github.aw.import-inputs.category }}`.
   `create_pull_request`, `noop`, or `report_incomplete`. Never finish with a
   plan, progress message, checklist, or ordinary assistant response. In this
   Codex workflow these names are CLI subcommands, not native function tools.
-  Complete the run on or before turn 24 with one shell command that invokes
+  Complete the run on or before turn 54 with one shell command that invokes
   `safeoutputs create_pull_request`, `safeoutputs noop`, or
   `safeoutputs report_incomplete`; never emit a direct function-tool call for
-  any of them. This deadline reserves six of the 30 model invocations for one
+  any of them. This deadline reserves six of the 60 model invocations for one
   CLI-format recovery and orderly completion.
 - If an evidence budget is exhausted, stop investigating and make the required
   safe-output call. Use `create_pull_request` only for an already validated

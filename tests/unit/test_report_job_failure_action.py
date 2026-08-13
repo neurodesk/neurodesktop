@@ -5,6 +5,8 @@ ACTION = repo_path(".github/actions/report-job-failure/action.yml")
 BUILD_WORKFLOW = repo_path(".github/workflows/build-neurodesktop.yml")
 WORKFLOW = repo_path(".github/workflows/issue-investigator.md")
 LOCK = repo_path(".github/workflows/issue-investigator.lock.yml")
+FIXER_WORKFLOW = repo_path(".github/workflows/issue-fixer.md")
+FIXER_LOCK = repo_path(".github/workflows/issue-fixer.lock.yml")
 REVIEW_WORKFLOW = repo_path(".github/workflows/issue-investigator-review.md")
 REVIEW_LOCK = repo_path(".github/workflows/issue-investigator-review.lock.yml")
 CODERABBIT_CONFIG = repo_path(".coderabbit.yaml")
@@ -89,9 +91,9 @@ def test_issue_investigator_routes_codex_through_neurodesk_gateway():
     assert 'GH_AW_MAX_AI_CREDITS: "-1"' in lock
     assert '"maxAiCredits":' not in lock
     assert '\\"maxAiCredits\\":' not in lock
-    assert "max-turns: 40\n" in workflow
-    assert "GH_AW_MAX_TURNS: 40" in lock
-    assert '"maxRuns":40,"maxCacheMisses":2000' in lock
+    assert "max-turns: 30\n" in workflow
+    assert "GH_AW_MAX_TURNS: 30" in lock
+    assert '"maxRuns":30,"maxCacheMisses":2000' in lock
     assert "max-turn-cache-misses: 2000\n" in workflow
     assert "openai_base_url=" not in workflow
     assert "openai_base_url=" not in lock
@@ -100,7 +102,7 @@ def test_issue_investigator_routes_codex_through_neurodesk_gateway():
     assert "--openai-api-base-path /openai" in lock
 
 
-def test_issue_investigator_has_bounded_evidence_collection_guardrails():
+def test_issue_investigator_is_a_bounded_diagnose_and_comment_phase():
     workflow = WORKFLOW.read_text()
     lock = LOCK.read_text()
     normalized_workflow = " ".join(workflow.split())
@@ -117,19 +119,42 @@ def test_issue_investigator_has_bounded_evidence_collection_guardrails():
     assert "## Evidence Collection Budget" in workflow
     assert "Use a maximum of 8 read commands" in workflow
     assert "one representative failing job log" in workflow
-    assert "read at most 2 representative failing job logs" in workflow
+    assert "representative failing job logs" in workflow
     assert "For matrix CI failures, do not inspect every matrix entry" in workflow
     assert "Use a maximum of 2 live network probes" in workflow
-    assert "Do not retry a failing read or probe more than once" in workflow
-    assert "call a safe-output tool immediately" in workflow
+    assert "Do not retry a failing read or probe more than once" in normalized_workflow
+    assert "call a safe-output tool immediately" in normalized_workflow
     assert "The eighth read command is a hard decision deadline" in workflow
-    assert "use at most 24 additional command or tool" in normalized_workflow
-    assert "Call the selected safe-output tool before turn 40" in workflow
-    assert "use `dispatch_workflow` as the single safe output" in workflow
-    assert "then use `add-comment`" not in workflow
-    assert "`create-pull-request`" not in workflow
-    assert "`add-comment`" not in workflow
-    assert "`dispatch-workflow`" not in workflow
+    assert "Do not edit repository files" in normalized_workflow
+    assert "Call the selected safe-output tool before turn 24" in workflow
+    assert "`add_comment` or `noop`" in normalized_workflow
+    assert "create-pull-request:" not in workflow
+    assert "dispatch-workflow:" not in workflow
+    assert "create_pull_request" not in lock
+    assert "dispatch_workflow" not in lock
+    assert "transient infrastructure/setup failure" in normalized_workflow
+    assert "productive run exhausted its model-invocation budget" in normalized_workflow
+    assert "runaway/retry loop" in normalized_workflow
+    assert "whether any agent actually started" in workflow
+
+
+def test_issue_fixer_has_the_write_phase_budget_and_pr_contract():
+    workflow = FIXER_WORKFLOW.read_text()
+    lock = FIXER_LOCK.read_text()
+
+    assert "workflow_dispatch:" in workflow
+    assert "issues:" not in workflow.split("permissions:", maxsplit=1)[0]
+    assert "issue-number:" in workflow
+    assert "max-turns: 80" in workflow
+    assert "timeout-minutes: 90" in workflow
+    assert "GH_AW_MAX_TURNS: 80" in lock
+    assert '"maxRuns":80,"maxCacheMisses":2000' in lock
+    assert "create-pull-request:" in workflow
+    assert 'title-prefix: "[issue-investigator] "' in workflow
+    assert "labels: [agentic-workflow]" in workflow
+    assert "create_pull_request" in lock
+    assert "tool before turn 72" in workflow
+    assert "{{#runtime-import .github/workflows/issue-fixer.md}}" in lock
 
 
 def test_coderabbit_auto_reviews_draft_agentic_pull_requests():

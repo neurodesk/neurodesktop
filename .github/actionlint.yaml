@@ -12,6 +12,12 @@ paths:
       - 'shellcheck reported issue in this script: SC2016'
       - 'unknown permission scope "copilot-requests"'
       - 'unexpected key "queue" for "concurrency" section'
+  .github/workflows/issue-fixer.lock.yml:
+    ignore:
+      # Same gh-aw v0.80.9 generated constructs as issue-investigator.
+      - 'shellcheck reported issue in this script: SC2016'
+      - 'unknown permission scope "copilot-requests"'
+      - 'unexpected key "queue" for "concurrency" section'
   .github/workflows/issue-investigator-review.lock.yml:
     ignore:
       # Both findings are emitted from gh-aw generated code, not the source
