@@ -4,7 +4,7 @@ description: LXDE desktop over VNC/RDP through Guacamole, clipboard sync,
   per-display Firefox profiles, and office file associations
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-07-31"
+last-reviewed: "2026-08-14"
 ---
 
 # Desktop Environment
@@ -30,6 +30,12 @@ profile store. If Firefox's profile-creation command does not write the profile
 metadata, the wrapper creates the profile directory and `profiles.ini` entry
 itself. Simultaneous VNC and RDP desktops therefore do not contend for the same
 default Firefox profile.
+
+The image puts a small `Xtigervnc` launcher beside a link to the distribution's
+`tigervncserver` command in `/usr/local/bin`. It confines only the virtual X
+server child to Mesa's EGL vendor so NVIDIA Container Toolkit driver injection
+cannot make it load an incompatible host NVIDIA EGL library. The parent launcher
+and LXDE applications retain the deployment's normal EGL vendor selection.
 
 ## Clipboard sync
 

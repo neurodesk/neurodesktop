@@ -2,10 +2,10 @@
 
 The registration commands in the Dockerfile only prove that a plugin is listed.
 These tests prove the parts that actually break in use: that the hooks' `jq`
-dependency is present, that exactly one `astra` answers on PATH, that the skill
-teaches the same schema version `astra validate` speaks, and that OpenCode --
-which has no Lightcone marketplace client -- still finds every skill and runs
-the upstream hooks from a restored home.
+dependency is present, that the pinned image-owned `astra` wins on PATH, that
+the skill teaches the same schema version `astra validate` speaks, and that
+OpenCode -- which has no Lightcone marketplace client -- still finds every
+skill and runs the upstream hooks from a restored home.
 """
 
 import importlib.metadata
@@ -54,20 +54,32 @@ def test_jq_is_installed_for_the_astra_hooks():
     assert output == "1"
 
 
-def test_exactly_one_astra_cli_answers_on_path_at_the_pinned_version():
+def test_pinned_astra_cli_wins_with_one_image_owned_install():
     code, output = run_cmd("command -v astra")
     assert code == 0, output
     assert output == "/opt/conda/bin/astra"
 
     # Scanned in Python rather than with `command -v -a`, which is a bashism
     # that dash -- the image's /bin/sh -- does not accept.
-    on_path = [
-        str(Path(directory) / "astra")
-        for directory in os.environ["PATH"].split(os.pathsep)
-        if (Path(directory) / "astra").exists()
-    ]
+    # Persistent deployments may contain a user-managed astra under HOME, and
+    # launchers may repeat an otherwise identical PATH directory. Neither is a
+    # second install shipped by this image. Check each unique image-owned PATH
+    # directory while retaining command -v above as the shadowing guard.
+    home = Path.home().resolve()
+    seen_directories = set()
+    on_path = []
+    for directory in os.environ["PATH"].split(os.pathsep):
+        resolved_directory = Path(directory).resolve()
+        if resolved_directory in seen_directories:
+            continue
+        seen_directories.add(resolved_directory)
+        if resolved_directory == home or home in resolved_directory.parents:
+            continue
+        candidate = resolved_directory / "astra"
+        if candidate.exists():
+            on_path.append(str(candidate))
     assert on_path == ["/opt/conda/bin/astra"], (
-        f"a second astra install would shadow the one the viewer imports: {on_path}"
+        f"a second image-owned astra install could drift from the viewer: {on_path}"
     )
 
     code, output = run_cmd("astra --version")

@@ -1213,6 +1213,12 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -d -m 0755 /opt/config/jupyter/webapp_icons \
     && cp -a /tmp/jupyter/webapp_icons/. /opt/config/jupyter/webapp_icons/ \
     && install -D -m 0644 /tmp/lxde/background.png /usr/share/lxde/wallpapers/desktop_wallpaper.png \
+    # Debian's TigerVNC Perl launcher searches its own directory before PATH
+    # when locating Xtigervnc. Invoke it through /usr/local/bin so it selects
+    # the adjacent Mesa-confined X-server wrapper below.
+    && ln -sf /usr/bin/tigervncserver /usr/local/bin/vncserver \
+    && install -m 0755 /tmp/lxde/Xtigervnc /usr/local/bin/Xtigervnc \
+    && test -r /usr/share/glvnd/egl_vendor.d/50_mesa.json \
     && install -D -m 0644 /tmp/lxde/pcmanfm.conf /etc/xdg/pcmanfm/LXDE/pcmanfm.conf \
     && install -D -m 0644 /tmp/lxde/lxterminal.conf /usr/share/lxterminal/lxterminal.conf \
     && install -D -m 0644 /tmp/lmod/module.sh /usr/share/module.sh \

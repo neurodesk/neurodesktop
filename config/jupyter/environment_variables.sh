@@ -113,6 +113,23 @@ export APPTAINERENV_SUBJECTS_DIR=${HOME}/freesurfer-subjects-dir
 export MPLCONFIGDIR=${HOME}/.config/matplotlib-mpldir
 export NBI_TOUR_CONFIG_PATH="${NBI_TOUR_CONFIG_PATH:-/opt/jovyan_defaults/.jupyter/nbi/tour_config.json}"
 
+# A deployment can prepend a directory that the base image already put on PATH
+# (Apptainer and some Jupyter launchers both do this). Keep the first occurrence
+# so command discovery and image tests describe executables, not repeated PATH
+# entries.
+path_deduplicate() {
+        local entry deduplicated_path=""
+        local -a path_entries
+        IFS=: read -r -a path_entries <<< "${PATH}"
+        for entry in "${path_entries[@]}"; do
+                [ -n "${entry}" ] || continue
+                if [[ ":${deduplicated_path}:" != *":${entry}:"* ]]; then
+                        deduplicated_path="${deduplicated_path}${deduplicated_path:+:}${entry}"
+                fi
+        done
+        PATH="${deduplicated_path}"
+}
+
 # Keep agent wrappers in /usr/local/sbin ahead of user-level installs in ~/.local/bin.
 path_prepend() {
         local dir="$1"
@@ -131,6 +148,7 @@ path_append_if_missing() {
         esac
 }
 
+path_deduplicate
 path_prepend "/usr/local/sbin"
 path_append_if_missing "${HOME}/.local/bin"
 path_append_if_missing "/opt/conda/bin"

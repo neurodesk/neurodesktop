@@ -1,0 +1,14 @@
+#!/bin/sh
+
+# NVIDIA Container Toolkit can inject its EGL vendor manifest and driver
+# libraries into an otherwise software-rendered desktop container. TigerVNC
+# 1.13.1 probes every advertised EGL vendor while initialising GLX; mismatched
+# host NVIDIA libraries can then crash Xtigervnc before it accepts a client.
+# This wrapper is selected only for the X server child, so desktop applications
+# retain the deployment's normal EGL vendor selection.
+mesa_egl_vendor=/usr/share/glvnd/egl_vendor.d/50_mesa.json
+if [ -r "${mesa_egl_vendor}" ]; then
+    export __EGL_VENDOR_LIBRARY_FILENAMES="${mesa_egl_vendor}"
+fi
+
+exec /usr/bin/Xtigervnc "$@"

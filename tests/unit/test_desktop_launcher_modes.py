@@ -442,6 +442,17 @@ def test_guacamole_script_gates_rdp_and_vnc_startup():
     assert 'remove_mapping_connection "vnc"' in script
 
 
+def test_vncserver_uses_mesa_only_for_virtual_x_server_startup():
+    wrapper = repo_path("config/lxde/Xtigervnc").read_text(encoding="utf-8")
+    dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
+
+    assert "__EGL_VENDOR_LIBRARY_FILENAMES" in wrapper
+    assert "/usr/share/glvnd/egl_vendor.d/50_mesa.json" in wrapper
+    assert 'exec /usr/bin/Xtigervnc "$@"' in wrapper
+    assert "ln -sf /usr/bin/tigervncserver /usr/local/bin/vncserver" in dockerfile
+    assert "install -m 0755 /tmp/lxde/Xtigervnc /usr/local/bin/Xtigervnc" in dockerfile
+
+
 def test_guacamole_rdp_template_forces_plain_rdp_security():
     active_mapping = _read_first(
         "/etc/guacamole/user-mapping-vnc-rdp.xml",
