@@ -340,6 +340,8 @@ RUN retry wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_al
     && apt-install-retry \
     autofs \
     cvmfs="${CVMFS_VERSION}" \
+    cvmfs-fuse3="${CVMFS_VERSION}" \
+    cvmfs-libs="${CVMFS_VERSION}" \
     uuid-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
