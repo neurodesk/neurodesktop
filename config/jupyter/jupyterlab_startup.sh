@@ -259,9 +259,19 @@ mkdir -p ${HOME}/.config/opencode
 # leaves its sessions behind pointing at a path that no longer exists, and
 # opening one replays that dead directory back into the API. Set
 # NEURODESKTOP_OPENCODE_PRUNE_SESSIONS=0 to keep every session forever.
+#
+# Detach it: on a large opencode.db the --apply path (rolling backup + delete +
+# VACUUM) is O(database size) and can take minutes. Run synchronously it delays
+# the Jupyter server bind, and JupyterHub kills the single-user pod when the
+# server does not answer within http_timeout (120s by default) - so a heavy
+# OpenCode user could never start their session. This is housekeeping the
+# server does not depend on, so background it like ensure_ssh_keys.sh and
+# ensure_codeserver_extensions above; its output goes to a log for inspection.
 if [ -x /opt/neurodesktop/opencode_prune_sessions.py ]; then
-    /opt/neurodesktop/opencode_prune_sessions.py --apply || \
-        echo "[WARN] OpenCode session prune failed; leaving session history untouched."
+    {
+        /opt/neurodesktop/opencode_prune_sessions.py --apply || \
+            echo "[WARN] OpenCode session prune failed; leaving session history untouched."
+    } >/tmp/opencode_prune_sessions.log 2>&1 &
 fi
 
 # Align Notebook Intelligence's provider/model with the model selected in

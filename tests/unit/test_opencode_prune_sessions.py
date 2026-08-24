@@ -236,6 +236,30 @@ def test_startup_script_runs_the_prune():
     assert "-x /opt/neurodesktop/opencode_prune_sessions.py" in text
 
 
+def test_startup_script_backgrounds_the_prune():
+    """The prune must be detached so it can never block the server bind.
+
+    On a large opencode.db the ``--apply`` path (rolling backup + delete +
+    VACUUM) is O(database size) and can take minutes. Run synchronously it
+    delays the Jupyter server bind, and JupyterHub kills the single-user pod
+    when the server does not answer within ``http_timeout`` (120s by default),
+    so a heavy OpenCode user can never start. It must run in the background.
+    """
+    startup = repo_path("config/jupyter/jupyterlab_startup.sh")
+    if not startup.is_file():
+        pytest.skip("repository checkout not available")
+    text = startup.read_text(encoding="utf-8")
+    marker = "if [ -x /opt/neurodesktop/opencode_prune_sessions.py"
+    assert marker in text, "prune invocation guard missing from startup script"
+    block = text[text.index(marker):]
+    block = block[: block.index("\nfi")]
+    assert block.rstrip().endswith("&"), (
+        "the OpenCode prune must be backgrounded (end the guard block with '&') "
+        "so a slow prune on a large opencode.db cannot stall the server bind "
+        "past http_timeout"
+    )
+
+
 def test_dockerfile_installs_the_prune_script_executable():
     """The image must ship it at the path jupyterlab_startup.sh calls."""
     text = repo_path("Dockerfile").read_text(encoding="utf-8")

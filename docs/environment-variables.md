@@ -163,7 +163,8 @@ are listed at the end. The subsystems themselves are described in
   to keep OpenCode sessions whose working directory has been deleted. By
   default `jupyterlab_startup.sh` runs
   `/opt/neurodesktop/opencode_prune_sessions.py --apply` once per container
-  start, which drops those sessions from
+  start, in the background so a slow prune on a large database cannot delay the
+  Jupyter server bind, which drops those sessions from
   `~/.local/share/opencode/opencode.db` (OpenCode itself never prunes them, so
   they otherwise stay in its session index pointing at paths that no longer
   exist). Sessions whose whole parent tree is missing are left alone, so a

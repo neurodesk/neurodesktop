@@ -112,8 +112,13 @@ paths that are gone.
 (installed as `/opt/neurodesktop/opencode_prune_sessions.py`) removes sessions
 whose working directory no longer exists.
 [`jupyterlab_startup.sh`](../../config/jupyter/jupyterlab_startup.sh) runs it with
-`--apply` once per container start; run it by hand without `--apply` for a dry
-run. `NEURODESKTOP_OPENCODE_PRUNE_SESSIONS=0` disables it.
+`--apply` once per container start, **in the background** (output to
+`/tmp/opencode_prune_sessions.log`). The `--apply` path is O(database size) - it
+writes a rolling backup and `VACUUM`s the database - so on a large
+`opencode.db` it can take minutes; detaching it keeps a slow prune from delaying
+the Jupyter server bind, which JupyterHub would otherwise kill at `http_timeout`.
+Run it by hand without `--apply` for a dry run.
+`NEURODESKTOP_OPENCODE_PRUNE_SESSIONS=0` disables it.
 
 Three details make the deletion safe and complete:
 
