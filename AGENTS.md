@@ -27,6 +27,12 @@
 - `docs/architecture.md`, `docs/testing.md`, and
   `docs/environment-variables.md` are referenced by path from tests and the
   compiled agentic workflows; do not move or rename them.
+- When changing the automatic `APPTAINER_NV` setup in
+  `environment_variables.sh`, run `pytest tests/unit/test_apptainer_nv.py`
+  from a checkout. Gate the default on the loaded proprietary driver at
+  `/proc/driver/nvidia/version`, and preserve every explicit value so
+  `APPTAINER_NV=0` remains the per-command opt-out for incompatible host
+  libraries.
 - When changing `print_access_url.sh` (the end-of-startup access-link banner)
   or how `before_notebook.sh` launches it, run `pytest
   tests/unit/test_print_access_url.py` from a checkout.

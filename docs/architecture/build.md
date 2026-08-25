@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-11"
+last-reviewed: "2026-08-25"
 ---
 
 # Build-Time Behaviors
@@ -122,6 +122,15 @@ cannot run on 'arm64'" bug on macOS. Other non-Apptainer sessions leave
 `neurodesk_singularity_opts` empty because it interferes with VS Code and
 Matlab. Non-root Apptainer/HPC sessions use `--writable-tmpfs` because setuid
 Apptainer cannot use a directory overlay as an unprivileged user.
+
+When `/proc/driver/nvidia/version` shows that the proprietary NVIDIA driver is
+loaded, `environment_variables.sh` defaults `APPTAINER_NV` to `1`. Apptainer
+then binds the host's NVIDIA device files and userspace libraries into each
+tool container. The libraries support both CUDA and an NVIDIA-driven display.
+An NVIDIA-driven display needs the host's `libGLX_nvidia.so.0` even for an
+OpenGL application that does not use CUDA. An explicit `APPTAINER_NV` value
+takes precedence, so `APPTAINER_NV=0` disables the binds when a host library is
+incompatible with an older container glibc.
 
 ## User Permissions
 

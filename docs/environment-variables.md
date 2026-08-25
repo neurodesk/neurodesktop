@@ -43,6 +43,18 @@ are listed at the end. The subsystems themselves are described in
   `environment_variables.sh` defaults it to `HOME`; an explicit override is
   preserved. This avoids a failed password-database lookup on the mapped host
   uid in the rootless Podman setup reported in issue #804.
+- `APPTAINER_NV`: enables Apptainer's NVIDIA device and host-library binds.
+  `environment_variables.sh` defaults it to `1` when
+  `/proc/driver/nvidia/version` shows that the proprietary driver is loaded.
+  An explicit value is preserved. Set `APPTAINER_NV=0` for a command if a host
+  NVIDIA library fails with a `GLIBC_* not found` error in an older tool
+  container.
+
+  NVIDIA binds are also required for OpenGL applications when the NVIDIA GPU
+  drives the display. The X server selects `libGLX_nvidia.so.0`, but Neurodesk
+  tool containers ship Mesa's GLX vendor library. Without the bind, programs
+  such as FSLeyes, ITK-SNAP, MRView, and Slicer can fail to open even when they
+  do not use CUDA.
 
 ## Startup
 

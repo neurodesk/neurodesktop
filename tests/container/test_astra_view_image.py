@@ -14,7 +14,7 @@ def test_astra_viewer_and_schema_dependencies_are_installed_at_exact_versions():
     assert importlib.metadata.version("astra-spec") == "0.0.12"
     assert importlib.metadata.version("astra-tools") == "0.2.11"
     assert importlib.metadata.version("anywidget") == "0.11.0"
-    assert importlib.metadata.version("ipywidgets") == "8.1.8"
+    assert importlib.metadata.version("ipywidgets") == "8.1.9"
 
     import neurodesk_astra_view
 

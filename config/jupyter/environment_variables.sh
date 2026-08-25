@@ -371,12 +371,19 @@ fi
 # await lmod.list()
 # !fslmaths
 
-# # this adds --nv to the singularity calls -> but only if a GPU is present
-# if [ "$(lspci | grep -i nvidia)" ]
-# then
-#         export neurodesk_singularity_opts="${neurodesk_singularity_opts} --nv "
-# fi
-# THIS IS CURRENTLY DISABLED BECAUSE IT CAUSES PROBLEMS ON UBUNTU 24.04 HOSTS WHERE THIS LEADS TO A GLIBC VERSION ERROR
+# An NVIDIA-driven X server selects libGLX_nvidia.so.0 for every OpenGL GUI,
+# but Neurodesk images only ship Mesa's GLX vendor library. Enable Apptainer's
+# NVIDIA library binds when the proprietary driver is loaded. Preserve every
+# explicit value, including APPTAINER_NV=0, so users can opt out when a host
+# library needs a newer glibc than the tool container provides.
+configure_apptainer_nv() {
+        local driver_version_file="${1:-/proc/driver/nvidia/version}"
+
+        if [ -f "${driver_version_file}" ] && [ -z "${APPTAINER_NV+x}" ]; then
+                export APPTAINER_NV=1
+        fi
+}
+configure_apptainer_nv
 
 export PS1='\u@neurodesktop-$NEURODESKTOP_VERSION:\w$ '
 
