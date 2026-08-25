@@ -123,14 +123,15 @@
   failures non-blocking and return their context through the system prompt or
   tool output so the model actually sees it.
 - When changing Jupyter AI, Jupyter Collaboration, its ACP personas,
-  the Jupyter Server Documents workaround, or the jupyter-server-mcp
-  banner patch,
+  the Jupyter Server Documents workaround, the widget pins used with
+  server-side notebook execution, or the jupyter-server-mcp banner patch,
   run `pytest tests/unit/test_jupyter_ai_workspace.py
   tests/unit/test_astra_jupyter_ai_tooling.py
   tests/unit/test_jupyter_server_documents_patch.py
   tests/unit/test_jupyter_ai_acp_client_patch.py
   tests/unit/test_jupyter_server_mcp_patch.py` from a checkout and `pytest
-  /opt/tests/test_astra_jupyter_ai_image.py` in the built image, then verify
+  /opt/tests/test_astra_jupyter_ai_image.py
+  /opt/tests/test_widget_compatibility_image.py` in the built image, then verify
   `pip check`, `jupyter server extension list`, and `jupyter labextension list
   --verbose` in that image. Keep Jupyter AI chat workspace seeding scoped to
   `.chat` saves, never overwrite an existing `AGENTS.md`, and never make a seed

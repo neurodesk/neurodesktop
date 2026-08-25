@@ -80,7 +80,7 @@ non-obvious tiers protect.
 | ASTRA viewer core (adapter, graph, widget, previews) | `pytest tests/unit/test_astra_view_graph.py tests/unit/test_astra_view_packaging.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | `astra`/`lc` installs, Lightcone skills and hooks | `pytest tests/unit/test_astra_jupyter_ai_tooling.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
-| Jupyter AI, ACP personas, server-documents/jupyter-server-mcp patches | see [below](#jupyter-ai-and-acp-personas) | `pytest /opt/tests/test_astra_jupyter_ai_image.py` |
+| Jupyter AI, ACP personas, collaboration/widget compatibility and server patches | see [below](#jupyter-ai-and-acp-personas) | `pytest /opt/tests/test_astra_jupyter_ai_image.py /opt/tests/test_widget_compatibility_image.py` |
 | Notebook Intelligence / MyST pins and rebuilds | `pytest tests/unit/test_nbi_settings_patch.py tests/unit/test_myst_build_workaround.py` | `pytest /opt/tests/test_nbi_labextension_patch.py` |
 | Launcher extension, workspace link routing | `pytest tests/unit/test_workspace_link_routing.py` | `pytest /opt/tests/test_workspace_link_routing_image.py` |
 | Agentic workflows under `.github/workflows/*.md` | `pytest tests/unit/test_report_job_failure_action.py tests/unit/test_agentic_maintenance_workflows.py` | — |
@@ -142,7 +142,7 @@ pytest tests/unit/test_jupyter_ai_acp_client_patch.py
 pytest tests/unit/test_jupyter_server_mcp_patch.py
 pytest tests/unit/test_coding_agents.py -k 'opencode_machine_commands or opencode_acp_exports_lmod'
 # In the rebuilt image:
-pytest /opt/tests/test_astra_jupyter_ai_image.py
+pytest /opt/tests/test_astra_jupyter_ai_image.py /opt/tests/test_widget_compatibility_image.py
 pip check
 jupyter server extension list
 jupyter labextension list --verbose
@@ -152,7 +152,10 @@ The workspace test covers the checkout-safe hook behavior: only ``.chat``
 saves seed ``AGENTS.md``, project-authored guidance is never overwritten, and
 seed failures do not block chat creation. The image test drives a real
 ``FileContentsManager.new_untitled(..., ext=".chat")`` call against the shipped
-hook and ``/opt/AGENTS.md``.
+hook and ``/opt/AGENTS.md``. The widget image test inspects the installed
+JupyterLab manager bundle and requires its bounded late-model retry, because
+server-side notebook output and kernel widget comms travel over independently
+ordered WebSockets.
 
 ### ASTRA viewer
 

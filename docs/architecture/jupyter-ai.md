@@ -72,6 +72,19 @@ those two bundles against the image's JupyterLab 4.6 YDoc 4.1.1 contract. The
 image test requires both rebuilt extensions to report `OK` in `jupyter
 labextension list --verbose`.
 
+Jupyter AI 3.1.x requires `jupyter-server-documents`; removing the package or
+disabling its server extension is not a supported fallback for this release.
+Its server-side notebook execution sends cell outputs over the Yjs WebSocket,
+while widget model comms still use the kernel WebSocket. Those independent
+channels can deliver a widget view before its model, which `ipywidgets` 8.1.8
+made permanent as `Error displaying widget: model not found` or `Loading
+widget...`. Neurodesktop pins `ipywidgets` 8.1.9 and
+`jupyterlab_widgets` 3.0.17, whose widget manager waits briefly for late model
+registration. The image regression checks the installed frontend bundle so
+an unpinned or stale Python package cannot silently restore the race. Jupyter
+AI 3.2 plans to make RTC optional, but Neurodesktop will not remove the stable
+3.1 dependency by adopting an alpha release.
+
 `jupyter-server-documents` 0.3.3 still has an upstream stale-client race in which one
 queued update can terminate a chat room's background message processor.
 Neurodesktop applies an exact-source, build-time workaround for upstream issue

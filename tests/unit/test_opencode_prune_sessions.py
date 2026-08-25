@@ -226,18 +226,17 @@ def test_script_runs_standalone_as_a_dry_run(tmp_path):
     assert os.access(ocp.SOURCE_PATH, os.X_OK)
 
 
-def test_startup_script_runs_the_prune():
-    """jupyterlab_startup.sh must actually invoke it, with --apply."""
+def test_startup_script_does_not_run_the_manual_prune():
+    """Database maintenance must not delay startup or race a live OpenCode."""
     startup = repo_path("config/jupyter/jupyterlab_startup.sh")
     if not startup.is_file():
         pytest.skip("repository checkout not available")
     text = startup.read_text(encoding="utf-8")
-    assert "/opt/neurodesktop/opencode_prune_sessions.py --apply" in text
-    assert "-x /opt/neurodesktop/opencode_prune_sessions.py" in text
+    assert "opencode_prune_sessions.py" not in text
 
 
 def test_dockerfile_installs_the_prune_script_executable():
-    """The image must ship it at the path jupyterlab_startup.sh calls."""
+    """The image must retain the manual recovery tool at its documented path."""
     text = repo_path("Dockerfile").read_text(encoding="utf-8")
     assert (
         "install -m 0755 -o root -g users "
