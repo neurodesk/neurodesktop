@@ -29,7 +29,7 @@ jobs:
     # Target the scale-set name directly (bypasses runner group). Once stable,
     # promote to `runs-on: { group: runner-neurodesktop }` per cluster team's
     # two-phase guidance.
-    runs-on: neurodesk-syd2-arcrunner-neurodesktop
+    runs-on: neurodesk-syd-arcrunner-neurodesktop
     timeout-minutes: 20
     steps:
       - name: Runner identity
@@ -83,7 +83,7 @@ jobs:
   ca-validation:
     if: ${{ inputs.mode == 'ca-validation' }}
     name: CA ${{ matrix.role }}
-    runs-on: neurodesk-syd2-arcrunner-neurodesktop
+    runs-on: neurodesk-syd-arcrunner-neurodesktop
     timeout-minutes: 45
     strategy:
       # A job dying is the SIGNAL, not a reason to cancel the rest.
