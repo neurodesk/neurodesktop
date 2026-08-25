@@ -4,7 +4,7 @@ description: Startup flow, services, directory layout, and the map of
   per-subsystem architecture pages
 parent: index.md
 status: current
-last-reviewed: "2026-08-04"
+last-reviewed: "2026-08-25"
 ---
 
 # Architecture
@@ -45,10 +45,10 @@ The startup sequence follows this order (per
    runtime info file) at the end of the startup log, where the ServerApp's own
    token banner has already scrolled out of view.
 3. [`config/jupyter/jupyterlab_startup.sh`](../config/jupyter/jupyterlab_startup.sh)
-   starts JupyterLab and associated services. It also runs
-   [`opencode_prune_sessions.py`](../config/agents/opencode_prune_sessions.py)
-   once per container start (see
-   [OpenCode session pruning](architecture/coding-agents.md#opencode-session-pruning)).
+   starts JupyterLab and associated services. OpenCode database maintenance is
+   deliberately excluded from this startup path; the manual recovery tool is
+   described under
+   [OpenCode session pruning](architecture/coding-agents.md#opencode-session-pruning).
 4. `jupyter_notebook_config.py` is loaded when the Jupyter ServerApp starts.
    It is generated at image build time (see
    [config generation](architecture/webapps.md#build-time-config-generation))
@@ -81,7 +81,7 @@ itself.
 - [`config/jupyter/`](../config/jupyter/): JupyterLab config, startup scripts,
   and webapp infrastructure
 - [`config/agents/`](../config/agents/): coding-agent wrappers, OpenCode
-  session pruning, and Notebook Intelligence setup
+  session-pruning recovery tooling, and Notebook Intelligence setup
 - [`config/guacamole/`](../config/guacamole/): remote desktop gateway config
 - [`config/cvmfs/`](../config/cvmfs/): CVMFS mount configurations and keys
 - [`config/lxde/`](../config/lxde/): desktop environment customization

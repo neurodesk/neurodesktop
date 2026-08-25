@@ -3,13 +3,13 @@
 
 OpenCode keeps session history in ~/.local/share/opencode/opencode.db, not in
 the working directory, and never prunes it. Deleting a project directory
-therefore leaves its sessions on the Home page forever, pointing at paths that
-are gone. Worse, opening one replays its stale directory back into the API
-(the SPA encodes it into the URL and the ``x-opencode-directory`` header), so
-dead directories keep resurfacing as session targets.
+therefore leaves its sessions in the database, pointing at paths that are gone.
 
-jupyterlab_startup.sh runs this once per container start. Set
-NEURODESKTOP_OPENCODE_PRUNE_SESSIONS=0 to disable it.
+This is a manual recovery and administration tool. It is deliberately not run
+at container startup: applying it writes a full database backup and runs
+``VACUUM``, so a large database can take minutes and must not delay Jupyter or
+contend with a newly launched OpenCode process. Set
+NEURODESKTOP_OPENCODE_PRUNE_SESSIONS=0 to disable an explicit invocation.
 
 Usage:
   opencode_prune_sessions.py              # dry run: report what would go
@@ -101,8 +101,8 @@ def prune(db_path, apply=False, isdir=os.path.isdir, log=print):
             log(f"[INFO] {len(doomed)} stale session(s); pass --apply to delete")
             return 0
 
-        # A single rolling backup rather than one per run, so an unattended
-        # startup cleanup cannot grow the home directory without bound.
+        # A single rolling backup rather than one per run, so repeated manual
+        # maintenance cannot grow the home directory without bound.
         try:
             connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             shutil.copy2(db_path, db_path + BACKUP_SUFFIX)

@@ -253,17 +253,6 @@ mkdir -p ${HOME}/.config/goose
 # ensure opencode config directory exists
 mkdir -p ${HOME}/.config/opencode
 
-# Drop OpenCode sessions whose working directory has been deleted. OpenCode
-# stores session history in a database beside its config, never prunes it, and
-# lists every session on its Home page - so removing a project directory
-# leaves its sessions behind pointing at a path that no longer exists, and
-# opening one replays that dead directory back into the API. Set
-# NEURODESKTOP_OPENCODE_PRUNE_SESSIONS=0 to keep every session forever.
-if [ -x /opt/neurodesktop/opencode_prune_sessions.py ]; then
-    /opt/neurodesktop/opencode_prune_sessions.py --apply || \
-        echo "[WARN] OpenCode session prune failed; leaving session history untouched."
-fi
-
 # Align Notebook Intelligence's provider/model with the model selected in
 # OpenCode (~/.config/opencode/opencode.json) and inject NEURODESK_API_KEY
 # from env or ~/.bashrc if available.

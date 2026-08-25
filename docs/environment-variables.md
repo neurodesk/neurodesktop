@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-08-11"
+last-reviewed: "2026-08-25"
 ---
 
 # Environment Variables
@@ -160,16 +160,15 @@ are listed at the end. The subsystems themselves are described in
 ## OpenCode
 
 - `NEURODESKTOP_OPENCODE_PRUNE_SESSIONS`: set to `0` (or `false`/`no`/`off`)
-  to keep OpenCode sessions whose working directory has been deleted. By
-  default `jupyterlab_startup.sh` runs
-  `/opt/neurodesktop/opencode_prune_sessions.py --apply` once per container
-  start, which drops those sessions from
-  `~/.local/share/opencode/opencode.db` (OpenCode itself never prunes them, so
-  they otherwise stay in its session index pointing at paths that no longer
-  exist). Sessions whose whole parent tree is missing are left alone, so a
-  volume that is not mounted yet is never mistaken for a deleted directory.
-  The previous database is kept as a single rolling
-  `opencode.db.prune-backup`
+  to disable an explicit invocation of the manual recovery tool
+  `/opt/neurodesktop/opencode_prune_sessions.py`. Container startup never runs
+  the tool automatically. Without `--apply` it reports sessions whose working
+  directory has been deleted; with `--apply` it drops them from
+  `~/.local/share/opencode/opencode.db`, writes a single rolling
+  `opencode.db.prune-backup`, and runs `VACUUM`. Sessions whose whole parent
+  tree is missing are left alone, so an unmounted volume is not mistaken for a
+  deleted directory. Because backup and vacuum work scales with database size,
+  applying the cleanup is an explicit operator action
 
 ## Build arguments
 

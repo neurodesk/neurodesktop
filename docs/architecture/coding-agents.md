@@ -4,7 +4,7 @@ description: Claude Code installation, the OpenCode terminal wrapper, and
   OpenCode session pruning
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-04"
+last-reviewed: "2026-08-25"
 ---
 
 # Coding agents
@@ -109,11 +109,19 @@ therefore leaves its sessions in OpenCode's session index forever, pointing at
 paths that are gone.
 
 [`config/agents/opencode_prune_sessions.py`](../../config/agents/opencode_prune_sessions.py)
-(installed as `/opt/neurodesktop/opencode_prune_sessions.py`) removes sessions
-whose working directory no longer exists.
-[`jupyterlab_startup.sh`](../../config/jupyter/jupyterlab_startup.sh) runs it with
-`--apply` once per container start; run it by hand without `--apply` for a dry
-run. `NEURODESKTOP_OPENCODE_PRUNE_SESSIONS=0` disables it.
+(installed as `/opt/neurodesktop/opencode_prune_sessions.py`) is a manual
+recovery and administration tool that removes sessions whose working directory
+no longer exists. Run it without `--apply` to review a dry-run report, then run
+it with `--apply` to perform the deletion. It is never invoked automatically by
+container startup. `NEURODESKTOP_OPENCODE_PRUNE_SESSIONS=0` disables an
+explicit invocation, which can be useful as a site-level safety override.
+
+Keeping it off the startup path is deliberate. The `--apply` operation writes
+a full rolling backup and runs `VACUUM`, making its runtime proportional to the
+database size. A large database can therefore take minutes; running it during
+startup can delay the Jupyter server bind, while detaching it can instead
+contend with a newly launched OpenCode process. Database maintenance must be an
+explicit operator action rather than a prerequisite for starting a session.
 
 Three details make the deletion safe and complete:
 
@@ -130,4 +138,4 @@ Three details make the deletion safe and complete:
   but declare no foreign key, so they are swept explicitly.
 
 The pre-prune database is kept as a single rolling `opencode.db.prune-backup`
-so an unattended startup cleanup cannot grow the home directory without bound.
+so repeated manual maintenance cannot grow backup history without bound.
