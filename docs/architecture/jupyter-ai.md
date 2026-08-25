@@ -1,10 +1,10 @@
 ---
 title: Jupyter AI
 description: The ACP-native Jupyter AI chat surface, its Claude/Codex/OpenCode
-  personas, workspace seeding, and anchored server workarounds
+  personas, workspace seeding, and collaboration-stack workarounds
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-11"
+last-reviewed: "2026-08-25"
 ---
 
 # Jupyter AI
@@ -65,11 +65,12 @@ registration site; a different hook overriding ours still warns.
 
 ## Collaboration stack and server workarounds
 
-Jupyter AI 3.1.2 is installed with Jupyter Collaboration 5.0.0. Its published
-collaboration and document-provider frontends support the JupyterLab 4.6 YDoc
-4.1.1 contract directly, so Neurodesktop no longer rebuilds those two bundles.
-The image test requires both published extensions to report `OK` in
-`jupyter labextension list --verbose`.
+Jupyter AI 3.1.2 is installed with Jupyter Collaboration 4.4.2. The release
+targets JupyterLab 4, but its published collaboration and document-provider
+frontends support `@jupyter/ydoc` only through version 3. Neurodesktop rebuilds
+those two bundles against the image's JupyterLab 4.6 YDoc 4.1.1 contract. The
+image test requires both rebuilt extensions to report `OK` in `jupyter
+labextension list --verbose`.
 
 `jupyter-server-documents` 0.3.3 still has an upstream stale-client race in which one
 queued update can terminate a chat room's background message processor.

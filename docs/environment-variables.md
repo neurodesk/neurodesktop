@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-08-11"
+last-reviewed: "2026-08-25"
 ---
 
 # Environment Variables
@@ -201,7 +201,7 @@ reviewed; the Dockerfile itself is authoritative.
   defaults to `4ded682be8487d8aa05831678ef84ef12068d50d`
 - `JUPYTER_AI_VERSION`: Jupyter AI metapackage release;
   defaults to `3.1.2`, with its direct pre-1.0 extensions and Jupyter
-  Collaboration 5.0.0 pinned alongside it
+  Collaboration pinned alongside it
 - `CODEX_ACP_VERSION`, `CLAUDE_AGENT_ACP_VERSION`: pinned
   ACP adapters that expose the Codex and Claude personas in Jupyter AI;
   defaults to `1.1.14` and `0.66.0`. They install without their vendored agent
@@ -211,6 +211,10 @@ reviewed; the Dockerfile itself is authoritative.
 - `CODEX_CLI_VERSION`: the `@openai/codex` CLI release
   installed globally; defaults to `0.147.0` and must stay inside the range the
   pinned codex-acp adapter declares, because the adapter drives this binary
+- `JUPYTER_COLLABORATION_VERSION`, `JUPYTER_COLLABORATION_REF`: release and
+  exact source commit used to rebuild Jupyter AI's collaboration frontends for
+  JupyterLab 4.6's YDoc 4 contract; defaults to `4.4.2` and
+  `3bf11cb7b271b554998105a11e6c9b8c3e376615`
 - `MYST_PNPM_VERSION`, `MYST_YDOC_VERSION`: pnpm and Jupyter
   YDoc releases used for the MyST/RISE compatibility rebuild; defaults to
   `11.21.0` and `4.1.1`
