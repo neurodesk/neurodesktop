@@ -129,6 +129,9 @@ c.ServerApp.tornado_settings = { "headers": { "Content-Security-Policy": "frame-
 # These are automatically detected from cgroup v2 files in before_notebook.sh
 c.ResourceUseDisplay.track_cpu_percent = True
 c.ResourceUseDisplay.mem_warning_threshold = 0.1  # Warn at 90% usage
+# jupyter-resource-usage compares CPU_LIMIT in cores directly with a percentage,
+# which produces false warnings. Keep CPU reporting but disable that warning.
+c.ResourceUseDisplay.cpu_warning_threshold = 0
 c.ResourceUseDisplay.track_disk_usage = True
 c.ResourceUseDisplay.disk_path = os.environ.get('HOME', '/home/jovyan')
 # The Prometheus exporter runs psutil in a 1 s PeriodicCallback on the tornado
