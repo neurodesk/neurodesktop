@@ -556,6 +556,8 @@ RUN retry conda install -c conda-forge nb_conda_kernels \
 ARG BUST_CACHE_PIP=3
 ARG UV_VERSION="0.12.3"
 ARG JUPYTER_AI_VERSION="3.1.2"
+ARG JUPYTER_COLLABORATION_VERSION="4.4.2"
+ARG JUPYTER_COLLABORATION_REF="3bf11cb7b271b554998105a11e6c9b8c3e376615"
 ARG ASTRA_SPEC_VERSION="0.0.12"
 ARG ASTRA_TOOLS_VERSION="0.2.11"
 ARG ANYWIDGET_VERSION="0.11.0"
@@ -598,7 +600,9 @@ RUN apt-install-retry build-essential \
     jupyterlab-chat==0.23.2 \
     jupyterlab-commands-toolkit==0.1.6 \
     jupyterlab-notebook-awareness==0.2.0 \
-    jupyter-collaboration==5.0.0 \
+    # Stay on the JupyterLab 4 collaboration line. Its published frontends
+    # need the scoped YDoc 4 rebuild below before JupyterLab 4.6 accepts them.
+    jupyter-collaboration==${JUPYTER_COLLABORATION_VERSION} \
     jupyterlab_rise \
     jupyterlab-niivue==0.2.7 \
     jupyterlab_myst==2.7.0 \
@@ -680,7 +684,7 @@ RUN apt-mark manual autofs cvmfs libc6-dev linux-libc-dev uuid-dev \
     libgpgme-dev libossp-uuid-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# The two from-source labextension rebuilds below are the most expensive
+# The three from-source labextension rebuilds below are the most expensive
 # layers in the image. They live here — before neurocommand, the local
 # extension builds, and every config/tests layer — so that config, test,
 # webapp-link, and extension churn never invalidates them; their only cache
@@ -756,6 +760,56 @@ RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {
     && rm -rf "${APP_MYST_DIR}" \
     && cp -a "${MYST_LABEXT_DIR}" "${APP_MYST_DIR}" \
     && rm -rf /tmp/myst /tmp/rise /tmp/myst-corepack /tmp/myst-pnpm-store /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
+
+# Jupyter Collaboration 4.4.2 targets JupyterLab 4, but its published
+# frontends advertise @jupyter/ydoc only through version 3 and are therefore
+# rejected by JupyterLab 4.6's YDoc 4.1.1. Rebuild only the collaboration and
+# document-provider frontends against the exact YDoc already used by the image.
+# The two casts bridge duplicate protected TypeScript identities created by
+# the workspace; they do not change runtime code or document factories.
+RUN retry git clone --depth 1 --branch "v${JUPYTER_COLLABORATION_VERSION}" \
+    https://github.com/jupyterlab/jupyter-collaboration.git /tmp/jupyter-collaboration \
+    && test "$(git -C /tmp/jupyter-collaboration rev-parse HEAD)" = "${JUPYTER_COLLABORATION_REF}" \
+    && cd /tmp/jupyter-collaboration \
+    && npm pkg set "resolutions.@jupyter/ydoc=${MYST_YDOC_VERSION}" \
+    && for package_dir in \
+    packages/collaboration-extension \
+    packages/collaborative-drive \
+    packages/docprovider-extension \
+    packages/docprovider; do \
+        npm pkg set "dependencies.@jupyter/ydoc=^${MYST_YDOC_VERSION}" --prefix "${package_dir}"; \
+    done \
+    && npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}" \
+    --prefix packages/collaboration-extension \
+    && npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}" \
+    --prefix packages/docprovider-extension \
+    && sed -i \
+    -e 's/^      yFileFactory$/      yFileFactory as never/' \
+    -e 's/^      yNotebookFactory$/      yNotebookFactory as never/' \
+    packages/docprovider-extension/src/filebrowser.ts \
+    && YARN_ENABLE_IMMUTABLE_INSTALLS=0 retry jlpm install \
+    && jlpm lerna run build \
+    --scope @jupyter/collaboration \
+    --scope @jupyter/collaborative-drive \
+    --scope @jupyter/docprovider \
+    && jlpm lerna run build:lib:prod \
+    && /opt/conda/bin/jupyter labextension build \
+    --core-path=/opt/conda/share/jupyter/lab packages/collaboration-extension \
+    && /opt/conda/bin/jupyter labextension build \
+    --core-path=/opt/conda/share/jupyter/lab packages/docprovider-extension \
+    && COLLAB_SRC=/tmp/jupyter-collaboration/projects/jupyter-collaboration-ui/jupyter_collaboration_ui/labextension \
+    && DOCPROVIDER_SRC=/tmp/jupyter-collaboration/projects/jupyter-docprovider/jupyter_docprovider/labextension \
+    && COLLAB_DEST=/opt/conda/share/jupyter/labextensions/@jupyter/collaboration-extension \
+    && DOCPROVIDER_DEST=/opt/conda/share/jupyter/labextensions/@jupyter/docprovider-extension \
+    && rm -rf "${COLLAB_DEST}" "${DOCPROVIDER_DEST}" \
+    && cp -a "${COLLAB_SRC}" "${COLLAB_DEST}" \
+    && cp -a "${DOCPROVIDER_SRC}" "${DOCPROVIDER_DEST}" \
+    # Strip the rebuild's sourcemaps in the layer that installs the bundles.
+    && find "${COLLAB_DEST}/static" "${DOCPROVIDER_DEST}/static" \
+    -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
+    && test "$(node -p "require('${COLLAB_DEST}/package.json').dependencies['@jupyter/ydoc']")" = "^${MYST_YDOC_VERSION}" \
+    && test "$(node -p "require('${DOCPROVIDER_DEST}/package.json').dependencies['@jupyter/ydoc']")" = "^${MYST_YDOC_VERSION}" \
+    && rm -rf /tmp/jupyter-collaboration /root/.cache /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
 
 # The layers from here to the local extension builds are keyed only on pinned
 # versions/refs (no local files), so they change on explicit bumps and never
