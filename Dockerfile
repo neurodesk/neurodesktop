@@ -613,9 +613,11 @@ RUN apt-install-retry build-essential \
     astra-tools==${ASTRA_TOOLS_VERSION} \
     anywidget==${ANYWIDGET_VERSION} \
     uv==${UV_VERSION} \
-    ipywidgets==8.1.8 \
+    # 8.1.9/3.0.17 make the frontend wait briefly when Yjs-delivered output
+    # reaches it before the widget model's kernel comm (ipywidgets #4026).
+    ipywidgets==8.1.9 \
     ipyvolume \
-    jupyterlab_widgets \
+    jupyterlab_widgets==3.0.17 \
     nbgitpuller \
     xnat \
     pytest \

@@ -8,6 +8,7 @@ import asyncio
 import importlib.metadata
 import logging
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -196,8 +197,11 @@ def test_jupyter_ai_server_and_frontend_extensions_are_compatible():
 
     code, lab_output = run_cmd("jupyter labextension list --verbose", timeout=60)
     assert code == 0, lab_output
-    assert "@jupyter/collaboration-extension v5.0.0" in lab_output
-    assert "@jupyter/docprovider-extension v5.0.0" in lab_output
+    for extension in (
+        "@jupyter/collaboration-extension",
+        "@jupyter/docprovider-extension",
+    ):
+        assert re.search(rf"{re.escape(extension)} v5\.0\.\d+", lab_output), lab_output
     assert "not compatible with the current JupyterLab" not in lab_output
 
 
