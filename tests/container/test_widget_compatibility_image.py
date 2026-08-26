@@ -197,6 +197,7 @@ def _wait_for_expression(
         f"browser errors were {browser_errors!r}; state was {browser_state}"
     )
 
+
 def test_widget_manager_waits_for_a_late_model_registration():
     """Yjs output may arrive before the matching kernel ``comm_open``.
 
@@ -228,6 +229,8 @@ def test_widget_manager_waits_for_a_late_model_registration():
         "the installed widget manager still fails immediately when a widget "
         "view reaches the browser before its model"
     )
+    assert "neurodesktop-widget-model-retry" in bundles
+    assert "Date.now()-o<1e4" in bundles
 
 
 def test_server_side_execution_renders_a_widget(tmp_path: Path) -> None:
@@ -235,8 +238,24 @@ def test_server_side_execution_renders_a_widget(tmp_path: Path) -> None:
     notebook = nbformat.v4.new_notebook(
         cells=[
             nbformat.v4.new_code_cell(
+                "import asyncio\n"
                 "import ipywidgets as widgets\n"
-                "widgets.IntSlider(value=42, description='server widget')"
+                "from IPython.display import display\n"
+                "model_id = 'delayed-hbox-model'\n"
+                "async def open_model_later():\n"
+                "    await asyncio.sleep(3)\n"
+                "    return widgets.HBox([\n"
+                "        widgets.IntSlider(value=42),\n"
+                "        widgets.Label(value='nested'),\n"
+                "    ], model_id=model_id)\n"
+                "delayed_model_task = asyncio.create_task(open_model_later())\n"
+                "display({\n"
+                "    'application/vnd.jupyter.widget-view+json': {\n"
+                "        'version_major': 2,\n"
+                "        'version_minor': 0,\n"
+                "        'model_id': model_id,\n"
+                "    }\n"
+                "}, raw=True)"
             ),
             nbformat.v4.new_markdown_cell("Widget regression end."),
         ],
@@ -363,7 +382,8 @@ def test_server_side_execution_renders_a_widget(tmp_path: Path) -> None:
             bidi,
             context,
             "Boolean("
-            "document.querySelector('.jupyter-widgets.widget-slider') || "
+            "document.querySelector('.jupyter-widgets.widget-box') || "
+            "document.body.innerText.includes('model not found') || "
             "document.querySelector("
             "'.jp-OutputArea-output[data-mime-type=\"text/plain\"]'"
             ")"
@@ -374,21 +394,24 @@ def test_server_side_execution_renders_a_widget(tmp_path: Path) -> None:
             bidi.evaluate(
                 context,
                 "JSON.stringify((() => {"
-                "const widget = document.querySelector("
-                "'.jupyter-widgets.widget-slider'"
-                ");"
                 "return {"
+                "modelError: document.body.innerText.includes("
+                "'model not found'"
+                "),"
                 "plainTextFallback: [...document.querySelectorAll("
                 "'.jp-OutputArea-output[data-mime-type=\"text/plain\"]'"
-                ")].some(node => node.textContent.includes('IntSlider(')),"
-                "widget: Boolean(widget)"
+                ")].some(node => node.textContent.includes('VBox(')),"
+                "widgetBoxes: document.querySelectorAll("
+                "'.jupyter-widgets.widget-box'"
+                ").length"
                 "};"
                 "})())",
             )
         )
         assert output == {
+            "modelError": False,
             "plainTextFallback": False,
-            "widget": True,
+            "widgetBoxes": 1,
         }
     finally:
         if bidi is not None:

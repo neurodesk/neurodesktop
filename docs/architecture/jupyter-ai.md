@@ -80,8 +80,11 @@ channels can deliver a widget view before its model, which `ipywidgets` 8.1.8
 made permanent as `Error displaying widget: model not found` or `Loading
 widget...`. Neurodesktop pins `ipywidgets` 8.1.9 and
 `jupyterlab_widgets` 3.0.17, whose widget manager waits briefly for late model
-registration. The image regression checks the installed frontend bundle so
-an unpinned or stale Python package cannot silently restore the race. Jupyter
+registration. Its upstream two-second bound is still too short for complex
+layouts such as a ``VBox`` containing delayed ``HBox`` models. Neurodesktop
+extends that bound to ten seconds and publishes the changed widget-manager
+chunk and remote entry under new content-derived names. The image regression
+delays a real ``HBox`` comm for three seconds and requires it to render. Jupyter
 AI 3.2 plans to make RTC optional, but Neurodesktop will not remove the stable
 3.1 dependency by adopting an alpha release.
 

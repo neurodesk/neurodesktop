@@ -1363,6 +1363,14 @@ RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_documents.py,ta
     install -m 0755 -o root -g users /tmp/patch_jupyter_server_documents.py /opt/neurodesktop/patch_jupyter_server_documents.py \
     && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_server_documents.py
 
+# ipywidgets 8.1.9 retries a late widget model for two seconds. Complex
+# server-executed outputs can exceed that window because their Yjs output and
+# kernel comms use separate WebSockets. Extend the bounded retry to ten seconds
+# and publish new content-hashed assets so browser caches cannot retain it.
+RUN --mount=type=bind,source=config/jupyter/patch_jupyterlab_widgets.py,target=/tmp/patch_jupyterlab_widgets.py,ro \
+    install -m 0755 -o root -g users /tmp/patch_jupyterlab_widgets.py /opt/neurodesktop/patch_jupyterlab_widgets.py \
+    && /opt/conda/bin/python /opt/neurodesktop/patch_jupyterlab_widgets.py
+
 # RISE's standalone application has a smaller service set than JupyterLab.
 # Loading every installed federated extension lets collaboration and chat
 # disable or require services RISE does not provide, leaving a blank deck.

@@ -157,10 +157,11 @@ hook and ``/opt/AGENTS.md``. The widget image test inspects the installed
 JupyterLab manager bundle and requires its bounded late-model retry, because
 server-side notebook output and kernel widget comms travel over independently
 ordered WebSockets. It also starts Jupyter Server and headless Firefox, runs an
-``IntSlider`` through the installed server-side cell executor, and requires a
-widget DOM instead of the unsafe renderer's ``text/plain`` fallback. The unit
-test also requires the workaround to publish a new content-hashed chunk and
-remote entry, so an immutable cached copy cannot conceal the fix.
+``HBox`` whose model comm is delayed for three seconds through the installed
+server-side cell executor, and requires a widget DOM instead of ``model not
+found`` or the unsafe renderer's ``text/plain`` fallback. The unit tests also
+require both frontend workarounds to publish new content-hashed chunks and
+remote entries, so an immutable cached copy cannot conceal either fix.
 
 ### MyST and standalone RISE
 

@@ -140,6 +140,7 @@
   run `pytest tests/unit/test_jupyter_ai_workspace.py
   tests/unit/test_astra_jupyter_ai_tooling.py
   tests/unit/test_jupyter_server_documents_patch.py
+  tests/unit/test_jupyterlab_widgets_patch.py
   tests/unit/test_jupyter_ai_acp_client_patch.py
   tests/unit/test_jupyter_server_mcp_patch.py` from a checkout and `pytest
   /opt/tests/test_astra_jupyter_ai_image.py
@@ -148,7 +149,9 @@
   --verbose` in that image. Keep user-initiated server-side code execution
   marking the cell trusted before its outputs arrive; otherwise unsafe rich
   renderers fall back to `text/plain`. The widget image test must execute a
-  real widget through JupyterLab, not only inspect installed bundles. Publish
+  delayed nested widget through JupyterLab, not only inspect installed bundles.
+  Keep the late-model wait bounded at ten seconds; the upstream two-second wait
+  is too short for complex output over the independent WebSockets. Publish
   patched federated assets under new content-derived names; Jupyter serves
   their original hashed URLs as immutable for one year. Keep
   Jupyter AI chat workspace seeding scoped to `.chat` saves, never overwrite
