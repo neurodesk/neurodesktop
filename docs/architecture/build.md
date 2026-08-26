@@ -108,6 +108,15 @@ a Python dependency on the legacy `jupyterlab-mathjax3` package. Its JupyterLab
 RISE's standalone application both provide the current built-in MathJax
 extension.
 
+The standalone RISE application does not expose the full set of services in
+JupyterLab. Neurodesktop therefore filters its page config to the
+`jupyterlab-rise` extension and the MyST bundle rebuilt against that app. This
+keeps collaboration, chat, file-browser, and widget extensions from disabling
+RISE's built-in notebook cell executor or requesting services the standalone
+app does not provide. Full JupyterLab still loads those extensions normally.
+The filter is an anchored patch to `jupyterlab_rise.app`; a changed upstream
+anchor fails the image build and requires the patch to be reassessed.
+
 ## Apptainer
 
 The Dockerfile builds Apptainer from upstream source in a dedicated build stage

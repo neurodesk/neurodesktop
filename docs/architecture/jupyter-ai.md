@@ -85,13 +85,25 @@ an unpinned or stale Python package cannot silently restore the race. Jupyter
 AI 3.2 plans to make RTC optional, but Neurodesktop will not remove the stable
 3.1 dependency by adopting an alpha release.
 
+The same server-side executor bypasses JupyterLab's normal code-cell execution
+path, which marks a cell trusted before its outputs arrive. Without that state,
+JupyterLab refuses unsafe rich renderers and displays an ipywidget's
+``text/plain`` representation instead. The anchored server-documents patch
+marks user-executed code cells trusted, and the image regression executes a
+real ``IntSlider`` through JupyterLab to distinguish a rendered widget from its
+plain Python representation. Because Jupyter serves federated extension assets
+with a one-year immutable cache, the patch leaves the upstream bundle intact,
+publishes the changed chunk and remote entry under new content-derived names,
+and updates the extension manifest. Reusing the original hashed filename would
+leave browsers that opened JupyterLab before the update on the broken code.
+
 `jupyter-server-documents` 0.3.3 still has an upstream stale-client race in which one
 queued update can terminate a chat room's background message processor.
 Neurodesktop applies an exact-source, build-time workaround for upstream issue
 271: missing-client lookup fails cleanly, and one rejected frame cannot stop the
 rest of the room queue. The anchored patch intentionally fails the image build
-if a future package release changes either source seam, forcing the workaround
-to be reassessed rather than silently carried forward.
+if a future package release changes any backend or frontend seam, forcing the
+workarounds to be reassessed rather than silently carried forward.
 
 `jupyter-ai-acp-client` 0.2.1 logs every streamed message chunk at INFO — two
 lines per chunk, where a chunk is often a few characters — plus one line per

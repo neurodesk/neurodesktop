@@ -1,5 +1,7 @@
 """Build-time workaround contract for jupyter-server-documents issue #271."""
 
+import json
+
 import pytest
 
 from testlib import load_source_module, repo_path
@@ -55,6 +57,34 @@ def write_upstream_fixture(package_dir):
     (rooms_dir / "yroom.py").write_text(YROOM_SOURCE, encoding="utf-8")
 
 
+def write_frontend_fixture(labextension_dir, source):
+    static_dir = labextension_dir / "static"
+    static_dir.mkdir(parents=True)
+    bundle = static_dir / "278.aaaaaaaaaaaaaaaaaaaa.js"
+    bundle.write_text(source, encoding="utf-8")
+    remote_entry = static_dir / "remoteEntry.bbbbbbbbbbbbbbbbbbbb.js"
+    remote_entry.write_text(
+        'T.u=e=>e+"."+{278:"aaaaaaaaaaaaaaaaaaaa"}[e]+".js?v="+'
+        '{278:"aaaaaaaaaaaaaaaaaaaa"}[e]',
+        encoding="utf-8",
+    )
+    package_json = labextension_dir / "package.json"
+    package_json.write_text(
+        json.dumps(
+            {
+                "name": "@jupyter-ai-contrib/server-documents",
+                "jupyterlab": {
+                    "_build": {
+                        "load": "static/remoteEntry.bbbbbbbbbbbbbbbbbbbb.js"
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return bundle, remote_entry, package_json
+
+
 def test_patch_applies_both_issue_271_guards_and_is_idempotent(tmp_path):
     patcher = load_patcher_module()
     write_upstream_fixture(tmp_path)
@@ -85,6 +115,75 @@ def test_patch_refuses_anchor_drift_without_partial_changes(tmp_path):
 
     assert clients_path.read_text(encoding="utf-8") == "upstream changed\n"
     assert (tmp_path / "rooms/yroom.py").read_text(encoding="utf-8") == YROOM_SOURCE
+
+
+def test_patch_marks_server_executed_code_cells_trusted(tmp_path):
+    patcher = load_patcher_module()
+    original_bundle, original_remote_entry, package_json = write_frontend_fixture(
+        tmp_path, patcher.WIDGET_TRUST_BEFORE
+    )
+
+    assert patcher.patch_widget_trust(tmp_path)
+
+    load_path = json.loads(package_json.read_text(encoding="utf-8"))["jupyterlab"][
+        "_build"
+    ]["load"]
+    patched_remote_entry = tmp_path / load_path
+    assert patched_remote_entry != original_remote_entry
+    assert patched_remote_entry.exists()
+
+    patched_remote_text = patched_remote_entry.read_text(encoding="utf-8")
+    patched_bundles = [
+        path
+        for path in (tmp_path / "static").glob("278.*.js")
+        if path != original_bundle
+    ]
+    assert len(patched_bundles) == 1
+    patched_bundle = patched_bundles[0]
+    patched_hash = patched_bundle.name.split(".")[1]
+    assert patched_hash in patched_remote_text
+    assert "aaaaaaaaaaaaaaaaaaaa" not in patched_remote_text
+
+    patched = patched_bundle.read_text(encoding="utf-8")
+    assert patcher.WIDGET_TRUST_MARKER in patched
+    assert "e.model.trusted=!0" in patched
+    assert original_bundle.read_text(encoding="utf-8") == patcher.WIDGET_TRUST_BEFORE
+    assert (
+        original_remote_entry.read_text(encoding="utf-8")
+        == 'T.u=e=>e+"."+{278:"aaaaaaaaaaaaaaaaaaaa"}[e]+".js?v="+'
+        '{278:"aaaaaaaaaaaaaaaaaaaa"}[e]'
+    )
+    assert not patcher.patch_widget_trust(tmp_path)
+
+
+def test_widget_trust_patch_refuses_frontend_anchor_drift(tmp_path):
+    patcher = load_patcher_module()
+    bundle, _, _ = write_frontend_fixture(tmp_path, "upstream changed")
+
+    with pytest.raises(ValueError, match="cell trust anchor"):
+        patcher.patch_widget_trust(tmp_path)
+
+    assert bundle.read_text(encoding="utf-8") == "upstream changed"
+
+
+def test_widget_trust_patch_migrates_legacy_in_place_patch(tmp_path):
+    patcher = load_patcher_module()
+    legacy_bundle, legacy_remote_entry, package_json = write_frontend_fixture(
+        tmp_path, patcher.WIDGET_TRUST_AFTER
+    )
+
+    assert patcher.patch_widget_trust(tmp_path)
+
+    load_path = json.loads(package_json.read_text(encoding="utf-8"))["jupyterlab"][
+        "_build"
+    ]["load"]
+    patched_remote_entry = tmp_path / load_path
+    assert patched_remote_entry != legacy_remote_entry
+    assert patcher.WIDGET_CACHE_SAFE_MARKER in patched_remote_entry.read_text(
+        encoding="utf-8"
+    )
+    assert legacy_bundle.read_text(encoding="utf-8") == patcher.WIDGET_TRUST_AFTER
+    assert not patcher.patch_widget_trust(tmp_path)
 
 
 def test_dockerfile_applies_workaround_after_pinned_package_install():

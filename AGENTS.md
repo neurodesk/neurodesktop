@@ -88,11 +88,17 @@
   stays Python's call — two or more candidates send the directory rather
   than a guess — and run evidence appears without touching the spec, so the
   viewer needs its `Refresh` to see a job that finished.
-- When changing Notebook Intelligence or MyST pins or their frontend rebuilds,
-  run `pytest tests/unit/test_nbi_settings_patch.py
-  tests/unit/test_myst_build_workaround.py` from a checkout and `pytest
-  /opt/tests/test_nbi_labextension_patch.py` in the built image, and verify both
-  extensions are compatible in `jupyter labextension list --verbose`.
+- When changing Notebook Intelligence, MyST/RISE pins or frontend rebuilds, or
+  the standalone RISE page-config patch, run `pytest
+  tests/unit/test_nbi_settings_patch.py
+  tests/unit/test_myst_build_workaround.py
+  tests/unit/test_jupyterlab_rise_patch.py` from a checkout and `pytest
+  /opt/tests/test_nbi_labextension_patch.py
+  /opt/tests/test_rise_slides_image.py` in the built image, and verify both
+  extensions are compatible in `jupyter labextension list --verbose`. Keep
+  the standalone app confined to `jupyterlab-rise` and the MyST bundle built
+  against it; full JupyterLab extensions can require services RISE does not
+  provide or disable the notebook cell executor it needs.
 - When changing the Neurodesk launcher extension or how agent-authored
   absolute paths are routed into the JupyterLab main panel, run `pytest
   tests/unit/test_workspace_link_routing.py` from a checkout and `pytest
@@ -139,9 +145,15 @@
   /opt/tests/test_astra_jupyter_ai_image.py
   /opt/tests/test_widget_compatibility_image.py` in the built image, then verify
   `pip check`, `jupyter server extension list`, and `jupyter labextension list
-  --verbose` in that image. Keep Jupyter AI chat workspace seeding scoped to
-  `.chat` saves, never overwrite an existing `AGENTS.md`, and never make a seed
-  failure block the chat save. Keep the ACP adapters' vendored agent binaries
+  --verbose` in that image. Keep user-initiated server-side code execution
+  marking the cell trusted before its outputs arrive; otherwise unsafe rich
+  renderers fall back to `text/plain`. The widget image test must execute a
+  real widget through JupyterLab, not only inspect installed bundles. Publish
+  patched federated assets under new content-derived names; Jupyter serves
+  their original hashed URLs as immutable for one year. Keep
+  Jupyter AI chat workspace seeding scoped to `.chat` saves, never overwrite
+  an existing `AGENTS.md`, and never make a seed failure block the chat save.
+  Keep the ACP adapters' vendored agent binaries
   deleted after install (npm ignores omit-optional for global installs) and
   keep the adapters driving the image's own agent CLIs via `CODEX_PATH` and
   `CLAUDE_CODE_EXECUTABLE`; the vendored copies would otherwise add ~500 MB

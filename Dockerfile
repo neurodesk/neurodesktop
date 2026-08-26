@@ -1354,12 +1354,21 @@ RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_proxy.py,target
     install -m 0755 -o root -g users /tmp/patch_jupyter_server_proxy.py /opt/neurodesktop/patch_jupyter_server_proxy.py \
     && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_server_proxy.py
 
-# Upstream issue #271: a stale client frame can terminate a Jupyter AI chat
-# room's message queue. Keep this anchored workaround until a fixed
-# jupyter-server-documents release is pinned and validated.
+# jupyter-server-documents 0.3.3 has two pinned upstream defects: a stale
+# client frame can terminate a Jupyter AI chat room's queue, and its custom
+# cell executor leaves user-executed outputs untrusted. The frontend workaround
+# publishes new content-hashed assets because Jupyter serves bundles as
+# immutable. Keep these anchored workarounds until a fixed release is pinned.
 RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_documents.py,target=/tmp/patch_jupyter_server_documents.py,ro \
     install -m 0755 -o root -g users /tmp/patch_jupyter_server_documents.py /opt/neurodesktop/patch_jupyter_server_documents.py \
     && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_server_documents.py
+
+# RISE's standalone application has a smaller service set than JupyterLab.
+# Loading every installed federated extension lets collaboration and chat
+# disable or require services RISE does not provide, leaving a blank deck.
+RUN --mount=type=bind,source=config/jupyter/patch_jupyterlab_rise.py,target=/tmp/patch_jupyterlab_rise.py,ro \
+    install -m 0755 -o root -g users /tmp/patch_jupyterlab_rise.py /opt/neurodesktop/patch_jupyterlab_rise.py \
+    && /opt/conda/bin/python /opt/neurodesktop/patch_jupyterlab_rise.py
 
 # jupyter-server-mcp starts FastMCP through its own embedded runner and prints
 # the FastMCP banner unconditionally, ignoring the image's

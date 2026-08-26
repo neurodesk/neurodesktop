@@ -82,7 +82,7 @@ non-obvious tiers protect.
 | File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | `astra`/`lc` installs, Lightcone skills and hooks | `pytest tests/unit/test_astra_jupyter_ai_tooling.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
 | Jupyter AI, ACP personas, collaboration/widget compatibility and server patches | see [below](#jupyter-ai-and-acp-personas) | `pytest /opt/tests/test_astra_jupyter_ai_image.py /opt/tests/test_widget_compatibility_image.py` |
-| Notebook Intelligence / MyST pins and rebuilds | `pytest tests/unit/test_nbi_settings_patch.py tests/unit/test_myst_build_workaround.py` | `pytest /opt/tests/test_nbi_labextension_patch.py` |
+| Notebook Intelligence / MyST and standalone RISE | `pytest tests/unit/test_nbi_settings_patch.py tests/unit/test_myst_build_workaround.py tests/unit/test_jupyterlab_rise_patch.py` | `pytest /opt/tests/test_nbi_labextension_patch.py /opt/tests/test_rise_slides_image.py` |
 | Launcher extension, workspace link routing | `pytest tests/unit/test_workspace_link_routing.py` | `pytest /opt/tests/test_workspace_link_routing_image.py` |
 | Agentic workflows under `.github/workflows/*.md` | `pytest tests/unit/test_report_job_failure_action.py tests/unit/test_agentic_maintenance_workflows.py` | — |
 
@@ -156,7 +156,20 @@ seed failures do not block chat creation. The image test drives a real
 hook and ``/opt/AGENTS.md``. The widget image test inspects the installed
 JupyterLab manager bundle and requires its bounded late-model retry, because
 server-side notebook output and kernel widget comms travel over independently
-ordered WebSockets.
+ordered WebSockets. It also starts Jupyter Server and headless Firefox, runs an
+``IntSlider`` through the installed server-side cell executor, and requires a
+widget DOM instead of the unsafe renderer's ``text/plain`` fallback. The unit
+test also requires the workaround to publish a new content-hashed chunk and
+remote entry, so an immutable cached copy cannot conceal the fix.
+
+### MyST and standalone RISE
+
+The checkout tests guard the pinned MyST rebuild and the anchored RISE
+page-config patch. The image test starts the installed Jupyter Server, opens a
+real `/rise/<notebook>` URL in the image's headless Firefox through WebDriver
+BiDi, and waits for the first slide's text. An HTTP 200 response is insufficient:
+RISE can serve its shell while a frontend activation error leaves the page
+blank.
 
 ### ASTRA viewer
 
