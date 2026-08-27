@@ -158,8 +158,9 @@ JupyterLab manager bundle and requires its bounded late-model retry, because
 server-side notebook output and kernel widget comms travel over independently
 ordered WebSockets. It also starts Jupyter Server and headless Firefox, runs an
 ``HBox`` whose model comm is delayed for three seconds through the installed
-server-side cell executor, and requires a widget DOM instead of ``model not
-found`` or the unsafe renderer's ``text/plain`` fallback. Before clicking Run,
+server-side cell executor, and requires preceding repeated stream output plus
+a widget DOM instead of a YDoc output exception, ``model not found``, or the
+unsafe renderer's ``text/plain`` fallback. Before clicking Run,
 the test waits for the status bar to name the selected kernel and report
 ``Idle``. The notebook execution indicator alone can report ``idle`` before
 JupyterLab has created a kernel. The test also requires `ipykernel` 6.31.0 as

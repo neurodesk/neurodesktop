@@ -149,7 +149,9 @@
   --verbose` in that image. Keep user-initiated server-side code execution
   marking the cell trusted before its outputs arrive; otherwise unsafe rich
   renderers fall back to `text/plain`. The widget image test must execute a
-  delayed nested widget through JupyterLab, not only inspect installed bundles.
+  delayed nested widget through JupyterLab after repeated stream output, not
+  only inspect installed bundles. Keep notebook-room outputs as CRDT maps;
+  plain dictionaries break JupyterLab's next `appendStreamOutput()` update.
   Wait for the status bar to name the selected kernel and report `Idle` before
   clicking Run; the notebook execution indicator can report `idle` before a
   kernel exists.

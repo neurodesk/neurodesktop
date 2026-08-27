@@ -216,14 +216,17 @@ def test_widget_manager_waits_for_a_late_model_registration():
     assert "Date.now()-o<1e4" in bundles
 
 
-def test_server_side_execution_renders_a_widget(tmp_path: Path) -> None:
-    """A widget executed by the server-side cell executor renders as a widget."""
+def test_server_side_execution_renders_streams_and_a_widget(tmp_path: Path) -> None:
+    """Stream updates stay valid before a server-executed widget renders."""
     notebook = nbformat.v4.new_notebook(
         cells=[
             nbformat.v4.new_code_cell(
                 "import asyncio\n"
                 "import ipywidgets as widgets\n"
                 "from IPython.display import display\n"
+                "print('stream-before-widget-one', flush=True)\n"
+                "await asyncio.sleep(0.2)\n"
+                "print('stream-before-widget-two', flush=True)\n"
                 "model_id = 'delayed-hbox-model'\n"
                 "async def open_model_later():\n"
                 "    await asyncio.sleep(3)\n"
@@ -384,6 +387,9 @@ def test_server_side_execution_renders_a_widget(tmp_path: Path) -> None:
                 "plainTextFallback: [...document.querySelectorAll("
                 "'.jp-OutputArea-output[data-mime-type=\"text/plain\"]'"
                 ")].some(node => node.textContent.includes('VBox(')),"
+                "streamText: document.body.innerText.includes("
+                "'stream-before-widget-one') && document.body.innerText.includes("
+                "'stream-before-widget-two'),"
                 "widgetBoxes: document.querySelectorAll("
                 "'.jupyter-widgets.widget-box'"
                 ").length"
@@ -394,8 +400,16 @@ def test_server_side_execution_renders_a_widget(tmp_path: Path) -> None:
         assert output == {
             "modelError": False,
             "plainTextFallback": False,
+            "streamText": True,
             "widgetBoxes": 1,
         }
+        browser_errors = [
+            event["params"]["text"]
+            for event in bidi.events
+            if event.get("method") == "log.entryAdded"
+            and event["params"].get("level") == "error"
+        ]
+        assert not any("_youtputs" in error for error in browser_errors), browser_errors
     finally:
         if bidi is not None:
             bidi.close()

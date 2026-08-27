@@ -11,7 +11,12 @@ Its server-side notebook executor also bypasses JupyterLab's normal
 trusted. Rich output renderers such as ipywidgets are unsafe for untrusted
 cells, so JupyterLab falls back to their ``text/plain`` representation.
 
-The upstream fixes have not been released. Patch all three failure seams at
+When the outputs service is disabled for a notebook room, the same executor
+appends plain Python dictionaries to the cell's CRDT output array. JupyterLab
+expects every entry there to be a Y.Map, so a following stream update fails in
+``appendStreamOutput()`` before later rich output can render.
+
+The upstream fixes have not been released. Patch all four failure seams at
 image build time. Exact anchors make a future package update fail loudly
 instead of silently retaining or misapplying these workarounds.
 """
@@ -28,6 +33,7 @@ from pathlib import Path
 
 CLIENT_LOOKUP_MARKER = "neurodesktop-issue-271-client-lookup"
 QUEUE_GUARD_MARKER = "neurodesktop-issue-271-queue-guard"
+YDOC_OUTPUT_MARKER = "neurodesktop-crdt-notebook-output"
 WIDGET_TRUST_MARKER = "neurodesktop-server-execution-trust"
 WIDGET_CACHE_SAFE_MARKER = "neurodesktop-widget-cache-safe-entry"
 
@@ -69,6 +75,16 @@ QUEUE_GUARD_AFTER = f"""            client_id, message = queue_item
                 self._message_queue.task_done()
 """
 
+YDOC_OUTPUT_BEFORE = """        else:
+            output = self.transform_output(msg_type, content, ydoc=False)
+"""
+
+YDOC_OUTPUT_AFTER = f"""        else:
+            # {YDOC_OUTPUT_MARKER}
+            # The notebook Y.Array requires a pycrdt.Map, not a plain dict.
+            output = self.transform_output(msg_type, content, ydoc=True)
+"""
+
 WIDGET_TRUST_BEFORE = (
     'if("code"!==e.model.type)return"markdown"===e.model.type&&'
     '(e.rendered=!0,e.inputHidden=!1),s({cell:e,success:!0}),!0;'
@@ -108,36 +124,56 @@ def patch_package(package_dir: Path) -> bool:
     package_dir = Path(package_dir)
     clients_path = package_dir / "websockets" / "clients.py"
     yroom_path = package_dir / "rooms" / "yroom.py"
+    output_processor_path = package_dir / "outputs" / "output_processor.py"
     clients_text = clients_path.read_text(encoding="utf-8")
     yroom_text = yroom_path.read_text(encoding="utf-8")
+    output_processor_text = output_processor_path.read_text(encoding="utf-8")
 
     client_patched = CLIENT_LOOKUP_MARKER in clients_text
     queue_patched = QUEUE_GUARD_MARKER in yroom_text
-    if client_patched and queue_patched:
-        return False
     if client_patched != queue_patched:
         raise ValueError("partial issue #271 workaround detected; refusing to continue")
 
-    if clients_text.count(CLIENT_LOOKUP_BEFORE) != 1:
+    issue_271_changed = not client_patched
+    if issue_271_changed:
+        if clients_text.count(CLIENT_LOOKUP_BEFORE) != 1:
+            raise ValueError(
+                "client lookup anchor did not match exactly once; "
+                "reassess the upstream issue #271 workaround"
+            )
+        if yroom_text.count(QUEUE_GUARD_BEFORE) != 1:
+            raise ValueError(
+                "message queue anchor did not match exactly once; "
+                "reassess the upstream issue #271 workaround"
+            )
+
+    output_patched = YDOC_OUTPUT_MARKER in output_processor_text
+    if output_patched:
+        if output_processor_text.count(YDOC_OUTPUT_AFTER) != 1:
+            raise ValueError(
+                "CRDT output workaround is incomplete; refusing to continue"
+            )
+    elif output_processor_text.count(YDOC_OUTPUT_BEFORE) != 1:
         raise ValueError(
-            "client lookup anchor did not match exactly once; "
-            "reassess the upstream issue #271 workaround"
-        )
-    if yroom_text.count(QUEUE_GUARD_BEFORE) != 1:
-        raise ValueError(
-            "message queue anchor did not match exactly once; "
-            "reassess the upstream issue #271 workaround"
+            "notebook output anchor did not match exactly once; "
+            "reassess the CRDT output workaround"
         )
 
-    clients_path.write_text(
-        clients_text.replace(CLIENT_LOOKUP_BEFORE, CLIENT_LOOKUP_AFTER),
-        encoding="utf-8",
-    )
-    yroom_path.write_text(
-        yroom_text.replace(QUEUE_GUARD_BEFORE, QUEUE_GUARD_AFTER),
-        encoding="utf-8",
-    )
-    return True
+    if issue_271_changed:
+        clients_path.write_text(
+            clients_text.replace(CLIENT_LOOKUP_BEFORE, CLIENT_LOOKUP_AFTER),
+            encoding="utf-8",
+        )
+        yroom_path.write_text(
+            yroom_text.replace(QUEUE_GUARD_BEFORE, QUEUE_GUARD_AFTER),
+            encoding="utf-8",
+        )
+    if not output_patched:
+        output_processor_path.write_text(
+            output_processor_text.replace(YDOC_OUTPUT_BEFORE, YDOC_OUTPUT_AFTER),
+            encoding="utf-8",
+        )
+    return issue_271_changed or not output_patched
 
 
 def patch_widget_trust(labextension_dir: Path) -> bool:

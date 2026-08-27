@@ -39,6 +39,35 @@ YROOM_SOURCE = '''class YRoom:
             self._message_queue.task_done()
 '''
 
+OUTPUT_PROCESSOR_SOURCE = '''from pycrdt import Map
+
+
+class OutputProcessor:
+    def _write_output(
+        self,
+        msg_type: str,
+        ycell,
+        file_id: str | None,
+        cell_id: str,
+        content: dict,
+    ):
+        if self.use_outputs_service and file_id:
+            output = self.transform_output(msg_type, content, ydoc=False)
+            output = self.outputs_manager.write(
+                file_id=file_id,
+                cell_id=cell_id,
+                output=output,
+            )
+        else:
+            output = self.transform_output(msg_type, content, ydoc=False)
+
+        if output is None:
+            return
+
+        outputs = ycell["outputs"]
+        outputs.append(output)
+'''
+
 
 def load_patcher_module():
     return load_source_module(
@@ -51,10 +80,15 @@ def load_patcher_module():
 def write_upstream_fixture(package_dir):
     websocket_dir = package_dir / "websockets"
     rooms_dir = package_dir / "rooms"
+    outputs_dir = package_dir / "outputs"
     websocket_dir.mkdir(parents=True)
     rooms_dir.mkdir(parents=True)
+    outputs_dir.mkdir(parents=True)
     (websocket_dir / "clients.py").write_text(CLIENTS_SOURCE, encoding="utf-8")
     (rooms_dir / "yroom.py").write_text(YROOM_SOURCE, encoding="utf-8")
+    (outputs_dir / "output_processor.py").write_text(
+        OUTPUT_PROCESSOR_SOURCE, encoding="utf-8"
+    )
 
 
 def write_frontend_fixture(labextension_dir, source):
@@ -85,7 +119,7 @@ def write_frontend_fixture(labextension_dir, source):
     return bundle, remote_entry, package_json
 
 
-def test_patch_applies_both_issue_271_guards_and_is_idempotent(tmp_path):
+def test_patch_applies_backend_guards_and_crdt_outputs_and_is_idempotent(tmp_path):
     patcher = load_patcher_module()
     write_upstream_fixture(tmp_path)
 
@@ -93,6 +127,9 @@ def test_patch_applies_both_issue_271_guards_and_is_idempotent(tmp_path):
 
     clients = (tmp_path / "websockets/clients.py").read_text(encoding="utf-8")
     yroom = (tmp_path / "rooms/yroom.py").read_text(encoding="utf-8")
+    output_processor = (tmp_path / "outputs/output_processor.py").read_text(
+        encoding="utf-8"
+    )
     assert patcher.CLIENT_LOOKUP_MARKER in clients
     assert "self.synced.get(client_id) or self.desynced.get(client_id)" in clients
     assert "if client and client.websocket" in clients
@@ -100,6 +137,8 @@ def test_patch_applies_both_issue_271_guards_and_is_idempotent(tmp_path):
     assert "except Exception:" in yroom
     assert "finally:" in yroom
     assert "self._message_queue.task_done()" in yroom
+    assert patcher.YDOC_OUTPUT_MARKER in output_processor
+    assert "self.transform_output(msg_type, content, ydoc=True)" in output_processor
 
     assert not patcher.patch_package(tmp_path)
 
@@ -115,6 +154,9 @@ def test_patch_refuses_anchor_drift_without_partial_changes(tmp_path):
 
     assert clients_path.read_text(encoding="utf-8") == "upstream changed\n"
     assert (tmp_path / "rooms/yroom.py").read_text(encoding="utf-8") == YROOM_SOURCE
+    assert (
+        tmp_path / "outputs/output_processor.py"
+    ).read_text(encoding="utf-8") == OUTPUT_PROCESSOR_SOURCE
 
 
 def test_patch_marks_server_executed_code_cells_trusted(tmp_path):
