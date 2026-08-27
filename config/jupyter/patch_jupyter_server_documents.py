@@ -14,10 +14,12 @@ cells, so JupyterLab falls back to their ``text/plain`` representation.
 When the outputs service is disabled for a notebook room, the same executor
 appends plain Python dictionaries to the cell's CRDT output array. JupyterLab
 expects every entry there to be a Y.Map and a stream output's ``text`` value to
-be a Y.Text. Otherwise a following stream update fails in
-``appendStreamOutput()`` before later rich output can render.
+be a Y.Text. It also expects consecutive stream messages to update that one
+Y.Text. Appending a new Y.Map per fragment makes JupyterLab combine the records
+locally and echo the same text back into the room, so a replay duplicates
+fragments and can call ``appendStreamOutput()`` before an output exists.
 
-The upstream fixes have not been released. Patch all four failure seams at
+The upstream fixes have not been released. Patch all five failure seams at
 image build time. Exact anchors make a future package update fail loudly
 instead of silently retaining or misapplying these workarounds.
 """
@@ -36,6 +38,7 @@ CLIENT_LOOKUP_MARKER = "neurodesktop-issue-271-client-lookup"
 QUEUE_GUARD_MARKER = "neurodesktop-issue-271-queue-guard"
 YDOC_OUTPUT_MARKER = "neurodesktop-crdt-notebook-output"
 YDOC_STREAM_TEXT_MARKER = "neurodesktop-crdt-stream-text"
+YDOC_STREAM_MERGE_MARKER = "neurodesktop-crdt-stream-merge"
 WIDGET_TRUST_MARKER = "neurodesktop-server-execution-trust"
 WIDGET_CACHE_SAFE_MARKER = "neurodesktop-widget-cache-safe-entry"
 
@@ -108,6 +111,110 @@ YDOC_STREAM_TEXT_AFTER = f'''        if msg_type == "stream":
             }})
 '''
 
+YDOC_STREAM_WRITE_BEFORE = '''        display_id = content.get("transient", {}).get("display_id")
+'''
+
+YDOC_STREAM_WRITE_AFTER = f'''        if msg_type == "stream" and not self.use_outputs_service:
+            # {YDOC_STREAM_MERGE_MARKER}
+            # A notebook room stores one CRDT stream output per contiguous
+            # stdout/stderr run. Appending one map per kernel fragment makes
+            # JupyterLab merge it locally and echo the fragment into Y.Text a
+            # second time, which duplicates output when another client joins.
+            self._write_ydoc_stream(ycell, cell_id, content)
+            return
+
+        self._discard_stream_position(cell_id)
+        display_id = content.get("transient", {{}}).get("display_id")
+'''
+
+YDOC_STREAM_HELPERS_BEFORE = '''    def _clear_ycell_outputs(self, ycell, file_id: str | None, cell_id: str):
+'''
+
+YDOC_STREAM_HELPERS_AFTER = '''    @staticmethod
+    def _process_stream_text(index: int, new_text: str, text: str = ""):
+        """Apply JupyterLab's stream cursor rules and return text plus cursor."""
+        if not any(char in new_text for char in "\\b\\r\\n"):
+            text = text[:index] + new_text + text[index + len(new_text):]
+            return text, index + len(new_text)
+
+        cursor = index
+        offset = 0
+        while offset < len(new_text):
+            control_positions = [
+                position
+                for char in "\\n\\b\\r"
+                if (position := new_text.find(char, offset)) >= 0
+            ]
+            control = min(control_positions) if control_positions else len(new_text)
+            prefix = new_text[offset:control]
+            text = text[:cursor] + prefix + text[cursor + len(prefix):]
+            cursor += len(prefix)
+            if control == len(new_text):
+                break
+
+            char = new_text[control]
+            offset = control + 1
+            if char == "\\b":
+                if cursor > 0 and text[cursor - 1] != "\\n":
+                    text = text[:cursor - 1] + text[cursor + 1:]
+                    cursor -= 1
+            elif char == "\\r":
+                cursor = text.rfind("\\n", 0, cursor) + 1
+            else:
+                text += "\\n"
+                cursor = len(text)
+        return text, cursor
+
+    def _stream_positions(self):
+        positions = getattr(self, "_neurodesktop_stream_positions", None)
+        if positions is None:
+            positions = self._neurodesktop_stream_positions = {}
+        return positions
+
+    def _discard_stream_position(self, cell_id: str) -> None:
+        self._stream_positions().pop(cell_id, None)
+
+    def _write_ydoc_stream(self, ycell, cell_id: str, content: dict) -> None:
+        outputs = ycell["outputs"]
+        name = content["name"]
+        new_text = content["text"]
+        positions = self._stream_positions()
+        last = outputs[-1] if len(outputs) else None
+        if (
+            last is not None
+            and last.get("output_type") == "stream"
+            and last.get("name") == name
+            and isinstance(last.get("text"), Text)
+        ):
+            ytext = last["text"]
+            current = str(ytext)
+            state = positions.get(cell_id)
+            index = state[1] if state and state[0] == current else len(current)
+            updated, index = self._process_stream_text(index, new_text, current)
+            prefix = 0
+            while (
+                prefix < len(current)
+                and prefix < len(updated)
+                and current[prefix] == updated[prefix]
+            ):
+                prefix += 1
+            if prefix < len(current):
+                del ytext[prefix:]
+            if prefix < len(updated):
+                ytext.insert(prefix, updated[prefix:])
+        else:
+            updated, index = self._process_stream_text(0, new_text)
+            outputs.append(Map({
+                "output_type": "stream",
+                "text": Text(updated),
+                "name": name,
+            }))
+        positions[cell_id] = (updated, index)
+
+    def _clear_ycell_outputs(self, ycell, file_id: str | None, cell_id: str):
+        self._discard_stream_position(cell_id)
+'''
+
 WIDGET_TRUST_BEFORE = (
     'if("code"!==e.model.type)return"markdown"===e.model.type&&'
     '(e.rendered=!0,e.inputHidden=!1),s({cell:e,success:!0}),!0;'
@@ -172,7 +279,8 @@ def patch_package(package_dir: Path) -> bool:
 
     output_patched = YDOC_OUTPUT_MARKER in output_processor_text
     stream_text_patched = YDOC_STREAM_TEXT_MARKER in output_processor_text
-    if output_patched != stream_text_patched:
+    stream_merge_patched = YDOC_STREAM_MERGE_MARKER in output_processor_text
+    if len({output_patched, stream_text_patched, stream_merge_patched}) != 1:
         raise ValueError(
             "partial CRDT output workaround detected; refusing to continue"
         )
@@ -181,6 +289,8 @@ def patch_package(package_dir: Path) -> bool:
             output_processor_text.count(YDOC_OUTPUT_AFTER) != 1
             or output_processor_text.count(YDOC_IMPORT_AFTER) != 1
             or output_processor_text.count(YDOC_STREAM_TEXT_AFTER) != 1
+            or output_processor_text.count(YDOC_STREAM_WRITE_AFTER) != 1
+            or output_processor_text.count(YDOC_STREAM_HELPERS_AFTER) != 1
         ):
             raise ValueError(
                 "CRDT output workaround is incomplete; refusing to continue"
@@ -189,6 +299,8 @@ def patch_package(package_dir: Path) -> bool:
         output_processor_text.count(YDOC_OUTPUT_BEFORE) != 1
         or output_processor_text.count(YDOC_IMPORT_BEFORE) != 1
         or output_processor_text.count(YDOC_STREAM_TEXT_BEFORE) != 1
+        or output_processor_text.count(YDOC_STREAM_WRITE_BEFORE) != 1
+        or output_processor_text.count(YDOC_STREAM_HELPERS_BEFORE) != 1
     ):
         raise ValueError(
             "notebook output anchor did not match exactly once; "
@@ -208,7 +320,9 @@ def patch_package(package_dir: Path) -> bool:
         output_processor_path.write_text(
             output_processor_text.replace(YDOC_IMPORT_BEFORE, YDOC_IMPORT_AFTER)
             .replace(YDOC_OUTPUT_BEFORE, YDOC_OUTPUT_AFTER)
-            .replace(YDOC_STREAM_TEXT_BEFORE, YDOC_STREAM_TEXT_AFTER),
+            .replace(YDOC_STREAM_TEXT_BEFORE, YDOC_STREAM_TEXT_AFTER)
+            .replace(YDOC_STREAM_WRITE_BEFORE, YDOC_STREAM_WRITE_AFTER)
+            .replace(YDOC_STREAM_HELPERS_BEFORE, YDOC_STREAM_HELPERS_AFTER),
             encoding="utf-8",
         )
     return issue_271_changed or not output_patched

@@ -98,9 +98,13 @@ dictionaries before appending them to the cell's CRDT output array. JupyterLab
 expects each entry to remain a Y.Map and each stream output's ``text`` value to
 remain a Y.Text. A plain dictionary fails when `appendStreamOutput()` calls the
 missing map `get()` method; a Y.Map containing a plain string fails on the next
-call to the missing text `insert()` method. The backend patch keeps the
-outputs-service representation unchanged but requests CRDT maps and constructs
-CRDT stream text for the in-notebook path.
+call to the missing text `insert()` method. Consecutive stream messages must
+also update one CRDT output. Separate maps make JupyterLab merge the fragments
+locally and write the same fragment back into the room, which duplicates text
+when another client joins and can apply a stream delta before its output row.
+The backend patch keeps the outputs-service representation unchanged, requests
+CRDT maps, constructs CRDT stream text, and processes carriage returns while
+coalescing each contiguous stdout or stderr run into one map.
 
 The same server-side executor bypasses JupyterLab's normal code-cell execution
 path, which marks a cell trusted before its outputs arrive. Without that state,

@@ -216,6 +216,58 @@ def test_widget_manager_waits_for_a_late_model_registration():
     assert "Date.now()-o<1e4" in bundles
 
 
+def test_server_side_stream_fragments_are_one_replay_safe_crdt_output() -> None:
+    """The notebook room stores one processed output per contiguous stream."""
+    from jupyter_server_documents.outputs.output_processor import OutputProcessor
+    from pycrdt import Array, Doc, Map, Text
+
+    document = Doc({"cell": Map({"outputs": Array()})})
+    cell = document["cell"]
+    processor = OutputProcessor()
+    processor.use_outputs_service = False
+
+    def write(text: str) -> None:
+        processor.process_output(
+            "stream",
+            cell,
+            file_id=None,
+            cell_id="stream-cell",
+            content={"name": "stdout", "text": text},
+        )
+
+    write("stream-run-1\n")
+    for fragment in range(20):
+        write(f"\rstream-fragment-{fragment:02d}")
+    write("\n")
+    write("stream-end\n")
+
+    outputs = cell["outputs"]
+    assert len(outputs) == 1
+    assert isinstance(outputs[0], Map)
+    assert isinstance(outputs[0]["text"], Text)
+    assert str(outputs[0]["text"]) == (
+        "stream-run-1\nstream-fragment-19\nstream-end\n"
+    )
+
+    # A cleared re-execution starts with a fresh cursor and still produces one
+    # output. This mirrors YNotebookRoom clearing the array before execution.
+    del outputs[:]
+    write("stream-run-2\n")
+    write("abc\rX")
+    write("Y\n")
+    write("stream-end\n")
+    assert len(outputs) == 1
+    assert str(outputs[0]["text"]) == "stream-run-2\nXYc\nstream-end\n"
+
+    # A joining client must reconstruct one complete stream map. Multiple
+    # adjacent maps trigger JupyterLab's local combine-and-echo replay bug.
+    replay = Doc({"cell": Map({"outputs": Array()})})
+    replay.apply_update(document.get_update())
+    replay_outputs = replay["cell"]["outputs"]
+    assert len(replay_outputs) == 1
+    assert str(replay_outputs[0]["text"]) == "stream-run-2\nXYc\nstream-end\n"
+
+
 def test_server_side_execution_renders_streams_and_a_widget(tmp_path: Path) -> None:
     """Stream updates stay valid before a server-executed widget renders."""
     notebook = nbformat.v4.new_notebook(
@@ -225,12 +277,16 @@ def test_server_side_execution_renders_streams_and_a_widget(tmp_path: Path) -> N
                 "import sys\n"
                 "import ipywidgets as widgets\n"
                 "from IPython.display import display\n"
+                "widget_run = globals().get('_widget_regression_run', 0) + 1\n"
+                "_widget_regression_run = widget_run\n"
+                "print(f'stream-run-{widget_run}')\n"
                 "for fragment in range(20):\n"
                 "    sys.stdout.write(f'\\rstream-fragment-{fragment:02d}')\n"
                 "    sys.stdout.flush()\n"
                 "    await asyncio.sleep(0.05)\n"
                 "print()\n"
-                "model_id = 'delayed-hbox-model'\n"
+                "print('stream-end')\n"
+                "model_id = f'delayed-hbox-model-{widget_run}'\n"
                 "async def open_model_later():\n"
                 "    await asyncio.sleep(3)\n"
                 "    return widgets.HBox([\n"
@@ -379,6 +435,7 @@ def test_server_side_execution_renders_streams_and_a_widget(tmp_path: Path) -> N
             ")",
             timeout=45,
         )
+        expected_stream = "stream-run-1\nstream-fragment-19\nstream-end\n"
         output = json.loads(
             bidi.evaluate(
                 context,
@@ -392,6 +449,9 @@ def test_server_side_execution_renders_streams_and_a_widget(tmp_path: Path) -> N
                 ")].some(node => node.textContent.includes('VBox(')),"
                 "streamText: document.body.innerText.includes("
                 "'stream-fragment-19'),"
+                "streamOutputs: [...document.querySelectorAll("
+                "'.jp-OutputArea-output[data-mime-type=\"application/vnd.jupyter.stdout\"]'"
+                ")].map(node => node.textContent),"
                 "widgetBoxes: document.querySelectorAll("
                 "'.jupyter-widgets.widget-box'"
                 ").length"
@@ -403,8 +463,76 @@ def test_server_side_execution_renders_streams_and_a_widget(tmp_path: Path) -> N
             "modelError": False,
             "plainTextFallback": False,
             "streamText": True,
+            "streamOutputs": [expected_stream],
             "widgetBoxes": 1,
         }
+
+        # Re-execution clears the cell before writing a new fragmented stream.
+        # The second run must replace the first output rather than replaying any
+        # of its fragments.
+        _click_dom_element(
+            bidi,
+            context,
+            "[...document.querySelectorAll('[role=menuitem]')]"
+            ".find(node => node.textContent.trim() === 'Run')",
+        )
+        _click_dom_element(
+            bidi,
+            context,
+            "[...document.querySelectorAll('[role=menuitem]')]"
+            ".find(node => node.textContent.trim() === 'Run All Cells')",
+        )
+        expected_stream = "stream-run-2\nstream-fragment-19\nstream-end\n"
+        _wait_for_expression(
+            bidi,
+            context,
+            "document.body.innerText.includes('stream-run-2') && "
+            "document.body.innerText.includes('stream-fragment-19')",
+            timeout=45,
+        )
+        stream_outputs = json.loads(
+            bidi.evaluate(
+                context,
+                "JSON.stringify([...document.querySelectorAll("
+                "'.jp-OutputArea-output[data-mime-type=\"application/vnd.jupyter.stdout\"]'"
+                ")].map(node => node.textContent))",
+            )
+        )
+        assert stream_outputs == [expected_stream]
+
+        # A second JupyterLab client replays the populated notebook room. It
+        # must receive the same single stream output without duplicating the
+        # suffix while reconstructing its local output model.
+        replay_context = bidi.request("browsingContext.create", {"type": "tab"})[
+            "context"
+        ]
+        bidi.request(
+            "browsingContext.navigate",
+            {
+                "context": replay_context,
+                "url": (
+                    f"http://127.0.0.1:{server_port}/lab/tree/widget.ipynb"
+                    f"?token={token}"
+                ),
+                "wait": "complete",
+            },
+        )
+        _wait_for_expression(
+            bidi,
+            replay_context,
+            "document.body.innerText.includes('stream-run-2') && "
+            "document.body.innerText.includes('stream-fragment-19')",
+            timeout=45,
+        )
+        replay_stream_outputs = json.loads(
+            bidi.evaluate(
+                replay_context,
+                "JSON.stringify([...document.querySelectorAll("
+                "'.jp-OutputArea-output[data-mime-type=\"application/vnd.jupyter.stdout\"]'"
+                ")].map(node => node.textContent))",
+            )
+        )
+        assert replay_stream_outputs == [expected_stream]
         browser_errors = [
             event["params"]["text"]
             for event in bidi.events

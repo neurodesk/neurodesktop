@@ -51,6 +51,8 @@ class OutputProcessor:
         cell_id: str,
         content: dict,
     ):
+        display_id = content.get("transient", {}).get("display_id")
+
         if self.use_outputs_service and file_id:
             output = self.transform_output(msg_type, content, ydoc=False)
             output = self.outputs_manager.write(
@@ -66,6 +68,11 @@ class OutputProcessor:
 
         outputs = ycell["outputs"]
         outputs.append(output)
+
+    def _clear_ycell_outputs(self, ycell, file_id: str | None, cell_id: str):
+        del ycell["outputs"][:]
+        if self.use_outputs_service and file_id:
+            self.outputs_manager.clear(file_id=file_id, cell_id=cell_id)
 
     def transform_output(self, msg_type: str, content: dict, ydoc: bool = False):
         factory = Map if ydoc else (lambda x: x)
@@ -150,10 +157,15 @@ def test_patch_applies_backend_guards_and_crdt_outputs_and_is_idempotent(tmp_pat
     assert patcher.YDOC_OUTPUT_MARKER in output_processor
     assert "self.transform_output(msg_type, content, ydoc=True)" in output_processor
     assert patcher.YDOC_STREAM_TEXT_MARKER in output_processor
+    assert patcher.YDOC_STREAM_MERGE_MARKER in output_processor
     assert "from pycrdt import Map, Text" in output_processor
     assert 'text = Text(content["text"]) if ydoc else content["text"]' in (
         output_processor
     )
+    assert "self._write_ydoc_stream(ycell, cell_id, content)" in output_processor
+    assert "last.get(\"output_type\") == \"stream\"" in output_processor
+    assert "updated, index = self._process_stream_text(" in output_processor
+    assert "self._discard_stream_position(cell_id)" in output_processor
 
     assert not patcher.patch_package(tmp_path)
 
