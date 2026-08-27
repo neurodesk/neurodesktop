@@ -617,6 +617,9 @@ RUN apt-install-retry build-essential \
     astra-tools==${ASTRA_TOOLS_VERSION} \
     anywidget==${ANYWIDGET_VERSION} \
     uv==${UV_VERSION} \
+    # Keep widget comms on the stable main-shell path while JupyterLab's
+    # per-target comm subshell support remains experimental.
+    ipykernel==6.31.0 \
     # 8.1.9/3.0.17 make the frontend wait briefly when Yjs-delivered output
     # reaches it before the widget model's kernel comm (ipywidgets #4026).
     ipywidgets==8.1.9 \

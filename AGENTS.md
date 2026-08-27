@@ -150,6 +150,12 @@
   marking the cell trusted before its outputs arrive; otherwise unsafe rich
   renderers fall back to `text/plain`. The widget image test must execute a
   delayed nested widget through JupyterLab, not only inspect installed bundles.
+  Wait for the status bar to name the selected kernel and report `Idle` before
+  clicking Run; the notebook execution indicator can report `idle` before a
+  kernel exists.
+  Keep `ipykernel` on the stable 6.x line until its experimental comm subshells
+  can create a per-target subshell for delayed server-executed widgets without
+  canceling the control future.
   Keep the late-model wait bounded at ten seconds; the upstream two-second wait
   is too short for complex output over the independent WebSockets. Publish
   patched federated assets under new content-derived names; Jupyter serves

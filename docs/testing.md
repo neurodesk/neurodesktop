@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-08-25"
+last-reviewed: "2026-08-26"
 ---
 
 # Testing
@@ -159,9 +159,13 @@ server-side notebook output and kernel widget comms travel over independently
 ordered WebSockets. It also starts Jupyter Server and headless Firefox, runs an
 ``HBox`` whose model comm is delayed for three seconds through the installed
 server-side cell executor, and requires a widget DOM instead of ``model not
-found`` or the unsafe renderer's ``text/plain`` fallback. The unit tests also
-require both frontend workarounds to publish new content-hashed chunks and
-remote entries, so an immutable cached copy cannot conceal either fix.
+found`` or the unsafe renderer's ``text/plain`` fallback. Before clicking Run,
+the test waits for the status bar to name the selected kernel and report
+``Idle``. The notebook execution indicator alone can report ``idle`` before
+JupyterLab has created a kernel. The test also requires `ipykernel` 6.31.0 as
+the stable main-shell widget-comm path. The unit tests require both frontend
+workarounds to publish new content-hashed chunks and remote entries, so an
+immutable cached copy cannot conceal either fix.
 
 ### MyST and standalone RISE
 

@@ -95,3 +95,10 @@ def test_dockerfile_applies_widget_patch_after_package_install():
         "/opt/conda/bin/python /opt/neurodesktop/patch_jupyterlab_widgets.py"
     )
     assert package_pin < patch_run
+
+
+def test_dockerfile_pins_ipykernel_before_experimental_subshells():
+    """Widget comms stay on the stable main-shell path."""
+    dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
+
+    assert "ipykernel==6.31.0" in dockerfile

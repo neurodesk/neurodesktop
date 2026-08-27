@@ -42,24 +42,6 @@ def _wait_for_server(
     pytest.fail("Jupyter Server did not become ready")
 
 
-def _start_notebook_session(base_url: str, token: str) -> None:
-    request = urllib.request.Request(
-        f"{base_url}/api/sessions?token={token}",
-        data=json.dumps(
-            {
-                "kernel": {"name": "conda-base-py"},
-                "name": "widget.ipynb",
-                "path": "widget.ipynb",
-                "type": "notebook",
-            }
-        ).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        assert response.status == 201
-
-
 class _BidiSession:
     def __init__(self, url: str, firefox: subprocess.Popen[str]) -> None:
         deadline = time.monotonic() + 30
@@ -206,6 +188,7 @@ def test_widget_manager_waits_for_a_late_model_registration():
     missing model briefly instead of permanently rendering ``model not found``
     (or waiting forever at ``Loading widget...``).
     """
+    assert importlib.metadata.version("ipykernel") == "6.31.0"
     assert importlib.metadata.version("ipywidgets") == "8.1.9"
     assert importlib.metadata.version("jupyterlab_widgets") == "3.0.17"
 
@@ -325,7 +308,6 @@ def test_server_side_execution_renders_a_widget(tmp_path: Path) -> None:
             server,
             server_log_path,
         )
-        _start_notebook_session(f"http://127.0.0.1:{server_port}", token)
         bidi = _BidiSession(f"ws://127.0.0.1:{firefox_port}/session", firefox)
         bidi.request("session.new", {"capabilities": {}})
         bidi.request("session.subscribe", {"events": ["log.entryAdded"]})
@@ -351,8 +333,9 @@ def test_server_side_execution_renders_a_widget(tmp_path: Path) -> None:
         _wait_for_expression(
             bidi,
             context,
-            "document.querySelector('.jp-Notebook-ExecutionIndicator')"
-            "?.dataset.status === 'idle'",
+            "document.body.innerText.includes("
+            "'Python [conda env:base] * | Idle'"
+            ")",
         )
         assert bidi.evaluate(
             context,

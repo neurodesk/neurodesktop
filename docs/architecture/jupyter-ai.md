@@ -4,7 +4,7 @@ description: The ACP-native Jupyter AI chat surface, its Claude/Codex/OpenCode
   personas, workspace seeding, and collaboration-stack workarounds
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-25"
+last-reviewed: "2026-08-26"
 ---
 
 # Jupyter AI
@@ -78,7 +78,9 @@ Its server-side notebook execution sends cell outputs over the Yjs WebSocket,
 while widget model comms still use the kernel WebSocket. Those independent
 channels can deliver a widget view before its model, which `ipywidgets` 8.1.8
 made permanent as `Error displaying widget: model not found` or `Loading
-widget...`. Neurodesktop pins `ipywidgets` 8.1.9 and
+widget...`. Neurodesktop pins `ipykernel` 6.31.0 so widget comms stay on the
+main shell instead of using JupyterLab's experimental per-target comm
+subshells. Neurodesktop also pins `ipywidgets` 8.1.9 and
 `jupyterlab_widgets` 3.0.17, whose widget manager waits briefly for late model
 registration. Its upstream two-second bound is still too short for complex
 layouts such as a ``VBox`` containing delayed ``HBox`` models. Neurodesktop
