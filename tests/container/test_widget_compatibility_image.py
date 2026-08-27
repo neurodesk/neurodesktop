@@ -261,9 +261,11 @@ def test_server_side_stream_fragments_are_one_replay_safe_crdt_output() -> None:
 
     # A joining client must reconstruct one complete stream map. Multiple
     # adjacent maps trigger JupyterLab's local combine-and-echo replay bug.
-    replay = Doc({"cell": Map({"outputs": Array()})})
+    replay = Doc()
+    # Register the shared root without creating competing local cell contents.
+    replay_cell = replay.get("cell", type=Map)
     replay.apply_update(document.get_update())
-    replay_outputs = replay["cell"]["outputs"]
+    replay_outputs = replay_cell["outputs"]
     assert len(replay_outputs) == 1
     assert str(replay_outputs[0]["text"]) == "stream-run-2\nXYc\nstream-end\n"
 
