@@ -13,7 +13,8 @@ cells, so JupyterLab falls back to their ``text/plain`` representation.
 
 When the outputs service is disabled for a notebook room, the same executor
 appends plain Python dictionaries to the cell's CRDT output array. JupyterLab
-expects every entry there to be a Y.Map, so a following stream update fails in
+expects every entry there to be a Y.Map and a stream output's ``text`` value to
+be a Y.Text. Otherwise a following stream update fails in
 ``appendStreamOutput()`` before later rich output can render.
 
 The upstream fixes have not been released. Patch all four failure seams at
@@ -34,6 +35,7 @@ from pathlib import Path
 CLIENT_LOOKUP_MARKER = "neurodesktop-issue-271-client-lookup"
 QUEUE_GUARD_MARKER = "neurodesktop-issue-271-queue-guard"
 YDOC_OUTPUT_MARKER = "neurodesktop-crdt-notebook-output"
+YDOC_STREAM_TEXT_MARKER = "neurodesktop-crdt-stream-text"
 WIDGET_TRUST_MARKER = "neurodesktop-server-execution-trust"
 WIDGET_CACHE_SAFE_MARKER = "neurodesktop-widget-cache-safe-entry"
 
@@ -84,6 +86,27 @@ YDOC_OUTPUT_AFTER = f"""        else:
             # The notebook Y.Array requires a pycrdt.Map, not a plain dict.
             output = self.transform_output(msg_type, content, ydoc=True)
 """
+
+YDOC_IMPORT_BEFORE = "from pycrdt import Map\n"
+YDOC_IMPORT_AFTER = "from pycrdt import Map, Text\n"
+
+YDOC_STREAM_TEXT_BEFORE = '''        if msg_type == "stream":
+            return factory({
+                "output_type": "stream",
+                "text": content["text"],
+                "name": content["name"],
+            })
+'''
+
+YDOC_STREAM_TEXT_AFTER = f'''        if msg_type == "stream":
+            # {YDOC_STREAM_TEXT_MARKER}
+            text = Text(content["text"]) if ydoc else content["text"]
+            return factory({{
+                "output_type": "stream",
+                "text": text,
+                "name": content["name"],
+            }})
+'''
 
 WIDGET_TRUST_BEFORE = (
     'if("code"!==e.model.type)return"markdown"===e.model.type&&'
@@ -148,12 +171,25 @@ def patch_package(package_dir: Path) -> bool:
             )
 
     output_patched = YDOC_OUTPUT_MARKER in output_processor_text
+    stream_text_patched = YDOC_STREAM_TEXT_MARKER in output_processor_text
+    if output_patched != stream_text_patched:
+        raise ValueError(
+            "partial CRDT output workaround detected; refusing to continue"
+        )
     if output_patched:
-        if output_processor_text.count(YDOC_OUTPUT_AFTER) != 1:
+        if (
+            output_processor_text.count(YDOC_OUTPUT_AFTER) != 1
+            or output_processor_text.count(YDOC_IMPORT_AFTER) != 1
+            or output_processor_text.count(YDOC_STREAM_TEXT_AFTER) != 1
+        ):
             raise ValueError(
                 "CRDT output workaround is incomplete; refusing to continue"
             )
-    elif output_processor_text.count(YDOC_OUTPUT_BEFORE) != 1:
+    elif (
+        output_processor_text.count(YDOC_OUTPUT_BEFORE) != 1
+        or output_processor_text.count(YDOC_IMPORT_BEFORE) != 1
+        or output_processor_text.count(YDOC_STREAM_TEXT_BEFORE) != 1
+    ):
         raise ValueError(
             "notebook output anchor did not match exactly once; "
             "reassess the CRDT output workaround"
@@ -170,7 +206,9 @@ def patch_package(package_dir: Path) -> bool:
         )
     if not output_patched:
         output_processor_path.write_text(
-            output_processor_text.replace(YDOC_OUTPUT_BEFORE, YDOC_OUTPUT_AFTER),
+            output_processor_text.replace(YDOC_IMPORT_BEFORE, YDOC_IMPORT_AFTER)
+            .replace(YDOC_OUTPUT_BEFORE, YDOC_OUTPUT_AFTER)
+            .replace(YDOC_STREAM_TEXT_BEFORE, YDOC_STREAM_TEXT_AFTER),
             encoding="utf-8",
         )
     return issue_271_changed or not output_patched

@@ -160,13 +160,15 @@ ordered WebSockets. It also starts Jupyter Server and headless Firefox, runs an
 ``HBox`` whose model comm is delayed for three seconds through the installed
 server-side cell executor, and requires preceding repeated stream output plus
 a widget DOM instead of a YDoc output exception, ``model not found``, or the
-unsafe renderer's ``text/plain`` fallback. Before clicking Run,
-the test waits for the status bar to name the selected kernel and report
-``Idle``. The notebook execution indicator alone can report ``idle`` before
-JupyterLab has created a kernel. The test also requires `ipykernel` 6.31.0 as
-the stable main-shell widget-comm path. The unit tests require both frontend
-workarounds to publish new content-hashed chunks and remote entries, so an
-immutable cached copy cannot conceal either fix.
+unsafe renderer's ``text/plain`` fallback. The stream uses many flushed
+carriage-return fragments so JupyterLab must append to an existing CRDT text
+value rather than only displaying separate complete stream outputs. Before
+clicking Run, the test waits for the status bar to name the selected kernel and
+report ``Idle``. The notebook execution indicator alone can report ``idle``
+before JupyterLab has created a kernel. The test also requires `ipykernel`
+6.31.0 as the stable main-shell widget-comm path. The unit tests require both
+frontend workarounds to publish new content-hashed chunks and remote entries,
+so an immutable cached copy cannot conceal either fix.
 
 ### MyST and standalone RISE
 

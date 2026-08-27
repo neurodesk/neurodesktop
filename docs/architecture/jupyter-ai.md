@@ -86,19 +86,21 @@ registration. Its upstream two-second bound is still too short for complex
 layouts such as a ``VBox`` containing delayed ``HBox`` models. Neurodesktop
 extends that bound to ten seconds and publishes the changed widget-manager
 chunk and remote entry under new content-derived names. The image regression
-emits repeated stream updates, delays a real ``HBox`` comm for three seconds,
-and requires both the stream text and widget to render without a YDoc output
-exception. Jupyter
+emits fragmented carriage-return stream updates, delays a real ``HBox`` comm
+for three seconds, and requires both the stream text and widget to render
+without a YDoc output exception. Jupyter
 AI 3.2 plans to make RTC optional, but Neurodesktop will not remove the stable
 3.1 dependency by adopting an alpha release.
 
 Notebook rooms disable the separate outputs service. In that path,
 `jupyter-server-documents` 0.3.3 converts kernel messages to plain Python
 dictionaries before appending them to the cell's CRDT output array. JupyterLab
-expects each entry to remain a Y.Map; a later stream update therefore throws
-from `appendStreamOutput()` when it calls the missing map `get()` method. The
-backend patch keeps the outputs-service representation unchanged but requests
-CRDT maps for the in-notebook path.
+expects each entry to remain a Y.Map and each stream output's ``text`` value to
+remain a Y.Text. A plain dictionary fails when `appendStreamOutput()` calls the
+missing map `get()` method; a Y.Map containing a plain string fails on the next
+call to the missing text `insert()` method. The backend patch keeps the
+outputs-service representation unchanged but requests CRDT maps and constructs
+CRDT stream text for the in-notebook path.
 
 The same server-side executor bypasses JupyterLab's normal code-cell execution
 path, which marks a cell trusted before its outputs arrive. Without that state,

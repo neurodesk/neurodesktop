@@ -66,6 +66,16 @@ class OutputProcessor:
 
         outputs = ycell["outputs"]
         outputs.append(output)
+
+    def transform_output(self, msg_type: str, content: dict, ydoc: bool = False):
+        factory = Map if ydoc else (lambda x: x)
+        if msg_type == "stream":
+            return factory({
+                "output_type": "stream",
+                "text": content["text"],
+                "name": content["name"],
+            })
+        return None
 '''
 
 
@@ -139,6 +149,11 @@ def test_patch_applies_backend_guards_and_crdt_outputs_and_is_idempotent(tmp_pat
     assert "self._message_queue.task_done()" in yroom
     assert patcher.YDOC_OUTPUT_MARKER in output_processor
     assert "self.transform_output(msg_type, content, ydoc=True)" in output_processor
+    assert patcher.YDOC_STREAM_TEXT_MARKER in output_processor
+    assert "from pycrdt import Map, Text" in output_processor
+    assert 'text = Text(content["text"]) if ydoc else content["text"]' in (
+        output_processor
+    )
 
     assert not patcher.patch_package(tmp_path)
 

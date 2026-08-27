@@ -222,11 +222,14 @@ def test_server_side_execution_renders_streams_and_a_widget(tmp_path: Path) -> N
         cells=[
             nbformat.v4.new_code_cell(
                 "import asyncio\n"
+                "import sys\n"
                 "import ipywidgets as widgets\n"
                 "from IPython.display import display\n"
-                "print('stream-before-widget-one', flush=True)\n"
-                "await asyncio.sleep(0.2)\n"
-                "print('stream-before-widget-two', flush=True)\n"
+                "for fragment in range(20):\n"
+                "    sys.stdout.write(f'\\rstream-fragment-{fragment:02d}')\n"
+                "    sys.stdout.flush()\n"
+                "    await asyncio.sleep(0.05)\n"
+                "print()\n"
                 "model_id = 'delayed-hbox-model'\n"
                 "async def open_model_later():\n"
                 "    await asyncio.sleep(3)\n"
@@ -388,8 +391,7 @@ def test_server_side_execution_renders_streams_and_a_widget(tmp_path: Path) -> N
                 "'.jp-OutputArea-output[data-mime-type=\"text/plain\"]'"
                 ")].some(node => node.textContent.includes('VBox(')),"
                 "streamText: document.body.innerText.includes("
-                "'stream-before-widget-one') && document.body.innerText.includes("
-                "'stream-before-widget-two'),"
+                "'stream-fragment-19'),"
                 "widgetBoxes: document.querySelectorAll("
                 "'.jupyter-widgets.widget-box'"
                 ").length"
@@ -409,7 +411,12 @@ def test_server_side_execution_renders_streams_and_a_widget(tmp_path: Path) -> N
             if event.get("method") == "log.entryAdded"
             and event["params"].get("level") == "error"
         ]
-        assert not any("_youtputs" in error for error in browser_errors), browser_errors
+        stream_output_errors = [
+            error
+            for error in browser_errors
+            if "appendStreamOutput" in error or "insert is not a function" in error
+        ]
+        assert not stream_output_errors, stream_output_errors
     finally:
         if bidi is not None:
             bidi.close()
