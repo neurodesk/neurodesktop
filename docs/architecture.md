@@ -4,7 +4,7 @@ description: Startup flow, services, directory layout, and the map of
   per-subsystem architecture pages
 parent: index.md
 status: current
-last-reviewed: "2026-08-25"
+last-reviewed: "2026-08-27"
 ---
 
 # Architecture
@@ -89,7 +89,8 @@ itself.
 - [`config/ssh/`](../config/ssh/): SSH/SFTP server setup
 - [`config/firefox/`](../config/firefox/), [`config/vscode/`](../config/vscode/),
   and [`config/itksnap/`](../config/itksnap/): application-specific configs
-- [`scripts/`](../scripts/): build-time utilities and installed runtime CLIs
+- [`scripts/`](../scripts/): build-time utilities, installed runtime CLIs, and
+  external cluster launchers such as `connectSherlock.sh`
 - [`extensions/`](../extensions/): in-repo JupyterLab extensions
   (`neurodesk-launcher`, `astra-viewer`)
 - [`tests/`](../tests/): the two-tier test suite (see [Testing](testing.md));

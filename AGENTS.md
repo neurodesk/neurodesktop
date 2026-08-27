@@ -36,6 +36,11 @@
 - When changing `print_access_url.sh` (the end-of-startup access-link banner)
   or how `before_notebook.sh` launches it, run `pytest
   tests/unit/test_print_access_url.py` from a checkout.
+- When changing `scripts/connectSherlock.sh`, run `pytest
+  tests/unit/test_connect_sherlock.py` from a checkout. Keep its self-update URL
+  on the copy in this repository and let the Neurodesktop image own
+  `ServerApp.jpserver_extensions`; the Sherlock launcher must not disable
+  `jupyter_server_fileid`, which `jupyter-server-documents` requires.
 - When changing Jupyter Server Proxy response buffering or the Tornado HTTP
   client limits in `jupyter_server_config_extra.py` or
   `patch_jupyter_server_proxy.py`, run `pytest
