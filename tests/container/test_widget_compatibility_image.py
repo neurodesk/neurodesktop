@@ -216,6 +216,114 @@ def test_widget_manager_waits_for_a_late_model_registration():
     assert "Date.now()-o<1e4" in bundles
 
 
+def test_server_documents_installs_reconnect_data_loss_guards() -> None:
+    """Both halves of the blank-notebook reconnect fix are active assets."""
+    import jupyter_server_documents
+
+    package_dir = Path(jupyter_server_documents.__file__).parent
+    yroom_source = (package_dir / "rooms/yroom.py").read_text(encoding="utf-8")
+    assert "neurodesktop-late-sync-step2" in yroom_source
+    assert "handshake_timeout = traitlets.Float(" in yroom_source
+    assert "self._pending_ss2: dict[str, asyncio.Future[bytes]] = {}" in yroom_source
+    assert "self._pending_ss2.pop(client_id, None)" in yroom_source
+
+    labextension = (
+        Path(sys.prefix)
+        / "share/jupyter/labextensions/@jupyter-ai-contrib/server-documents"
+    )
+    package = json.loads((labextension / "package.json").read_text(encoding="utf-8"))
+    remote_entry = labextension / package["jupyterlab"]["_build"]["load"]
+    remote_source = remote_entry.read_text(encoding="utf-8")
+    assert "neurodesktop-widget-cache-safe-entry" in remote_source
+
+    active_bundles = [
+        path
+        for path in (labextension / "static").glob("*.js")
+        if re.search(r"\.([0-9a-f]{20})\.js$", path.name)
+        and re.search(r"\.([0-9a-f]{20})\.js$", path.name).group(1)
+        in remote_source
+        and "neurodesktop-idempotent-divergent-repair"
+        in path.read_text(encoding="utf-8")
+    ]
+    assert len(active_bundles) == 1
+    active_source = active_bundles[0].read_text(encoding="utf-8")
+    assert "p.decodeStateVector(s)" in active_source
+    assert "o.id.client" in active_source
+    assert "o.id.clock" in active_source
+
+
+def test_late_sync_step2_is_applied_without_disconnect() -> None:
+    """A timeout resumes broadcasts, then the late CRDT reply is applied."""
+    import asyncio
+    import logging
+
+    from jupyter_server_documents.rooms.yroom import YRoom
+    from pycrdt import YMessageType, YSyncMessageType
+
+    class Clients:
+        def __init__(self) -> None:
+            self.removed: list[str] = []
+
+        def mark_desynced(self, client_id: str) -> None:
+            pass
+
+        def remove(self, client_id: str) -> None:
+            self.removed.append(client_id)
+
+    class UpdateChannel:
+        def __init__(self) -> None:
+            self.paused = False
+
+        def pause(self) -> None:
+            self.paused = True
+
+        def resume(self, *, pre_sync_sv: bytes) -> None:
+            self.paused = False
+
+    class YDoc:
+        def get_state(self) -> bytes:
+            return b"\x00"
+
+    class StubRoom:
+        handle_sync = YRoom.handle_sync
+        handle_message = YRoom.handle_message
+        room_id = "late-ss2-room"
+        handshake_timeout = 0.01
+        log = logging.getLogger("late-ss2-room")
+
+        def __init__(self) -> None:
+            self.clients = Clients()
+            self.update_channel = UpdateChannel()
+            self._ydoc = YDoc()
+            self._pending_ss2: dict[str, asyncio.Future[bytes]] = {}
+            self.applied: list[tuple[str, bytes]] = []
+
+        def _has_divergent_history(self, message: bytes, state: bytes) -> bool:
+            return False
+
+        def handle_sync_step1(self, client_id: str, message: bytes) -> None:
+            pass
+
+        def handle_sync_step2(self, client_id: str, message: bytes) -> None:
+            self.applied.append((client_id, message))
+
+    async def run() -> StubRoom:
+        room = StubRoom()
+        await room.handle_sync("stale-client", b"\x00\x00")
+        assert not room.update_channel.paused
+        assert not room.clients.removed
+        assert not room._pending_ss2
+
+        late_reply = bytes(
+            [YMessageType.SYNC, YSyncMessageType.SYNC_STEP2, 0]
+        )
+        await room.handle_message("stale-client", late_reply)
+        assert room.applied == [("stale-client", late_reply)]
+        return room
+
+    asyncio.run(run())
+
+
 def test_ipyniivue_uses_one_shared_bundle_with_per_model_state() -> None:
     """The large frontend is cached while each model owns its NiiVue state."""
     import ipyniivue
@@ -332,6 +440,7 @@ def test_room_queue_survives_a_rejected_message() -> None:
         _process_message_queue = YRoom._process_message_queue
         room_id = "queue-guard-room"
         log = logging.getLogger("queue-guard-room")
+        file_api = None
 
         def __init__(self) -> None:
             self._message_queue = asyncio.Queue()

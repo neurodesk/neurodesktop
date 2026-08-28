@@ -179,6 +179,12 @@ JupyterLab asset, keeps model state inside a factory-created definition, and
 adds WebGL cleanup only to model destruction. The other frontend unit tests
 require changed federated chunks and remote entries to use new content-hashed
 names, so an immutable cached copy cannot conceal a fix.
+The same unit and image suites require the server-documents reconnect guards:
+a handshake timeout must resume broadcasts without disconnecting the client,
+a late SyncStep2 must still be applied, and divergent repair must delete only
+Yjs item ranges absent from the server state vector. These assertions protect
+against the one-blank-cell autosave regression after a server restart or room
+cleanup.
 
 ### MyST and standalone RISE
 

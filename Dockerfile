@@ -1366,12 +1366,12 @@ RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_proxy.py,target
     install -m 0755 -o root -g users /tmp/patch_jupyter_server_proxy.py /opt/neurodesktop/patch_jupyter_server_proxy.py \
     && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_server_proxy.py
 
-# jupyter-server-documents 0.3.3 has three pinned upstream defects: a stale
-# client frame can terminate a Jupyter AI chat room's queue, its custom cell
-# executor leaves user-executed outputs untrusted, and its notebook-room path
-# appends plain dictionaries where JupyterLab requires CRDT maps. The frontend
-# workaround publishes new content-hashed assets because Jupyter serves bundles
-# as immutable. Keep these anchored workarounds until a fixed release is pinned.
+# jupyter-server-documents 0.3.3 has pinned upstream defects: stale frames can
+# terminate a room queue, a late SyncStep2 can trigger a destructive repeated
+# divergent-history repair, server execution leaves cells untrusted, and
+# notebook rooms append non-CRDT outputs. Frontend workarounds publish new
+# content-hashed assets because Jupyter serves bundles as immutable. Keep these
+# anchored workarounds until a fixed release is pinned.
 # The stream-coalescing logic lives in neurodesktop_stream_output.py, which the
 # patcher installs into the package; the anchored splice only delegates to it.
 RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_documents.py,target=/tmp/patch_jupyter_server_documents.py,ro \

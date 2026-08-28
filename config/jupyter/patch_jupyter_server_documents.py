@@ -4,7 +4,11 @@
 ``jupyter-server-documents==0.3.3`` can process a queued update after its
 client has disconnected. The missing-client lookup then references an
 unassigned local, and the exception escapes the room's background queue task.
-That leaves the room connected but unable to process any later messages.
+That leaves the room connected but unable to process any later messages. It
+also drops a SyncStep2 reply that arrives after its five-second handshake
+window and disconnects the client. A stale browser then repeats its divergent
+history repair, whose non-idempotent full-range clear can delete server-owned
+notebook cells and autosave a one-cell blank document.
 
 Its server-side notebook executor also bypasses JupyterLab's normal
 ``CodeCellModel.clearExecution()`` path, which marks a user-executed cell as
@@ -19,8 +23,8 @@ Y.Text. Appending a new Y.Map per fragment makes JupyterLab combine the records
 locally and echo the same text back into the room, so a replay duplicates
 fragments and can call ``appendStreamOutput()`` before an output exists.
 
-The upstream fixes have not been released. Patch all five failure seams at
-image build time. Exact anchors make a future package update fail loudly
+The upstream fixes have not been released. Patch each failure seam at image
+build time. Exact anchors make a future package update fail loudly
 instead of silently retaining or misapplying these workarounds.
 
 The stream-coalescing logic itself lives in ``neurodesktop_stream_output.py``
@@ -42,11 +46,13 @@ from pathlib import Path
 
 CLIENT_LOOKUP_MARKER = "neurodesktop-issue-271-client-lookup"
 QUEUE_GUARD_MARKER = "neurodesktop-issue-271-queue-guard"
+LATE_SYNC_STEP2_MARKER = "neurodesktop-late-sync-step2"
 YDOC_OUTPUT_MARKER = "neurodesktop-crdt-notebook-output"
 YDOC_STREAM_TEXT_MARKER = "neurodesktop-crdt-stream-text"
 YDOC_STREAM_MERGE_MARKER = "neurodesktop-crdt-stream-merge"
 WIDGET_TRUST_MARKER = "neurodesktop-server-execution-trust"
 WIDGET_CACHE_SAFE_MARKER = "neurodesktop-widget-cache-safe-entry"
+DIVERGENT_REPAIR_MARKER = "neurodesktop-idempotent-divergent-repair"
 
 CLIENT_LOOKUP_BEFORE = """        if client_id in self.desynced: 
             client = self.desynced[client_id]
@@ -85,6 +91,153 @@ QUEUE_GUARD_AFTER = f"""            client_id, message = queue_item
                 # Always release Queue.join(), including for a rejected frame.
                 self._message_queue.task_done()
 """
+
+HANDSHAKE_TIMEOUT_BEFORE = '''    inactivity_timeout = traitlets.Int(
+        default_value=60,
+        config=True,
+        help="Number of seconds of inactivity before a room is considered inactive."
+    )
+    """
+    Number of seconds of inactivity before a room is considered inactive.
+
+    See `YRoom.inactive` for more details on how activity is tracked.
+    """
+
+    file_api_class = traitlets.Type(
+'''
+
+HANDSHAKE_TIMEOUT_AFTER = '''    inactivity_timeout = traitlets.Int(
+        default_value=60,
+        config=True,
+        help="Number of seconds of inactivity before a room is considered inactive."
+    )
+    """
+    Number of seconds of inactivity before a room is considered inactive.
+
+    See `YRoom.inactive` for more details on how activity is tracked.
+    """
+
+    handshake_timeout = traitlets.Float(
+        default_value=5.0,
+        config=True,
+        help=(
+            "Seconds to await SyncStep2 before resuming room broadcasts. "
+            "A late reply is still applied and does not disconnect the client."
+        )
+    )
+
+    file_api_class = traitlets.Type(
+'''
+
+PENDING_SS2_INIT_BEFORE = '''        self._pending_ss2_future: asyncio.Future[bytes] | None = None
+        self._pending_ss2_client_id: str | None = None
+'''
+
+PENDING_SS2_INIT_AFTER = '''        self._pending_ss2: dict[str, asyncio.Future[bytes]] = {}
+'''
+
+PENDING_SS2_ROUTE_BEFORE = '''        if (
+            self._pending_ss2_future is not None
+            and not self._pending_ss2_future.done()
+            and client_id == self._pending_ss2_client_id
+            and len(message) >= 2
+            and message[0] == YMessageType.SYNC
+            and message[1] == YSyncMessageSubtype.SYNC_STEP2
+        ):
+            self._pending_ss2_future.set_result(message)
+            return
+'''
+
+PENDING_SS2_ROUTE_AFTER = '''        pending = self._pending_ss2.get(client_id)
+        if (
+            pending is not None
+            and not pending.done()
+            and len(message) >= 2
+            and message[0] == YMessageType.SYNC
+            and message[1] == YSyncMessageSubtype.SYNC_STEP2
+        ):
+            pending.set_result(message)
+            return
+'''
+
+LATE_SYNC_STEP2_BEFORE = '''        elif sync_message_subtype == YSyncMessageSubtype.SYNC_STEP2:
+            self.log.warning("Received SS2 message in message loop, this should never happen.")
+            return
+'''
+
+LATE_SYNC_STEP2_AFTER = f'''        elif sync_message_subtype == YSyncMessageSubtype.SYNC_STEP2:
+            # {LATE_SYNC_STEP2_MARKER}
+            # A timed-out divergent repair carries its tombstones only here.
+            # CRDT updates are commutative and idempotent, so a late apply is
+            # safe and prevents the next reconnect from repeating the repair.
+            try:
+                self.handle_sync_step2(client_id, message)
+                self.log.info(
+                    "Applied late SyncStep2 from client '%s' in room '%s'.",
+                    client_id,
+                    self.room_id
+                )
+            except Exception:
+                # handle_sync_step2 already logged the malformed message. Do
+                # not let it terminate the room's shared message-queue task.
+                pass
+            return
+'''
+
+PENDING_SS2_CREATE_BEFORE = '''        self._pending_ss2_future = loop.create_future()
+        self._pending_ss2_client_id = client_id
+'''
+
+PENDING_SS2_CREATE_AFTER = '''        self._pending_ss2[client_id] = loop.create_future()
+'''
+
+PENDING_SS2_WAIT_BEFORE = '''            ss2_message = await asyncio.wait_for(self._pending_ss2_future, timeout=5.0)
+'''
+
+PENDING_SS2_WAIT_AFTER = '''            ss2_message = await asyncio.wait_for(
+                self._pending_ss2[client_id], timeout=self.handshake_timeout
+            )
+'''
+
+PENDING_SS2_TIMEOUT_BEFORE = '''        except asyncio.TimeoutError:
+            self.log.warning(
+                "Timed out waiting for SyncStep2 reply from client '%s' in room '%s'.",
+                client_id,
+                self.room_id
+            )
+            handshake_failed = True
+'''
+
+PENDING_SS2_TIMEOUT_AFTER = '''        except asyncio.TimeoutError:
+            self.log.info(
+                "No SyncStep2 reply from client '%s' in room '%s' within %.1fs; "
+                "resuming broadcasts. The reply will be applied when it arrives.",
+                client_id,
+                self.room_id,
+                self.handshake_timeout
+            )
+'''
+
+PENDING_SS2_CLEAR_BEFORE = '''        # Clear instance state
+        self._pending_ss2_future = None
+        self._pending_ss2_client_id = None
+'''
+
+PENDING_SS2_CLEAR_AFTER = '''        # Stop intercepting this client's SS2. A later reply enters the queue
+        # and is applied by the late-SyncStep2 branch in handle_message().
+        self._pending_ss2.pop(client_id, None)
+'''
+
+LATE_SYNC_STEP2_PATCHES = (
+    (HANDSHAKE_TIMEOUT_BEFORE, HANDSHAKE_TIMEOUT_AFTER),
+    (PENDING_SS2_INIT_BEFORE, PENDING_SS2_INIT_AFTER),
+    (PENDING_SS2_ROUTE_BEFORE, PENDING_SS2_ROUTE_AFTER),
+    (LATE_SYNC_STEP2_BEFORE, LATE_SYNC_STEP2_AFTER),
+    (PENDING_SS2_CREATE_BEFORE, PENDING_SS2_CREATE_AFTER),
+    (PENDING_SS2_WAIT_BEFORE, PENDING_SS2_WAIT_AFTER),
+    (PENDING_SS2_TIMEOUT_BEFORE, PENDING_SS2_TIMEOUT_AFTER),
+    (PENDING_SS2_CLEAR_BEFORE, PENDING_SS2_CLEAR_AFTER),
+)
 
 YDOC_OUTPUT_BEFORE = """        else:
             output = self.transform_output(msg_type, content, ydoc=False)
@@ -175,6 +328,32 @@ WIDGET_TRUST_AFTER = (
     "if(!l)return!0;"
 )
 
+DIVERGENT_REPAIR_CALL_BEFORE = (
+    "!function(e,t,o,n){o?e.transact(()=>{for(const[,t]of e.share)S(t);"
+    "p.applyUpdate(e,t)},n):p.applyUpdate(e,t,n)}(n.doc,i,a,n)"
+)
+
+DIVERGENT_REPAIR_CALL_AFTER = (
+    "!function(e,t,o,n,s){if(!o)return void p.applyUpdate(e,t,n);"
+    "const r=p.decodeStateVector(s);e.transact(()=>{for(const[,t]of e.share)"
+    "S(t,r);p.applyUpdate(e,t)},n)}(n.doc,i,a,n,r)"
+)
+
+DIVERGENT_REPAIR_HELPER_BEFORE = (
+    "function S(e){e instanceof p.Map||(e instanceof p.Array||e instanceof "
+    "p.Text||e instanceof p.XmlFragment)&&e.delete(0,e.length)}"
+)
+
+DIVERGENT_REPAIR_HELPER_AFTER = (
+    f"function S(e,t){{/*{DIVERGENT_REPAIR_MARKER}*/if(e instanceof p.Map)"
+    "return;if(!(e instanceof p.Array||e instanceof p.Text||e instanceof "
+    "p.XmlFragment))return;const n=[];let r=0,o=e._start;for(;null!==o;){"
+    "if(!o.deleted&&o.countable){const e=t.get(o.id.client)??0,i=Math.max(0,"
+    "Math.min(o.length,e-o.id.clock));i<o.length&&n.push([r+i,o.length-i]),"
+    "r+=o.length}o=o.right}for(let t=n.length-1;t>=0;t--)"
+    "e.delete(n[t][0],n[t][1])}"
+)
+
 HASHED_BUNDLE_NAME = re.compile(
     r"^(?P<prefix>.+)\.(?P<hash>[0-9a-f]{20})\.js$"
 )
@@ -231,6 +410,18 @@ def patch_package(package_dir: Path) -> bool:
                 "reassess the upstream issue #271 workaround"
             )
 
+    late_ss2_patched = LATE_SYNC_STEP2_MARKER in yroom_text
+    if late_ss2_patched:
+        if any(yroom_text.count(after) != 1 for _, after in LATE_SYNC_STEP2_PATCHES):
+            raise ValueError(
+                "late SyncStep2 workaround is incomplete; refusing to continue"
+            )
+    elif any(yroom_text.count(before) != 1 for before, _ in LATE_SYNC_STEP2_PATCHES):
+        raise ValueError(
+            "late SyncStep2 anchor did not match exactly once; "
+            "reassess the handshake data-loss workaround"
+        )
+
     stream_module_path = output_processor_path.with_name(STREAM_MODULE_NAME)
     module_source = stream_module_source()
     output_patched = YDOC_OUTPUT_MARKER in output_processor_text
@@ -274,15 +465,18 @@ def patch_package(package_dir: Path) -> bool:
         output_patched
         and stream_module_path.read_text(encoding="utf-8") != module_source
     )
+    yroom_changed = issue_271_changed or not late_ss2_patched
     if issue_271_changed:
         clients_path.write_text(
             clients_text.replace(CLIENT_LOOKUP_BEFORE, CLIENT_LOOKUP_AFTER),
             encoding="utf-8",
         )
-        yroom_path.write_text(
-            yroom_text.replace(QUEUE_GUARD_BEFORE, QUEUE_GUARD_AFTER),
-            encoding="utf-8",
-        )
+        yroom_text = yroom_text.replace(QUEUE_GUARD_BEFORE, QUEUE_GUARD_AFTER)
+    if not late_ss2_patched:
+        for before, after in LATE_SYNC_STEP2_PATCHES:
+            yroom_text = yroom_text.replace(before, after)
+    if yroom_changed:
+        yroom_path.write_text(yroom_text, encoding="utf-8")
     if not output_patched or module_refreshed:
         stream_module_path.write_text(module_source, encoding="utf-8")
     if not output_patched:
@@ -294,11 +488,11 @@ def patch_package(package_dir: Path) -> bool:
             .replace(YDOC_STREAM_HELPERS_BEFORE, YDOC_STREAM_HELPERS_AFTER),
             encoding="utf-8",
         )
-    return issue_271_changed or not output_patched or module_refreshed
+    return yroom_changed or not output_patched or module_refreshed
 
 
 def patch_widget_trust(labextension_dir: Path) -> bool:
-    """Make server-side execution trust code cells initiated by the user.
+    """Patch cell trust and make divergent-history repair idempotent.
 
     Jupyter serves federated extension assets as immutable for one year. Keep
     the upstream files intact, publish the patched chunk and remote entry under
@@ -327,39 +521,60 @@ def patch_widget_trust(labextension_dir: Path) -> bool:
     remote_entry = labextension_dir / load_path
     remote_text = remote_entry.read_text(encoding="utf-8")
     texts = {path: path.read_text(encoding="utf-8") for path in bundles}
-    before_paths = [
-        path
-        for path, text in texts.items()
-        if WIDGET_TRUST_BEFORE in text
-    ]
-    active_marker_paths = []
+    active_executor_paths = []
     for path, text in texts.items():
         name_match = HASHED_BUNDLE_NAME.match(path.name)
         if (
             name_match
-            and WIDGET_TRUST_MARKER in text
             and name_match.group("hash") in remote_text
+            and any(
+                anchor in text
+                for anchor in (
+                    WIDGET_TRUST_BEFORE,
+                    WIDGET_TRUST_AFTER,
+                    DIVERGENT_REPAIR_CALL_BEFORE,
+                    DIVERGENT_REPAIR_CALL_AFTER,
+                    DIVERGENT_REPAIR_HELPER_BEFORE,
+                    DIVERGENT_REPAIR_HELPER_AFTER,
+                )
+            )
         ):
-            active_marker_paths.append(path)
+            active_executor_paths.append(path)
 
     cache_safe_entry = WIDGET_CACHE_SAFE_MARKER in remote_text
-    if len(active_marker_paths) == 1 and cache_safe_entry:
-        return False
-    clean_upstream = len(before_paths) == 1 and not active_marker_paths
-    legacy_in_place_patch = (
-        not before_paths
-        and len(active_marker_paths) == 1
-        and not cache_safe_entry
-    )
-    if not clean_upstream and not legacy_in_place_patch:
+    if len(active_executor_paths) != 1:
+        raise ValueError(
+            "server-documents executor bundle did not match exactly once"
+        )
+    source_bundle = active_executor_paths[0]
+    source_text = texts[source_bundle]
+
+    trust_clean = source_text.count(WIDGET_TRUST_BEFORE) == 1
+    trust_patched = source_text.count(WIDGET_TRUST_AFTER) == 1
+    if trust_clean == trust_patched:
         raise ValueError(
             "server-side cell trust anchor did not match exactly once; "
             "reassess the widget trust workaround"
         )
 
-    source_bundle = (
-        active_marker_paths[0] if legacy_in_place_patch else before_paths[0]
-    )
+    repair_call_clean = source_text.count(DIVERGENT_REPAIR_CALL_BEFORE) == 1
+    repair_helper_clean = source_text.count(DIVERGENT_REPAIR_HELPER_BEFORE) == 1
+    repair_call_patched = source_text.count(DIVERGENT_REPAIR_CALL_AFTER) == 1
+    repair_helper_patched = source_text.count(DIVERGENT_REPAIR_HELPER_AFTER) == 1
+    repair_clean = repair_call_clean and repair_helper_clean
+    repair_patched = repair_call_patched and repair_helper_patched
+    if (
+        repair_call_clean != repair_helper_clean
+        or repair_call_patched != repair_helper_patched
+        or repair_clean == repair_patched
+    ):
+        raise ValueError(
+            "partial divergent-history repair detected; refusing to continue"
+        )
+
+    if trust_patched and repair_patched and cache_safe_entry:
+        return False
+
     source_match = HASHED_BUNDLE_NAME.match(source_bundle.name)
     remote_match = HASHED_BUNDLE_NAME.match(remote_entry.name)
     if source_match is None or remote_match is None:
@@ -371,10 +586,16 @@ def patch_widget_trust(labextension_dir: Path) -> bool:
             "server-documents remote entry does not reference the executor bundle"
         )
 
-    patched_bundle_text = texts[source_bundle]
-    if clean_upstream:
+    patched_bundle_text = source_text
+    if trust_clean:
         patched_bundle_text = patched_bundle_text.replace(
             WIDGET_TRUST_BEFORE, WIDGET_TRUST_AFTER
+        )
+    if repair_clean:
+        patched_bundle_text = patched_bundle_text.replace(
+            DIVERGENT_REPAIR_CALL_BEFORE, DIVERGENT_REPAIR_CALL_AFTER
+        ).replace(
+            DIVERGENT_REPAIR_HELPER_BEFORE, DIVERGENT_REPAIR_HELPER_AFTER
         )
     patched_bundle_hash = hashlib.sha256(
         patched_bundle_text.encode("utf-8")
@@ -383,10 +604,9 @@ def patch_widget_trust(labextension_dir: Path) -> bool:
         f"{source_match.group('prefix')}.{patched_bundle_hash}.js"
     )
 
-    patched_remote_text = (
-        remote_text.replace(source_hash, patched_bundle_hash)
-        + f"\n/*{WIDGET_CACHE_SAFE_MARKER}*/\n"
-    )
+    patched_remote_text = remote_text.replace(source_hash, patched_bundle_hash)
+    if not cache_safe_entry:
+        patched_remote_text += f"\n/*{WIDGET_CACHE_SAFE_MARKER}*/\n"
     patched_remote_hash = hashlib.sha256(
         patched_remote_text.encode("utf-8")
     ).hexdigest()[:20]

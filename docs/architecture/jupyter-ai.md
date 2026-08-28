@@ -154,8 +154,33 @@ publishes the changed chunk and remote entry under new content-derived names,
 and updates the extension manifest. Reusing the original hashed filename would
 leave browsers that opened JupyterLab before the update on the broken code.
 
-`jupyter-server-documents` 0.3.3 still has an upstream stale-client race in which one
-queued update can terminate a chat room's background message processor.
+The package also has a reconnect data-loss path tracked upstream as
+[`jupyter-server-documents` issue 305](https://github.com/jupyter-ai-contrib/jupyter-server-documents/issues/305).
+After a room is freed or the server restarts, an open browser can reconnect
+with Yjs history the new room does not know. The browser repairs that divergence
+by removing its client-owned ordered items and applying the persisted server
+state in one transaction; its SyncStep2 reply is the only message carrying
+those tombstones back to the server. Version 0.3.3 waits five seconds for that
+reply. A busy browser serializing several document handshakes can miss the
+deadline, after which the server drops the late reply and disconnects the
+client. The next reconnect is divergent again. The old frontend repair then
+clears the full ordered range, including cells it just received from the
+server, and a later SyncStep2 can autosave the canonical one-blank-cell
+notebook. This incident's 759-byte file beside a complete checkpoint was that
+exact signature; the NiiVue renderer had not run and was not the deletion
+source.
+
+Neurodesktop closes both sides of the path. The server keeps pending
+SyncStep2 futures per client, treats the timeout only as a bound on paused
+broadcasts, leaves the client connected, and applies a late reply from the
+message queue. The frontend repair receives the server state vector and
+deletes only ordered Yjs item ranges not covered by it. Server-owned items are
+therefore untouched on every repeated repair. The frontend change is published
+in the same content-hashed server-documents chunk as the cell-trust change so
+existing browser caches cannot retain the destructive implementation.
+
+`jupyter-server-documents` 0.3.3 also has an upstream stale-client race in which
+one queued update can terminate a chat room's background message processor.
 Neurodesktop applies an exact-source, build-time workaround for upstream issue
 271: missing-client lookup fails cleanly, and one rejected frame cannot stop the
 rest of the room queue. The anchored patch intentionally fails the image build

@@ -172,6 +172,11 @@
   Wait for the status bar to name the selected kernel and report `Idle` before
   clicking Run; the notebook execution indicator can report `idle` before a
   kernel exists.
+  Keep reconnect repair safe on both sides: a SyncStep2 arriving after the
+  handshake timeout must still be applied without disconnecting its client,
+  pending replies stay keyed per client, and the frontend divergent-history
+  repair deletes only Yjs ordered items not covered by the server state vector.
+  A repeated repair must never delete server-owned notebook cells.
   Keep `ipykernel` on the stable 6.x line until its experimental comm subshells
   can create a per-target subshell for delayed server-executed widgets without
   canceling the control future.
