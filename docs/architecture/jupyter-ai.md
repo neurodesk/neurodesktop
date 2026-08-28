@@ -85,10 +85,24 @@ subshells. Neurodesktop also pins `ipywidgets` 8.1.9 and
 registration. Its upstream two-second bound is still too short for complex
 layouts such as a ``VBox`` containing delayed ``HBox`` models. Neurodesktop
 extends that bound to ten seconds and publishes the changed widget-manager
-chunk and remote entry under new content-derived names. The image regression
-emits fragmented carriage-return stream updates, delays a real ``HBox`` comm
-for three seconds, and requires both the stream text and widget to render
-without a YDoc output exception. Jupyter
+chunk and remote entry under new content-derived names.
+
+ipyniivue 2.4.4 supplies anywidget with a 5 MB ESM file through a synchronized
+model trait. Without a workaround, nine NiiVue models send and import nine
+copies of that bundle while their comms compete with notebook output delivery.
+Neurodesktop moves the heavy module into one content-hashed JupyterLab static
+asset and leaves a small bootstrap in the Python package. The shared module
+exports a factory, and each bootstrap invocation creates a separate widget
+definition so its NiiVue instance and graph interval stay model-local. When a
+model is destroyed, the definition runs NiiVue cleanup and requests
+``WEBGL_lose_context``. Removing only a view does not release the context,
+because ipyniivue supports moving and redisplaying the same model.
+
+The image regression emits fragmented carriage-return stream updates, delays a
+real ``HBox`` comm for three seconds, creates nine NiiVue models, and requires
+the stream and all
+widgets to render without a YDoc output exception. It re-executes the cell and
+restores the populated room in a second client. Jupyter
 AI 3.2 plans to make RTC optional, but Neurodesktop will not remove the stable
 3.1 dependency by adopting an alpha release.
 

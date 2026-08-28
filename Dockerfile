@@ -561,8 +561,11 @@ ARG JUPYTER_COLLABORATION_REF="3bf11cb7b271b554998105a11e6c9b8c3e376615"
 ARG ASTRA_SPEC_VERSION="0.0.12"
 ARG ASTRA_TOOLS_VERSION="0.2.11"
 ARG ANYWIDGET_VERSION="0.11.0"
+ARG IPYNIIVUE_VERSION="2.4.4"
 USER root
-RUN apt-install-retry build-essential \
+RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch_ipyniivue.py,ro \
+    install -d -m 0755 -o root -g users /opt/neurodesktop \
+    && apt-install-retry build-essential \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install \
     datalad \
     nipype \
@@ -577,7 +580,7 @@ RUN apt-install-retry build-essential \
     datalad-osf \
     osfclient \
     watermark \
-    ipyniivue \
+    ipyniivue==${IPYNIIVUE_VERSION} \
     jupyter-server-proxy==4.5.0 \
     jupyterlmod \
     jupyterlab-git \
@@ -636,6 +639,12 @@ RUN apt-install-retry build-essential \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/python -m bash_kernel.install --sys-prefix \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
     && rm -rf "/opt/conda/share/jupyter/labextensions/@jupyterlab/mathjax3-extension" \
+    # ipyniivue 2.4.4 otherwise syncs and imports its 5 MB ESM once per
+    # model. Move that payload to a fixed, content-hashed JupyterLab asset and
+    # add model-destruction cleanup in this install layer so the original
+    # bundle does not remain in image history.
+    && install -m 0755 -o root -g users /tmp/patch_ipyniivue.py /opt/neurodesktop/patch_ipyniivue.py \
+    && /opt/conda/bin/python /opt/neurodesktop/patch_ipyniivue.py \
     # claude-agent-sdk (a notebook_intelligence dependency) vendors a full
     # Claude Code CLI (~260 MB). The image already ships that binary at
     # /opt/jovyan_defaults/.local/bin/claude and NBI resolves `claude` from

@@ -145,6 +145,7 @@
   run `pytest tests/unit/test_jupyter_ai_workspace.py
   tests/unit/test_astra_jupyter_ai_tooling.py
   tests/unit/test_jupyter_server_documents_patch.py
+  tests/unit/test_ipyniivue_patch.py
   tests/unit/test_jupyterlab_widgets_patch.py
   tests/unit/test_jupyter_ai_acp_client_patch.py
   tests/unit/test_jupyter_server_mcp_patch.py` from a checkout and `pytest
@@ -169,7 +170,12 @@
   Keep the late-model wait bounded at ten seconds; the upstream two-second wait
   is too short for complex output over the independent WebSockets. Publish
   patched federated assets under new content-derived names; Jupyter serves
-  their original hashed URLs as immutable for one year. Keep
+  their original hashed URLs as immutable for one year. Keep ipyniivue's large
+  ESM in one content-hashed JupyterLab asset rather than syncing it with every
+  model, but create each widget definition from a fresh factory so NiiVue and
+  graph interval state are never shared between models. Model destruction must
+  run NiiVue cleanup and relinquish its WebGL context; view removal alone must
+  keep supporting redisplay. Keep
   Jupyter AI chat workspace seeding scoped to `.chat` saves, never overwrite
   an existing `AGENTS.md`, and never make a seed failure block the chat save.
   Keep the ACP adapters' vendored agent binaries

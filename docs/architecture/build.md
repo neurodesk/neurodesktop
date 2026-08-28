@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-25"
+last-reviewed: "2026-08-27"
 ---
 
 # Build-Time Behaviors
@@ -40,6 +40,11 @@ all of `tests/` was mounted) would needlessly rebuild everything downstream.
 When adding a layer, mount individual files and place the layer at the
 band matching its most volatile input.
 
+The ipyniivue patch is one deliberate exception: its version-coupled source is
+mounted into the pip layer because that layer must replace the installed 5 MB
+bundle before it is committed. Applying the patch in the later local-file band
+would leave the unused package copy in image history.
+
 ## Image Size Hygiene
 
 Layers are append-only: deleting or re-owning a file in a later layer only
@@ -60,7 +65,28 @@ bytes. The image therefore follows three rules, asserted by
   duplicate agent binaries (the ACP adapters' platform packages and
   `claude-agent-sdk/_bundled`, together ~750 MB), webpack/TS sourcemaps, a
   curated list of heavyweight bundled Python test suites, and Tomcat's
-  default webapps are all deleted where they first appear.
+  default webapps are all deleted where they first appear. ipyniivue's 5 MB
+  frontend is moved from its per-model anywidget trait into JupyterLab's static
+  tree in its pip install layer, so the replaced package copy does not remain
+  in image history.
+
+## ipyniivue Frontend Packaging
+
+ipyniivue 2.4.4 declares its bundled ESM with a Python ``Path``. anywidget
+turns that file into a synchronized string on each widget model, so a notebook
+with nine viewers sends and imports about 45 MB of repeated JavaScript. The pip
+layer runs an anchored patch that publishes the large module once under a
+content-derived name in JupyterLab's static directory and replaces the package
+file with a small same-origin loader.
+
+The large module originally keeps its NiiVue instance in module globals. A
+normal fixed-URL import would therefore make every widget share one viewer.
+The patch wraps those globals in an exported definition factory, and the small
+per-model loader calls the factory after importing the cached module. Its
+model-destruction cleanup also releases the NiiVue WebGL context. The existing
+view cleanup remains non-destructive so a view can move between output areas.
+The patch is tied to the exact 2.4.4 bundle seams and fails the build when a
+package upgrade changes them.
 
 ## Notebook Intelligence Patches
 

@@ -216,6 +216,26 @@ def test_widget_manager_waits_for_a_late_model_registration():
     assert "Date.now()-o<1e4" in bundles
 
 
+def test_ipyniivue_uses_one_shared_bundle_with_per_model_state() -> None:
+    """The large frontend is cached while each model owns its NiiVue state."""
+    import ipyniivue
+
+    assert importlib.metadata.version("ipyniivue") == "2.4.4"
+    package_dir = Path(ipyniivue.__file__).parent
+    bootstrap = (package_dir / "static/widget.js").read_text(encoding="utf-8")
+    assert len(bootstrap) < 2_000
+    asset_names = re.findall(
+        r"neurodesktop-ipyniivue\.[0-9a-f]{20}\.js", bootstrap
+    )
+    assert len(asset_names) == 1
+
+    shared_bundle = Path(sys.prefix) / "share/jupyter/lab/static" / asset_names[0]
+    shared_source = shared_bundle.read_text(encoding="utf-8")
+    assert "function createWidgetDefinition(){let vA,BC;" in shared_source
+    assert "neurodesktop-ipyniivue-model-cleanup" in shared_source
+    assert 'getExtension("WEBGL_lose_context")?.loseContext()' in shared_source
+
+
 def test_server_side_stream_fragments_are_one_replay_safe_crdt_output() -> None:
     """The notebook room stores one processed output per contiguous stream."""
     from jupyter_server_documents.outputs.output_processor import OutputProcessor
@@ -270,14 +290,15 @@ def test_server_side_stream_fragments_are_one_replay_safe_crdt_output() -> None:
     assert str(replay_outputs[0]["text"]) == "stream-run-2\nXYc\nstream-end\n"
 
 
-def test_server_side_execution_renders_streams_and_a_widget(tmp_path: Path) -> None:
-    """Stream updates stay valid before a server-executed widget renders."""
+def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> None:
+    """Stream updates stay valid while delayed and NiiVue widgets render."""
     notebook = nbformat.v4.new_notebook(
         cells=[
             nbformat.v4.new_code_cell(
                 "import asyncio\n"
                 "import sys\n"
                 "import ipywidgets as widgets\n"
+                "from ipyniivue import NiiVue\n"
                 "from IPython.display import display\n"
                 "widget_run = globals().get('_widget_regression_run', 0) + 1\n"
                 "_widget_regression_run = widget_run\n"
@@ -302,7 +323,9 @@ def test_server_side_execution_renders_streams_and_a_widget(tmp_path: Path) -> N
                 "        'version_minor': 0,\n"
                 "        'model_id': model_id,\n"
                 "    }\n"
-                "}, raw=True)"
+                "}, raw=True)\n"
+                "niivues = [NiiVue(height=128) for _ in range(9)]\n"
+                "display(widgets.VBox(niivues))"
             ),
             nbformat.v4.new_markdown_cell("Widget regression end."),
         ],
@@ -429,7 +452,9 @@ def test_server_side_execution_renders_streams_and_a_widget(tmp_path: Path) -> N
             bidi,
             context,
             "Boolean("
-            "document.querySelector('.jupyter-widgets.widget-box') || "
+            "(document.querySelectorAll('.jupyter-widgets.widget-box').length "
+            "=== 2 && "
+            "document.querySelectorAll('.jp-OutputArea canvas').length === 9) || "
             "document.body.innerText.includes('model not found') || "
             "document.querySelector("
             "'.jp-OutputArea-output[data-mime-type=\"text/plain\"]'"
@@ -446,6 +471,9 @@ def test_server_side_execution_renders_streams_and_a_widget(tmp_path: Path) -> N
                 "modelError: document.body.innerText.includes("
                 "'model not found'"
                 "),"
+                "loadingWidget: document.body.innerText.includes("
+                "'Loading widget'"
+                "),"
                 "plainTextFallback: [...document.querySelectorAll("
                 "'.jp-OutputArea-output[data-mime-type=\"text/plain\"]'"
                 ")].some(node => node.textContent.includes('VBox(')),"
@@ -456,6 +484,9 @@ def test_server_side_execution_renders_streams_and_a_widget(tmp_path: Path) -> N
                 ")].map(node => node.textContent),"
                 "widgetBoxes: document.querySelectorAll("
                 "'.jupyter-widgets.widget-box'"
+                ").length,"
+                "niivueCanvases: document.querySelectorAll("
+                "'.jp-OutputArea canvas'"
                 ").length"
                 "};"
                 "})())",
@@ -463,10 +494,12 @@ def test_server_side_execution_renders_streams_and_a_widget(tmp_path: Path) -> N
         )
         assert output == {
             "modelError": False,
+            "loadingWidget": False,
             "plainTextFallback": False,
             "streamText": True,
             "streamOutputs": [expected_stream],
-            "widgetBoxes": 1,
+            "widgetBoxes": 2,
+            "niivueCanvases": 9,
         }
 
         # Re-execution clears the cell before writing a new fragmented stream.
@@ -489,7 +522,12 @@ def test_server_side_execution_renders_streams_and_a_widget(tmp_path: Path) -> N
             bidi,
             context,
             "document.body.innerText.includes('stream-run-2') && "
-            "document.body.innerText.includes('stream-fragment-19')",
+            "document.body.innerText.includes('stream-fragment-19') && "
+            "document.querySelectorAll('.jp-OutputArea canvas').length === 9 && "
+            "document.querySelectorAll('.jupyter-widgets.widget-box').length "
+            "=== 2 && "
+            "!document.body.innerText.includes('Loading widget') && "
+            "!document.body.innerText.includes('model not found')",
             timeout=45,
         )
         stream_outputs = json.loads(
@@ -523,7 +561,12 @@ def test_server_side_execution_renders_streams_and_a_widget(tmp_path: Path) -> N
             bidi,
             replay_context,
             "document.body.innerText.includes('stream-run-2') && "
-            "document.body.innerText.includes('stream-fragment-19')",
+            "document.body.innerText.includes('stream-fragment-19') && "
+            "document.querySelectorAll('.jp-OutputArea canvas').length === 9 && "
+            "document.querySelectorAll('.jupyter-widgets.widget-box').length "
+            "=== 2 && "
+            "!document.body.innerText.includes('Loading widget') && "
+            "!document.body.innerText.includes('model not found')",
             timeout=45,
         )
         replay_stream_outputs = json.loads(

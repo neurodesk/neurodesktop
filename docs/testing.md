@@ -140,6 +140,8 @@ is returned to the model-facing system prompt or tool output.
 pytest tests/unit/test_jupyter_ai_workspace.py
 pytest tests/unit/test_astra_jupyter_ai_tooling.py
 pytest tests/unit/test_jupyter_server_documents_patch.py
+pytest tests/unit/test_ipyniivue_patch.py
+pytest tests/unit/test_jupyterlab_widgets_patch.py
 pytest tests/unit/test_jupyter_ai_acp_client_patch.py
 pytest tests/unit/test_jupyter_server_mcp_patch.py
 pytest tests/unit/test_coding_agents.py -k 'opencode_machine_commands or opencode_acp_exports_lmod'
@@ -168,9 +170,14 @@ replay rather than only displaying separate complete stream outputs. Before
 clicking Run, the test waits for the status bar to name the selected kernel and
 report ``Idle``. The notebook execution indicator alone can report ``idle``
 before JupyterLab has created a kernel. The test also requires `ipykernel`
-6.31.0 as the stable main-shell widget-comm path. The unit tests require both
-frontend workarounds to publish new content-hashed chunks and remote entries,
-so an immutable cached copy cannot conceal either fix.
+6.31.0 as the stable main-shell widget-comm path. The same browser test creates
+nine NiiVue models, re-executes them, and restores them in the second client.
+It requires nine canvases with no permanent ``Loading widget...`` output. The
+ipyniivue unit test moves the installed 5 MB frontend into one content-hashed
+JupyterLab asset, keeps model state inside a factory-created definition, and
+adds WebGL cleanup only to model destruction. The other frontend unit tests
+require changed federated chunks and remote entries to use new content-hashed
+names, so an immutable cached copy cannot conceal a fix.
 
 ### MyST and standalone RISE
 
