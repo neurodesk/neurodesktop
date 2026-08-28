@@ -47,6 +47,21 @@ def test_connect_sherlock_updates_from_neurodesktop_repository():
     ) in source
 
 
+def test_sherlock_tunnels_do_not_request_ttys_for_fixed_commands():
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "ExitOnForwardFailure=yes -t" not in source
+    assert 'ssh -S "$SSH_SOCKET" -o ExitOnForwardFailure=yes -T \\' in source
+    assert (
+        'ssh -S "$CTRL_SOCKET" -o ExitOnForwardFailure=yes -T -L '
+        '"${TUNNEL_PORT}:localhost:${TUNNEL_PORT}"'
+    ) in source
+    assert (
+        "ssh -o ExitOnForwardFailure=yes -T -L "
+        "${TUNNEL_PORT}:localhost:${NOTEBOOK_PORT}"
+    ) in source
+
+
 def test_self_update_replaces_and_reexecutes_an_old_copy(tmp_path):
     old_script = tmp_path / "connectSherlock.sh"
     old_script.write_text("#!/bin/bash\necho old copy\n", encoding="utf-8")

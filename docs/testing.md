@@ -140,6 +140,7 @@ is returned to the model-facing system prompt or tool output.
 pytest tests/unit/test_jupyter_ai_workspace.py
 pytest tests/unit/test_astra_jupyter_ai_tooling.py
 pytest tests/unit/test_jupyter_server_documents_patch.py
+pytest tests/unit/test_neurodesktop_stream_output.py
 pytest tests/unit/test_ipyniivue_patch.py
 pytest tests/unit/test_jupyterlab_widgets_patch.py
 pytest tests/unit/test_jupyter_ai_acp_client_patch.py

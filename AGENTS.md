@@ -145,6 +145,7 @@
   run `pytest tests/unit/test_jupyter_ai_workspace.py
   tests/unit/test_astra_jupyter_ai_tooling.py
   tests/unit/test_jupyter_server_documents_patch.py
+  tests/unit/test_neurodesktop_stream_output.py
   tests/unit/test_ipyniivue_patch.py
   tests/unit/test_jupyterlab_widgets_patch.py
   tests/unit/test_jupyter_ai_acp_client_patch.py
@@ -160,7 +161,14 @@
   inspect installed bundles. Keep notebook-room outputs as CRDT maps, coalesce
   each contiguous stream, and keep every stream output's `text` as a CRDT text
   value; separate maps duplicate replayed fragments, while plain dictionaries
-  or strings break JupyterLab's next `appendStreamOutput()` update.
+  or strings break JupyterLab's next `appendStreamOutput()` update. The
+  coalescing rules live in `config/jupyter/neurodesktop_stream_output.py`, a
+  port of JupyterLab's `Private.processText`/`addText` that the patcher
+  installs into the package; keep the port and its unit-test parity vectors
+  in step with JupyterLab, keep its per-cell state to length, cursor, and a
+  running hash — never the text — so a long stream is neither retained in
+  memory nor rebuilt on end-of-text appends, and keep every pycrdt `Text`
+  index in UTF-8 bytes.
   Wait for the status bar to name the selected kernel and report `Idle` before
   clicking Run; the notebook execution indicator can report `idle` before a
   kernel exists.

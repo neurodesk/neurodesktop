@@ -289,6 +289,71 @@ def test_server_side_stream_fragments_are_one_replay_safe_crdt_output() -> None:
     assert len(replay_outputs) == 1
     assert str(replay_outputs[0]["text"]) == "stream-run-2\nXYc\nstream-end\n"
 
+    # The coalescing rules live in the parity module the patcher installs
+    # into the package; the processor only delegates to it.
+    from jupyter_server_documents.outputs import _neurodesktop_stream
+
+    assert hasattr(_neurodesktop_stream, "write_stream_output")
+
+    # Backspaces follow JupyterLab's cursor rules, and interleaved stream
+    # names stay separate outputs exactly as nbformat records them.
+    del outputs[:]
+    write("abc")
+    write("\b\bXY\n")
+    processor.process_output(
+        "stream",
+        cell,
+        file_id=None,
+        cell_id="stream-cell",
+        content={"name": "stderr", "text": "err-1\n"},
+    )
+    write("out-2\n")
+    assert [output["name"] for output in outputs] == ["stdout", "stderr", "stdout"]
+    assert [str(output["text"]) for output in outputs] == [
+        "aXY\n",
+        "err-1\n",
+        "out-2\n",
+    ]
+
+
+def test_room_queue_survives_a_rejected_message() -> None:
+    """One raising message handler must not stop the room's queue task.
+
+    Without the queue guard the exception escapes the background task, so
+    later messages are never handled and ``Queue.join()`` deadlocks — this
+    test then fails by timeout.
+    """
+    import asyncio
+    import logging
+
+    from jupyter_server_documents.rooms.yroom import YRoom
+
+    class StubRoom:
+        _process_message_queue = YRoom._process_message_queue
+        room_id = "queue-guard-room"
+        log = logging.getLogger("queue-guard-room")
+
+        def __init__(self) -> None:
+            self._message_queue = asyncio.Queue()
+            self.handled: list[str] = []
+
+        async def handle_message(self, client_id: str, message: bytes) -> None:
+            if client_id == "poison":
+                raise RuntimeError("rejected frame")
+            self.handled.append(client_id)
+
+    async def run() -> list[str]:
+        room = StubRoom()
+        room._message_queue.put_nowait(("poison", b""))
+        room._message_queue.put_nowait(("late", b""))
+        task = asyncio.create_task(room._process_message_queue())
+        await asyncio.wait_for(room._message_queue.join(), timeout=10)
+        room._message_queue.put_nowait(None)
+        await asyncio.wait_for(task, timeout=10)
+        return room.handled
+
+    assert asyncio.run(run()) == ["late"]
+
 
 def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> None:
     """Stream updates stay valid while delayed and NiiVue widgets render."""
@@ -298,8 +363,14 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
                 "import asyncio\n"
                 "import sys\n"
                 "import ipywidgets as widgets\n"
+                "import nibabel\n"
+                "import numpy as np\n"
                 "from ipyniivue import NiiVue\n"
                 "from IPython.display import display\n"
+                "volume = np.random.default_rng(0).normal(\n"
+                "    size=(48, 48, 48)).astype('float32')\n"
+                "nibabel.save(nibabel.Nifti1Image(volume, np.eye(4)),\n"
+                "             'volume.nii.gz')\n"
                 "widget_run = globals().get('_widget_regression_run', 0) + 1\n"
                 "_widget_regression_run = widget_run\n"
                 "print(f'stream-run-{widget_run}')\n"
@@ -325,6 +396,7 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
                 "    }\n"
                 "}, raw=True)\n"
                 "niivues = [NiiVue(height=128) for _ in range(9)]\n"
+                "niivues[0].load_volumes([{'path': 'volume.nii.gz'}])\n"
                 "display(widgets.VBox(niivues))"
             ),
             nbformat.v4.new_markdown_cell("Widget regression end."),
@@ -424,6 +496,13 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             "'Python [conda env:base] * | Idle'"
             ")",
         )
+        # The shared ipyniivue bundle is imported after Run below; raise the
+        # resource-timing buffer first so its fetch cannot be evicted before
+        # the single-fetch assertion reads it.
+        assert bidi.evaluate(
+            context,
+            "performance.setResourceTimingBufferSize(5000); true",
+        )
         assert bidi.evaluate(
             context,
             "document.querySelector('.jp-Notebook .jp-CodeCell').click(); true",
@@ -501,6 +580,18 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             "widgetBoxes": 2,
             "niivueCanvases": 9,
         }
+
+        # Nine models must share one fetched bundle. Per-model delivery is
+        # the 5 MB-per-widget regression the ipyniivue workaround removes.
+        shared_bundle_fetches = json.loads(
+            bidi.evaluate(
+                context,
+                "JSON.stringify(performance.getEntriesByType('resource')"
+                ".map(entry => entry.name)"
+                ".filter(name => name.includes('neurodesktop-ipyniivue')))",
+            )
+        )
+        assert len(shared_bundle_fetches) == 1, shared_bundle_fetches
 
         # Re-execution clears the cell before writing a new fragmented stream.
         # The second run must replace the first output rather than replaying any
@@ -590,6 +681,21 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             if "appendStreamOutput" in error or "insert is not a function" in error
         ]
         assert not stream_output_errors, stream_output_errors
+
+        # Re-execution destroyed nine earlier NiiVue models; without the
+        # model-cleanup patch their WebGL contexts stay alive and the
+        # browser starts evicting contexts.
+        context_exhaustion = [
+            event["params"]["text"]
+            for event in bidi.events
+            if event.get("method") == "log.entryAdded"
+            and "webgl context" in event["params"].get("text", "").lower()
+            and any(
+                phrase in event["params"]["text"].lower()
+                for phrase in ("too many", "exceeded", "losing", "oldest")
+            )
+        ]
+        assert not context_exhaustion, context_exhaustion
     finally:
         if bidi is not None:
             bidi.close()

@@ -1372,8 +1372,12 @@ RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_proxy.py,target
 # appends plain dictionaries where JupyterLab requires CRDT maps. The frontend
 # workaround publishes new content-hashed assets because Jupyter serves bundles
 # as immutable. Keep these anchored workarounds until a fixed release is pinned.
+# The stream-coalescing logic lives in neurodesktop_stream_output.py, which the
+# patcher installs into the package; the anchored splice only delegates to it.
 RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_documents.py,target=/tmp/patch_jupyter_server_documents.py,ro \
+    --mount=type=bind,source=config/jupyter/neurodesktop_stream_output.py,target=/tmp/neurodesktop_stream_output.py,ro \
     install -m 0755 -o root -g users /tmp/patch_jupyter_server_documents.py /opt/neurodesktop/patch_jupyter_server_documents.py \
+    && install -m 0644 -o root -g users /tmp/neurodesktop_stream_output.py /opt/neurodesktop/neurodesktop_stream_output.py \
     && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_server_documents.py
 
 # ipywidgets 8.1.9 retries a late widget model for two seconds. Complex

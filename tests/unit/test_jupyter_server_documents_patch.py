@@ -163,11 +163,40 @@ def test_patch_applies_backend_guards_and_crdt_outputs_and_is_idempotent(tmp_pat
         output_processor
     )
     assert "self._write_ydoc_stream(ycell, cell_id, content)" in output_processor
-    assert "last.get(\"output_type\") == \"stream\"" in output_processor
-    assert "updated, index = self._process_stream_text(" in output_processor
+    assert "_neurodesktop_stream.write_stream_output(" in output_processor
     assert "self._discard_stream_position(cell_id)" in output_processor
 
+    # The coalescing logic is installed as an importable module, not spliced
+    # into the anchored change.
+    module_path = tmp_path / "outputs/_neurodesktop_stream.py"
+    assert module_path.read_text(encoding="utf-8") == patcher.stream_module_source()
+    assert "def process_stream_text" in module_path.read_text(encoding="utf-8")
+
     assert not patcher.patch_package(tmp_path)
+
+
+def test_patch_refreshes_an_outdated_installed_stream_module(tmp_path):
+    patcher = load_patcher_module()
+    write_upstream_fixture(tmp_path)
+    assert patcher.patch_package(tmp_path)
+
+    module_path = tmp_path / "outputs/_neurodesktop_stream.py"
+    module_path.write_text("outdated copy\n", encoding="utf-8")
+
+    assert patcher.patch_package(tmp_path)
+    assert module_path.read_text(encoding="utf-8") == patcher.stream_module_source()
+    assert not patcher.patch_package(tmp_path)
+
+
+def test_patch_refuses_a_missing_stream_module_as_partial(tmp_path):
+    patcher = load_patcher_module()
+    write_upstream_fixture(tmp_path)
+    assert patcher.patch_package(tmp_path)
+
+    (tmp_path / "outputs/_neurodesktop_stream.py").unlink()
+
+    with pytest.raises(ValueError, match="partial CRDT output workaround"):
+        patcher.patch_package(tmp_path)
 
 
 def test_patch_refuses_anchor_drift_without_partial_changes(tmp_path):
@@ -184,6 +213,7 @@ def test_patch_refuses_anchor_drift_without_partial_changes(tmp_path):
     assert (
         tmp_path / "outputs/output_processor.py"
     ).read_text(encoding="utf-8") == OUTPUT_PROCESSOR_SOURCE
+    assert not (tmp_path / "outputs/_neurodesktop_stream.py").exists()
 
 
 def test_patch_marks_server_executed_code_cells_trusted(tmp_path):

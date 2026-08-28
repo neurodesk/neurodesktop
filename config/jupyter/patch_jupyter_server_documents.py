@@ -22,6 +22,12 @@ fragments and can call ``appendStreamOutput()`` before an output exists.
 The upstream fixes have not been released. Patch all five failure seams at
 image build time. Exact anchors make a future package update fail loudly
 instead of silently retaining or misapplying these workarounds.
+
+The stream-coalescing logic itself lives in ``neurodesktop_stream_output.py``
+next to this script; the spliced methods only delegate to it. The patcher
+installs that module into the package as
+``jupyter_server_documents/outputs/_neurodesktop_stream.py`` so the anchored
+change stays small and the algorithm stays unit-testable from a checkout.
 """
 
 from __future__ import annotations
@@ -91,7 +97,14 @@ YDOC_OUTPUT_AFTER = f"""        else:
 """
 
 YDOC_IMPORT_BEFORE = "from pycrdt import Map\n"
-YDOC_IMPORT_AFTER = "from pycrdt import Map, Text\n"
+YDOC_IMPORT_AFTER = (
+    "from pycrdt import Map, Text\n"
+    "\n"
+    "from . import _neurodesktop_stream\n"
+)
+
+STREAM_MODULE_NAME = "_neurodesktop_stream.py"
+STREAM_MODULE_SOURCE_NAME = "neurodesktop_stream_output.py"
 
 YDOC_STREAM_TEXT_BEFORE = '''        if msg_type == "stream":
             return factory({
@@ -130,42 +143,7 @@ YDOC_STREAM_WRITE_AFTER = f'''        if msg_type == "stream" and not self.use_o
 YDOC_STREAM_HELPERS_BEFORE = '''    def _clear_ycell_outputs(self, ycell, file_id: str | None, cell_id: str):
 '''
 
-YDOC_STREAM_HELPERS_AFTER = '''    @staticmethod
-    def _process_stream_text(index: int, new_text: str, text: str = ""):
-        """Apply JupyterLab's stream cursor rules and return text plus cursor."""
-        if not any(char in new_text for char in "\\b\\r\\n"):
-            text = text[:index] + new_text + text[index + len(new_text):]
-            return text, index + len(new_text)
-
-        cursor = index
-        offset = 0
-        while offset < len(new_text):
-            control_positions = [
-                position
-                for char in "\\n\\b\\r"
-                if (position := new_text.find(char, offset)) >= 0
-            ]
-            control = min(control_positions) if control_positions else len(new_text)
-            prefix = new_text[offset:control]
-            text = text[:cursor] + prefix + text[cursor + len(prefix):]
-            cursor += len(prefix)
-            if control == len(new_text):
-                break
-
-            char = new_text[control]
-            offset = control + 1
-            if char == "\\b":
-                if cursor > 0 and text[cursor - 1] != "\\n":
-                    text = text[:cursor - 1] + text[cursor + 1:]
-                    cursor -= 1
-            elif char == "\\r":
-                cursor = text.rfind("\\n", 0, cursor) + 1
-            else:
-                text += "\\n"
-                cursor = len(text)
-        return text, cursor
-
-    def _stream_positions(self):
+YDOC_STREAM_HELPERS_AFTER = '''    def _stream_positions(self):
         positions = getattr(self, "_neurodesktop_stream_positions", None)
         if positions is None:
             positions = self._neurodesktop_stream_positions = {}
@@ -175,41 +153,10 @@ YDOC_STREAM_HELPERS_AFTER = '''    @staticmethod
         self._stream_positions().pop(cell_id, None)
 
     def _write_ydoc_stream(self, ycell, cell_id: str, content: dict) -> None:
-        outputs = ycell["outputs"]
-        name = content["name"]
-        new_text = content["text"]
         positions = self._stream_positions()
-        last = outputs[-1] if len(outputs) else None
-        if (
-            last is not None
-            and last.get("output_type") == "stream"
-            and last.get("name") == name
-            and isinstance(last.get("text"), Text)
-        ):
-            ytext = last["text"]
-            current = str(ytext)
-            state = positions.get(cell_id)
-            index = state[1] if state and state[0] == current else len(current)
-            updated, index = self._process_stream_text(index, new_text, current)
-            prefix = 0
-            while (
-                prefix < len(current)
-                and prefix < len(updated)
-                and current[prefix] == updated[prefix]
-            ):
-                prefix += 1
-            if prefix < len(current):
-                del ytext[prefix:]
-            if prefix < len(updated):
-                ytext.insert(prefix, updated[prefix:])
-        else:
-            updated, index = self._process_stream_text(0, new_text)
-            outputs.append(Map({
-                "output_type": "stream",
-                "text": Text(updated),
-                "name": name,
-            }))
-        positions[cell_id] = (updated, index)
+        positions[cell_id] = _neurodesktop_stream.write_stream_output(
+            ycell["outputs"], content, positions.get(cell_id)
+        )
 
     def _clear_ycell_outputs(self, ycell, file_id: str | None, cell_id: str):
         self._discard_stream_position(cell_id)
@@ -239,6 +186,13 @@ def installed_package_dir() -> Path:
     if spec is None or not spec.submodule_search_locations:
         raise ValueError("jupyter_server_documents is not installed")
     return Path(next(iter(spec.submodule_search_locations)))
+
+
+def stream_module_source() -> str:
+    """Read the shared stream-coalescing module installed next to this script."""
+    return Path(__file__).with_name(STREAM_MODULE_SOURCE_NAME).read_text(
+        encoding="utf-8"
+    )
 
 
 def installed_labextension_dir() -> Path:
@@ -277,10 +231,19 @@ def patch_package(package_dir: Path) -> bool:
                 "reassess the upstream issue #271 workaround"
             )
 
+    stream_module_path = output_processor_path.with_name(STREAM_MODULE_NAME)
+    module_source = stream_module_source()
     output_patched = YDOC_OUTPUT_MARKER in output_processor_text
     stream_text_patched = YDOC_STREAM_TEXT_MARKER in output_processor_text
     stream_merge_patched = YDOC_STREAM_MERGE_MARKER in output_processor_text
-    if len({output_patched, stream_text_patched, stream_merge_patched}) != 1:
+    if len(
+        {
+            output_patched,
+            stream_text_patched,
+            stream_merge_patched,
+            stream_module_path.exists(),
+        }
+    ) != 1:
         raise ValueError(
             "partial CRDT output workaround detected; refusing to continue"
         )
@@ -307,6 +270,10 @@ def patch_package(package_dir: Path) -> bool:
             "reassess the CRDT output workaround"
         )
 
+    module_refreshed = (
+        output_patched
+        and stream_module_path.read_text(encoding="utf-8") != module_source
+    )
     if issue_271_changed:
         clients_path.write_text(
             clients_text.replace(CLIENT_LOOKUP_BEFORE, CLIENT_LOOKUP_AFTER),
@@ -316,6 +283,8 @@ def patch_package(package_dir: Path) -> bool:
             yroom_text.replace(QUEUE_GUARD_BEFORE, QUEUE_GUARD_AFTER),
             encoding="utf-8",
         )
+    if not output_patched or module_refreshed:
+        stream_module_path.write_text(module_source, encoding="utf-8")
     if not output_patched:
         output_processor_path.write_text(
             output_processor_text.replace(YDOC_IMPORT_BEFORE, YDOC_IMPORT_AFTER)
@@ -325,7 +294,7 @@ def patch_package(package_dir: Path) -> bool:
             .replace(YDOC_STREAM_HELPERS_BEFORE, YDOC_STREAM_HELPERS_AFTER),
             encoding="utf-8",
         )
-    return issue_271_changed or not output_patched
+    return issue_271_changed or not output_patched or module_refreshed
 
 
 def patch_widget_trust(labextension_dir: Path) -> bool:

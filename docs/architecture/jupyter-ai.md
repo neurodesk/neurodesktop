@@ -99,10 +99,15 @@ model is destroyed, the definition runs NiiVue cleanup and requests
 because ipyniivue supports moving and redisplaying the same model.
 
 The image regression emits fragmented carriage-return stream updates, delays a
-real ``HBox`` comm for three seconds, creates nine NiiVue models, and requires
-the stream and all
-widgets to render without a YDoc output exception. It re-executes the cell and
-restores the populated room in a second client. Jupyter
+real ``HBox`` comm for three seconds, and creates nine NiiVue models, one
+loading a generated NIfTI volume so real image data crosses the widget comm.
+The stream and all widgets must render without a YDoc output exception, the
+nine models must produce exactly one fetch of the shared ipyniivue bundle, and
+re-execution must not exhaust WebGL contexts. It re-executes the cell and
+restores the populated room in a second client. Companion image tests drive
+the patched ``OutputProcessor`` directly over backspace and interleaved
+stdout/stderr fragments, and prove one rejected frame cannot stop a room's
+message queue. Jupyter
 AI 3.2 plans to make RTC optional, but Neurodesktop will not remove the stable
 3.1 dependency by adopting an alpha release.
 
@@ -118,7 +123,24 @@ locally and write the same fragment back into the room, which duplicates text
 when another client joins and can apply a stream delta before its output row.
 The backend patch keeps the outputs-service representation unchanged, requests
 CRDT maps, constructs CRDT stream text, and processes carriage returns while
-coalescing each contiguous stdout or stderr run into one map.
+coalescing each contiguous stdout or stderr run into one map. The cursor rules
+are a port of JupyterLab's `Private.processText`/`addText`
+(`packages/outputarea/src/model.ts`) kept in
+`config/jupyter/neurodesktop_stream_output.py`; the patcher installs it into
+the package as `outputs/_neurodesktop_stream.py` and splices only thin
+delegating methods, so the algorithm stays reviewable and is pinned by parity
+vectors in `tests/unit/test_neurodesktop_stream_output.py`. Between messages
+the processor retains only a per-cell `(length, cursor, running hash)` —
+never the accumulated text — and appends blindly while the cursor sits at
+the end and the fragment contains no `\r` or `\b`, so ordinary
+newline-terminated output of any size is neither held in memory for the life
+of the room nor rebuilt on every fragment. Rewinding fragments materialize
+the text once and validate the stored cursor against the running hash, so a
+concurrently replaced output conservatively appends at the end; that
+materialization matches what JupyterLab's own `addText` does per fragment.
+pycrdt `Text` indexes by UTF-8 bytes, so every CRDT index is converted from
+the code-point cursor arithmetic — the unit tests pin this with a
+byte-indexed fake.
 
 The same server-side executor bypasses JupyterLab's normal code-cell execution
 path, which marks a cell trusted before its outputs arrive. Without that state,
