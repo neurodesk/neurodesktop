@@ -10,6 +10,14 @@ window and disconnects the client. A stale browser then repeats its divergent
 history repair, whose non-idempotent full-range clear can delete server-owned
 notebook cells and autosave a one-cell blank document.
 
+Its per-connection kernel WebSocket bridge also skips upstream
+jupyter_server's connection "nudge", so a freshly connected client's ZMQ
+IOPub subscription is unproven and everything the kernel publishes before it
+reaches the kernel is silently lost — a widget bulk state reply can vanish
+with no error anywhere. The nudge logic lives in
+``neurodesktop_kernel_nudge.py`` next to this script; the anchored change in
+``websocket_connection.py`` only awaits it before starting the listen tasks.
+
 Its server-side notebook executor also bypasses JupyterLab's normal
 ``CodeCellModel.clearExecution()`` path, which marks a user-executed cell as
 trusted. Rich output renderers such as ipywidgets are unsafe for untrusted
@@ -50,6 +58,7 @@ LATE_SYNC_STEP2_MARKER = "neurodesktop-late-sync-step2"
 YDOC_OUTPUT_MARKER = "neurodesktop-crdt-notebook-output"
 YDOC_STREAM_TEXT_MARKER = "neurodesktop-crdt-stream-text"
 YDOC_STREAM_MERGE_MARKER = "neurodesktop-crdt-stream-merge"
+KERNEL_NUDGE_MARKER = "neurodesktop-kernel-ws-nudge"
 WIDGET_TRUST_MARKER = "neurodesktop-server-execution-trust"
 WIDGET_CACHE_SAFE_MARKER = "neurodesktop-widget-cache-safe-entry"
 DIVERGENT_REPAIR_MARKER = "neurodesktop-idempotent-divergent-repair"
@@ -239,6 +248,39 @@ LATE_SYNC_STEP2_PATCHES = (
     (PENDING_SS2_CLEAR_BEFORE, PENDING_SS2_CLEAR_AFTER),
 )
 
+KERNEL_NUDGE_IMPORT_BEFORE = """from jupyter_server.services.kernels.connection.base import (
+    BaseKernelWebsocketConnection,
+    deserialize_msg_from_ws_v1,
+    serialize_msg_to_ws_v1,
+)
+"""
+
+KERNEL_NUDGE_IMPORT_AFTER = """from jupyter_server.services.kernels.connection.base import (
+    BaseKernelWebsocketConnection,
+    deserialize_msg_from_ws_v1,
+    serialize_msg_to_ws_v1,
+)
+
+from . import _neurodesktop_kernel_nudge
+"""
+
+KERNEL_NUDGE_CONNECT_BEFORE = """        self._client.start_channels(hb=False)
+        self._tasks = [
+"""
+
+KERNEL_NUDGE_CONNECT_AFTER = f"""        self._client.start_channels(hb=False)
+        # {KERNEL_NUDGE_MARKER}
+        # A fresh IOPub SUB socket drops everything the kernel publishes
+        # before its subscription arrives. Prove the bridge end-to-end the
+        # way upstream jupyter_server's connection nudge does before any
+        # traffic is forwarded; the nudge bounds itself and never raises.
+        await _neurodesktop_kernel_nudge.nudge(self)
+        self._tasks = [
+"""
+
+NUDGE_MODULE_NAME = "_neurodesktop_kernel_nudge.py"
+NUDGE_MODULE_SOURCE_NAME = "neurodesktop_kernel_nudge.py"
+
 YDOC_OUTPUT_BEFORE = """        else:
             output = self.transform_output(msg_type, content, ydoc=False)
 """
@@ -374,6 +416,13 @@ def stream_module_source() -> str:
     )
 
 
+def nudge_module_source() -> str:
+    """Read the shared kernel-nudge module installed next to this script."""
+    return Path(__file__).with_name(NUDGE_MODULE_SOURCE_NAME).read_text(
+        encoding="utf-8"
+    )
+
+
 def installed_labextension_dir() -> Path:
     """Locate the installed frontend bundle paired with the Python package."""
     return (
@@ -388,9 +437,11 @@ def patch_package(package_dir: Path) -> bool:
     clients_path = package_dir / "websockets" / "clients.py"
     yroom_path = package_dir / "rooms" / "yroom.py"
     output_processor_path = package_dir / "outputs" / "output_processor.py"
+    websocket_path = package_dir / "websocket_connection.py"
     clients_text = clients_path.read_text(encoding="utf-8")
     yroom_text = yroom_path.read_text(encoding="utf-8")
     output_processor_text = output_processor_path.read_text(encoding="utf-8")
+    websocket_text = websocket_path.read_text(encoding="utf-8")
 
     client_patched = CLIENT_LOOKUP_MARKER in clients_text
     queue_patched = QUEUE_GUARD_MARKER in yroom_text
@@ -420,6 +471,25 @@ def patch_package(package_dir: Path) -> bool:
         raise ValueError(
             "late SyncStep2 anchor did not match exactly once; "
             "reassess the handshake data-loss workaround"
+        )
+
+    nudge_module_path = package_dir / NUDGE_MODULE_NAME
+    nudge_patched = KERNEL_NUDGE_MARKER in websocket_text
+    nudge_import_patched = websocket_text.count(KERNEL_NUDGE_IMPORT_AFTER) == 1
+    if len(
+        {nudge_patched, nudge_import_patched, nudge_module_path.exists()}
+    ) != 1:
+        raise ValueError(
+            "partial kernel websocket nudge workaround detected; "
+            "refusing to continue"
+        )
+    if not nudge_patched and (
+        websocket_text.count(KERNEL_NUDGE_IMPORT_BEFORE) != 1
+        or websocket_text.count(KERNEL_NUDGE_CONNECT_BEFORE) != 1
+    ):
+        raise ValueError(
+            "kernel websocket nudge anchor did not match exactly once; "
+            "reassess the kernel websocket nudge workaround"
         )
 
     stream_module_path = output_processor_path.with_name(STREAM_MODULE_NAME)
@@ -465,6 +535,11 @@ def patch_package(package_dir: Path) -> bool:
         output_patched
         and stream_module_path.read_text(encoding="utf-8") != module_source
     )
+    nudge_source = nudge_module_source()
+    nudge_module_refreshed = (
+        nudge_patched
+        and nudge_module_path.read_text(encoding="utf-8") != nudge_source
+    )
     yroom_changed = issue_271_changed or not late_ss2_patched
     if issue_271_changed:
         clients_path.write_text(
@@ -488,7 +563,22 @@ def patch_package(package_dir: Path) -> bool:
             .replace(YDOC_STREAM_HELPERS_BEFORE, YDOC_STREAM_HELPERS_AFTER),
             encoding="utf-8",
         )
-    return yroom_changed or not output_patched or module_refreshed
+    if not nudge_patched or nudge_module_refreshed:
+        nudge_module_path.write_text(nudge_source, encoding="utf-8")
+    if not nudge_patched:
+        websocket_path.write_text(
+            websocket_text.replace(
+                KERNEL_NUDGE_IMPORT_BEFORE, KERNEL_NUDGE_IMPORT_AFTER
+            ).replace(KERNEL_NUDGE_CONNECT_BEFORE, KERNEL_NUDGE_CONNECT_AFTER),
+            encoding="utf-8",
+        )
+    return (
+        yroom_changed
+        or not output_patched
+        or module_refreshed
+        or not nudge_patched
+        or nudge_module_refreshed
+    )
 
 
 def patch_widget_trust(labextension_dir: Path) -> bool:

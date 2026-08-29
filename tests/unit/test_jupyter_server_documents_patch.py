@@ -128,6 +128,46 @@ YROOM_SOURCE = '''class YRoom:
             self.clients.remove(client_id)
 '''
 
+WEBSOCKET_SOURCE = '''"""
+Per-connection kernel WebSocket bridge.
+"""
+import asyncio
+import typing as t
+
+from tornado.websocket import WebSocketClosedError
+from jupyter_server.services.kernels.connection.base import (
+    BaseKernelWebsocketConnection,
+    deserialize_msg_from_ws_v1,
+    serialize_msg_to_ws_v1,
+)
+
+
+class KernelWebsocketConnection(BaseKernelWebsocketConnection):
+    """WebSocket bridge that owns its own AsyncKernelClient per connection."""
+
+    kernel_ws_protocol = "v1.kernel.websocket.jupyter.org"
+
+    _client: t.Any = None
+    _tasks: t.List[asyncio.Task] = []
+
+    async def connect(self) -> None:
+        self._client = self.kernel_manager.client()
+        self._client.load_connection_info(self.kernel_manager.get_connection_info())
+        self._client.start_channels(hb=False)
+        self._tasks = [
+            asyncio.create_task(self._listen(ch))
+            for ch in ("shell", "control", "stdin", "iopub")
+        ]
+
+    def disconnect(self) -> None:
+        for task in self._tasks:
+            task.cancel()
+        self._tasks = []
+        if self._client is not None:
+            self._client.stop_channels()
+            self._client = None
+'''
+
 OUTPUT_PROCESSOR_SOURCE = '''from pycrdt import Map
 
 
@@ -194,6 +234,9 @@ def write_upstream_fixture(package_dir):
     (rooms_dir / "yroom.py").write_text(YROOM_SOURCE, encoding="utf-8")
     (outputs_dir / "output_processor.py").write_text(
         OUTPUT_PROCESSOR_SOURCE, encoding="utf-8"
+    )
+    (package_dir / "websocket_connection.py").write_text(
+        WEBSOCKET_SOURCE, encoding="utf-8"
     )
 
 
@@ -282,6 +325,20 @@ def test_patch_applies_backend_guards_and_crdt_outputs_and_is_idempotent(tmp_pat
     assert module_path.read_text(encoding="utf-8") == patcher.stream_module_source()
     assert "def process_stream_text" in module_path.read_text(encoding="utf-8")
 
+    # The kernel websocket bridge nudges every fresh connection before its
+    # listen tasks start, from a module installed next to it.
+    websocket = (tmp_path / "websocket_connection.py").read_text(encoding="utf-8")
+    assert patcher.KERNEL_NUDGE_MARKER in websocket
+    assert "from . import _neurodesktop_kernel_nudge" in websocket
+    assert "await _neurodesktop_kernel_nudge.nudge(self)" in websocket
+    assert websocket.index("start_channels(hb=False)") < websocket.index(
+        "await _neurodesktop_kernel_nudge.nudge(self)"
+    ) < websocket.index("asyncio.create_task(self._listen(ch))")
+    nudge_module_path = tmp_path / "_neurodesktop_kernel_nudge.py"
+    nudge_module = nudge_module_path.read_text(encoding="utf-8")
+    assert nudge_module == patcher.nudge_module_source()
+    assert "async def nudge" in nudge_module
+
     assert not patcher.patch_package(tmp_path)
 
 
@@ -296,6 +353,48 @@ def test_patch_refreshes_an_outdated_installed_stream_module(tmp_path):
     assert patcher.patch_package(tmp_path)
     assert module_path.read_text(encoding="utf-8") == patcher.stream_module_source()
     assert not patcher.patch_package(tmp_path)
+
+
+def test_patch_refreshes_an_outdated_installed_nudge_module(tmp_path):
+    patcher = load_patcher_module()
+    write_upstream_fixture(tmp_path)
+    assert patcher.patch_package(tmp_path)
+
+    module_path = tmp_path / "_neurodesktop_kernel_nudge.py"
+    module_path.write_text("outdated copy\n", encoding="utf-8")
+
+    assert patcher.patch_package(tmp_path)
+    assert module_path.read_text(encoding="utf-8") == patcher.nudge_module_source()
+    assert not patcher.patch_package(tmp_path)
+
+
+def test_patch_refuses_a_missing_nudge_module_as_partial(tmp_path):
+    patcher = load_patcher_module()
+    write_upstream_fixture(tmp_path)
+    assert patcher.patch_package(tmp_path)
+
+    (tmp_path / "_neurodesktop_kernel_nudge.py").unlink()
+
+    with pytest.raises(ValueError, match="partial kernel websocket nudge"):
+        patcher.patch_package(tmp_path)
+
+
+def test_patch_refuses_websocket_nudge_anchor_drift(tmp_path):
+    patcher = load_patcher_module()
+    write_upstream_fixture(tmp_path)
+    websocket_path = tmp_path / "websocket_connection.py"
+    websocket_path.write_text("upstream changed\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="kernel websocket nudge anchor"):
+        patcher.patch_package(tmp_path)
+
+    # Validation failures must leave every file untouched.
+    assert websocket_path.read_text(encoding="utf-8") == "upstream changed\n"
+    assert (
+        tmp_path / "websockets/clients.py"
+    ).read_text(encoding="utf-8") == CLIENTS_SOURCE
+    assert not (tmp_path / "_neurodesktop_kernel_nudge.py").exists()
+    assert not (tmp_path / "outputs/_neurodesktop_stream.py").exists()
 
 
 def test_patch_refuses_a_missing_stream_module_as_partial(tmp_path):

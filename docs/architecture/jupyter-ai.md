@@ -4,7 +4,7 @@ description: The ACP-native Jupyter AI chat surface, its Claude/Codex/OpenCode
   personas, workspace seeding, and collaboration-stack workarounds
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-28"
+last-reviewed: "2026-08-29"
 ---
 
 # Jupyter AI
@@ -109,6 +109,24 @@ delivers comm traffic. Each reconnect is bounded at ten seconds; restoration
 continues into its bounded control-state request if reconnecting cannot finish.
 The retry bypasses the one-time readiness probe after reconnecting so probe
 timeouts cannot consume the retry's rendering window.
+
+The root of those settling losses is server-side. `jupyter-server-documents`
+replaces jupyter_server's kernel WebSocket connection with a per-connection
+`AsyncKernelClient`, but skips upstream's connection "nudge". A freshly
+connected ZMQ IOPub SUB socket silently drops everything the kernel publishes
+before its subscription arrives (the slow-joiner race), so a new client's
+bulk-state reply could vanish with no error anywhere. Neurodesktop's anchored
+backend patch restores the nudge: `connect()` repeats `kernel_info_request`
+on transient shell and control sockets until a reply and at least one IOPub
+message prove the bridge, before the channel listen tasks start. The transient
+sockets keep nudge replies away from the frontend, and the proving IOPub
+message is forwarded to the WebSocket rather than consumed. A busy kernel is
+skipped (its subscriptions are long established, and shell requests would
+queue behind the running execution), and the nudge is bounded at ten seconds,
+after which the connection proceeds with the old behavior. The logic lives in
+`config/jupyter/neurodesktop_kernel_nudge.py`, installed into the package as
+`jupyter_server_documents/_neurodesktop_kernel_nudge.py`; the frontend probe,
+reconnect, and retry bounds above remain as defense in depth.
 
 The ipywidgets backend also stores only the most recently opened widget control
 comm. When two JupyterLab clients restore the same kernel concurrently, a state

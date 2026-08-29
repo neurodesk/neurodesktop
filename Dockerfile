@@ -1369,16 +1369,21 @@ RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_proxy.py,target
 
 # jupyter-server-documents 0.3.3 has pinned upstream defects: stale frames can
 # terminate a room queue, a late SyncStep2 can trigger a destructive repeated
-# divergent-history repair, server execution leaves cells untrusted, and
-# notebook rooms append non-CRDT outputs. Frontend workarounds publish new
-# content-hashed assets because Jupyter serves bundles as immutable. Keep these
-# anchored workarounds until a fixed release is pinned.
-# The stream-coalescing logic lives in neurodesktop_stream_output.py, which the
-# patcher installs into the package; the anchored splice only delegates to it.
+# divergent-history repair, server execution leaves cells untrusted, notebook
+# rooms append non-CRDT outputs, and its per-connection kernel WebSocket
+# bridge skips upstream jupyter_server's connection nudge, silently losing
+# IOPub messages published before a fresh subscription joins. Frontend
+# workarounds publish new content-hashed assets because Jupyter serves bundles
+# as immutable. Keep these anchored workarounds until a fixed release is
+# pinned. The stream-coalescing and kernel-nudge logic live in
+# neurodesktop_stream_output.py and neurodesktop_kernel_nudge.py, which the
+# patcher installs into the package; the anchored splices only delegate.
 RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_documents.py,target=/tmp/patch_jupyter_server_documents.py,ro \
     --mount=type=bind,source=config/jupyter/neurodesktop_stream_output.py,target=/tmp/neurodesktop_stream_output.py,ro \
+    --mount=type=bind,source=config/jupyter/neurodesktop_kernel_nudge.py,target=/tmp/neurodesktop_kernel_nudge.py,ro \
     install -m 0755 -o root -g users /tmp/patch_jupyter_server_documents.py /opt/neurodesktop/patch_jupyter_server_documents.py \
     && install -m 0644 -o root -g users /tmp/neurodesktop_stream_output.py /opt/neurodesktop/neurodesktop_stream_output.py \
+    && install -m 0644 -o root -g users /tmp/neurodesktop_kernel_nudge.py /opt/neurodesktop/neurodesktop_kernel_nudge.py \
     && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_server_documents.py
 
 # ipywidgets 8.1.9 sends every control-state response through the most recently

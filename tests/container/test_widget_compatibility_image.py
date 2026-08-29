@@ -715,6 +715,24 @@ def test_server_documents_installs_reconnect_data_loss_guards() -> None:
     assert "self._pending_ss2: dict[str, asyncio.Future[bytes]] = {}" in yroom_source
     assert "self._pending_ss2.pop(client_id, None)" in yroom_source
 
+    # A fresh kernel WebSocket bridge must prove its ZMQ paths (the upstream
+    # "nudge") before the listen tasks start; without it a new client's IOPub
+    # subscription can silently miss the widget bulk-state reply.
+    websocket_source = (package_dir / "websocket_connection.py").read_text(
+        encoding="utf-8"
+    )
+    assert "neurodesktop-kernel-ws-nudge" in websocket_source
+    assert "from . import _neurodesktop_kernel_nudge" in websocket_source
+    assert "await _neurodesktop_kernel_nudge.nudge(self)" in websocket_source
+    assert websocket_source.index("start_channels(hb=False)") < (
+        websocket_source.index("await _neurodesktop_kernel_nudge.nudge(self)")
+    ) < websocket_source.index("asyncio.create_task(self._listen(ch))")
+    nudge_source = (package_dir / "_neurodesktop_kernel_nudge.py").read_text(
+        encoding="utf-8"
+    )
+    assert "async def nudge" in nudge_source
+    assert "forward_iopub_message" in nudge_source
+
     labextension = (
         Path(sys.prefix)
         / "share/jupyter/labextensions/@jupyter-ai-contrib/server-documents"

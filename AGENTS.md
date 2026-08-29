@@ -145,6 +145,7 @@
   run `pytest tests/unit/test_jupyter_ai_workspace.py
   tests/unit/test_astra_jupyter_ai_tooling.py
   tests/unit/test_jupyter_server_documents_patch.py
+  tests/unit/test_neurodesktop_kernel_nudge.py
   tests/unit/test_neurodesktop_stream_output.py
   tests/unit/test_ipyniivue_patch.py
   tests/unit/test_widget_browser_diagnostics.py
@@ -197,6 +198,13 @@
   pending replies stay keyed per client, and the frontend divergent-history
   repair deletes only Yjs ordered items not covered by the server state vector.
   A repeated repair must never delete server-owned notebook cells.
+  Keep the per-connection kernel WebSocket bridge nudging every fresh
+  connection before its listen tasks start: kernel-info on transient shell
+  and control sockets until a reply and one IOPub message prove the ZMQ
+  subscription, forwarding — never consuming — that IOPub message, skipping
+  only busy kernels, and continuing after the bounded timeout instead of
+  failing the connection. The nudge logic stays in
+  `config/jupyter/neurodesktop_kernel_nudge.py` so it remains unit-testable.
   Keep `ipykernel` on the stable 6.x line until its experimental comm subshells
   can create a per-target subshell for delayed server-executed widgets without
   canceling the control future.
