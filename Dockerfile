@@ -1383,9 +1383,11 @@ RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_documents.py,ta
 
 # ipywidgets 8.1.9 sends every control-state response through the most recently
 # opened client comm, so overlapping widget-manager restores can steal each
-# other's reply. Its frontend also waits only two seconds for a late model.
-# Keep replies on their requesting comm, extend the bounded model wait to ten
-# seconds, and publish new hashed frontend assets so caches cannot retain it.
+# other's reply. Its frontend also waits only two seconds for a late model and
+# only four seconds for bulk control state before entering a racy per-model
+# fallback. Keep replies on their requesting comm, extend the bounded waits to
+# ten and thirty seconds, and publish new hashed assets so caches cannot retain
+# them.
 RUN --mount=type=bind,source=config/jupyter/patch_ipywidgets_control_comm.py,target=/tmp/patch_ipywidgets_control_comm.py,ro \
     --mount=type=bind,source=config/jupyter/patch_jupyterlab_widgets.py,target=/tmp/patch_jupyterlab_widgets.py,ro \
     install -m 0755 -o root -g users /tmp/patch_ipywidgets_control_comm.py /opt/neurodesktop/patch_ipywidgets_control_comm.py \

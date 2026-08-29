@@ -70,32 +70,15 @@ def test_widget_notebook_keeps_core_replay_coverage_without_webgl():
         assert "open_model_later" in source
         assert "widgets.HBox" in source
         assert "delayed-hbox-model" in source
+        assert "time.sleep(5)" in source
+        assert "widgets.Widget._handle_control_comm_msg" in source
+        assert "widget.comm.on_msg(lambda msg: None)" in source
     assert "NiiVue" not in core_source
     assert "volume.nii.gz" not in core_source
     assert "NiiVue" in webgl_source
     assert "volume.nii.gz" in webgl_source
     assert "scene-sync-count:0" in webgl_source
     assert "niivue.observe(record_scene_sync, names='scene')" in webgl_source
-
-
-def test_replay_client_uses_a_separate_jupyterlab_workspace():
-    module = load_widget_test_module()
-
-    assert module._jupyterlab_notebook_url(
-        8765,
-        "browser token",
-    ) == (
-        "http://127.0.0.1:8765/lab/tree/widget.ipynb"
-        "?token=browser+token"
-    )
-    assert module._jupyterlab_notebook_url(
-        8765,
-        "browser token",
-        workspace="widget replay",
-    ) == (
-        "http://127.0.0.1:8765/lab/workspaces/widget%20replay/"
-        "tree/widget.ipynb?token=browser+token"
-    )
 
 
 def test_ipyniivue_idle_probe_records_only_shared_asset_intervals():

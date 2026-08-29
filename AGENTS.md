@@ -196,8 +196,10 @@
   Keep `ipykernel` on the stable 6.x line until its experimental comm subshells
   can create a per-target subshell for delayed server-executed widgets without
   canceling the control future.
-  Keep the late-model wait bounded at ten seconds; the upstream two-second wait
-  is too short for complex output over the independent WebSockets. Publish
+  Keep the late-model wait bounded at ten seconds and the bulk control-state
+  wait bounded at thirty seconds. The upstream two- and four-second waits are
+  too short for complex output over the independent WebSockets, and the
+  per-model fallback can race a late bulk response. Publish
   patched federated assets under new content-derived names; Jupyter serves
   their original hashed URLs as immutable for one year. Keep ipyniivue's large
   ESM in one content-hashed JupyterLab asset rather than syncing it with every

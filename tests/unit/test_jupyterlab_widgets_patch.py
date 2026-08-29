@@ -44,10 +44,11 @@ def write_labextension_fixture(labextension_dir, bundle_source):
     return bundle, remote_entry, package_json
 
 
-def test_patch_extends_model_wait_and_publishes_new_hashed_assets(tmp_path):
+def test_patch_extends_widget_waits_and_publishes_new_hashed_assets(tmp_path):
     patcher = load_patcher_module()
     original_bundle, original_remote_entry, package_json = write_labextension_fixture(
-        tmp_path, patcher.MODEL_RETRY_BEFORE
+        tmp_path,
+        patcher.MODEL_RETRY_BEFORE + patcher.CONTROL_TIMEOUT_BEFORE,
     )
 
     assert patcher.patch_labextension(tmp_path)
@@ -68,11 +69,44 @@ def test_patch_extends_model_wait_and_publishes_new_hashed_assets(tmp_path):
     ]
     assert len(patched_bundles) == 1
     patched_bundle = patched_bundles[0]
-    assert patcher.MODEL_RETRY_MARKER in patched_bundle.read_text(encoding="utf-8")
-    assert "Date.now()-o<1e4" in patched_bundle.read_text(encoding="utf-8")
-    assert original_bundle.read_text(encoding="utf-8") == patcher.MODEL_RETRY_BEFORE
+    patched_text = patched_bundle.read_text(encoding="utf-8")
+    assert patcher.MODEL_RETRY_MARKER in patched_text
+    assert "Date.now()-o<1e4" in patched_text
+    assert patcher.CONTROL_TIMEOUT_MARKER in patched_text
+    assert '"Control comm did not respond in time"),3e4)' in patched_text
+    assert original_bundle.read_text(encoding="utf-8") == (
+        patcher.MODEL_RETRY_BEFORE + patcher.CONTROL_TIMEOUT_BEFORE
+    )
     assert patched_bundle.name.split(".")[1] in patched_remote_entry.read_text(
         encoding="utf-8"
+    )
+    assert not patcher.patch_labextension(tmp_path)
+
+
+def test_patch_upgrades_the_existing_model_only_workaround(tmp_path):
+    patcher = load_patcher_module()
+    original_bundle, _, package_json = write_labextension_fixture(
+        tmp_path,
+        patcher.MODEL_RETRY_AFTER + patcher.CONTROL_TIMEOUT_BEFORE,
+    )
+
+    assert patcher.patch_labextension(tmp_path)
+
+    load_path = json.loads(package_json.read_text(encoding="utf-8"))["jupyterlab"][
+        "_build"
+    ]["load"]
+    patched_remote_entry = tmp_path / load_path
+    patched_bundles = [
+        path
+        for path in (tmp_path / "static").glob("32.*.js")
+        if path != original_bundle
+    ]
+    assert len(patched_bundles) == 1
+    patched_text = patched_bundles[0].read_text(encoding="utf-8")
+    assert patcher.MODEL_RETRY_MARKER in patched_text
+    assert patcher.CONTROL_TIMEOUT_MARKER in patched_text
+    assert patched_bundles[0].name.split(".")[1] in (
+        patched_remote_entry.read_text(encoding="utf-8")
     )
     assert not patcher.patch_labextension(tmp_path)
 

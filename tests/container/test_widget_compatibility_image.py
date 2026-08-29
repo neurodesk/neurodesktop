@@ -101,24 +101,6 @@ SCENE_SYNC_COUNT_EXPRESSION = (
 )
 
 
-def _jupyterlab_notebook_url(
-    server_port: int,
-    token: str,
-    *,
-    workspace: str | None = None,
-) -> str:
-    workspace_path = (
-        ""
-        if workspace is None
-        else "/workspaces/" + urllib.parse.quote(workspace, safe="")
-    )
-    query = urllib.parse.urlencode({"token": token})
-    return (
-        f"http://127.0.0.1:{server_port}/lab{workspace_path}/"
-        f"tree/widget.ipynb?{query}"
-    )
-
-
 def _unused_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -471,6 +453,7 @@ def _widget_regression_notebook(*, include_niivue: bool):
     source = (
         "import asyncio\n"
         "import sys\n"
+        "import time\n"
         "import ipywidgets as widgets\n"
         f"{niivue_imports}"
         "from IPython.display import display\n"
@@ -487,11 +470,23 @@ def _widget_regression_notebook(*, include_niivue: bool):
         "model_id = f'delayed-hbox-model-{widget_run}'\n"
         "async def open_model_later():\n"
         "    await asyncio.sleep(3)\n"
-        "    return widgets.HBox([\n"
+        "    box = widgets.HBox([\n"
         "        widgets.IntSlider(value=42),\n"
         "        widgets.Label(value='nested'),\n"
         "    ], model_id=model_id)\n"
+        "    if widget_run == 2:\n"
+        "        for widget in (box, *box.children):\n"
+        "            widget.comm.on_msg(lambda msg: None)\n"
+        "    return box\n"
         "delayed_model_task = asyncio.create_task(open_model_later())\n"
+        "if widget_run == 2:\n"
+        "    original_control_handler = widgets.Widget._handle_control_comm_msg\n"
+        "    @classmethod\n"
+        "    def delayed_control_handler(cls, msg, control_comm=None):\n"
+        "        time.sleep(5)\n"
+        "        return original_control_handler(\n"
+        "            msg, control_comm=control_comm)\n"
+        "    widgets.Widget._handle_control_comm_msg = delayed_control_handler\n"
         "display({\n"
         "    'application/vnd.jupyter.widget-view+json': {\n"
         "        'version_major': 2,\n"
@@ -555,7 +550,7 @@ def test_ipyniivue_interval_probe_records_matching_asset_timer(tmp_path: Path) -
 
 
 def test_widget_manager_waits_for_a_late_model_registration():
-    """Yjs output may arrive before the matching kernel ``comm_open``.
+    """Yjs output and bulk control state may arrive after frontend waits.
 
     ``jupyter-server-documents`` delivers notebook output over a different
     websocket from widget comms.  The shipped frontend must therefore retry a
@@ -588,6 +583,8 @@ def test_widget_manager_waits_for_a_late_model_registration():
     )
     assert "neurodesktop-widget-model-retry" in bundles
     assert "Date.now()-o<1e4" in bundles
+    assert "neurodesktop-widget-control-timeout" in bundles
+    assert '"Control comm did not respond in time"),3e4)' in bundles
 
 
 def test_widget_control_state_replies_return_to_requesting_client(monkeypatch):
@@ -953,7 +950,10 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             "browsingContext.navigate",
             {
                 "context": context,
-                "url": _jupyterlab_notebook_url(server_port, token),
+                "url": (
+                    f"http://127.0.0.1:{server_port}/lab/tree/widget.ipynb"
+                    f"?token={token}"
+                ),
                 "wait": "complete",
             },
         )
@@ -1163,9 +1163,10 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
         )
         assert stream_outputs == [expected_stream]
 
-        # A second JupyterLab client replays the populated notebook room. Give
-        # it a separate workspace so JupyterLab does not move either client to
-        # an automatic workspace while plugins are activating.
+        # A second JupyterLab client replays the populated notebook room. The
+        # notebook delays its bulk control-state response beyond the upstream
+        # four-second limit and makes the racy per-model fallback unavailable.
+        # The manager must wait for the bulk response and reproduce the stream.
         replay_context = bidi.request("browsingContext.create", {"type": "tab"})[
             "context"
         ]
@@ -1173,10 +1174,9 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             "browsingContext.navigate",
             {
                 "context": replay_context,
-                "url": _jupyterlab_notebook_url(
-                    server_port,
-                    token,
-                    workspace="widget-replay",
+                "url": (
+                    f"http://127.0.0.1:{server_port}/lab/tree/widget.ipynb"
+                    f"?token={token}"
                 ),
                 "wait": "complete",
             },

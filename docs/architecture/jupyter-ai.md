@@ -87,6 +87,11 @@ layouts such as a ``VBox`` containing delayed ``HBox`` models. Neurodesktop
 extends that bound to ten seconds and publishes the changed widget-manager
 chunk and remote entry under new content-derived names.
 
+The same widget manager abandons a bulk kernel-state request after four
+seconds. Its per-model fallback can overlap the late bulk response and leave
+restoration unfinished. Neurodesktop keeps the bulk request alive for thirty
+seconds so a loaded kernel does not enter that race.
+
 The ipywidgets backend also stores only the most recently opened widget control
 comm. When two JupyterLab clients restore the same kernel concurrently, a state
 request received from one client can therefore send its response to the other.

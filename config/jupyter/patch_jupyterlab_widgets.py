@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Extend ipywidgets' bounded wait for late model registration.
+"""Extend ipywidgets' bounded model and control-state waits.
 
 ``ipywidgets==8.1.9`` retries a missing frontend model for two seconds. Server
 Documents sends notebook output over its collaboration WebSocket while widget
 comms use the kernel WebSocket, so a complex output can legitimately arrive
-more than two seconds before one of its nested models. Publish an anchored
-ten-second retry under new content-derived asset names. Jupyter serves the
-original federated extension URLs as immutable for one year.
+more than two seconds before one of its nested models. The widget manager also
+abandons its bulk control-state request after four seconds and falls back to
+individual model requests that can be stranded by the late bulk response.
+Publish anchored ten-second model and thirty-second control-state waits under
+new content-derived asset names. Jupyter serves the original federated
+extension URLs as immutable for one year.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from pathlib import Path
 
 
 MODEL_RETRY_MARKER = "neurodesktop-widget-model-retry"
+CONTROL_TIMEOUT_MARKER = "neurodesktop-widget-control-timeout"
 CACHE_SAFE_MARKER = "neurodesktop-widget-retry-cache-safe-entry"
 
 MODEL_RETRY_BEFORE = (
@@ -32,6 +36,16 @@ MODEL_RETRY_AFTER = (
     "for(;Date.now()-o<1e4;){"
     "if(void 0!==(t=this._models[e]))return t;"
     "await new Promise(e=>setTimeout(e,100))}"
+)
+
+CONTROL_TIMEOUT_BEFORE = (
+    'setTimeout(()=>l("Control comm did not respond in time"),4e3)'
+)
+
+CONTROL_TIMEOUT_AFTER = (
+    "setTimeout(()=>l("
+    f'/*{CONTROL_TIMEOUT_MARKER}*/'
+    '"Control comm did not respond in time"),3e4)'
 )
 
 HASHED_BUNDLE_NAME = re.compile(
@@ -70,7 +84,7 @@ def patch_labextension(labextension_dir: Path) -> bool:
     remote_entry = labextension_dir / load_path
     remote_text = remote_entry.read_text(encoding="utf-8")
     texts = {path: path.read_text(encoding="utf-8") for path in bundles}
-    before_paths = [
+    model_before_paths = [
         path for path, text in texts.items() if MODEL_RETRY_BEFORE in text
     ]
     active_marker_paths = []
@@ -85,16 +99,42 @@ def patch_labextension(labextension_dir: Path) -> bool:
 
     if (
         len(active_marker_paths) == 1
+        and all(
+            marker in texts[active_marker_paths[0]]
+            for marker in (MODEL_RETRY_MARKER, CONTROL_TIMEOUT_MARKER)
+        )
         and CACHE_SAFE_MARKER in remote_text
     ):
         return False
-    if len(before_paths) != 1 or active_marker_paths:
+
+    if len(active_marker_paths) > 1:
         raise ValueError(
-            "widget model retry anchor did not match exactly once; "
-            "reassess the late-model workaround"
+            "more than one active widget workaround bundle was found"
         )
 
-    source_bundle = before_paths[0]
+    if active_marker_paths:
+        source_bundle = active_marker_paths[0]
+        replacements = ((CONTROL_TIMEOUT_BEFORE, CONTROL_TIMEOUT_AFTER),)
+    else:
+        if len(model_before_paths) != 1:
+            raise ValueError(
+                "widget model retry anchor did not match exactly once; "
+                "reassess the widget wait workaround"
+            )
+        source_bundle = model_before_paths[0]
+        replacements = (
+            (MODEL_RETRY_BEFORE, MODEL_RETRY_AFTER),
+            (CONTROL_TIMEOUT_BEFORE, CONTROL_TIMEOUT_AFTER),
+        )
+
+    source_text = texts[source_bundle]
+    for before, _ in replacements:
+        if source_text.count(before) != 1:
+            raise ValueError(
+                "widget wait anchor did not match exactly once; "
+                "reassess the widget wait workaround"
+            )
+
     source_match = HASHED_BUNDLE_NAME.match(source_bundle.name)
     remote_match = HASHED_BUNDLE_NAME.match(remote_entry.name)
     if source_match is None or remote_match is None:
@@ -106,9 +146,9 @@ def patch_labextension(labextension_dir: Path) -> bool:
             "widget manager remote entry does not reference the model bundle"
         )
 
-    patched_bundle_text = texts[source_bundle].replace(
-        MODEL_RETRY_BEFORE, MODEL_RETRY_AFTER
-    )
+    patched_bundle_text = source_text
+    for before, after in replacements:
+        patched_bundle_text = patched_bundle_text.replace(before, after)
     patched_bundle_hash = hashlib.sha256(
         patched_bundle_text.encode("utf-8")
     ).hexdigest()[:20]
@@ -116,10 +156,9 @@ def patch_labextension(labextension_dir: Path) -> bool:
         f"{source_match.group('prefix')}.{patched_bundle_hash}.js"
     )
 
-    patched_remote_text = (
-        remote_text.replace(source_hash, patched_bundle_hash)
-        + f"\n/*{CACHE_SAFE_MARKER}*/\n"
-    )
+    patched_remote_text = remote_text.replace(source_hash, patched_bundle_hash)
+    if CACHE_SAFE_MARKER not in patched_remote_text:
+        patched_remote_text += f"\n/*{CACHE_SAFE_MARKER}*/\n"
     patched_remote_hash = hashlib.sha256(
         patched_remote_text.encode("utf-8")
     ).hexdigest()[:20]
