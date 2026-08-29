@@ -102,10 +102,13 @@ after the request has already been lost. The manager also attempts one bounded
 kernel-info probe before the control comm opens. JupyterLab marks the browser
 WebSocket connected before the kernel bridge is necessarily ready, and its own
 initial kernel-info request documents that it can be lost during this interval.
-If the readiness checks time out, restoration continues into its bounded
-control-state requests rather than being abandoned. The retry bypasses the
-one-time readiness probe because the kernel connection is already established;
-otherwise probe timeouts can consume the retry's entire rendering window.
+If the readiness probe times out, the manager asks JupyterLab to reconnect that
+browser's kernel channel before continuing. It also reconnects before each
+bulk retry, which replaces a WebSocket that reports `connected` but no longer
+delivers comm traffic. Each reconnect is bounded at ten seconds; restoration
+continues into its bounded control-state request if reconnecting cannot finish.
+The retry bypasses the one-time readiness probe after reconnecting so probe
+timeouts cannot consume the retry's rendering window.
 
 The ipywidgets backend also stores only the most recently opened widget control
 comm. When two JupyterLab clients restore the same kernel concurrently, a state

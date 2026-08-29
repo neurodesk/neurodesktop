@@ -89,12 +89,15 @@ def test_patch_waits_for_the_kernel_and_retries_a_lost_bulk_request(tmp_path):
     assert patcher.CONTROL_TIMEOUT_MARKER in patched_text
     assert "this.__neurodesktopControlRetry?3e4:1e4" in patched_text
     assert patcher.CONTROL_RETRY_MARKER in patched_text
-    assert "try{return await this._loadFromKernel()}" in patched_text
+    assert "neurodeskRetryKernel.reconnect()" in patched_text
+    assert "return await this._loadFromKernel()" in patched_text
     assert "neurodeskRetries<2" in patched_text
     assert patcher.CONNECTION_WAIT_MARKER in patched_text
     assert "if(!this.__neurodesktopControlRetry)" in patched_text
     assert '"connected"!==neurodeskKernel.connectionStatus' in patched_text
     assert "neurodeskKernel.requestKernelInfo()" in patched_text
+    assert "neurodeskKernel.reconnect().then(()=>!0)" in patched_text
+    assert "__neurodesktopKernelProbeStatus" in patched_text
     assert 'readiness probe")),3e3)' in patched_text
     assert original_bundle.read_text(encoding="utf-8") == original_source
     assert not patcher.patch_labextension(tmp_path)
@@ -152,6 +155,30 @@ def test_patch_upgrades_the_existing_wait_workaround(tmp_path):
     assert patcher.CONTROL_TIMEOUT_MARKER in patched_text
     assert patcher.CONTROL_RETRY_MARKER in patched_text
     assert patcher.CONNECTION_WAIT_MARKER in patched_text
+    assert not patcher.patch_labextension(tmp_path)
+
+
+def test_patch_upgrades_the_existing_two_retry_workaround(tmp_path):
+    patcher = load_patcher_module()
+    original_bundle, _, package_json = write_labextension_fixture(
+        tmp_path,
+        patcher.MODEL_RETRY_AFTER
+        + patcher.CONTROL_TIMEOUT_AFTER
+        + patcher.CONTROL_RETRY_V2_AFTER
+        + patcher.CONNECTION_WAIT_V1_AFTER,
+    )
+
+    assert patcher.patch_labextension(tmp_path)
+
+    patched_text, _ = patched_bundle_text(
+        tmp_path,
+        original_bundle,
+        package_json,
+    )
+    assert patcher.CONTROL_RETRY_MARKER in patched_text
+    assert "neurodeskRetryKernel.reconnect()" in patched_text
+    assert patcher.CONNECTION_WAIT_MARKER in patched_text
+    assert "neurodeskKernel.reconnect().then(()=>!0)" in patched_text
     assert not patcher.patch_labextension(tmp_path)
 
 

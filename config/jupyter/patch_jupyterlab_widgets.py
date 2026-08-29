@@ -8,11 +8,11 @@ more than two seconds before one of its nested models. The widget manager also
 abandons its bulk control-state request after four seconds and falls back to
 individual model requests that can be stranded by the late bulk response.
 Finally, a control comm opened while a second client's kernel connection is
-settling can be lost before it reaches ipykernel. Wait for that connection and
-probe the kernel before opening the comm, then retry the bulk request up to twice
-before falling back. Publish the anchored changes under new content-derived
-asset names because Jupyter serves the original federated extension URLs as
-immutable for one year.
+settling can be lost before it reaches ipykernel. Wait for that connection,
+probe it, and reconnect a stale channel before opening or retrying the bulk
+request. Make up to two retries before falling back. Publish the anchored
+changes under new content-derived asset names because Jupyter serves the
+original federated extension URLs as immutable for one year.
 """
 
 from __future__ import annotations
@@ -28,8 +28,10 @@ MODEL_RETRY_MARKER = "neurodesktop-widget-model-retry"
 CONTROL_TIMEOUT_V1_MARKER = "neurodesktop-widget-control-timeout"
 CONTROL_TIMEOUT_MARKER = "neurodesktop-widget-control-timeout-staged-retry"
 CONTROL_RETRY_V1_MARKER = "neurodesktop-widget-control-retry"
-CONTROL_RETRY_MARKER = "neurodesktop-widget-control-retry-v2"
-CONNECTION_WAIT_MARKER = "neurodesktop-widget-kernel-connection-wait"
+CONTROL_RETRY_V2_MARKER = "neurodesktop-widget-control-retry-v2"
+CONTROL_RETRY_MARKER = "neurodesktop-widget-control-retry-reconnect"
+CONNECTION_WAIT_V1_MARKER = "neurodesktop-widget-kernel-connection-wait"
+CONNECTION_WAIT_MARKER = "neurodesktop-widget-kernel-connection-reconnect"
 CACHE_SAFE_MARKER = "neurodesktop-widget-retry-cache-safe-entry"
 
 MODEL_RETRY_BEFORE = (
@@ -75,11 +77,11 @@ CONTROL_RETRY_V1_AFTER = (
     "return this._loadFromKernelModels()}let o=e.states"
 )
 
-CONTROL_RETRY_AFTER = (
+CONTROL_RETRY_V2_AFTER = (
     "}catch(e){let neurodeskRetries="
     "this.__neurodesktopControlRetryCount||0;"
     "if(neurodeskRetries<2){"
-    f"/*{CONTROL_RETRY_MARKER}*/"
+    f"/*{CONTROL_RETRY_V2_MARKER}*/"
     "this.__neurodesktopControlRetryCount=neurodeskRetries+1;"
     "this.__neurodesktopControlRetry=!0;"
     "try{return await this._loadFromKernel()}finally{"
@@ -88,9 +90,26 @@ CONTROL_RETRY_AFTER = (
     "return this._loadFromKernelModels()}let o=e.states"
 )
 
+CONTROL_RETRY_AFTER = (
+    "}catch(e){let neurodeskRetries="
+    "this.__neurodesktopControlRetryCount||0;"
+    "if(neurodeskRetries<2){"
+    f"/*{CONTROL_RETRY_MARKER}*/"
+    "this.__neurodesktopControlRetryCount=neurodeskRetries+1;"
+    "this.__neurodesktopControlRetry=!0;"
+    "try{let neurodeskRetryKernel=this.kernel;"
+    "if(neurodeskRetryKernel&&neurodeskRetryKernel.reconnect)try{"
+    "await Promise.race([neurodeskRetryKernel.reconnect(),"
+    "new Promise(e=>setTimeout(e,1e4))])}catch(e){}"
+    "return await this._loadFromKernel()}finally{"
+    "this.__neurodesktopControlRetryCount=neurodeskRetries;"
+    "this.__neurodesktopControlRetry=neurodeskRetries>0}}"
+    "return this._loadFromKernelModels()}let o=e.states"
+)
+
 CONNECTION_WAIT_BEFORE = "async _loadFromKernel(){let e,t;try{"
 
-CONNECTION_WAIT_AFTER = (
+CONNECTION_WAIT_V1_AFTER = (
     "async _loadFromKernel(){if(!this.__neurodesktopControlRetry){"
     "let neurodeskKernel=this.kernel;"
     "if(neurodeskKernel&&neurodeskKernel.connectionStatusChanged&&"
@@ -113,6 +132,43 @@ CONNECTION_WAIT_AFTER = (
     "neurodeskKernel.requestKernelInfo().then(i=>{"
     "clearTimeout(neurodeskProbeTimer),e(i)},i=>{"
     "clearTimeout(neurodeskProbeTimer),t(i)})})}catch(e){}}"
+    f"/*{CONNECTION_WAIT_V1_MARKER}*/"
+    "let e,t;try{"
+)
+
+CONNECTION_WAIT_AFTER = (
+    "async _loadFromKernel(){if(!this.__neurodesktopControlRetry){"
+    "let neurodeskKernel=this.kernel;"
+    "if(neurodeskKernel&&neurodeskKernel.connectionStatusChanged&&"
+    '"connected"!==neurodeskKernel.connectionStatus)'
+    "await new Promise(e=>{"
+    "let neurodeskOnStatus=(i,r)=>{if(\"connected\"===r){"
+    "neurodeskKernel.connectionStatusChanged.disconnect(neurodeskOnStatus),"
+    "clearTimeout(neurodeskTimer),e()}},"
+    "neurodeskTimer=setTimeout(()=>{"
+    "neurodeskKernel.connectionStatusChanged.disconnect(neurodeskOnStatus),"
+    "e()},3e4);"
+    "neurodeskKernel.connectionStatusChanged.connect(neurodeskOnStatus),"
+    '"connected"===neurodeskKernel.connectionStatus&&('
+    "neurodeskKernel.connectionStatusChanged.disconnect(neurodeskOnStatus),"
+    "clearTimeout(neurodeskTimer),e())});"
+    "if(neurodeskKernel&&neurodeskKernel.requestKernelInfo){"
+    'this.__neurodesktopKernelProbeStatus="pending";'
+    "let neurodeskProbeReady=!1;try{await new Promise((e,t)=>{"
+    "let neurodeskProbeTimer=setTimeout(()=>t(Error("
+    '"Kernel connection did not answer its readiness probe")),3e3);'
+    "neurodeskKernel.requestKernelInfo().then(i=>{"
+    "clearTimeout(neurodeskProbeTimer),e(i)},i=>{"
+    "clearTimeout(neurodeskProbeTimer),t(i)})}),"
+    'neurodeskProbeReady=!0,this.__neurodesktopKernelProbeStatus="ready"}'
+    'catch(e){this.__neurodesktopKernelProbeStatus="failed"}'
+    "if(!neurodeskProbeReady&&neurodeskKernel.reconnect)try{"
+    "let neurodeskReconnected=await Promise.race(["
+    "neurodeskKernel.reconnect().then(()=>!0),"
+    "new Promise(e=>setTimeout(()=>e(!1),1e4))]);"
+    "this.__neurodesktopKernelProbeStatus="
+    'neurodeskReconnected?"reconnected":"reconnect-timeout"}'
+    'catch(e){this.__neurodesktopKernelProbeStatus="reconnect-failed"}}}'
     f"/*{CONNECTION_WAIT_MARKER}*/"
     "let e,t;try{"
 )
@@ -203,15 +259,24 @@ def patch_labextension(labextension_dir: Path) -> bool:
         if CONTROL_RETRY_MARKER not in source_text:
             replacements.append(
                 (
-                    CONTROL_RETRY_V1_AFTER
-                    if CONTROL_RETRY_V1_MARKER in source_text
-                    else CONTROL_RETRY_BEFORE,
+                    CONTROL_RETRY_V2_AFTER
+                    if CONTROL_RETRY_V2_MARKER in source_text
+                    else (
+                        CONTROL_RETRY_V1_AFTER
+                        if CONTROL_RETRY_V1_MARKER in source_text
+                        else CONTROL_RETRY_BEFORE
+                    ),
                     CONTROL_RETRY_AFTER,
                 )
             )
         if CONNECTION_WAIT_MARKER not in source_text:
             replacements.append(
-                (CONNECTION_WAIT_BEFORE, CONNECTION_WAIT_AFTER)
+                (
+                    CONNECTION_WAIT_V1_AFTER
+                    if CONNECTION_WAIT_V1_MARKER in source_text
+                    else CONNECTION_WAIT_BEFORE,
+                    CONNECTION_WAIT_AFTER,
+                )
             )
     else:
         if len(model_before_paths) != 1:

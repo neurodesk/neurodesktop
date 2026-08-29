@@ -211,9 +211,11 @@
   suppressed while the first restore remains in progress. Attempt one bounded
   kernel-info round trip as well: JupyterLab marks its WebSocket connected
   before the kernel bridge is necessarily ready and its first kernel-info
-  request can be lost. A readiness timeout must continue into the bounded
-  control-state retries instead of abandoning restoration, and a retry must
-  not repeat the readiness probe after the kernel is already connected.
+  request can be lost. Reconnect that browser's kernel channel when the probe
+  times out, and reconnect again before each bulk retry so a WebSocket that
+  only appears connected cannot strand every request. Bound each reconnect at
+  ten seconds and continue into the bounded control-state request if it cannot
+  finish. A retry must not repeat the readiness probe after reconnecting.
   Publish patched federated assets
   under new content-derived names; Jupyter serves
   their original hashed URLs as immutable for one year. Keep ipyniivue's large

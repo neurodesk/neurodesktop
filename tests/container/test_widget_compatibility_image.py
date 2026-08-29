@@ -99,6 +99,8 @@ WIDGET_RENDERER_DIAGNOSTICS_EXPRESSION = r"""(async () => {
                             manager?.__neurodesktopControlRetry ?? null,
                         controlRetryCount:
                             manager?.__neurodesktopControlRetryCount ?? null,
+                        kernelProbeStatus:
+                            manager?.__neurodesktopKernelProbeStatus ?? null,
                         modelIds: manager?._modelsSync
                             ? [...manager._modelsSync.keys()]
                             : [],
@@ -661,13 +663,15 @@ def test_widget_manager_waits_for_a_late_model_registration():
     assert "Date.now()-o<1e4" in bundles
     assert "neurodesktop-widget-control-timeout-staged-retry" in bundles
     assert "this.__neurodesktopControlRetry?3e4:1e4" in bundles
-    assert "neurodesktop-widget-control-retry-v2" in bundles
-    assert "try{return await this._loadFromKernel()}" in bundles
+    assert "neurodesktop-widget-control-retry-reconnect" in bundles
+    assert "neurodeskRetryKernel.reconnect()" in bundles
+    assert "return await this._loadFromKernel()" in bundles
     assert "neurodeskRetries<2" in bundles
-    assert "neurodesktop-widget-kernel-connection-wait" in bundles
+    assert "neurodesktop-widget-kernel-connection-reconnect" in bundles
     assert "if(!this.__neurodesktopControlRetry)" in bundles
     assert '"connected"!==neurodeskKernel.connectionStatus' in bundles
     assert "neurodeskKernel.requestKernelInfo()" in bundles
+    assert "neurodeskKernel.reconnect().then(()=>!0)" in bundles
 
 
 def test_widget_control_state_replies_return_to_requesting_client(monkeypatch):
