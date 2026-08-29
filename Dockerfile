@@ -640,7 +640,8 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
     && rm -rf "/opt/conda/share/jupyter/labextensions/@jupyterlab/mathjax3-extension" \
     # ipyniivue 2.4.4 otherwise syncs and imports its 5 MB ESM once per
-    # model. Move that payload to a fixed, content-hashed JupyterLab asset and
+    # model. Move that payload to a fixed, content-hashed JupyterLab asset,
+    # replace its 30 ms scene polling with event-driven synchronization, and
     # add model-destruction cleanup in this install layer so the original
     # bundle does not remain in image history.
     && install -m 0755 -o root -g users /tmp/patch_ipyniivue.py /opt/neurodesktop/patch_ipyniivue.py \

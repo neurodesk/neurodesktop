@@ -147,6 +147,7 @@
   tests/unit/test_jupyter_server_documents_patch.py
   tests/unit/test_neurodesktop_stream_output.py
   tests/unit/test_ipyniivue_patch.py
+  tests/unit/test_widget_browser_diagnostics.py
   tests/unit/test_jupyterlab_widgets_patch.py
   tests/unit/test_jupyter_ai_acp_client_patch.py
   tests/unit/test_jupyter_server_mcp_patch.py` from a checkout and `pytest
@@ -171,7 +172,18 @@
   index in UTF-8 bytes.
   Wait for the status bar to name the selected kernel and report `Idle` before
   clicking Run; the notebook execution indicator can report `idle` before a
-  kernel exists.
+  kernel exists. Keep the disposable browser profile allowing Firefox's
+  software WebGL fallback without forcing Mesa's driver mode, require a WebGL2
+  capability probe before opening JupyterLab, and retry only a fresh Firefox
+  process that fails that startup probe. If every probe fails, omit only the
+  NiiVue cells and canvas assertions; the stream, delayed widget, re-execution,
+  and second-client replay must still run, and the test must warn with the
+  Firefox/WebGL diagnostics. Never retry the notebook or replay assertions;
+  their failures must include the WebGL renderer and context state plus bounded
+  Firefox and Jupyter Server log tails. When WebGL2 is available, interact with
+  all nine NiiVue canvases and require scene-model traffic to stop at idle;
+  instrument intervals created by the shared asset so a permanent frontend
+  polling loop cannot pass merely because it emits no model delta.
   Keep reconnect repair safe on both sides: a SyncStep2 arriving after the
   handshake timeout must still be applied without disconnecting its client,
   pending replies stay keyed per client, and the frontend divergent-history
@@ -186,9 +198,11 @@
   their original hashed URLs as immutable for one year. Keep ipyniivue's large
   ESM in one content-hashed JupyterLab asset rather than syncing it with every
   model, but create each widget definition from a fresh factory so NiiVue and
-  graph interval state are never shared between models. Model destruction must
-  run NiiVue cleanup and relinquish its WebGL context; view removal alone must
-  keep supporting redisplay. Keep
+  scene synchronization state are never shared between models. Send scene
+  changes once from each focused `NiiVue.sync()` event; never restore the
+  upstream 30 ms polling interval. Model destruction must run NiiVue cleanup
+  and relinquish its WebGL context; view removal alone must keep supporting
+  redisplay. Keep
   Jupyter AI chat workspace seeding scoped to `.chat` saves, never overwrite
   an existing `AGENTS.md`, and never make a seed failure block the chat save.
   Keep the ACP adapters' vendored agent binaries

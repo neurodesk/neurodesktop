@@ -8,9 +8,28 @@ import pytest
 from testlib import load_source_module, repo_path
 
 
+IPYNIIVUE_SYNC_LOOP = (
+    'function S0(A,I){BC!==void 0&&(clearInterval(BC),BC=void 0);'
+    'let B=I.get("scene"),C=!1;BC=setInterval(async()=>{if(!C)return;'
+    'let E=I.get("this_model_id");if(!E)return;let t;try{'
+    't=await I.widget_manager.get_model(E)}catch{return}let i={'
+    'renderAzimuth:A.scene.renderAzimuth,'
+    'renderElevation:A.scene.renderElevation,'
+    'volScaleMultiplier:A.scene.volScaleMultiplier,'
+    'crosshairPos:[...A.scene.crosshairPos],'
+    'clipPlanes:A.scene.clipPlanes.map(a=>[...a]),'
+    'clipPlaneDepthAziElevs:A.scene.clipPlaneDepthAziElevs.map(a=>[...a]),'
+    'pan2Dxyzmm:[...A.scene.pan2Dxyzmm],gamma:A.scene.gamma||1},'
+    'o=D2(B,i);Object.keys(o).length>0&&(e2(t,{scene:o}),B=i)},30);'
+    'let Q=A.sync;A.sync=new Proxy(Q,{apply:(E,t,i)=>{if('
+    'Reflect.apply(E,t,i),!A.gl){C=!1;return}if(!A.gl.canvas.matches('
+    '":focus")){C=!1;return}C=!0}})}'
+)
+
+
 IPYNIIVUE_TAIL = (
     'var vA,BC;async function BB(A,I){return A+I}'
-    'function S0(A,I){BC=setInterval(()=>A+I,30)}'
+    f"{IPYNIIVUE_SYNC_LOOP}"
     'var Ih={async initialize({model:A}){let I=new $B;if(!vA){'
     'console.log("Creating new Niivue instance");vA=new t2(A)}return()=>{'
     'I.disposeAll(),A.off("change:volumes"),clearInterval(BC)}},'
@@ -58,12 +77,16 @@ def test_patch_shares_bundle_but_creates_one_definition_per_model(tmp_path):
     assert hashlib.sha256(shared_source.encode("utf-8")).hexdigest()[:20] in (
         shared_bundle.name
     )
-    assert "function createWidgetDefinition(){let vA,BC;" in shared_source
+    assert "function createWidgetDefinition(){let vA;" in shared_source
     assert "export{createWidgetDefinition};" in shared_source
     assert "export{Ih as default};" not in shared_source
     assert patcher.MODEL_CLEANUP_MARKER in shared_source
     assert 'getExtension("WEBGL_lose_context")?.loseContext()' in shared_source
     assert "vA=void 0" in shared_source
+    assert patcher.SCENE_SYNC_MARKER in shared_source
+    assert "setInterval(" not in shared_source
+    assert "let D=Reflect.apply(o,a,e)" in shared_source
+    assert 'A.gl.canvas.matches(":focus")&&C(),D' in shared_source
     assert not patcher.patch_ipyniivue(package_dir, lab_static_dir)
 
 

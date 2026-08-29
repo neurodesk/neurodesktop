@@ -4,7 +4,7 @@ description: The ACP-native Jupyter AI chat surface, its Claude/Codex/OpenCode
   personas, workspace seeding, and collaboration-stack workarounds
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-26"
+last-reviewed: "2026-08-28"
 ---
 
 # Jupyter AI
@@ -93,19 +93,24 @@ copies of that bundle while their comms compete with notebook output delivery.
 Neurodesktop moves the heavy module into one content-hashed JupyterLab static
 asset and leaves a small bootstrap in the Python package. The shared module
 exports a factory, and each bootstrap invocation creates a separate widget
-definition so its NiiVue instance and graph interval stay model-local. When a
-model is destroyed, the definition runs NiiVue cleanup and requests
-``WEBGL_lose_context``. Removing only a view does not release the context,
-because ipyniivue supports moving and redisplaying the same model.
+definition so its NiiVue instance and scene synchronization state stay
+model-local. Upstream polls every 30 ms after a focused canvas synchronizes;
+the patched definition instead computes and sends one scene delta directly
+from each focused ``NiiVue.sync()`` event, then does no work while the viewer
+is idle. When a model is destroyed, the definition runs NiiVue cleanup and
+requests ``WEBGL_lose_context``. Removing only a view does not release the
+context, because ipyniivue supports moving and redisplaying the same model.
 
 The image regression emits fragmented carriage-return stream updates, delays a
 real ``HBox`` comm for three seconds, and creates nine NiiVue models, one
 loading a generated NIfTI volume so real image data crosses the widget comm.
 The stream and all widgets must render without a YDoc output exception, the
 nine models must produce exactly one fetch of the shared ipyniivue bundle, and
-re-execution must not exhaust WebGL contexts. It re-executes the cell and
-restores the populated room in a second client. Companion image tests drive
-the patched ``OutputProcessor`` directly over backspace and interleaved
+re-execution must not exhaust WebGL contexts. The browser interacts with every
+canvas, observes the scene updates, then requires both model traffic and
+shared-asset interval activity to remain stopped while idle. It re-executes the
+cell and restores the populated room in a second client. Companion image tests
+drive the patched ``OutputProcessor`` directly over backspace and interleaved
 stdout/stderr fragments, and prove one rejected frame cannot stop a room's
 message queue. Jupyter
 AI 3.2 plans to make RTC optional, but Neurodesktop will not remove the stable

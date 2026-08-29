@@ -9,12 +9,96 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+import warnings
+from dataclasses import dataclass
 from pathlib import Path
 
 import nbformat
 import pytest
 import websocket
+
+
+WEBGL2_DIAGNOSTICS_EXPRESSION = """JSON.stringify((() => {
+    const canvas = document.createElement('canvas');
+    let gl = null;
+    let error = null;
+    try {
+        gl = canvas.getContext('webgl2');
+    } catch (exception) {
+        error = `${exception.name}: ${exception.message}`;
+    }
+    const debug = gl?.getExtension('WEBGL_debug_renderer_info');
+    const diagnostics = {
+        available: Boolean(gl),
+        contextLost: gl ? gl.isContextLost() : null,
+        version: gl ? gl.getParameter(gl.VERSION) : null,
+        shadingLanguageVersion: gl
+            ? gl.getParameter(gl.SHADING_LANGUAGE_VERSION)
+            : null,
+        vendor: gl ? gl.getParameter(gl.VENDOR) : null,
+        renderer: gl ? gl.getParameter(gl.RENDERER) : null,
+        unmaskedVendor: debug
+            ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL)
+            : null,
+        unmaskedRenderer: debug
+            ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL)
+            : null,
+        error,
+        userAgent: navigator.userAgent,
+        hardwareConcurrency: navigator.hardwareConcurrency,
+    };
+    gl?.getExtension('WEBGL_lose_context')?.loseContext();
+    return diagnostics;
+})())"""
+
+DOM_DIAGNOSTICS_EXPRESSION = (
+    "JSON.stringify({"
+    "body: document.body.innerText.slice(-2000),"
+    "outputs: [...document.querySelectorAll('.jp-OutputArea-output')]"
+    ".map(node => node.outerHTML.slice(0, 2000))"
+    "})"
+)
+
+IPYNIIVUE_INTERVAL_PROBE_PRELOAD = """() => {
+    const records = [];
+    Object.defineProperty(
+        window,
+        '__neurodesktopIpyniivueIntervalActivity',
+        {value: records, configurable: false},
+    );
+    const nativeSetInterval = window.setInterval;
+    window.setInterval = function(callback, delay, ...args) {
+        const stack = new Error().stack || '';
+        if (!stack.includes('neurodesktop-ipyniivue')) {
+            return nativeSetInterval.call(this, callback, delay, ...args);
+        }
+        const record = {delay: Number(delay), calls: 0};
+        records.push(record);
+        return nativeSetInterval.call(
+            this,
+            (...callbackArgs) => {
+                record.calls += 1;
+                return callback(...callbackArgs);
+            },
+            delay,
+            ...args,
+        );
+    };
+}"""
+
+IPYNIIVUE_INTERVAL_SNAPSHOT_EXPRESSION = (
+    "JSON.stringify("
+    "window.__neurodesktopIpyniivueIntervalActivity || []"
+    ")"
+)
+
+SCENE_SYNC_COUNT_EXPRESSION = (
+    "Number((([...document.querySelectorAll('.widget-label')].find("
+    "node => node.textContent.startsWith('scene-sync-count:')"
+    ")?.textContent || 'scene-sync-count:-1').split(':').at(-1)))"
+)
 
 
 def _unused_port() -> int:
@@ -104,8 +188,171 @@ def _stop(process: subprocess.Popen[str]) -> None:
         process.wait(timeout=10)
 
 
+def _firefox_environment(home: Path) -> dict[str, str]:
+    """Return an isolated environment without a forced Mesa driver mode."""
+    environment = os.environ.copy()
+    environment["HOME"] = str(home)
+    # Firefox's headless compositor chooses a working GL path itself. Forcing
+    # Mesa software rendering makes SWGL fail to map its default framebuffer
+    # on the CI container's displayless process.
+    environment.pop("LIBGL_ALWAYS_SOFTWARE", None)
+    return environment
+
+
+def _write_firefox_profile(profile: Path) -> None:
+    """Keep WebGL enabled even when a disposable CI runner is blocklisted."""
+    (profile / "user.js").write_text(
+        'user_pref("webgl.disabled", false);\n'
+        'user_pref("webgl.enable-webgl2", true);\n'
+        'user_pref("webgl.forbid-software", false);\n'
+        'user_pref("webgl.force-enabled", true);\n',
+        encoding="utf-8",
+    )
+
+
+def _tail_text(path: Path, limit: int = 8_000) -> str:
+    if not path.exists():
+        return "<missing>"
+    return path.read_text(encoding="utf-8", errors="replace")[-limit:]
+
+
+def _probe_webgl2(bidi: _BidiSession, context: str) -> dict:
+    result = bidi.evaluate(context, WEBGL2_DIAGNOSTICS_EXPRESSION)
+    if not isinstance(result, str):
+        return {"available": False, "probeResult": result}
+    try:
+        decoded = json.loads(result)
+    except json.JSONDecodeError:
+        return {"available": False, "probeResult": result}
+    if not isinstance(decoded, dict):
+        return {"available": False, "probeResult": decoded}
+    return decoded
+
+
+def _browser_failure_diagnostics(
+    bidi: _BidiSession,
+    context: str,
+    *,
+    log_paths: tuple[Path, ...] = (),
+) -> dict:
+    browser_errors = [
+        event["params"]["text"]
+        for event in bidi.events
+        if event.get("method") == "log.entryAdded"
+        and event["params"].get("level") == "error"
+    ]
+    state_result = bidi.evaluate(context, DOM_DIAGNOSTICS_EXPRESSION)
+    try:
+        state = (
+            json.loads(state_result)
+            if isinstance(state_result, str)
+            else state_result
+        )
+    except json.JSONDecodeError:
+        state = state_result
+    return {
+        "browserErrors": browser_errors,
+        "webgl": _probe_webgl2(bidi, context),
+        "state": state,
+        "processLogs": {str(path): _tail_text(path) for path in log_paths},
+    }
+
+
+@dataclass
+class _FirefoxBrowser:
+    process: subprocess.Popen[str]
+    bidi: _BidiSession
+    log: object
+    log_path: Path
+    context: str
+    webgl: dict
+    startup_failures: list[dict]
+
+    def close(self) -> None:
+        try:
+            self.bidi.close()
+        finally:
+            try:
+                _stop(self.process)
+            finally:
+                self.log.close()
+
+
+def _start_firefox_with_webgl_probe(
+    tmp_path: Path,
+    *,
+    attempts: int = 3,
+) -> _FirefoxBrowser:
+    """Start Firefox, replacing only processes that lack WebGL2 at startup."""
+    startup_failures = []
+    for attempt in range(1, attempts + 1):
+        firefox_port = _unused_port()
+        firefox_home = tmp_path / f"firefox-home-{attempt}"
+        firefox_profile = tmp_path / f"firefox-profile-{attempt}"
+        firefox_log_path = tmp_path / f"firefox-{attempt}.log"
+        firefox_home.mkdir()
+        firefox_profile.mkdir()
+        _write_firefox_profile(firefox_profile)
+        firefox_log = firefox_log_path.open("w", encoding="utf-8")
+        firefox = subprocess.Popen(
+            [
+                "/usr/bin/firefox",
+                "--headless",
+                "--profile",
+                str(firefox_profile),
+                f"--remote-debugging-port={firefox_port}",
+                "about:blank",
+            ],
+            env=_firefox_environment(firefox_home),
+            stdout=firefox_log,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        bidi = None
+        try:
+            bidi = _BidiSession(f"ws://127.0.0.1:{firefox_port}/session", firefox)
+            bidi.request("session.new", {"capabilities": {}})
+            bidi.request("session.subscribe", {"events": ["log.entryAdded"]})
+            context = bidi.request("browsingContext.create", {"type": "tab"})[
+                "context"
+            ]
+            webgl = _probe_webgl2(bidi, context)
+            startup_failure = {
+                "attempt": attempt,
+                "webgl": webgl,
+                "firefoxLog": _tail_text(firefox_log_path),
+            }
+            if webgl.get("available") or attempt == attempts:
+                if not webgl.get("available"):
+                    startup_failures.append(startup_failure)
+                return _FirefoxBrowser(
+                    process=firefox,
+                    bidi=bidi,
+                    log=firefox_log,
+                    log_path=firefox_log_path,
+                    context=context,
+                    webgl=webgl,
+                    startup_failures=startup_failures,
+                )
+            startup_failures.append(startup_failure)
+        except BaseException:
+            if bidi is not None:
+                bidi.close()
+            _stop(firefox)
+            firefox_log.close()
+            raise
+        bidi.close()
+        _stop(firefox)
+        firefox_log.close()
+
+
 def _click_dom_element(
-    bidi: _BidiSession, context: str, element_expression: str
+    bidi: _BidiSession,
+    context: str,
+    element_expression: str,
+    *,
+    x_fraction: float = 0.5,
+    y_fraction: float = 0.5,
 ) -> None:
     point = json.loads(
         bidi.evaluate(
@@ -114,8 +361,8 @@ def _click_dom_element(
             f"const node = {element_expression};"
             "if (!node) return null;"
             "const rect = node.getBoundingClientRect();"
-            "return {x: Math.round(rect.left + rect.width / 2),"
-            "y: Math.round(rect.top + rect.height / 2)};"
+            f"return {{x: Math.round(rect.left + rect.width * {x_fraction}),"
+            f"y: Math.round(rect.top + rect.height * {y_fraction})}};"
             "})())",
         )
     )
@@ -152,6 +399,7 @@ def _wait_for_expression(
     expression: str,
     *,
     timeout: float = 30,
+    log_paths: tuple[Path, ...] = (),
 ) -> object:
     deadline = time.monotonic() + timeout
     last_value = None
@@ -160,24 +408,132 @@ def _wait_for_expression(
         if last_value:
             return last_value
         time.sleep(0.1)
-    browser_errors = [
-        event["params"]["text"]
-        for event in bidi.events
-        if event.get("method") == "log.entryAdded"
-        and event["params"].get("level") == "error"
-    ]
-    browser_state = bidi.evaluate(
+    diagnostics = _browser_failure_diagnostics(
+        bidi,
         context,
-        "JSON.stringify({"
-        "body: document.body.innerText.slice(-2000),"
-        "outputs: [...document.querySelectorAll('.jp-OutputArea-output')]"
-        ".map(node => node.outerHTML.slice(0, 2000))"
-        "})",
+        log_paths=log_paths,
     )
     pytest.fail(
-        f"Browser condition did not become true; last value was {last_value!r}; "
-        f"browser errors were {browser_errors!r}; state was {browser_state}"
+        f"Browser condition did not become true; last value was {last_value!r}.\n"
+        + json.dumps(diagnostics, indent=2, sort_keys=True)
     )
+
+
+def _widget_regression_notebook(*, include_niivue: bool):
+    niivue_imports = ""
+    niivue_setup = ""
+    niivue_display = ""
+    if include_niivue:
+        niivue_imports = (
+            "import nibabel\n"
+            "import numpy as np\n"
+            "from ipyniivue import NiiVue\n"
+        )
+        niivue_setup = (
+            "volume = np.random.default_rng(0).normal(\n"
+            "    size=(48, 48, 48)).astype('float32')\n"
+            "nibabel.save(nibabel.Nifti1Image(volume, np.eye(4)),\n"
+            "             'volume.nii.gz')\n"
+        )
+        niivue_display = (
+            "niivues = [NiiVue(height=128) for _ in range(9)]\n"
+            "niivues[0].load_volumes([{'path': 'volume.nii.gz'}])\n"
+            "scene_sync_count = 0\n"
+            "scene_sync_label = widgets.Label(value='scene-sync-count:0')\n"
+            "def record_scene_sync(change):\n"
+            "    global scene_sync_count\n"
+            "    scene_sync_count += 1\n"
+            "    scene_sync_label.value = (\n"
+            "        f'scene-sync-count:{scene_sync_count}')\n"
+            "for niivue in niivues:\n"
+            "    niivue.observe(record_scene_sync, names='scene')\n"
+            "display(widgets.VBox([scene_sync_label, *niivues]))"
+        )
+
+    source = (
+        "import asyncio\n"
+        "import sys\n"
+        "import ipywidgets as widgets\n"
+        f"{niivue_imports}"
+        "from IPython.display import display\n"
+        f"{niivue_setup}"
+        "widget_run = globals().get('_widget_regression_run', 0) + 1\n"
+        "_widget_regression_run = widget_run\n"
+        "print(f'stream-run-{widget_run}')\n"
+        "for fragment in range(20):\n"
+        "    sys.stdout.write(f'\\rstream-fragment-{fragment:02d}')\n"
+        "    sys.stdout.flush()\n"
+        "    await asyncio.sleep(0.05)\n"
+        "print()\n"
+        "print('stream-end')\n"
+        "model_id = f'delayed-hbox-model-{widget_run}'\n"
+        "async def open_model_later():\n"
+        "    await asyncio.sleep(3)\n"
+        "    return widgets.HBox([\n"
+        "        widgets.IntSlider(value=42),\n"
+        "        widgets.Label(value='nested'),\n"
+        "    ], model_id=model_id)\n"
+        "delayed_model_task = asyncio.create_task(open_model_later())\n"
+        "display({\n"
+        "    'application/vnd.jupyter.widget-view+json': {\n"
+        "        'version_major': 2,\n"
+        "        'version_minor': 0,\n"
+        "        'model_id': model_id,\n"
+        "    }\n"
+        "}, raw=True)\n"
+        f"{niivue_display}"
+    )
+    return nbformat.v4.new_notebook(
+        cells=[
+            nbformat.v4.new_code_cell(source),
+            nbformat.v4.new_markdown_cell("Widget regression end."),
+        ],
+        metadata={
+            "kernelspec": {
+                "display_name": "Python [conda env:base] *",
+                "language": "python",
+                "name": "conda-base-py",
+            }
+        },
+    )
+
+
+def test_ipyniivue_interval_probe_records_matching_asset_timer(tmp_path: Path) -> None:
+    """The browser probe detects a timer whose source is an ipyniivue asset."""
+    browser = _start_firefox_with_webgl_probe(tmp_path)
+    try:
+        browser.bidi.request(
+            "script.addPreloadScript",
+            {
+                "functionDeclaration": IPYNIIVUE_INTERVAL_PROBE_PRELOAD,
+                "contexts": [browser.context],
+            },
+        )
+        script = (
+            "setInterval(() => {}, 30);\n"
+            "//# sourceURL=neurodesktop-ipyniivue-probe.js"
+        )
+        document = f"<script>eval({json.dumps(script)})</script>"
+        browser.bidi.request(
+            "browsingContext.navigate",
+            {
+                "context": browser.context,
+                "url": "data:text/html," + urllib.parse.quote(document),
+                "wait": "complete",
+            },
+        )
+        time.sleep(0.15)
+        records = json.loads(
+            browser.bidi.evaluate(
+                browser.context,
+                IPYNIIVUE_INTERVAL_SNAPSHOT_EXPRESSION,
+            )
+        )
+        assert len(records) == 1
+        assert records[0]["delay"] == 30
+        assert records[0]["calls"] > 0
+    finally:
+        browser.close()
 
 
 def test_widget_manager_waits_for_a_late_model_registration():
@@ -325,7 +681,7 @@ def test_late_sync_step2_is_applied_without_disconnect() -> None:
 
 
 def test_ipyniivue_uses_one_shared_bundle_with_per_model_state() -> None:
-    """The large frontend is cached while each model owns its NiiVue state."""
+    """Models share code, own state, and synchronize scenes without polling."""
     import ipyniivue
 
     assert importlib.metadata.version("ipyniivue") == "2.4.4"
@@ -339,8 +695,10 @@ def test_ipyniivue_uses_one_shared_bundle_with_per_model_state() -> None:
 
     shared_bundle = Path(sys.prefix) / "share/jupyter/lab/static" / asset_names[0]
     shared_source = shared_bundle.read_text(encoding="utf-8")
-    assert "function createWidgetDefinition(){let vA,BC;" in shared_source
+    assert "function createWidgetDefinition(){let vA;" in shared_source
     assert "neurodesktop-ipyniivue-model-cleanup" in shared_source
+    assert "neurodesktop-ipyniivue-event-scene-sync" in shared_source
+    assert "setInterval(" not in shared_source
     assert 'getExtension("WEBGL_lose_context")?.loseContext()' in shared_source
 
 
@@ -465,67 +823,11 @@ def test_room_queue_survives_a_rejected_message() -> None:
 
 
 def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> None:
-    """Stream updates stay valid while delayed and NiiVue widgets render."""
-    notebook = nbformat.v4.new_notebook(
-        cells=[
-            nbformat.v4.new_code_cell(
-                "import asyncio\n"
-                "import sys\n"
-                "import ipywidgets as widgets\n"
-                "import nibabel\n"
-                "import numpy as np\n"
-                "from ipyniivue import NiiVue\n"
-                "from IPython.display import display\n"
-                "volume = np.random.default_rng(0).normal(\n"
-                "    size=(48, 48, 48)).astype('float32')\n"
-                "nibabel.save(nibabel.Nifti1Image(volume, np.eye(4)),\n"
-                "             'volume.nii.gz')\n"
-                "widget_run = globals().get('_widget_regression_run', 0) + 1\n"
-                "_widget_regression_run = widget_run\n"
-                "print(f'stream-run-{widget_run}')\n"
-                "for fragment in range(20):\n"
-                "    sys.stdout.write(f'\\rstream-fragment-{fragment:02d}')\n"
-                "    sys.stdout.flush()\n"
-                "    await asyncio.sleep(0.05)\n"
-                "print()\n"
-                "print('stream-end')\n"
-                "model_id = f'delayed-hbox-model-{widget_run}'\n"
-                "async def open_model_later():\n"
-                "    await asyncio.sleep(3)\n"
-                "    return widgets.HBox([\n"
-                "        widgets.IntSlider(value=42),\n"
-                "        widgets.Label(value='nested'),\n"
-                "    ], model_id=model_id)\n"
-                "delayed_model_task = asyncio.create_task(open_model_later())\n"
-                "display({\n"
-                "    'application/vnd.jupyter.widget-view+json': {\n"
-                "        'version_major': 2,\n"
-                "        'version_minor': 0,\n"
-                "        'model_id': model_id,\n"
-                "    }\n"
-                "}, raw=True)\n"
-                "niivues = [NiiVue(height=128) for _ in range(9)]\n"
-                "niivues[0].load_volumes([{'path': 'volume.nii.gz'}])\n"
-                "display(widgets.VBox(niivues))"
-            ),
-            nbformat.v4.new_markdown_cell("Widget regression end."),
-        ],
-        metadata={
-            "kernelspec": {
-                "display_name": "Python [conda env:base] *",
-                "language": "python",
-                "name": "conda-base-py",
-            }
-        },
-    )
-    nbformat.write(notebook, tmp_path / "widget.ipynb")
-
+    """Streams and delayed widgets replay, with NiiVue when WebGL2 works."""
     server_port = _unused_port()
-    firefox_port = _unused_port()
     token = "widget-browser-regression"
     server_log_path = tmp_path / "jupyter-server.log"
     server_log = server_log_path.open("w", encoding="utf-8")
-    firefox_log = (tmp_path / "firefox.log").open("w", encoding="utf-8")
     server_home = tmp_path / "server-home"
     server_home.mkdir()
     server_env = os.environ.copy()
@@ -548,40 +850,57 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
         text=True,
     )
 
-    firefox_home = tmp_path / "firefox-home"
-    firefox_profile = tmp_path / "firefox-profile"
-    firefox_home.mkdir()
-    firefox_profile.mkdir()
-    firefox_env = os.environ.copy()
-    firefox_env["HOME"] = str(firefox_home)
-    firefox = subprocess.Popen(
-        [
-            "/usr/bin/firefox",
-            "--headless",
-            "--profile",
-            str(firefox_profile),
-            f"--remote-debugging-port={firefox_port}",
-            "about:blank",
-        ],
-        env=firefox_env,
-        stdout=firefox_log,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-
-    bidi = None
+    browser = None
     try:
         _wait_for_server(
             f"http://127.0.0.1:{server_port}/api/status?token={token}",
             server,
             server_log_path,
         )
-        bidi = _BidiSession(f"ws://127.0.0.1:{firefox_port}/session", firefox)
-        bidi.request("session.new", {"capabilities": {}})
-        bidi.request("session.subscribe", {"events": ["log.entryAdded"]})
-        context = bidi.request("browsingContext.create", {"type": "tab"})[
-            "context"
-        ]
+        browser = _start_firefox_with_webgl_probe(tmp_path)
+        bidi = browser.bidi
+        context = browser.context
+        diagnostic_logs = (browser.log_path, server_log_path)
+        include_niivue = bool(browser.webgl.get("available"))
+        expected_widget_boxes = 2 if include_niivue else 1
+        expected_niivue_canvases = 9 if include_niivue else 0
+        render_condition = (
+            "document.querySelectorAll('.jupyter-widgets.widget-box').length "
+            f"=== {expected_widget_boxes} && "
+            "document.querySelectorAll('.jp-OutputArea canvas').length "
+            f"=== {expected_niivue_canvases}"
+        )
+        if not include_niivue:
+            warnings.warn(
+                "WebGL2 is unavailable; running stream and delayed-widget "
+                "replay without NiiVue. "
+                + json.dumps(
+                    {
+                        "webgl": browser.webgl,
+                        "startupFailures": [
+                            {
+                                "attempt": failure["attempt"],
+                                "webgl": failure["webgl"],
+                            }
+                            for failure in browser.startup_failures
+                        ],
+                        "firefoxLog": _tail_text(browser.log_path),
+                    },
+                    sort_keys=True,
+                ),
+                RuntimeWarning,
+                stacklevel=1,
+            )
+        notebook = _widget_regression_notebook(include_niivue=include_niivue)
+        nbformat.write(notebook, tmp_path / "widget.ipynb")
+        if include_niivue:
+            bidi.request(
+                "script.addPreloadScript",
+                {
+                    "functionDeclaration": IPYNIIVUE_INTERVAL_PROBE_PRELOAD,
+                    "contexts": [context],
+                },
+            )
         bidi.request(
             "browsingContext.navigate",
             {
@@ -597,6 +916,7 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             bidi,
             context,
             "Boolean(document.querySelector('.jp-Notebook .jp-CodeCell'))",
+            log_paths=diagnostic_logs,
         )
         _wait_for_expression(
             bidi,
@@ -604,6 +924,7 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             "document.body.innerText.includes("
             "'Python [conda env:base] * | Idle'"
             ")",
+            log_paths=diagnostic_logs,
         )
         # The shared ipyniivue bundle is imported after Run below; raise the
         # resource-timing buffer first so its fetch cannot be evicted before
@@ -628,6 +949,7 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             "[...document.querySelectorAll('[role=menuitem]')]"
             ".some(node => node.textContent.trim().startsWith("
             "'Run Selected Cell') && !node.textContent.includes('and'))",
+            log_paths=diagnostic_logs,
         )
         _click_dom_element(
             bidi,
@@ -639,16 +961,14 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
         _wait_for_expression(
             bidi,
             context,
-            "Boolean("
-            "(document.querySelectorAll('.jupyter-widgets.widget-box').length "
-            "=== 2 && "
-            "document.querySelectorAll('.jp-OutputArea canvas').length === 9) || "
+            f"Boolean(({render_condition}) || "
             "document.body.innerText.includes('model not found') || "
             "document.querySelector("
             "'.jp-OutputArea-output[data-mime-type=\"text/plain\"]'"
             ")"
             ")",
             timeout=45,
+            log_paths=diagnostic_logs,
         )
         expected_stream = "stream-run-1\nstream-fragment-19\nstream-end\n"
         output = json.loads(
@@ -686,21 +1006,80 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             "plainTextFallback": False,
             "streamText": True,
             "streamOutputs": [expected_stream],
-            "widgetBoxes": 2,
-            "niivueCanvases": 9,
+            "widgetBoxes": expected_widget_boxes,
+            "niivueCanvases": expected_niivue_canvases,
         }
 
         # Nine models must share one fetched bundle. Per-model delivery is
         # the 5 MB-per-widget regression the ipyniivue workaround removes.
-        shared_bundle_fetches = json.loads(
-            bidi.evaluate(
-                context,
-                "JSON.stringify(performance.getEntriesByType('resource')"
-                ".map(entry => entry.name)"
-                ".filter(name => name.includes('neurodesktop-ipyniivue')))",
+        if include_niivue:
+            shared_bundle_fetches = json.loads(
+                bidi.evaluate(
+                    context,
+                    "JSON.stringify(performance.getEntriesByType('resource')"
+                    ".map(entry => entry.name)"
+                    ".filter(name => name.includes('neurodesktop-ipyniivue')))",
+                )
             )
-        )
-        assert len(shared_bundle_fetches) == 1, shared_bundle_fetches
+            assert len(shared_bundle_fetches) == 1, shared_bundle_fetches
+
+            # Exercise each viewer's real NiiVue.sync() path, then require
+            # both model traffic and frontend work to become quiescent. The
+            # upstream 2.4.4 bundle keeps one 30 ms setInterval per model;
+            # the preload probe records callbacks created by that asset.
+            for canvas_index in range(expected_niivue_canvases):
+                canvas_expression = (
+                    "document.querySelectorAll('.jp-OutputArea canvas')"
+                    f"[{canvas_index}]"
+                )
+                assert bidi.evaluate(
+                    context,
+                    "(() => {"
+                    f"const canvas = {canvas_expression};"
+                    "canvas.scrollIntoView({block: 'center'});"
+                    "return true;"
+                    "})()",
+                )
+                _click_dom_element(
+                    bidi,
+                    context,
+                    canvas_expression,
+                    x_fraction=0.25,
+                    y_fraction=0.25,
+                )
+
+            _wait_for_expression(
+                bidi,
+                context,
+                f"{SCENE_SYNC_COUNT_EXPRESSION} >= {expected_niivue_canvases}",
+                timeout=15,
+                log_paths=diagnostic_logs,
+            )
+            time.sleep(1)
+            scene_sync_count = bidi.evaluate(
+                context,
+                SCENE_SYNC_COUNT_EXPRESSION,
+            )
+            interval_activity = json.loads(
+                bidi.evaluate(
+                    context,
+                    IPYNIIVUE_INTERVAL_SNAPSHOT_EXPRESSION,
+                )
+            )
+            time.sleep(1)
+            idle_scene_sync_count = bidi.evaluate(
+                context,
+                SCENE_SYNC_COUNT_EXPRESSION,
+            )
+            idle_interval_activity = json.loads(
+                bidi.evaluate(
+                    context,
+                    IPYNIIVUE_INTERVAL_SNAPSHOT_EXPRESSION,
+                )
+            )
+            assert idle_scene_sync_count == scene_sync_count
+            assert interval_activity == [], interval_activity
+            assert idle_interval_activity == [], idle_interval_activity
 
         # Re-execution clears the cell before writing a new fragmented stream.
         # The second run must replace the first output rather than replaying any
@@ -723,12 +1102,11 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             context,
             "document.body.innerText.includes('stream-run-2') && "
             "document.body.innerText.includes('stream-fragment-19') && "
-            "document.querySelectorAll('.jp-OutputArea canvas').length === 9 && "
-            "document.querySelectorAll('.jupyter-widgets.widget-box').length "
-            "=== 2 && "
+            f"{render_condition} && "
             "!document.body.innerText.includes('Loading widget') && "
             "!document.body.innerText.includes('model not found')",
             timeout=45,
+            log_paths=diagnostic_logs,
         )
         stream_outputs = json.loads(
             bidi.evaluate(
@@ -762,12 +1140,11 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             replay_context,
             "document.body.innerText.includes('stream-run-2') && "
             "document.body.innerText.includes('stream-fragment-19') && "
-            "document.querySelectorAll('.jp-OutputArea canvas').length === 9 && "
-            "document.querySelectorAll('.jupyter-widgets.widget-box').length "
-            "=== 2 && "
+            f"{render_condition} && "
             "!document.body.innerText.includes('Loading widget') && "
             "!document.body.innerText.includes('model not found')",
             timeout=45,
+            log_paths=diagnostic_logs,
         )
         replay_stream_outputs = json.loads(
             bidi.evaluate(
@@ -794,21 +1171,20 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
         # Re-execution destroyed nine earlier NiiVue models; without the
         # model-cleanup patch their WebGL contexts stay alive and the
         # browser starts evicting contexts.
-        context_exhaustion = [
-            event["params"]["text"]
-            for event in bidi.events
-            if event.get("method") == "log.entryAdded"
-            and "webgl context" in event["params"].get("text", "").lower()
-            and any(
-                phrase in event["params"]["text"].lower()
-                for phrase in ("too many", "exceeded", "losing", "oldest")
-            )
-        ]
-        assert not context_exhaustion, context_exhaustion
+        if include_niivue:
+            context_exhaustion = [
+                event["params"]["text"]
+                for event in bidi.events
+                if event.get("method") == "log.entryAdded"
+                and "webgl context" in event["params"].get("text", "").lower()
+                and any(
+                    phrase in event["params"]["text"].lower()
+                    for phrase in ("too many", "exceeded", "losing", "oldest")
+                )
+            ]
+            assert not context_exhaustion, context_exhaustion
     finally:
-        if bidi is not None:
-            bidi.close()
-        _stop(firefox)
+        if browser is not None:
+            browser.close()
         _stop(server)
-        firefox_log.close()
         server_log.close()

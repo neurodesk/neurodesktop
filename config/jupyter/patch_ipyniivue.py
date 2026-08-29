@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Share ipyniivue's frontend bundle and release destroyed WebGL contexts.
+"""Share ipyniivue's frontend bundle and remove idle scene polling.
 
 ``ipyniivue==2.4.4`` gives anywidget a roughly 5 MB ESM file through a synced
 trait. Anywidget consequently sends and imports a separate copy for every
 NiiVue model. This patch moves the heavy code to JupyterLab's same-origin
 static directory and leaves a small per-model bootstrap in the Python package.
 The shared module exports a factory so its original module globals remain
-private to each model. The factory cleanup also relinquishes the model's WebGL
-context when anywidget destroys it.
+private to each model. It sends scene changes directly from ``NiiVue.sync()``
+instead of polling every 30 ms. The factory cleanup also relinquishes the
+model's WebGL context when anywidget destroys it.
 """
 
 from __future__ import annotations
@@ -20,19 +21,52 @@ from pathlib import Path
 
 BOOTSTRAP_MARKER = "neurodesktop-ipyniivue-shared-bundle"
 MODEL_CLEANUP_MARKER = "neurodesktop-ipyniivue-model-cleanup"
+SCENE_SYNC_MARKER = "neurodesktop-ipyniivue-event-scene-sync"
 ASSET_PATTERN = re.compile(
     r"neurodesktop-ipyniivue\.(?P<hash>[0-9a-f]{20})\.js"
 )
 
 STATE_BEFORE = "var vA,BC;async function BB"
 STATE_AFTER = "async function BB"
-FACTORY_BEFORE = "function S0(A,I){"
-FACTORY_AFTER = "function createWidgetDefinition(){let vA,BC;function S0(A,I){"
+SYNC_BEFORE = (
+    'function S0(A,I){BC!==void 0&&(clearInterval(BC),BC=void 0);'
+    'let B=I.get("scene"),C=!1;BC=setInterval(async()=>{if(!C)return;'
+    'let E=I.get("this_model_id");if(!E)return;let t;try{'
+    't=await I.widget_manager.get_model(E)}catch{return}let i={'
+    'renderAzimuth:A.scene.renderAzimuth,'
+    'renderElevation:A.scene.renderElevation,'
+    'volScaleMultiplier:A.scene.volScaleMultiplier,'
+    'crosshairPos:[...A.scene.crosshairPos],'
+    'clipPlanes:A.scene.clipPlanes.map(a=>[...a]),'
+    'clipPlaneDepthAziElevs:A.scene.clipPlaneDepthAziElevs.map(a=>[...a]),'
+    'pan2Dxyzmm:[...A.scene.pan2Dxyzmm],gamma:A.scene.gamma||1},'
+    'o=D2(B,i);Object.keys(o).length>0&&(e2(t,{scene:o}),B=i)},30);'
+    'let Q=A.sync;A.sync=new Proxy(Q,{apply:(E,t,i)=>{if('
+    'Reflect.apply(E,t,i),!A.gl){C=!1;return}if(!A.gl.canvas.matches('
+    '":focus")){C=!1;return}C=!0}})}'
+)
+SYNC_AFTER = (
+    f'function createWidgetDefinition(){{let vA;function S0(A,I){{'
+    f'/*{SCENE_SYNC_MARKER}*/let B=I.get("scene");const C=async()=>{{'
+    'let g=I.get("this_model_id");if(!g)return;let Q;try{'
+    'Q=await I.widget_manager.get_model(g)}catch{return}let E={'
+    'renderAzimuth:A.scene.renderAzimuth,'
+    'renderElevation:A.scene.renderElevation,'
+    'volScaleMultiplier:A.scene.volScaleMultiplier,'
+    'crosshairPos:[...A.scene.crosshairPos],'
+    'clipPlanes:A.scene.clipPlanes.map(a=>[...a]),'
+    'clipPlaneDepthAziElevs:A.scene.clipPlaneDepthAziElevs.map(a=>[...a]),'
+    'pan2Dxyzmm:[...A.scene.pan2Dxyzmm],gamma:A.scene.gamma||1},'
+    't=D2(B,E);Object.keys(t).length>0&&(e2(Q,{scene:t}),B=E)};'
+    'let i=A.sync;A.sync=new Proxy(i,{apply:(o,a,e)=>{'
+    'let D=Reflect.apply(o,a,e);return A.gl&&A.gl.canvas.matches('
+    '":focus")&&C(),D}})}'
+)
 CLEANUP_BEFORE = "clearInterval(BC)}},async render"
 CLEANUP_AFTER = (
     f"/*{MODEL_CLEANUP_MARKER}*/vA.cleanup(),"
     'vA.gl?.getExtension("WEBGL_lose_context")?.loseContext(),'
-    "vA=void 0,clearInterval(BC),BC=void 0}},async render"
+    "vA=void 0}},async render"
 )
 EXPORT_BEFORE = "};export{Ih as default};"
 EXPORT_AFTER = "};return Ih}export{createWidgetDefinition};"
@@ -95,15 +129,14 @@ def patch_ipyniivue(package_dir: Path, lab_static_dir: Path) -> bool:
         if (
             asset_hash != assets[0]
             or MODEL_CLEANUP_MARKER not in asset_source
+            or SCENE_SYNC_MARKER not in asset_source
             or "export{createWidgetDefinition};" not in asset_source
         ):
             raise ValueError("patched ipyniivue shared asset is incomplete")
         return False
 
     patched = _replace_once(source, STATE_BEFORE, STATE_AFTER, "state")
-    patched = _replace_once(
-        patched, FACTORY_BEFORE, FACTORY_AFTER, "factory start"
-    )
+    patched = _replace_once(patched, SYNC_BEFORE, SYNC_AFTER, "scene sync")
     patched = _replace_once(patched, CLEANUP_BEFORE, CLEANUP_AFTER, "cleanup")
     patched = _replace_once(patched, EXPORT_BEFORE, EXPORT_AFTER, "export")
 

@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-08-27"
+last-reviewed: "2026-08-28"
 ---
 
 # Testing
@@ -142,6 +142,7 @@ pytest tests/unit/test_astra_jupyter_ai_tooling.py
 pytest tests/unit/test_jupyter_server_documents_patch.py
 pytest tests/unit/test_neurodesktop_stream_output.py
 pytest tests/unit/test_ipyniivue_patch.py
+pytest tests/unit/test_widget_browser_diagnostics.py
 pytest tests/unit/test_jupyterlab_widgets_patch.py
 pytest tests/unit/test_jupyter_ai_acp_client_patch.py
 pytest tests/unit/test_jupyter_server_mcp_patch.py
@@ -170,13 +171,27 @@ carriage-return fragments, so the test checks both CRDT stream updates and
 replay rather than only displaying separate complete stream outputs. Before
 clicking Run, the test waits for the status bar to name the selected kernel and
 report ``Idle``. The notebook execution indicator alone can report ``idle``
-before JupyterLab has created a kernel. The test also requires `ipykernel`
-6.31.0 as the stable main-shell widget-comm path. The same browser test creates
-nine NiiVue models, re-executes them, and restores them in the second client.
-It requires nine canvases with no permanent ``Loading widget...`` output. The
+before JupyterLab has created a kernel. Its disposable Firefox profile enables
+WebGL2 and permits Firefox's software fallback without forcing Mesa's driver
+mode, then probes a real WebGL2 context before JupyterLab opens. Only a failed
+startup capability probe replaces Firefox; the notebook and replay assertions
+run once, so an application race still fails. If all fresh browser probes lack
+WebGL2, the test reports the Firefox reason and omits only the NiiVue code and
+canvas counts. It still executes, re-executes, and replays the stream and
+delayed ``HBox``.
+Timeout reports include the current WebGL renderer and context state together
+with bounded Firefox and Jupyter Server log tails. The test also requires
+`ipykernel` 6.31.0 as the stable main-shell widget-comm path. When WebGL2 is
+available, the same browser test creates nine NiiVue models, re-executes them,
+and restores them in the second client. It requires nine canvases with no
+permanent ``Loading widget...`` output. It interacts with every canvas and
+requires scene-model traffic to stop once idle. A preload probe counts interval
+callbacks created by the shared ipyniivue asset, so the upstream 30 ms polling
+loop fails even when repeated scene comparisons produce no model delta. The
 ipyniivue unit test moves the installed 5 MB frontend into one content-hashed
 JupyterLab asset, keeps model state inside a factory-created definition, and
-adds WebGL cleanup only to model destruction. The other frontend unit tests
+requires event-driven scene synchronization plus WebGL cleanup on model
+destruction. The other frontend unit tests
 require changed federated chunks and remote entries to use new content-hashed
 names, so an immutable cached copy cannot conceal a fix.
 The same unit and image suites require the server-documents reconnect guards:

@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-27"
+last-reviewed: "2026-08-28"
 ---
 
 # Build-Time Behaviors
@@ -82,7 +82,9 @@ file with a small same-origin loader.
 The large module originally keeps its NiiVue instance in module globals. A
 normal fixed-URL import would therefore make every widget share one viewer.
 The patch wraps those globals in an exported definition factory, and the small
-per-model loader calls the factory after importing the cached module. Its
+per-model loader calls the factory after importing the cached module. The
+factory replaces ipyniivue's permanent 30 ms scene polling with one
+asynchronous scene-delta send for each focused ``NiiVue.sync()`` event. Its
 model-destruction cleanup also releases the NiiVue WebGL context. The existing
 view cleanup remains non-destructive so a view can move between output areas.
 The patch is tied to the exact 2.4.4 bundle seams and fails the build when a
