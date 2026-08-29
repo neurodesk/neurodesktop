@@ -101,6 +101,24 @@ SCENE_SYNC_COUNT_EXPRESSION = (
 )
 
 
+def _jupyterlab_notebook_url(
+    server_port: int,
+    token: str,
+    *,
+    workspace: str | None = None,
+) -> str:
+    workspace_path = (
+        ""
+        if workspace is None
+        else "/workspaces/" + urllib.parse.quote(workspace, safe="")
+    )
+    query = urllib.parse.urlencode({"token": token})
+    return (
+        f"http://127.0.0.1:{server_port}/lab{workspace_path}/"
+        f"tree/widget.ipynb?{query}"
+    )
+
+
 def _unused_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -905,10 +923,7 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             "browsingContext.navigate",
             {
                 "context": context,
-                "url": (
-                    f"http://127.0.0.1:{server_port}/lab/tree/widget.ipynb"
-                    f"?token={token}"
-                ),
+                "url": _jupyterlab_notebook_url(server_port, token),
                 "wait": "complete",
             },
         )
@@ -1118,9 +1133,9 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
         )
         assert stream_outputs == [expected_stream]
 
-        # A second JupyterLab client replays the populated notebook room. It
-        # must receive the same single stream output without duplicating the
-        # suffix while reconstructing its local output model.
+        # A second JupyterLab client replays the populated notebook room. Give
+        # it a separate workspace so JupyterLab does not move either client to
+        # an automatic workspace while plugins are activating.
         replay_context = bidi.request("browsingContext.create", {"type": "tab"})[
             "context"
         ]
@@ -1128,9 +1143,10 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             "browsingContext.navigate",
             {
                 "context": replay_context,
-                "url": (
-                    f"http://127.0.0.1:{server_port}/lab/tree/widget.ipynb"
-                    f"?token={token}"
+                "url": _jupyterlab_notebook_url(
+                    server_port,
+                    token,
+                    workspace="widget-replay",
                 ),
                 "wait": "complete",
             },

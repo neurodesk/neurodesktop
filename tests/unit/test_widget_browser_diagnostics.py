@@ -78,6 +78,26 @@ def test_widget_notebook_keeps_core_replay_coverage_without_webgl():
     assert "niivue.observe(record_scene_sync, names='scene')" in webgl_source
 
 
+def test_replay_client_uses_a_separate_jupyterlab_workspace():
+    module = load_widget_test_module()
+
+    assert module._jupyterlab_notebook_url(
+        8765,
+        "browser token",
+    ) == (
+        "http://127.0.0.1:8765/lab/tree/widget.ipynb"
+        "?token=browser+token"
+    )
+    assert module._jupyterlab_notebook_url(
+        8765,
+        "browser token",
+        workspace="widget replay",
+    ) == (
+        "http://127.0.0.1:8765/lab/workspaces/widget%20replay/"
+        "tree/widget.ipynb?token=browser+token"
+    )
+
+
 def test_ipyniivue_idle_probe_records_only_shared_asset_intervals():
     module = load_widget_test_module()
 

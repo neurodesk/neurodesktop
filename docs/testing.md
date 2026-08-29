@@ -164,7 +164,9 @@ server-side notebook output and kernel widget comms travel over independently
 ordered WebSockets. It also starts Jupyter Server and headless Firefox, runs an
 ``HBox`` whose model comm is delayed for three seconds through the installed
 server-side cell executor, re-executes the cell, and opens a second JupyterLab
-client against the populated room. It requires exact, non-duplicated stream
+client in a separate named workspace against the populated room. The separate
+workspace prevents JupyterLab from relocating either client while its plugins
+activate. The test requires exact, non-duplicated stream
 text plus a widget DOM instead of a YDoc output exception, ``model not found``,
 or the unsafe renderer's ``text/plain`` fallback. The stream uses many flushed
 carriage-return fragments, so the test checks both CRDT stream updates and
