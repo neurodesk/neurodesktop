@@ -61,6 +61,7 @@ self_update_connect_sherlock() {
     local script_args=("$@")
     local script_dir
     local update_candidate
+    local update_choice
 
     if [[ "${CONNECT_SHERLOCK_SKIP_UPDATE_REEXEC:-0}" == "1" ]]; then
         return 0
@@ -91,6 +92,15 @@ self_update_connect_sherlock() {
     if ! validate_connect_sherlock_update "$update_candidate"; then
         rm -f "$update_candidate"
         echo "Update check skipped (downloaded script validation failed)."
+        return 0
+    fi
+
+    echo "A repository update for connectSherlock.sh is available."
+    echo -n "Update connectSherlock.sh now? [Y/n] "
+    read -r update_choice
+    if [[ "$update_choice" =~ ^([nN][oO]|[nN])$ ]]; then
+        rm -f "$update_candidate"
+        echo "Continuing with the current version."
         return 0
     fi
 
@@ -439,6 +449,21 @@ EOF
     return "$AUTH_STATUS"
 }
 
+print_neurodesktop_access_banner() {
+    local NOTEBOOK_URL="$1"
+
+    echo
+    echo "=========================================================================="
+    echo " Neurodesktop access link"
+    echo
+    echo " Open this link in your browser:"
+    echo
+    echo "     ${NOTEBOOK_URL}"
+    echo
+    echo " Allow about 30 seconds for startup."
+    echo "=========================================================================="
+}
+
 hold_neurodesk_tunnel() {
     # Hold a double-hop tunnel: local -> login -> compute node, landing on the
     # notebook's localhost port on the node. Runs in the foreground; Ctrl-C or a
@@ -637,11 +662,12 @@ attach_neurodesk_job() {
     fi
     echo "Container log: ssh $LOGIN_NODE tail -f ~/.neurodesk_job_${JOB_ID}.log"
     echo "Tunnel mapping: local ${TUNNEL_PORT} -> ${LOGIN_NODE} ${TUNNEL_PORT} -> ${NODE_NAME} ${SAVED_PORT}"
-    echo "Notebook will be available at ${NOTEBOOK_URL} (allow ~30s for startup)."
+    print_neurodesktop_access_banner "$NOTEBOOK_URL"
     if [ -z "$SAVED_TOKEN" ]; then
         echo "  (No token recorded for this job; if Jupyter asks for one, find it with:"
         echo "   ssh $LOGIN_NODE grep -m1 token= ~/.neurodesk_job_${JOB_ID}.log )"
     fi
+    echo
     echo "Press Ctrl-C to disconnect; you'll then be asked whether to cancel or keep the job."
     # Hold the tunnel in the foreground. A bare 'trap : INT' keeps this script
     # alive when Ctrl-C tears down the tunnel (the child ssh still gets the default
@@ -710,6 +736,48 @@ prompt_keep_or_cancel_on_exit() {
     else
         echo "Failed to cancel job $JOB_ID. Cancel it manually: ssh $LOGIN_NODE scancel $JOB_ID"
     fi
+}
+
+finish_foreground_neurodesk_job() {
+    # The non-TTY SSH connection does not forward Ctrl-C to the remote salloc
+    # process. Find the one interactive Neurodesktop allocation while the
+    # login-node control connection is still available, then let the user keep
+    # it for reconnection or cancel it.
+    local SSH_SOCKET="$1"
+    local LOGIN_NODE="$2"
+    local JOB_NAME="$3"
+    local JOB_ID
+
+    JOB_ID=$(ssh -S "$SSH_SOCKET" -q "$LOGIN_NODE" \
+        "squeue -u \$USER --name=$JOB_NAME -h -t R,PD -o '%i' | head -n 1" 2>/dev/null)
+    JOB_ID=${JOB_ID//[[:space:]]/}
+    if [[ ! "$JOB_ID" =~ ^[0-9]+$ ]]; then
+        return 0
+    fi
+
+    prompt_keep_or_cancel_on_exit "$SSH_SOCKET" "$LOGIN_NODE" "$JOB_ID"
+}
+
+run_foreground_neurodesk_session() {
+    local SSH_SOCKET="$1"
+    local LOGIN_NODE="$2"
+    local JOB_NAME="$3"
+    local SESSION_STATUS
+    local SESSION_SIGNALLED=0
+    shift 3
+
+    # Bash normally exits its script when the foreground SSH client receives
+    # Ctrl-C. Keep the shell alive long enough to offer allocation cleanup.
+    trap 'SESSION_SIGNALLED=1' INT HUP TERM
+    "$@"
+    SESSION_STATUS=$?
+    trap - INT HUP TERM
+
+    finish_foreground_neurodesk_job "$SSH_SOCKET" "$LOGIN_NODE" "$JOB_NAME"
+    if [ "$SESSION_SIGNALLED" -eq 1 ]; then
+        return 130
+    fi
+    return "$SESSION_STATUS"
 }
 
 function connectSherlock() {
@@ -1597,8 +1665,7 @@ EOF
     #   - sbatch (default): job is owned by Slurm and survives SSH disconnects,
     #     so it can be detached and reattached.
     #   - salloc (interactive-only partitions such as 'dev', which reject batch
-    #     jobs): foreground session tied to this terminal; it cannot be
-    #     reattached once the connection closes.
+    #     jobs): foreground tunnel with a keep-or-cancel choice when it closes.
     if ! ssh -S "$CTRL_SOCKET" "$LOGIN_NODE" "cat > ~/.neurodesk_job.sh && chmod +x ~/.neurodesk_job.sh" <<'EOF'
 #!/bin/bash
 # Per-job state file keyed by SLURM_JOB_ID so concurrent neurodesktop jobs do
@@ -1653,12 +1720,11 @@ EOF
     fi
 
     # Interactive foreground session (salloc). The notebook output streams to
-    # this terminal; closing it ends the allocation. While it is alive a second
-    # terminal can still attach (the wrapper records node/port), but a dropped
-    # connection releases the job.
+    # this terminal. When the connection ends, the local wrapper offers to keep
+    # the allocation for reconnection or cancel it.
     echo "Starting an interactive session on '$PARTITION' (foreground)."
-    echo "Closing this terminal or losing the connection ends the session -- unlike"
-    echo "batch partitions (e.g. 'normal'), interactive sessions cannot be reattached after a disconnect."
+    echo "Pressing Ctrl-C closes the tunnel, then asks whether to keep or cancel the allocation."
+    echo "If Sherlock is unreachable during cleanup, re-run this launcher to find the remaining job."
     TUNNEL_PORT=$(choose_attach_tunnel_port "$CTRL_SOCKET" "$LOGIN_NODE" "$NOTEBOOK_PORT")
     if [[ ! "$TUNNEL_PORT" =~ ^[0-9]+$ ]]; then
         echo "Failed to find a free local/login tunnel port after multiple attempts."
@@ -1669,7 +1735,8 @@ EOF
     # non-interactive, so neither SSH hop needs a remote TTY. Avoiding one also
     # prevents Sherlock's interactive login quota check from delaying or
     # printing a misleading "Killed" message during startup.
-    ssh -S "$CTRL_SOCKET" -o ExitOnForwardFailure=yes -T -L "${TUNNEL_PORT}:localhost:${TUNNEL_PORT}" "$LOGIN_NODE" \
+    run_foreground_neurodesk_session "$CTRL_SOCKET" "$LOGIN_NODE" "$JOB_NAME" \
+      ssh -S "$CTRL_SOCKET" -o ExitOnForwardFailure=yes -T -L "${TUNNEL_PORT}:localhost:${TUNNEL_PORT}" "$LOGIN_NODE" \
         "salloc --job-name=$JOB_NAME -p $PARTITION --nodes=1 --time=$WALLTIME --ntasks=1 --cpus-per-task=$CPUS --mem=$MEM $GPU_FLAG \
         bash -c 'echo \"Allocated: \${SLURM_NODELIST}\"; \
                  ssh -o ExitOnForwardFailure=yes -T -L ${TUNNEL_PORT}:localhost:${NOTEBOOK_PORT} \${SLURM_NODELIST} \"SLURM_JOB_ID=\${SLURM_JOB_ID} SLURM_CONF=\${SLURM_CONF:-} SLURM_SACK_SOCKET=\${SLURM_SACK_SOCKET:-} MUNGE_SOCKET=\${MUNGE_SOCKET:-} NEURODESKTOP_ENABLE_GPU=${ENABLE_GPU_CONTAINER} NEURODESKTOP_NOTEBOOK_PORT=${NOTEBOOK_PORT} NEURODESKTOP_TOKEN=${TUNNEL_TOKEN} NEURODESKTOP_DISPLAY_URL=http://127.0.0.1:${TUNNEL_PORT} ~/.neurodesk_job.sh\"'"
