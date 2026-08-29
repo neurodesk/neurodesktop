@@ -590,6 +590,36 @@ def test_widget_manager_waits_for_a_late_model_registration():
     assert "Date.now()-o<1e4" in bundles
 
 
+def test_widget_control_state_replies_return_to_requesting_client(monkeypatch):
+    """Concurrent managers must not steal each other's state response."""
+    from ipywidgets.widgets.widget import Widget
+
+    class Comm:
+        def __init__(self):
+            self.callback = None
+            self.sent = []
+
+        def on_msg(self, callback):
+            self.callback = callback
+
+        def send(self, data, buffers=None):
+            self.sent.append(data)
+
+    first = Comm()
+    second = Comm()
+    opened = {"metadata": {"version": "1.0.0"}}
+    request = {"content": {"data": {"method": "request_states"}}}
+
+    monkeypatch.setattr(Widget, "_control_comm", None)
+    Widget.handle_control_comm_opened(first, opened)
+    Widget.handle_control_comm_opened(second, opened)
+    first.callback(request)
+    second.callback(request)
+
+    assert [reply["method"] for reply in first.sent] == ["update_states"]
+    assert [reply["method"] for reply in second.sent] == ["update_states"]
+
+
 def test_server_documents_installs_reconnect_data_loss_guards() -> None:
     """Both halves of the blank-notebook reconnect fix are active assets."""
     import jupyter_server_documents

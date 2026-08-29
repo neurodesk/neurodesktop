@@ -1381,12 +1381,16 @@ RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_documents.py,ta
     && install -m 0644 -o root -g users /tmp/neurodesktop_stream_output.py /opt/neurodesktop/neurodesktop_stream_output.py \
     && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_server_documents.py
 
-# ipywidgets 8.1.9 retries a late widget model for two seconds. Complex
-# server-executed outputs can exceed that window because their Yjs output and
-# kernel comms use separate WebSockets. Extend the bounded retry to ten seconds
-# and publish new content-hashed assets so browser caches cannot retain it.
-RUN --mount=type=bind,source=config/jupyter/patch_jupyterlab_widgets.py,target=/tmp/patch_jupyterlab_widgets.py,ro \
-    install -m 0755 -o root -g users /tmp/patch_jupyterlab_widgets.py /opt/neurodesktop/patch_jupyterlab_widgets.py \
+# ipywidgets 8.1.9 sends every control-state response through the most recently
+# opened client comm, so overlapping widget-manager restores can steal each
+# other's reply. Its frontend also waits only two seconds for a late model.
+# Keep replies on their requesting comm, extend the bounded model wait to ten
+# seconds, and publish new hashed frontend assets so caches cannot retain it.
+RUN --mount=type=bind,source=config/jupyter/patch_ipywidgets_control_comm.py,target=/tmp/patch_ipywidgets_control_comm.py,ro \
+    --mount=type=bind,source=config/jupyter/patch_jupyterlab_widgets.py,target=/tmp/patch_jupyterlab_widgets.py,ro \
+    install -m 0755 -o root -g users /tmp/patch_ipywidgets_control_comm.py /opt/neurodesktop/patch_ipywidgets_control_comm.py \
+    && install -m 0755 -o root -g users /tmp/patch_jupyterlab_widgets.py /opt/neurodesktop/patch_jupyterlab_widgets.py \
+    && /opt/conda/bin/python /opt/neurodesktop/patch_ipywidgets_control_comm.py \
     && /opt/conda/bin/python /opt/neurodesktop/patch_jupyterlab_widgets.py
 
 # RISE's standalone application has a smaller service set than JupyterLab.

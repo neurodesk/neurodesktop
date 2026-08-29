@@ -148,6 +148,7 @@
   tests/unit/test_neurodesktop_stream_output.py
   tests/unit/test_ipyniivue_patch.py
   tests/unit/test_widget_browser_diagnostics.py
+  tests/unit/test_ipywidgets_control_comm_patch.py
   tests/unit/test_jupyterlab_widgets_patch.py
   tests/unit/test_jupyter_ai_acp_client_patch.py
   tests/unit/test_jupyter_server_mcp_patch.py` from a checkout and `pytest
@@ -159,10 +160,13 @@
   renderers fall back to `text/plain`. The widget image test must execute and
   re-execute a delayed nested widget through JupyterLab after repeated stream
   output, then replay the populated room in a second client; it must not only
-  inspect installed bundles. Keep notebook-room outputs as CRDT maps, coalesce
-  each contiguous stream, and keep every stream output's `text` as a CRDT text
-  value; separate maps duplicate replayed fragments, while plain dictionaries
-  or strings break JupyterLab's next `appendStreamOutput()` update. The
+  inspect installed bundles. Keep every widget control-state reply on the comm
+  that requested it; the backend's shared latest comm cannot safely route two
+  clients restoring the same kernel. Keep notebook-room outputs as CRDT maps,
+  coalesce each contiguous stream, and keep every stream output's `text` as a
+  CRDT text value; separate maps duplicate replayed fragments, while plain
+  dictionaries or strings break JupyterLab's next `appendStreamOutput()`
+  update. The
   coalescing rules live in `config/jupyter/neurodesktop_stream_output.py`, a
   port of JupyterLab's `Private.processText`/`addText` that the patcher
   installs into the package; keep the port and its unit-test parity vectors

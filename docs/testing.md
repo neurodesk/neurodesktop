@@ -143,6 +143,7 @@ pytest tests/unit/test_jupyter_server_documents_patch.py
 pytest tests/unit/test_neurodesktop_stream_output.py
 pytest tests/unit/test_ipyniivue_patch.py
 pytest tests/unit/test_widget_browser_diagnostics.py
+pytest tests/unit/test_ipywidgets_control_comm_patch.py
 pytest tests/unit/test_jupyterlab_widgets_patch.py
 pytest tests/unit/test_jupyter_ai_acp_client_patch.py
 pytest tests/unit/test_jupyter_server_mcp_patch.py
@@ -166,7 +167,9 @@ ordered WebSockets. It also starts Jupyter Server and headless Firefox, runs an
 server-side cell executor, re-executes the cell, and opens a second JupyterLab
 client in a separate named workspace against the populated room. The separate
 workspace prevents JupyterLab from relocating either client while its plugins
-activate. The test requires exact, non-duplicated stream
+activate. A direct two-client control-comm check also requires each widget-state
+reply to return to the client that requested it. The browser test requires
+exact, non-duplicated stream
 text plus a widget DOM instead of a YDoc output exception, ``model not found``,
 or the unsafe renderer's ``text/plain`` fallback. The stream uses many flushed
 carriage-return fragments, so the test checks both CRDT stream updates and

@@ -87,6 +87,12 @@ layouts such as a ``VBox`` containing delayed ``HBox`` models. Neurodesktop
 extends that bound to ten seconds and publishes the changed widget-manager
 chunk and remote entry under new content-derived names.
 
+The ipywidgets backend also stores only the most recently opened widget control
+comm. When two JupyterLab clients restore the same kernel concurrently, a state
+request received from one client can therefore send its response to the other.
+Neurodesktop's anchored backend patch captures the requesting comm in its
+callback so both widget managers finish restoring their own state.
+
 ipyniivue 2.4.4 supplies anywidget with a 5 MB ESM file through a synchronized
 model trait. Without a workaround, nine NiiVue models send and import nine
 copies of that bundle while their comms compete with notebook output delivery.
