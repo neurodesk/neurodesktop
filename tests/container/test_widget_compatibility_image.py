@@ -90,13 +90,20 @@ WIDGET_RENDERER_DIAGNOSTICS_EXPRESSION = r"""(async () => {
                         cellIndex,
                         outputIndex,
                         rendererClass: renderer.constructor?.name,
+                        managerKeys: manager ? Object.keys(manager) : [],
                         managerStatus: manager ? 'resolved' : 'pending',
                         restoredStatus: manager?.restoredStatus ?? null,
                         kernelRestoreInProgress:
                             manager?._kernelRestoreInProgress ?? null,
+                        controlRetryInProgress:
+                            manager?.__neurodesktopControlRetry ?? null,
                         modelIds: manager?._modelsSync
                             ? [...manager._modelsSync.keys()]
                             : [],
+                        kernelId: manager?.kernel?.id ?? null,
+                        kernelStatus: manager?.kernel?.status ?? null,
+                        kernelConnectionStatus:
+                            manager?.kernel?.connectionStatus ?? null,
                         hasRerenderModel:
                             renderer._rerenderMimeModel !== null,
                     });
@@ -649,6 +656,9 @@ def test_widget_manager_waits_for_a_late_model_registration():
     assert '"Control comm did not respond in time"),3e4)' in bundles
     assert "neurodesktop-widget-control-retry" in bundles
     assert "try{return await this._loadFromKernel()}" in bundles
+    assert "neurodesktop-widget-kernel-connection-wait" in bundles
+    assert '"connected"!==neurodeskKernel.connectionStatus' in bundles
+    assert "neurodeskKernel.requestKernelInfo()" in bundles
 
 
 def test_widget_control_state_replies_return_to_requesting_client(monkeypatch):
@@ -1266,6 +1276,15 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             "window.jupyterapp.commands.execute("
             "'docmanager:open', {path: 'widget.ipynb'}"
             ").then(() => true)",
+        )
+        _wait_for_expression(
+            bidi,
+            replay_context,
+            "document.body.innerText.includes("
+            "'Python [conda env:base] * | Idle'"
+            ")",
+            timeout=60,
+            log_paths=diagnostic_logs,
         )
         _wait_for_expression(
             bidi,

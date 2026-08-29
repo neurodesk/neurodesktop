@@ -96,6 +96,17 @@ def test_replay_client_uses_a_distinct_explicit_workspace():
     assert "NetworkError when attempting to fetch resource" in source
 
 
+def test_replay_waits_for_its_kernel_before_timing_widget_restore():
+    source = inspect.getsource(
+        load_widget_test_module().test_server_side_execution_renders_streams_and_widgets
+    )
+    replay_open = source.index("'docmanager:open', {path: 'widget.ipynb'}")
+    replay_idle = source.index("'Python [conda env:base] * | Idle'", replay_open)
+    replay_render = source.index("stream-fragment-19", replay_idle)
+
+    assert replay_open < replay_idle < replay_render
+
+
 def test_browser_failures_report_live_widget_manager_state():
     source = repo_path(
         "tests/container/test_widget_compatibility_image.py"

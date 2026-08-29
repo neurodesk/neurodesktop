@@ -93,7 +93,16 @@ restoration unfinished. Neurodesktop keeps the bulk request alive for thirty
 seconds so a loaded kernel does not enter that race. A control comm opened while
 a second client's kernel connection is settling can also be lost before it
 reaches ipykernel. Neurodesktop retries the bulk request once before entering
-the legacy per-model fallback.
+the legacy per-model fallback. It also waits for the kernel connection to
+report `connected` before opening the control comm. Upstream waits for the
+session context but can start restoration while its kernel channel is still
+connecting; that restoration then suppresses the connected-event retry until
+after the request has already been lost. The manager also attempts bounded
+kernel-info probes before the control comm opens. JupyterLab marks the browser
+WebSocket connected before the kernel bridge is necessarily ready, and its own
+initial kernel-info request documents that it can be lost during this interval.
+If the readiness checks time out, restoration continues into its bounded
+control-state requests rather than being abandoned.
 
 The ipywidgets backend also stores only the most recently opened widget control
 comm. When two JupyterLab clients restore the same kernel concurrently, a state
