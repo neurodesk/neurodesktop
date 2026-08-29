@@ -167,11 +167,15 @@ ordered WebSockets. It also starts Jupyter Server and headless Firefox, runs an
 server-side cell executor, re-executes the cell, and opens a second JupyterLab
 client against the populated room. The replay client uses an explicit separate
 workspace so JupyterLab does not relocate it away from the already-open default
-workspace and abort in-flight plugin asset requests. A direct two-client
-control-comm check also requires each widget-state reply to return to the client
-that requested it.
+workspace and abort in-flight plugin asset requests. It waits for that
+workspace's plugins to activate before opening the notebook through JupyterLab's
+document command, keeping document restoration out of application bootstrap. A
+direct two-client control-comm check also requires each widget-state reply to
+return to the client that requested it.
 The browser test requires the bulk control-state reply to survive a five-second
-kernel delay without entering the per-model fallback. It requires exact,
+scheduled kernel delay without entering the per-model fallback. The delay does
+not block the kernel event loop, so concurrent manager requests cannot serialize
+several artificial delays into the bounded frontend wait. It requires exact,
 non-duplicated stream text plus a widget DOM instead of a YDoc output exception,
 ``model not found``,
 or the unsafe renderer's ``text/plain`` fallback. The stream uses many flushed

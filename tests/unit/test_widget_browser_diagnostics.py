@@ -71,7 +71,8 @@ def test_widget_notebook_keeps_core_replay_coverage_without_webgl():
         assert "open_model_later" in source
         assert "widgets.HBox" in source
         assert "delayed-hbox-model" in source
-        assert "time.sleep(5)" in source
+        assert "asyncio.get_running_loop().call_later(" in source
+        assert "            5," in source
         assert "widgets.Widget._handle_control_comm_msg" in source
         assert "widget.comm.on_msg(lambda msg: None)" in source
     assert "NiiVue" not in core_source
@@ -88,7 +89,10 @@ def test_replay_client_uses_a_distinct_explicit_workspace():
         module.test_server_side_execution_renders_streams_and_widgets
     )
 
-    assert "/lab/workspaces/widget-replay/tree/widget.ipynb" in source
+    assert '"/lab/workspaces/widget-replay"' in source
+    assert '"--LabApp.expose_app_in_browser=True"' in source
+    assert "window.jupyterapp.allPluginsActivated" in source
+    assert "'docmanager:open', {path: 'widget.ipynb'}" in source
     assert "NetworkError when attempting to fetch resource" in source
 
 

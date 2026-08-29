@@ -453,7 +453,6 @@ def _widget_regression_notebook(*, include_niivue: bool):
     source = (
         "import asyncio\n"
         "import sys\n"
-        "import time\n"
         "import ipywidgets as widgets\n"
         f"{niivue_imports}"
         "from IPython.display import display\n"
@@ -483,9 +482,13 @@ def _widget_regression_notebook(*, include_niivue: bool):
         "    original_control_handler = widgets.Widget._handle_control_comm_msg\n"
         "    @classmethod\n"
         "    def delayed_control_handler(cls, msg, control_comm=None):\n"
-        "        time.sleep(5)\n"
-        "        return original_control_handler(\n"
-        "            msg, control_comm=control_comm)\n"
+        "        def send_delayed_state():\n"
+        "            original_control_handler(\n"
+        "                msg, control_comm=control_comm)\n"
+        "        asyncio.get_running_loop().call_later(\n"
+        "            5,\n"
+        "            send_delayed_state,\n"
+        "        )\n"
         "    widgets.Widget._handle_control_comm_msg = delayed_control_handler\n"
         "display({\n"
         "    'application/vnd.jupyter.widget-view+json': {\n"
@@ -585,6 +588,7 @@ def test_widget_manager_waits_for_a_late_model_registration():
     assert "Date.now()-o<1e4" in bundles
     assert "neurodesktop-widget-control-timeout" in bundles
     assert '"Control comm did not respond in time"),3e4)' in bundles
+    assert "neurodesktop-widget-manager-factory-first" in bundles
 
 
 def test_widget_control_state_replies_return_to_requesting_client(monkeypatch):
@@ -888,6 +892,7 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             f"--ServerApp.root_dir={tmp_path}",
             f"--FileContentsManager.preferred_dir={tmp_path}",
             f"--IdentityProvider.token={token}",
+            "--LabApp.expose_app_in_browser=True",
         ],
         stdout=server_log,
         stderr=subprocess.STDOUT,
@@ -1176,14 +1181,32 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
                 "context": replay_context,
                 "url": (
                     f"http://127.0.0.1:{server_port}"
-                    "/lab/workspaces/widget-replay/tree/widget.ipynb"
+                    "/lab/workspaces/widget-replay"
                     f"?token={token}"
                 ),
                 "wait": "complete",
             },
         )
         replay_path = bidi.evaluate(replay_context, "location.pathname")
-        assert replay_path == "/lab/workspaces/widget-replay/tree/widget.ipynb"
+        assert replay_path == "/lab/workspaces/widget-replay"
+        _wait_for_expression(
+            bidi,
+            replay_context,
+            "Boolean(window.jupyterapp)",
+            log_paths=diagnostic_logs,
+        )
+        assert bidi.evaluate(
+            replay_context,
+            "window.jupyterapp.restored"
+            ".then(() => window.jupyterapp.allPluginsActivated)"
+            ".then(() => true)",
+        )
+        assert bidi.evaluate(
+            replay_context,
+            "window.jupyterapp.commands.execute("
+            "'docmanager:open', {path: 'widget.ipynb'}"
+            ").then(() => true)",
+        )
         _wait_for_expression(
             bidi,
             replay_context,

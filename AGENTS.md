@@ -178,9 +178,11 @@
   clicking Run; the notebook execution indicator can report `idle` before a
   kernel exists. Give the replay client an explicit separate JupyterLab
   workspace; automatic relocation away from an already-open workspace aborts
-  in-flight plugin asset requests. Keep the disposable browser profile allowing
-  Firefox's software WebGL fallback without forcing Mesa's driver mode, require
-  a WebGL2 capability probe before opening JupyterLab, and retry only a fresh Firefox
+  in-flight plugin asset requests. Let that workspace finish activating plugins
+  before opening the replay notebook, so document restoration is not part of
+  application bootstrap. Keep the disposable browser profile allowing Firefox's
+  software WebGL fallback without forcing Mesa's driver mode, require a WebGL2
+  capability probe before opening JupyterLab, and retry only a fresh Firefox
   process that fails that startup probe. If every probe fails, omit only the
   NiiVue cells and canvas assertions; the stream, delayed widget, re-execution,
   and second-client replay must still run, and the test must warn with the
@@ -201,8 +203,11 @@
   Keep the late-model wait bounded at ten seconds and the bulk control-state
   wait bounded at thirty seconds. The upstream two- and four-second waits are
   too short for complex output over the independent WebSockets, and the
-  per-model fallback can race a late bulk response. Publish
-  patched federated assets under new content-derived names; Jupyter serves
+  per-model fallback can race a late bulk response. Install the manager-backed
+  renderer factory before walking existing renderers; collaboration output
+  created between the upstream operations otherwise stays at `Loading widget...`
+  without requesting kernel state. Publish patched federated assets under new
+  content-derived names; Jupyter serves
   their original hashed URLs as immutable for one year. Keep ipyniivue's large
   ESM in one content-hashed JupyterLab asset rather than syncing it with every
   model, but create each widget definition from a fresh factory so NiiVue and
