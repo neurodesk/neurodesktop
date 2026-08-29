@@ -90,16 +90,10 @@ chunk and remote entry under new content-derived names.
 The same widget manager abandons a bulk kernel-state request after four
 seconds. Its per-model fallback can overlap the late bulk response and leave
 restoration unfinished. Neurodesktop keeps the bulk request alive for thirty
-seconds so a loaded kernel does not enter that race.
-
-Manager setup also replaces the widget renderer factory after walking existing
-renderers. A collaboration output created between those operations keeps the
-factory's manager-less placeholder and never sends a kernel-state request.
-Neurodesktop installs the manager-backed factory first and then attaches the
-manager to existing renderers. Each existing cell keeps its own renderer
-registry, however, so Neurodesktop also subscribes to output-length changes and
-attaches the manager to newly inserted placeholder renderers. A weak set avoids
-attaching the same renderer twice.
+seconds so a loaded kernel does not enter that race. A control comm opened while
+a second client's kernel connection is settling can also be lost before it
+reaches ipykernel. Neurodesktop retries the bulk request once before entering
+the legacy per-model fallback.
 
 The ipywidgets backend also stores only the most recently opened widget control
 comm. When two JupyterLab clients restore the same kernel concurrently, a state

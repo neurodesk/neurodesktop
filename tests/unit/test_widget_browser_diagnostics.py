@@ -4,7 +4,7 @@ import ast
 import inspect
 import json
 
-from testlib import load_source_module
+from testlib import load_source_module, repo_path
 
 
 def load_widget_test_module():
@@ -94,6 +94,17 @@ def test_replay_client_uses_a_distinct_explicit_workspace():
     assert "window.jupyterapp.allPluginsActivated" in source
     assert "'docmanager:open', {path: 'widget.ipynb'}" in source
     assert "NetworkError when attempting to fetch resource" in source
+
+
+def test_browser_failures_report_live_widget_manager_state():
+    source = repo_path(
+        "tests/container/test_widget_compatibility_image.py"
+    ).read_text(encoding="utf-8")
+
+    assert "WIDGET_RENDERER_DIAGNOSTICS_EXPRESSION" in source
+    assert "managerStatus" in source
+    assert "kernelRestoreInProgress" in source
+    assert '"widgetRenderers": widget_renderers' in source
 
 
 def test_ipyniivue_idle_probe_records_only_shared_asset_intervals():

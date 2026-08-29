@@ -61,6 +61,52 @@ DOM_DIAGNOSTICS_EXPRESSION = (
     "})"
 )
 
+WIDGET_RENDERER_DIAGNOSTICS_EXPRESSION = r"""(async () => {
+    const panels = [...window.jupyterapp.shell.widgets()].filter(
+        panel => panel.context?.path === 'widget.ipynb'
+    );
+    const renderers = [];
+    for (const panel of panels) {
+        const cells = panel.content?.widgets || [];
+        for (const [cellIndex, cell] of cells.entries()) {
+            const outputItems = cell.outputArea?.widgets || [];
+            for (const [outputIndex, outputItem] of outputItems.entries()) {
+                const children = typeof outputItem.children === 'function'
+                    ? [...outputItem.children()]
+                    : [outputItem];
+                for (const renderer of children) {
+                    if (!renderer.node?.textContent?.includes('Loading widget')) {
+                        continue;
+                    }
+                    const manager = renderer._manager?.promise
+                        ? await Promise.race([
+                            renderer._manager.promise,
+                            new Promise(resolve => setTimeout(
+                                () => resolve(null), 100
+                            )),
+                        ])
+                        : null;
+                    renderers.push({
+                        cellIndex,
+                        outputIndex,
+                        rendererClass: renderer.constructor?.name,
+                        managerStatus: manager ? 'resolved' : 'pending',
+                        restoredStatus: manager?.restoredStatus ?? null,
+                        kernelRestoreInProgress:
+                            manager?._kernelRestoreInProgress ?? null,
+                        modelIds: manager?._modelsSync
+                            ? [...manager._modelsSync.keys()]
+                            : [],
+                        hasRerenderModel:
+                            renderer._rerenderMimeModel !== null,
+                    });
+                }
+            }
+        }
+    }
+    return JSON.stringify({panelCount: panels.length, renderers});
+})()"""
+
 IPYNIIVUE_INTERVAL_PROBE_PRELOAD = """() => {
     const records = [];
     Object.defineProperty(
@@ -250,10 +296,23 @@ def _browser_failure_diagnostics(
         )
     except json.JSONDecodeError:
         state = state_result
+    widget_result = bidi.evaluate(
+        context,
+        WIDGET_RENDERER_DIAGNOSTICS_EXPRESSION,
+    )
+    try:
+        widget_renderers = (
+            json.loads(widget_result)
+            if isinstance(widget_result, str)
+            else widget_result
+        )
+    except json.JSONDecodeError:
+        widget_renderers = widget_result
     return {
         "browserErrors": browser_errors,
         "webgl": _probe_webgl2(bidi, context),
         "state": state,
+        "widgetRenderers": widget_renderers,
         "processLogs": {str(path): _tail_text(path) for path in log_paths},
     }
 
@@ -588,8 +647,8 @@ def test_widget_manager_waits_for_a_late_model_registration():
     assert "Date.now()-o<1e4" in bundles
     assert "neurodesktop-widget-control-timeout" in bundles
     assert '"Control comm did not respond in time"),3e4)' in bundles
-    assert "neurodesktop-widget-manager-factory-first" in bundles
-    assert "neurodesktop-widget-output-watch" in bundles
+    assert "neurodesktop-widget-control-retry" in bundles
+    assert "try{return await this._loadFromKernel()}" in bundles
 
 
 def test_widget_control_state_replies_return_to_requesting_client(monkeypatch):

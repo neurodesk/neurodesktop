@@ -203,13 +203,10 @@
   Keep the late-model wait bounded at ten seconds and the bulk control-state
   wait bounded at thirty seconds. The upstream two- and four-second waits are
   too short for complex output over the independent WebSockets, and the
-  per-model fallback can race a late bulk response. Install the manager-backed
-  renderer factory before walking existing renderers; collaboration output
-  created between the upstream operations otherwise stays at `Loading widget...`
-  without requesting kernel state. Existing output areas retain their own
-  renderer registry, so attach the manager to future widget renderers on output
-  changes as well, without attaching any renderer twice. Publish patched
-  federated assets under new content-derived names; Jupyter serves
+  per-model fallback can race a late bulk response. Retry the bulk request once
+  before that fallback because the first control comm can be lost while a
+  second client's kernel connection settles. Publish patched federated assets
+  under new content-derived names; Jupyter serves
   their original hashed URLs as immutable for one year. Keep ipyniivue's large
   ESM in one content-hashed JupyterLab asset rather than syncing it with every
   model, but create each widget definition from a fresh factory so NiiVue and
