@@ -74,6 +74,7 @@ def test_widget_notebook_keeps_core_replay_coverage_without_webgl():
         assert "asyncio.get_running_loop().call_later(" in source
         assert "            5," in source
         assert "widgets.Widget._handle_control_comm_msg" in source
+        assert "control_request_count == 1" in source
         assert "widget.comm.on_msg(lambda msg: None)" in source
     assert "NiiVue" not in core_source
     assert "volume.nii.gz" not in core_source

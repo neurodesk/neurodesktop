@@ -89,20 +89,23 @@ chunk and remote entry under new content-derived names.
 
 The same widget manager abandons a bulk kernel-state request after four
 seconds. Its per-model fallback can overlap the late bulk response and leave
-restoration unfinished. Neurodesktop keeps the bulk request alive for thirty
-seconds so a loaded kernel does not enter that race. A control comm opened while
-a second client's kernel connection is settling can also be lost before it
-reaches ipykernel. Neurodesktop retries the bulk request once before entering
-the legacy per-model fallback. It also waits for the kernel connection to
+restoration unfinished. Neurodesktop gives the initial bulk request ten
+seconds, then makes at most two fresh retries with a full thirty-second response
+window before entering the legacy per-model fallback. This preserves time for
+complex state while recovering promptly when a request is lost. A control comm
+opened while a second client's kernel connection is settling can also be lost
+before it reaches ipykernel. The manager also waits for the kernel connection to
 report `connected` before opening the control comm. Upstream waits for the
 session context but can start restoration while its kernel channel is still
 connecting; that restoration then suppresses the connected-event retry until
-after the request has already been lost. The manager also attempts bounded
-kernel-info probes before the control comm opens. JupyterLab marks the browser
+after the request has already been lost. The manager also attempts one bounded
+kernel-info probe before the control comm opens. JupyterLab marks the browser
 WebSocket connected before the kernel bridge is necessarily ready, and its own
 initial kernel-info request documents that it can be lost during this interval.
 If the readiness checks time out, restoration continues into its bounded
-control-state requests rather than being abandoned.
+control-state requests rather than being abandoned. The retry bypasses the
+one-time readiness probe because the kernel connection is already established;
+otherwise probe timeouts can consume the retry's entire rendering window.
 
 The ipywidgets backend also stores only the most recently opened widget control
 comm. When two JupyterLab clients restore the same kernel concurrently, a state

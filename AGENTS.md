@@ -200,19 +200,21 @@
   Keep `ipykernel` on the stable 6.x line until its experimental comm subshells
   can create a per-target subshell for delayed server-executed widgets without
   canceling the control future.
-  Keep the late-model wait bounded at ten seconds and the bulk control-state
-  wait bounded at thirty seconds. The upstream two- and four-second waits are
-  too short for complex output over the independent WebSockets, and the
-  per-model fallback can race a late bulk response. Retry the bulk request once
-  before that fallback. Wait for a second client's kernel connection to report
+  Keep the late-model wait bounded at ten seconds. Give the initial bulk
+  control-state request ten seconds, then give its retry the full thirty-second
+  bound. The upstream two- and four-second waits are too short for complex
+  output over the independent WebSockets, and the per-model fallback can race
+  a late bulk response. Make at most two bulk retries before that fallback.
+  Wait for a second client's kernel connection to report
   `connected` before opening the control comm; a request sent while that
   connection settles can be lost, and the upstream connected-event restore is
-  suppressed while the first restore remains in progress. Attempt bounded
-  kernel-info round trips as well: JupyterLab marks its WebSocket connected
+  suppressed while the first restore remains in progress. Attempt one bounded
+  kernel-info round trip as well: JupyterLab marks its WebSocket connected
   before the kernel bridge is necessarily ready and its first kernel-info
   request can be lost. A readiness timeout must continue into the bounded
-  control-state retries instead of abandoning restoration. Publish patched
-  federated assets
+  control-state retries instead of abandoning restoration, and a retry must
+  not repeat the readiness probe after the kernel is already connected.
+  Publish patched federated assets
   under new content-derived names; Jupyter serves
   their original hashed URLs as immutable for one year. Keep ipyniivue's large
   ESM in one content-hashed JupyterLab asset rather than syncing it with every

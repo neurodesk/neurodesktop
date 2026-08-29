@@ -97,6 +97,8 @@ WIDGET_RENDERER_DIAGNOSTICS_EXPRESSION = r"""(async () => {
                             manager?._kernelRestoreInProgress ?? null,
                         controlRetryInProgress:
                             manager?.__neurodesktopControlRetry ?? null,
+                        controlRetryCount:
+                            manager?.__neurodesktopControlRetryCount ?? null,
                         modelIds: manager?._modelsSync
                             ? [...manager._modelsSync.keys()]
                             : [],
@@ -546,8 +548,13 @@ def _widget_regression_notebook(*, include_niivue: bool):
         "delayed_model_task = asyncio.create_task(open_model_later())\n"
         "if widget_run == 2:\n"
         "    original_control_handler = widgets.Widget._handle_control_comm_msg\n"
+        "    control_request_count = 0\n"
         "    @classmethod\n"
         "    def delayed_control_handler(cls, msg, control_comm=None):\n"
+        "        global control_request_count\n"
+        "        control_request_count += 1\n"
+        "        if control_request_count == 1:\n"
+        "            return\n"
         "        def send_delayed_state():\n"
         "            original_control_handler(\n"
         "                msg, control_comm=control_comm)\n"
@@ -652,11 +659,13 @@ def test_widget_manager_waits_for_a_late_model_registration():
     )
     assert "neurodesktop-widget-model-retry" in bundles
     assert "Date.now()-o<1e4" in bundles
-    assert "neurodesktop-widget-control-timeout" in bundles
-    assert '"Control comm did not respond in time"),3e4)' in bundles
-    assert "neurodesktop-widget-control-retry" in bundles
+    assert "neurodesktop-widget-control-timeout-staged-retry" in bundles
+    assert "this.__neurodesktopControlRetry?3e4:1e4" in bundles
+    assert "neurodesktop-widget-control-retry-v2" in bundles
     assert "try{return await this._loadFromKernel()}" in bundles
+    assert "neurodeskRetries<2" in bundles
     assert "neurodesktop-widget-kernel-connection-wait" in bundles
+    assert "if(!this.__neurodesktopControlRetry)" in bundles
     assert '"connected"!==neurodeskKernel.connectionStatus' in bundles
     assert "neurodeskKernel.requestKernelInfo()" in bundles
 
@@ -1239,9 +1248,9 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
         assert stream_outputs == [expected_stream]
 
         # A second JupyterLab client replays the populated notebook room. The
-        # notebook delays its bulk control-state response beyond the upstream
-        # four-second limit and makes the racy per-model fallback unavailable.
-        # The manager must wait for the bulk response and reproduce the stream.
+        # notebook drops the first bulk request, delays the retry beyond the
+        # upstream four-second limit, and makes the racy per-model fallback
+        # unavailable. The manager must retry and reproduce the stream.
         replay_context = bidi.request("browsingContext.create", {"type": "tab"})[
             "context"
         ]
@@ -1294,7 +1303,7 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             f"{render_condition} && "
             "!document.body.innerText.includes('Loading widget') && "
             "!document.body.innerText.includes('model not found')",
-            timeout=45,
+            timeout=60,
             log_paths=diagnostic_logs,
         )
         replay_stream_outputs = json.loads(

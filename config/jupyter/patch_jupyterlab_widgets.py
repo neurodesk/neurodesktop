@@ -9,7 +9,7 @@ abandons its bulk control-state request after four seconds and falls back to
 individual model requests that can be stranded by the late bulk response.
 Finally, a control comm opened while a second client's kernel connection is
 settling can be lost before it reaches ipykernel. Wait for that connection and
-probe the kernel before opening the comm, then retry the bulk request once
+probe the kernel before opening the comm, then retry the bulk request up to twice
 before falling back. Publish the anchored changes under new content-derived
 asset names because Jupyter serves the original federated extension URLs as
 immutable for one year.
@@ -25,8 +25,10 @@ from pathlib import Path
 
 
 MODEL_RETRY_MARKER = "neurodesktop-widget-model-retry"
-CONTROL_TIMEOUT_MARKER = "neurodesktop-widget-control-timeout"
-CONTROL_RETRY_MARKER = "neurodesktop-widget-control-retry"
+CONTROL_TIMEOUT_V1_MARKER = "neurodesktop-widget-control-timeout"
+CONTROL_TIMEOUT_MARKER = "neurodesktop-widget-control-timeout-staged-retry"
+CONTROL_RETRY_V1_MARKER = "neurodesktop-widget-control-retry"
+CONTROL_RETRY_MARKER = "neurodesktop-widget-control-retry-v2"
 CONNECTION_WAIT_MARKER = "neurodesktop-widget-kernel-connection-wait"
 CACHE_SAFE_MARKER = "neurodesktop-widget-retry-cache-safe-entry"
 
@@ -47,29 +49,50 @@ CONTROL_TIMEOUT_BEFORE = (
     'setTimeout(()=>l("Control comm did not respond in time"),4e3)'
 )
 
+CONTROL_TIMEOUT_V1_AFTER = (
+    "setTimeout(()=>l("
+    f'/*{CONTROL_TIMEOUT_V1_MARKER}*/'
+    '"Control comm did not respond in time"),3e4)'
+)
+
 CONTROL_TIMEOUT_AFTER = (
     "setTimeout(()=>l("
     f'/*{CONTROL_TIMEOUT_MARKER}*/'
-    '"Control comm did not respond in time"),3e4)'
+    '"Control comm did not respond in time"),'
+    "this.__neurodesktopControlRetry?3e4:1e4)"
 )
 
 CONTROL_RETRY_BEFORE = (
     "}catch(e){return this._loadFromKernelModels()}let o=e.states"
 )
 
-CONTROL_RETRY_AFTER = (
+CONTROL_RETRY_V1_AFTER = (
     "}catch(e){if(!this.__neurodesktopControlRetry){"
-    f"/*{CONTROL_RETRY_MARKER}*/"
+    f"/*{CONTROL_RETRY_V1_MARKER}*/"
     "this.__neurodesktopControlRetry=!0;"
     "try{return await this._loadFromKernel()}"
     "finally{this.__neurodesktopControlRetry=!1}}"
     "return this._loadFromKernelModels()}let o=e.states"
 )
 
+CONTROL_RETRY_AFTER = (
+    "}catch(e){let neurodeskRetries="
+    "this.__neurodesktopControlRetryCount||0;"
+    "if(neurodeskRetries<2){"
+    f"/*{CONTROL_RETRY_MARKER}*/"
+    "this.__neurodesktopControlRetryCount=neurodeskRetries+1;"
+    "this.__neurodesktopControlRetry=!0;"
+    "try{return await this._loadFromKernel()}finally{"
+    "this.__neurodesktopControlRetryCount=neurodeskRetries;"
+    "this.__neurodesktopControlRetry=neurodeskRetries>0}}"
+    "return this._loadFromKernelModels()}let o=e.states"
+)
+
 CONNECTION_WAIT_BEFORE = "async _loadFromKernel(){let e,t;try{"
 
 CONNECTION_WAIT_AFTER = (
-    "async _loadFromKernel(){let neurodeskKernel=this.kernel;"
+    "async _loadFromKernel(){if(!this.__neurodesktopControlRetry){"
+    "let neurodeskKernel=this.kernel;"
     "if(neurodeskKernel&&neurodeskKernel.connectionStatusChanged&&"
     '"connected"!==neurodeskKernel.connectionStatus)'
     "await new Promise(e=>{"
@@ -83,17 +106,13 @@ CONNECTION_WAIT_AFTER = (
     '"connected"===neurodeskKernel.connectionStatus&&('
     "neurodeskKernel.connectionStatusChanged.disconnect(neurodeskOnStatus),"
     "clearTimeout(neurodeskTimer),e())});"
-    "if(neurodeskKernel&&neurodeskKernel.requestKernelInfo){"
-    "let neurodeskReady=!1;"
-    "for(let neurodeskAttempt=0;"
-    "neurodeskAttempt<3&&!neurodeskReady;neurodeskAttempt++)try{"
+    "if(neurodeskKernel&&neurodeskKernel.requestKernelInfo)try{"
     "await new Promise((e,t)=>{"
     "let neurodeskProbeTimer=setTimeout(()=>t(Error("
-    '"Kernel connection did not answer its readiness probe")),1e4);'
+    '"Kernel connection did not answer its readiness probe")),3e3);'
     "neurodeskKernel.requestKernelInfo().then(i=>{"
     "clearTimeout(neurodeskProbeTimer),e(i)},i=>{"
-    "clearTimeout(neurodeskProbeTimer),t(i)})}),neurodeskReady=!0}"
-    "catch(e){}}"
+    "clearTimeout(neurodeskProbeTimer),t(i)})})}catch(e){}}"
     f"/*{CONNECTION_WAIT_MARKER}*/"
     "let e,t;try{"
 )
@@ -174,10 +193,22 @@ def patch_labextension(labextension_dir: Path) -> bool:
         replacements = []
         if CONTROL_TIMEOUT_MARKER not in source_text:
             replacements.append(
-                (CONTROL_TIMEOUT_BEFORE, CONTROL_TIMEOUT_AFTER)
+                (
+                    CONTROL_TIMEOUT_V1_AFTER
+                    if CONTROL_TIMEOUT_V1_MARKER in source_text
+                    else CONTROL_TIMEOUT_BEFORE,
+                    CONTROL_TIMEOUT_AFTER,
+                )
             )
         if CONTROL_RETRY_MARKER not in source_text:
-            replacements.append((CONTROL_RETRY_BEFORE, CONTROL_RETRY_AFTER))
+            replacements.append(
+                (
+                    CONTROL_RETRY_V1_AFTER
+                    if CONTROL_RETRY_V1_MARKER in source_text
+                    else CONTROL_RETRY_BEFORE,
+                    CONTROL_RETRY_AFTER,
+                )
+            )
         if CONNECTION_WAIT_MARKER not in source_text:
             replacements.append(
                 (CONNECTION_WAIT_BEFORE, CONNECTION_WAIT_AFTER)

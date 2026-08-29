@@ -87,13 +87,15 @@ def test_patch_waits_for_the_kernel_and_retries_a_lost_bulk_request(tmp_path):
     assert patcher.MODEL_RETRY_MARKER in patched_text
     assert "Date.now()-o<1e4" in patched_text
     assert patcher.CONTROL_TIMEOUT_MARKER in patched_text
-    assert '"Control comm did not respond in time"),3e4)' in patched_text
+    assert "this.__neurodesktopControlRetry?3e4:1e4" in patched_text
     assert patcher.CONTROL_RETRY_MARKER in patched_text
     assert "try{return await this._loadFromKernel()}" in patched_text
+    assert "neurodeskRetries<2" in patched_text
     assert patcher.CONNECTION_WAIT_MARKER in patched_text
+    assert "if(!this.__neurodesktopControlRetry)" in patched_text
     assert '"connected"!==neurodeskKernel.connectionStatus' in patched_text
     assert "neurodeskKernel.requestKernelInfo()" in patched_text
-    assert "if(!neurodeskReady)throw" not in patched_text
+    assert 'readiness probe")),3e3)' in patched_text
     assert original_bundle.read_text(encoding="utf-8") == original_source
     assert not patcher.patch_labextension(tmp_path)
 
@@ -127,8 +129,8 @@ def test_patch_upgrades_the_existing_wait_workaround(tmp_path):
     original_bundle, _, package_json = write_labextension_fixture(
         tmp_path,
         patcher.MODEL_RETRY_AFTER
-        + patcher.CONTROL_TIMEOUT_AFTER
-        + patcher.CONTROL_RETRY_BEFORE
+        + patcher.CONTROL_TIMEOUT_V1_AFTER
+        + patcher.CONTROL_RETRY_V1_AFTER
         + patcher.CONNECTION_WAIT_BEFORE,
     )
     (tmp_path / "static" / "32.dddddddddddddddddddd.js").write_text(
