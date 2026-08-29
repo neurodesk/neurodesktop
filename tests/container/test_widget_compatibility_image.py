@@ -1175,12 +1175,15 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             {
                 "context": replay_context,
                 "url": (
-                    f"http://127.0.0.1:{server_port}/lab/tree/widget.ipynb"
+                    f"http://127.0.0.1:{server_port}"
+                    "/lab/workspaces/widget-replay/tree/widget.ipynb"
                     f"?token={token}"
                 ),
                 "wait": "complete",
             },
         )
+        replay_path = bidi.evaluate(replay_context, "location.pathname")
+        assert replay_path == "/lab/workspaces/widget-replay/tree/widget.ipynb"
         _wait_for_expression(
             bidi,
             replay_context,
@@ -1213,6 +1216,12 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             if "appendStreamOutput" in error or "insert is not a function" in error
         ]
         assert not stream_output_errors, stream_output_errors
+        plugin_fetch_errors = [
+            error
+            for error in browser_errors
+            if "NetworkError when attempting to fetch resource" in error
+        ]
+        assert not plugin_fetch_errors, plugin_fetch_errors
 
         # Re-execution destroyed nine earlier NiiVue models; without the
         # model-cleanup patch their WebGL contexts stay alive and the

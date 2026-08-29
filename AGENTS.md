@@ -176,9 +176,11 @@
   index in UTF-8 bytes.
   Wait for the status bar to name the selected kernel and report `Idle` before
   clicking Run; the notebook execution indicator can report `idle` before a
-  kernel exists. Keep the disposable browser profile allowing Firefox's
-  software WebGL fallback without forcing Mesa's driver mode, require a WebGL2
-  capability probe before opening JupyterLab, and retry only a fresh Firefox
+  kernel exists. Give the replay client an explicit separate JupyterLab
+  workspace; automatic relocation away from an already-open workspace aborts
+  in-flight plugin asset requests. Keep the disposable browser profile allowing
+  Firefox's software WebGL fallback without forcing Mesa's driver mode, require
+  a WebGL2 capability probe before opening JupyterLab, and retry only a fresh Firefox
   process that fails that startup probe. If every probe fails, omit only the
   NiiVue cells and canvas assertions; the stream, delayed widget, re-execution,
   and second-client replay must still run, and the test must warn with the

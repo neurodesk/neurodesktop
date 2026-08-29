@@ -1,6 +1,7 @@
 """Checkout contracts for the widget image test's Firefox harness."""
 
 import ast
+import inspect
 import json
 
 from testlib import load_source_module
@@ -79,6 +80,16 @@ def test_widget_notebook_keeps_core_replay_coverage_without_webgl():
     assert "volume.nii.gz" in webgl_source
     assert "scene-sync-count:0" in webgl_source
     assert "niivue.observe(record_scene_sync, names='scene')" in webgl_source
+
+
+def test_replay_client_uses_a_distinct_explicit_workspace():
+    module = load_widget_test_module()
+    source = inspect.getsource(
+        module.test_server_side_execution_renders_streams_and_widgets
+    )
+
+    assert "/lab/workspaces/widget-replay/tree/widget.ipynb" in source
+    assert "NetworkError when attempting to fetch resource" in source
 
 
 def test_ipyniivue_idle_probe_records_only_shared_asset_intervals():

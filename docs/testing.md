@@ -165,8 +165,11 @@ server-side notebook output and kernel widget comms travel over independently
 ordered WebSockets. It also starts Jupyter Server and headless Firefox, runs an
 ``HBox`` whose model comm is delayed for three seconds through the installed
 server-side cell executor, re-executes the cell, and opens a second JupyterLab
-client against the populated room. A direct two-client control-comm check also
-requires each widget-state reply to return to the client that requested it.
+client against the populated room. The replay client uses an explicit separate
+workspace so JupyterLab does not relocate it away from the already-open default
+workspace and abort in-flight plugin asset requests. A direct two-client
+control-comm check also requires each widget-state reply to return to the client
+that requested it.
 The browser test requires the bulk control-state reply to survive a five-second
 kernel delay without entering the per-model fallback. It requires exact,
 non-duplicated stream text plus a widget DOM instead of a YDoc output exception,
