@@ -77,9 +77,10 @@ def test_patch_extends_widget_waits_and_closes_renderer_factory_race(tmp_path):
     assert patcher.CONTROL_TIMEOUT_MARKER in patched_text
     assert '"Control comm did not respond in time"),3e4)' in patched_text
     assert patcher.RENDERER_MANAGER_ORDER_MARKER in patched_text
+    assert patcher.RENDERER_OUTPUT_WATCH_MARKER in patched_text
     assert patched_text.index("i.addFactory") < patched_text.index(
         patcher.RENDERER_MANAGER_ORDER_MARKER
-    ) < patched_text.index("for(let i of o)i.manager=s")
+    ) < patched_text.index("outputLengthChanged.connect(neurodeskAttach)")
     assert original_bundle.read_text(encoding="utf-8") == (
         patcher.MODEL_RETRY_BEFORE
         + patcher.CONTROL_TIMEOUT_BEFORE
@@ -153,6 +154,9 @@ def test_patch_republishes_separate_wait_and_renderer_bundles(tmp_path):
     assert patcher.RENDERER_MANAGER_ORDER_MARKER in patched_renderer[0].read_text(
         encoding="utf-8"
     )
+    assert patcher.RENDERER_OUTPUT_WATCH_MARKER in patched_renderer[0].read_text(
+        encoding="utf-8"
+    )
     assert patched_wait[0].name.split(".")[1] in patched_remote
     assert patched_renderer[0].name.split(".")[1] in patched_remote
     assert not patcher.patch_labextension(tmp_path)
@@ -183,6 +187,7 @@ def test_patch_upgrades_the_existing_model_only_workaround(tmp_path):
     assert patcher.MODEL_RETRY_MARKER in patched_text
     assert patcher.CONTROL_TIMEOUT_MARKER in patched_text
     assert patcher.RENDERER_MANAGER_ORDER_MARKER in patched_text
+    assert patcher.RENDERER_OUTPUT_WATCH_MARKER in patched_text
     assert patched_bundles[0].name.split(".")[1] in (
         patched_remote_entry.read_text(encoding="utf-8")
     )
@@ -214,6 +219,45 @@ def test_patch_upgrades_the_existing_wait_workaround(tmp_path):
     assert patcher.MODEL_RETRY_MARKER in patched_text
     assert patcher.CONTROL_TIMEOUT_MARKER in patched_text
     assert patcher.RENDERER_MANAGER_ORDER_MARKER in patched_text
+    assert patcher.RENDERER_OUTPUT_WATCH_MARKER in patched_text
+    assert patched_bundles[0].name.split(".")[1] in (
+        patched_remote_entry.read_text(encoding="utf-8")
+    )
+    assert not patcher.patch_labextension(tmp_path)
+
+
+def test_patch_upgrades_the_factory_first_workaround(tmp_path):
+    patcher = load_patcher_module()
+    original_bundle, _, package_json = write_labextension_fixture(
+        tmp_path,
+        patcher.MODEL_RETRY_AFTER
+        + patcher.CONTROL_TIMEOUT_AFTER
+        + patcher.RENDERER_MANAGER_ORDER_AFTER,
+    )
+    stale_upstream_bundle = (
+        tmp_path / "static" / "32.dddddddddddddddddddd.js"
+    )
+    stale_upstream_bundle.write_text(
+        patcher.RENDERER_MANAGER_ORDER_BEFORE,
+        encoding="utf-8",
+    )
+
+    assert patcher.patch_labextension(tmp_path)
+
+    load_path = json.loads(package_json.read_text(encoding="utf-8"))["jupyterlab"][
+        "_build"
+    ]["load"]
+    patched_remote_entry = tmp_path / load_path
+    patched_bundles = [
+        path
+        for path in (tmp_path / "static").glob("32.*.js")
+        if path not in (original_bundle, stale_upstream_bundle)
+    ]
+    assert len(patched_bundles) == 1
+    patched_text = patched_bundles[0].read_text(encoding="utf-8")
+    assert patcher.RENDERER_MANAGER_ORDER_MARKER in patched_text
+    assert patcher.RENDERER_OUTPUT_WATCH_MARKER in patched_text
+    assert "outputLengthChanged.connect(neurodeskAttach)" in patched_text
     assert patched_bundles[0].name.split(".")[1] in (
         patched_remote_entry.read_text(encoding="utf-8")
     )

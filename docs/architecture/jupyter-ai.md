@@ -96,7 +96,10 @@ Manager setup also replaces the widget renderer factory after walking existing
 renderers. A collaboration output created between those operations keeps the
 factory's manager-less placeholder and never sends a kernel-state request.
 Neurodesktop installs the manager-backed factory first and then attaches the
-manager to existing renderers, closing both sides of that creation window.
+manager to existing renderers. Each existing cell keeps its own renderer
+registry, however, so Neurodesktop also subscribes to output-length changes and
+attaches the manager to newly inserted placeholder renderers. A weak set avoids
+attaching the same renderer twice.
 
 The ipywidgets backend also stores only the most recently opened widget control
 comm. When two JupyterLab clients restore the same kernel concurrently, a state

@@ -589,6 +589,7 @@ def test_widget_manager_waits_for_a_late_model_registration():
     assert "neurodesktop-widget-control-timeout" in bundles
     assert '"Control comm did not respond in time"),3e4)' in bundles
     assert "neurodesktop-widget-manager-factory-first" in bundles
+    assert "neurodesktop-widget-output-watch" in bundles
 
 
 def test_widget_control_state_replies_return_to_requesting_client(monkeypatch):
