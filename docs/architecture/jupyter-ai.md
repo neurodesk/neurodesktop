@@ -239,6 +239,57 @@ rest of the room queue. The anchored patch intentionally fails the image build
 if a future package release changes any backend or frontend seam, forcing the
 workarounds to be reassessed rather than silently carried forward.
 
+### Retiring the anchored workarounds
+
+Nothing above retires itself. Every affected package is pinned exactly
+(`jupyter-server-documents==0.3.3`, `ipyniivue==2.4.4`, `ipywidgets==8.1.9`,
+`jupyterlab_widgets==3.0.17`, `ipykernel==6.31.0`), so an upstream merge
+changes nothing until a pin is bumped. On a bump, each anchored seam lands in
+one of three states, and only two of them are loud:
+
+- **Upstream changed the anchored lines** (merged our fix, or refactored
+  them): the `BEFORE` text no longer matches and the marker is absent, so the
+  patcher raises `anchor did not match exactly once; reassess ...` and the
+  image build fails. This is the signal to *remove* the seam, not to
+  re-anchor it — re-anchor only when the release notes show the bug is still
+  open.
+- **Upstream left the lines alone**: the patch applies as before; keep it.
+- **Upstream fixed the bug elsewhere** without touching the anchored lines:
+  the patch applies on top of the fix, silently. Read the release notes for
+  every bump and rely on the behavioral image tests (replayed stream text,
+  queue guard, nudge, widget rendering), which assert outcomes rather than
+  markers.
+
+Frontend seams match minified identifiers (`e.model.trusted=!0`, ipyniivue's
+`vA`/`BC`/`S0`, the widget-manager retry loop), so any upstream rebuild
+renames them and they fail loudly on *every* version bump, merged fix or not.
+
+Signals that a retirement is due: the weekly `package-update-radar` tracking
+issue (it surveys every `pip` pin and `ARG *_VERSION`), and GitHub
+notifications on the upstream issues and PRs Neurodesk opened for these
+bugs. Retirement conditions per seam:
+
+| Seam (patcher) | Retires when upstream ships | Notes |
+| --- | --- | --- |
+| Issue-271 client lookup + queue guard (`patch_jupyter_server_documents.py`) | jupyter-server-documents fix for [#271](https://github.com/jupyter-ai-contrib/jupyter-server-documents/issues/271) | composes with the #305 handshake changes |
+| Late SyncStep2, per-client futures, `handshake_timeout`, frontend divergent repair (same patcher) | the [#305](https://github.com/jupyter-ai-contrib/jupyter-server-documents/issues/305) PRs (albertmichaelj's `darden/fixes` design) | frontend half is minified-anchored |
+| CRDT stream outputs + `neurodesktop_stream_output.py` (same patcher) | fix for [#306](https://github.com/jupyter-ai-contrib/jupyter-server-documents/issues/306) | silent-case risk: check release notes for any other output-path change |
+| Server-execution cell trust, frontend (same patcher) | fix for [#307](https://github.com/jupyter-ai-contrib/jupyter-server-documents/issues/307) | |
+| Kernel WebSocket nudge + `neurodesktop_kernel_nudge.py` (same patcher) | the nudge issue/PR on jupyter-server-documents | once merged, re-evaluate the frontend probe/reconnect/retry bounds for removal — they masked this transport hole |
+| Widget late-model retry, 10 s (`patch_jupyterlab_widgets.py`) | ipywidgets event-driven `get_model` ([#4026](https://github.com/jupyter-widgets/ipywidgets/issues/4026)) | a `get_model_timeout` setting replaces the patch only if >2 s is still needed |
+| ipyniivue factory, cleanup, event-driven scene sync (`patch_ipyniivue.py`) | ipyniivue [#298](https://github.com/niivue/ipyniivue/issues/298) and [#299](https://github.com/niivue/ipyniivue/issues/299) | the shared-bundle relocation is Neurodesk's optimization and stays; only the in-bundle anchors retire |
+| `ipykernel` 6.x pin (Dockerfile) | ipykernel 7 comm subshells handle delayed server-executed widgets | unrelated to the PRs; watch ipykernel release notes |
+
+To remove a seam: bump the pin in the `Dockerfile` and in the version
+assertions of `tests/container/test_widget_compatibility_image.py` and
+`tests/unit/test_jupyter_server_documents_patch.py`; build; delete the
+failing seam's `BEFORE`/`AFTER` constants, marker, partial-state check, and
+write, together with its unit-test fixture and any module it installs (and
+that module's Dockerfile bind mount and tests); keep the behavioral image
+tests and drop only marker-presence assertions; update the AGENTS.md bullet
+and this page. When a patcher has no seams left, delete the script, its
+Dockerfile `RUN` layer, and its unit-test file.
+
 `jupyter-ai-acp-client` 0.2.1 logs every streamed message chunk at INFO — two
 lines per chunk, where a chunk is often a few characters — plus one line per
 tool-call start and per once-a-second progress tick, so a single persona reply

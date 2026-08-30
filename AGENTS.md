@@ -205,6 +205,12 @@
   only busy kernels, and continuing after the bounded timeout instead of
   failing the connection. The nudge logic stays in
   `config/jupyter/neurodesktop_kernel_nudge.py` so it remains unit-testable.
+  When bumping any of these pins, read the retirement table in
+  [`docs/architecture/jupyter-ai.md`](docs/architecture/jupyter-ai.md#retiring-the-anchored-workarounds)
+  first: a failing anchor after a bump means remove that seam, not
+  re-anchor it, unless the release notes show the bug is still open; a
+  seam that still applies after upstream fixed the bug elsewhere is the
+  silent case, so check the release notes on every bump.
   Keep `ipykernel` on the stable 6.x line until its experimental comm subshells
   can create a per-target subshell for delayed server-executed widgets without
   canceling the control future.

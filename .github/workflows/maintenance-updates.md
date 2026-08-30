@@ -67,7 +67,13 @@ update. Workflow YAML and generated workflow locks are outside this automated
 workflow's write scope.
 
 Verify the candidate against the upstream project's official release notes and
-the repository's runtime contract. Prefer security fixes and patch/minor
+the repository's runtime contract. For `jupyter-server-documents`, `ipyniivue`,
+`ipywidgets`, `jupyterlab_widgets`, or `ipykernel`, first read the retirement
+table in `docs/architecture/jupyter-ai.md` ("Retiring the anchored
+workarounds"): a build-time patch anchor that fails after the bump means the
+seam must be removed rather than re-anchored, unless the release notes show
+the bug is still open, and a seam that still applies after upstream fixed the
+bug elsewhere must be removed too. Prefer security fixes and patch/minor
 updates with a clear compatibility story. Never replace a pin with a floating
 tag, edit generated lock data by hand, or combine unrelated upgrades. Generate
 package lock changes with the owning package manager.
