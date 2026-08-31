@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-08-28"
+last-reviewed: "2026-08-31"
 ---
 
 # Testing
@@ -172,6 +172,24 @@ workspace's plugins to activate before opening the notebook through JupyterLab's
 document command, keeping document restoration out of application bootstrap. A
 direct two-client control-comm check also requires each widget-state reply to
 return to the client that requested it.
+After execution, re-execution, and replay, the browser walks every live
+``WidgetRenderer`` and requires its manager promise to resolve. It also creates
+a real manager-less renderer, exposes it through an output area's child walk,
+emits ``outputLengthChanged``, and requires the defensive output watch to attach
+the active manager. This is the behavioral guard for that patch; bundle-marker
+assertions only confirm that the intended asset was installed.
+
+The missing-model test removes a live model from the frontend registry and
+replaces ``_loadFromKernel()`` with a deterministic stub that restores the
+retained model. It proves concurrent-call deduplication, the post-request model
+check, cleanup, and the short negative cache. It does not prove that the real
+control comm can reconstruct a deliberately dropped ``comm_open``. Triggering
+that transport loss deterministically would require intercepting the kernel
+WebSocket before JupyterLab receives the frame. The full browser workflow still
+drives the real bulk restore during second-client replay. Missing-model recovery
+also requires ``restoredStatus``; it will not start a competing restore while
+the initial restore remains pending.
+
 The browser test requires the bulk control-state reply to survive a five-second
 scheduled kernel delay without entering the per-model fallback. The delay does
 not block the kernel event loop, so concurrent manager requests cannot serialize

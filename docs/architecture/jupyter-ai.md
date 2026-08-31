@@ -4,7 +4,7 @@ description: The ACP-native Jupyter AI chat surface, its Claude/Codex/OpenCode
   personas, workspace seeding, and collaboration-stack workarounds
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-29"
+last-reviewed: "2026-08-31"
 ---
 
 # Jupyter AI
@@ -85,7 +85,16 @@ subshells. Neurodesktop also pins `ipywidgets` 8.1.9 and
 registration. Its upstream two-second bound is still too short for complex
 layouts such as a ``VBox`` containing delayed ``HBox`` models. Neurodesktop
 extends that bound to ten seconds and publishes the changed widget-manager
-chunk and remote entry under new content-derived names.
+chunk and remote entry under new content-derived names. Waiting cannot recover
+a ``comm_open`` that the kernel WebSocket dropped. If the manager has completed
+its initial restore and the model is still absent after ten seconds, it makes
+one deduplicated bulk-state request and checks again before reporting
+``model not found``. Concurrent missing outputs share that request. The
+manager records completion for thirty seconds, so several absent saved models
+cannot each start another full bulk request after their ten-second waits.
+Recovery runs only after the initial restore has completed. Starting another
+restore while that first restore is stuck would create competing control comms;
+the kernel nudge and bounded control-state retries handle that failure instead.
 
 The same widget manager abandons a bulk kernel-state request after four
 seconds. Its per-model fallback can overlap the late bulk response and leave
@@ -109,6 +118,14 @@ delivers comm traffic. Each reconnect is bounded at ten seconds; restoration
 continues into its bounded control-state request if reconnecting cannot finish.
 The retry bypasses the one-time readiness probe after reconnecting so probe
 timeouts cannot consume the retry's rendering window.
+
+JupyterLab 4.6 assigns the manager to existing renderers and replaces the
+panel's shared renderer factory in adjacent synchronous operations. The
+existing-renderer iterator is lazy, so it also sees renderers created while the
+manager owner was resolving. Neurodesktop does not reorder those operations.
+It defensively watches code-cell output-length changes and attaches the manager
+to any manager-less ``WidgetRenderer`` inserted outside the normal factory
+path. A weak set prevents duplicate attachment.
 
 The root of those settling losses is server-side. `jupyter-server-documents`
 replaces jupyter_server's kernel WebSocket connection with a per-connection
@@ -153,13 +170,20 @@ real ``HBox`` comm for three seconds, and creates nine NiiVue models, one
 loading a generated NIfTI volume so real image data crosses the widget comm.
 The stream and all widgets must render without a YDoc output exception, the
 nine models must produce exactly one fetch of the shared ipyniivue bundle, and
-re-execution must not exhaust WebGL contexts. The browser interacts with every
-canvas, observes the scene updates, then requires both model traffic and
-shared-asset interval activity to remain stopped while idle. It re-executes the
-cell and restores the populated room in a second client. Companion image tests
-drive the patched ``OutputProcessor`` directly over backspace and interleaved
-stdout/stderr fragments, and prove one rejected frame cannot stop a room's
-message queue. Jupyter
+re-execution must not exhaust WebGL contexts. The browser removes one live
+model from the frontend registry, supplies the retained model through the
+manager's bulk-recovery seam, and requires concurrent missing-model lookups to
+share one recovery. A sequential absent model must reuse the thirty-second
+negative cache. The browser also walks every widget renderer after execution,
+re-execution, and replay and requires its manager promise to resolve. It then
+inserts a real manager-less renderer into an output, emits the output-length
+signal, and requires the defensive watch to repair it. It also interacts
+with every canvas, observes the scene updates, then requires both model traffic
+and shared-asset interval activity to remain stopped while idle. It re-executes
+the cell and restores the populated room in a second client. Companion image
+tests drive the patched ``OutputProcessor`` directly over backspace and
+interleaved stdout/stderr fragments, and prove one rejected frame cannot stop a
+room's message queue. Jupyter
 AI 3.2 plans to make RTC optional, but Neurodesktop will not remove the stable
 3.1 dependency by adopting an alpha release.
 
@@ -276,7 +300,8 @@ bugs. Retirement conditions per seam:
 | CRDT stream outputs + `neurodesktop_stream_output.py` (same patcher) | fix for [#306](https://github.com/jupyter-ai-contrib/jupyter-server-documents/issues/306) | silent-case risk: check release notes for any other output-path change |
 | Server-execution cell trust, frontend (same patcher) | fix for [#307](https://github.com/jupyter-ai-contrib/jupyter-server-documents/issues/307) | |
 | Kernel WebSocket nudge + `neurodesktop_kernel_nudge.py` (same patcher) | the nudge issue/PR on jupyter-server-documents | once merged, re-evaluate the frontend probe/reconnect/retry bounds for removal — they masked this transport hole |
-| Widget late-model retry, 10 s (`patch_jupyterlab_widgets.py`) | ipywidgets event-driven `get_model` ([#4026](https://github.com/jupyter-widgets/ipywidgets/issues/4026)) | a `get_model_timeout` setting replaces the patch only if >2 s is still needed |
+| Widget late-model retry and missing-model bulk recovery (`patch_jupyterlab_widgets.py`) | ipywidgets event-driven `get_model` ([#4026](https://github.com/jupyter-widgets/ipywidgets/issues/4026)) plus recovery after a lost `comm_open` | a `get_model_timeout` setting replaces only the bounded-wait half |
+| Widget renderer output watch (same patcher) | an upstream insertion API guarantees that extensions and collaboration cannot bypass the panel's manager-backed factory | the browser test injects a manager-less renderer and requires the watch to repair it |
 | ipyniivue factory, cleanup, event-driven scene sync (`patch_ipyniivue.py`) | ipyniivue [#298](https://github.com/niivue/ipyniivue/issues/298) and [#299](https://github.com/niivue/ipyniivue/issues/299) | the shared-bundle relocation is Neurodesk's optimization and stays; only the in-bundle anchors retire |
 | `ipykernel` 6.x pin (Dockerfile) | ipykernel 7 comm subshells handle delayed server-executed widgets | unrelated to the PRs; watch ipykernel release notes |
 

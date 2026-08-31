@@ -101,6 +101,9 @@ WIDGET_RENDERER_DIAGNOSTICS_EXPRESSION = r"""(async () => {
                             manager?.__neurodesktopControlRetryCount ?? null,
                         kernelProbeStatus:
                             manager?.__neurodesktopKernelProbeStatus ?? null,
+                        missingModelRecoveryInProgress: Boolean(
+                            manager?.__neurodesktopMissingModelRecovery
+                        ),
                         modelIds: manager?._modelsSync
                             ? [...manager._modelsSync.keys()]
                             : [],
@@ -116,6 +119,98 @@ WIDGET_RENDERER_DIAGNOSTICS_EXPRESSION = r"""(async () => {
         }
     }
     return JSON.stringify({panelCount: panels.length, renderers});
+})()"""
+
+WIDGET_RENDERER_MANAGER_EXPRESSION = r"""(async () => {
+    const panels = [...window.jupyterapp.shell.widgets()].filter(
+        panel => panel.context?.path === 'widget.ipynb'
+    );
+    const renderers = [];
+    for (const panel of panels) {
+        for (const [cellIndex, cell] of panel.content.widgets.entries()) {
+            for (const [outputIndex, outputItem] of
+                    (cell.outputArea?.widgets || []).entries()) {
+                const children = typeof outputItem.children === 'function'
+                    ? [...outputItem.children()]
+                    : [outputItem];
+                for (const renderer of children) {
+                    // WidgetRenderer owns this promise delegate even when its
+                    // manager-backed factory has not resolved it.
+                    if (!('_manager' in renderer)) {
+                        continue;
+                    }
+                    let manager = null;
+                    let managerError = null;
+                    try {
+                        manager = renderer._manager?.promise
+                            ? await Promise.race([
+                                renderer._manager.promise,
+                                new Promise(resolve => setTimeout(
+                                    () => resolve(null), 1000
+                                )),
+                            ])
+                            : null;
+                    } catch (error) {
+                        managerError = String(error);
+                    }
+                    renderers.push({
+                        cellIndex,
+                        outputIndex,
+                        rendererClass: renderer.constructor?.name ?? null,
+                        managerResolved: Boolean(manager),
+                        managerError,
+                    });
+                }
+            }
+        }
+    }
+    return JSON.stringify({panelCount: panels.length, renderers});
+})()"""
+
+WIDGET_RENDERER_OUTPUT_WATCH_EXPRESSION = r"""(async () => {
+    const panel = [...window.jupyterapp.shell.widgets()].find(
+        widget => widget.context?.path === 'widget.ipynb'
+    );
+    const cell = panel.content.widgets.find(
+        candidate => candidate.outputArea?.widgets?.length
+    );
+    const outputArea = cell.outputArea;
+    let outputItem = null;
+    let renderer = null;
+    for (const candidate of outputArea.widgets) {
+        const children = typeof candidate.children === 'function'
+            ? [...candidate.children()]
+            : [candidate];
+        const widgetRenderer = children.find(child => '_manager' in child);
+        if (widgetRenderer) {
+            outputItem = candidate;
+            renderer = widgetRenderer;
+            break;
+        }
+    }
+    const manager = await renderer._manager.promise;
+    const managerless = new renderer.constructor({
+        mimeType: 'application/vnd.jupyter.widget-view+json',
+    });
+    const originalChildren = outputItem.children;
+    const originalRenderers = [...outputItem.children()];
+    outputItem.children = function* () {
+        yield* originalRenderers;
+        yield managerless;
+    };
+    try {
+        outputArea.outputLengthChanged.emit(outputArea.widgets.length);
+        const repairedManager = await Promise.race([
+            managerless._manager.promise,
+            new Promise(resolve => setTimeout(() => resolve(null), 1000)),
+        ]);
+        return JSON.stringify({
+            repaired: repairedManager === manager,
+        });
+    } finally {
+        outputItem.children = originalChildren;
+        managerless.dispose();
+    }
 })()"""
 
 IPYNIIVUE_INTERVAL_PROBE_PRELOAD = """() => {
@@ -489,6 +584,32 @@ def _wait_for_expression(
     )
 
 
+def _assert_widget_renderers_have_managers(
+    bidi: _BidiSession,
+    context: str,
+    *,
+    minimum: int,
+) -> None:
+    result = json.loads(
+        bidi.evaluate(context, WIDGET_RENDERER_MANAGER_EXPRESSION)
+    )
+    assert result["panelCount"] == 1, result
+    assert len(result["renderers"]) >= minimum, result
+    assert all(
+        renderer["managerResolved"] for renderer in result["renderers"]
+    ), result
+
+
+def _assert_output_watch_repairs_managerless_renderer(
+    bidi: _BidiSession,
+    context: str,
+) -> None:
+    result = json.loads(
+        bidi.evaluate(context, WIDGET_RENDERER_OUTPUT_WATCH_EXPRESSION)
+    )
+    assert result == {"repaired": True}
+
+
 def _widget_regression_notebook(*, include_niivue: bool):
     niivue_imports = ""
     niivue_setup = ""
@@ -660,7 +781,11 @@ def test_widget_manager_waits_for_a_late_model_registration():
         "view reaches the browser before its model"
     )
     assert "neurodesktop-widget-model-retry" in bundles
+    assert "neurodesktop-widget-missing-model-recovery" in bundles
     assert "Date.now()-o<1e4" in bundles
+    assert "__neurodesktopMissingModelRecovery" in bundles
+    assert "__neurodesktopMissingModelRecoveryAt" in bundles
+    assert "Date.now()-neurodeskRecoveredAt<30e3" in bundles
     assert "neurodesktop-widget-control-timeout-staged-retry" in bundles
     assert "this.__neurodesktopControlRetry?3e4:1e4" in bundles
     assert "neurodesktop-widget-control-retry-reconnect" in bundles
@@ -672,6 +797,7 @@ def test_widget_manager_waits_for_a_late_model_registration():
     assert '"connected"!==neurodeskKernel.connectionStatus' in bundles
     assert "neurodeskKernel.requestKernelInfo()" in bundles
     assert "neurodeskKernel.reconnect().then(()=>!0)" in bundles
+    assert "neurodesktop-widget-output-watch" in bundles
 
 
 def test_widget_control_state_replies_return_to_requesting_client(monkeypatch):
@@ -1160,6 +1286,139 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             "widgetBoxes": expected_widget_boxes,
             "niivueCanvases": expected_niivue_canvases,
         }
+        _assert_widget_renderers_have_managers(
+            bidi,
+            context,
+            minimum=expected_widget_boxes,
+        )
+        _assert_output_watch_repairs_managerless_renderer(bidi, context)
+
+        # Reproduce a comm_open that vanished before the browser received it.
+        # Keep the model that represents the kernel-owned copy, remove only
+        # the frontend registration, and inject it through the manager's bulk
+        # recovery seam. A bounded wait alone makes the loss permanent.
+        missing_model_recovery = json.loads(
+            bidi.evaluate(
+                context,
+                "(async () => {"
+                "const panel = [...window.jupyterapp.shell.widgets()].find("
+                "widget => widget.context?.path === 'widget.ipynb');"
+                "let manager = null;"
+                "for (const cell of panel.content.widgets) {"
+                "for (const outputItem of cell.outputArea?.widgets || []) {"
+                "const children = typeof outputItem.children === 'function'"
+                " ? [...outputItem.children()] : [outputItem];"
+                "for (const renderer of children) {"
+                "if (renderer._manager?.promise) {"
+                "manager = await renderer._manager.promise; break;"
+                "}"
+                "}"
+                "if (manager) break;"
+                "}"
+                "if (manager) break;"
+                "}"
+                "const modelId = 'delayed-hbox-model-1';"
+                "const original = await manager.get_model(modelId);"
+                "const originalLoad = manager._loadFromKernel.bind(manager);"
+                "const originalRestoredStatus = manager._restoredStatus;"
+                "const originalRecoveryAt = "
+                "manager.__neurodesktopMissingModelRecoveryAt;"
+                "let loadCalls = 0;"
+                "let recoveryCalls = 0;"
+                "const recoveryCallTimes = [];"
+                "manager._restoredStatus = true;"
+                "manager.__neurodesktopMissingModelRecoveryAt = 0;"
+                "manager._loadFromKernel = async () => {"
+                "loadCalls += 1;"
+                "await new Promise(resolve => setTimeout(resolve, 100));"
+                "if (manager.__neurodesktopMissingModelRecovery) {"
+                "recoveryCalls += 1;"
+                "recoveryCallTimes.push(Date.now());"
+                "manager.register_model(modelId, Promise.resolve(original));"
+                "}"
+                "};"
+                "delete manager._models[modelId];"
+                "manager._modelsSync?.delete(modelId);"
+                "const started = Date.now();"
+                "try {"
+                "const [recovered, recoveredAgain] = await Promise.all(["
+                "manager.get_model(modelId), manager.get_model(modelId)"
+                "]);"
+                "const elapsedMs = Date.now() - started;"
+                "const recoveryCompletedAt = "
+                "manager.__neurodesktopMissingModelRecoveryAt;"
+                "const sequentialStarted = Date.now();"
+                "let sequentialError = null;"
+                "try {"
+                "await manager.get_model('absent-sequential-model');"
+                "} catch (error) {"
+                "sequentialError = String(error);"
+                "}"
+                "return JSON.stringify({"
+                "originalId: original.model_id,"
+                "recoveredId: recovered.model_id,"
+                "recoveredAgainId: recoveredAgain.model_id,"
+                "hasModel: manager.has_model(modelId),"
+                "recoveryCleared:"
+                " manager.__neurodesktopMissingModelRecovery == null,"
+                "loadCalls,"
+                "recoveryCalls,"
+                "recoveryCallTimes,"
+                "recoveryCompletedAt,"
+                "recoveryAgeMs: Date.now() - recoveryCompletedAt,"
+                "elapsedMs,"
+                "sequentialElapsedMs: Date.now() - sequentialStarted,"
+                "sequentialError,"
+                "error: null"
+                "});"
+                "} catch (error) {"
+                "return JSON.stringify({"
+                "error: String(error),"
+                "restoredStatus: manager.restoredStatus,"
+                "hasModel: manager.has_model(modelId),"
+                "modelIds: Object.keys(manager._models),"
+                "kernelStatus: manager.kernel?.status,"
+                "kernelConnectionStatus: manager.kernel?.connectionStatus,"
+                "kernelProbeStatus:"
+                " manager.__neurodesktopKernelProbeStatus ?? null,"
+                "controlRetryCount:"
+                " manager.__neurodesktopControlRetryCount ?? null,"
+                "recoveryInProgress: Boolean("
+                "manager.__neurodesktopMissingModelRecovery)"
+                "});"
+                "} finally {"
+                "manager._loadFromKernel = originalLoad;"
+                "manager._restoredStatus = originalRestoredStatus;"
+                "if (originalRecoveryAt === undefined) {"
+                "delete manager.__neurodesktopMissingModelRecoveryAt;"
+                "} else {"
+                "manager.__neurodesktopMissingModelRecoveryAt = "
+                "originalRecoveryAt;"
+                "}"
+                "}"
+                "})()",
+            )
+        )
+        assert missing_model_recovery["error"] is None, missing_model_recovery
+        assert missing_model_recovery["originalId"] == "delayed-hbox-model-1"
+        assert missing_model_recovery["recoveredId"] == "delayed-hbox-model-1"
+        assert missing_model_recovery["recoveredAgainId"] == "delayed-hbox-model-1"
+        assert missing_model_recovery["hasModel"] is True
+        assert missing_model_recovery["recoveryCleared"] is True
+        assert missing_model_recovery["recoveryCalls"] == 1, (
+            missing_model_recovery["recoveryCallTimes"],
+            missing_model_recovery["recoveryCompletedAt"],
+            missing_model_recovery["recoveryAgeMs"],
+            missing_model_recovery["elapsedMs"],
+            missing_model_recovery["sequentialElapsedMs"],
+        )
+        assert missing_model_recovery["recoveryCompletedAt"] > 0
+        assert 0 <= missing_model_recovery["recoveryAgeMs"] < 30_000
+        assert missing_model_recovery["elapsedMs"] < 20_000
+        assert "widget model not found" in (
+            missing_model_recovery["sequentialError"]
+        )
+        assert missing_model_recovery["sequentialElapsedMs"] < 20_000
 
         # Nine models must share one fetched bundle. Per-model delivery is
         # the 5 MB-per-widget regression the ipyniivue workaround removes.
@@ -1268,6 +1527,11 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             )
         )
         assert stream_outputs == [expected_stream]
+        _assert_widget_renderers_have_managers(
+            bidi,
+            context,
+            minimum=expected_widget_boxes,
+        )
 
         # A second JupyterLab client replays the populated notebook room. The
         # notebook drops the first bulk request, delays the retry beyond the
@@ -1337,6 +1601,11 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             )
         )
         assert replay_stream_outputs == [expected_stream]
+        _assert_widget_renderers_have_managers(
+            bidi,
+            replay_context,
+            minimum=expected_widget_boxes,
+        )
         browser_errors = [
             event["params"]["text"]
             for event in bidi.events

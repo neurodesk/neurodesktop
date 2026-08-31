@@ -219,6 +219,15 @@
   bound. The upstream two- and four-second waits are too short for complex
   output over the independent WebSockets, and the per-model fallback can race
   a late bulk response. Make at most two bulk retries before that fallback.
+  When a restored manager still lacks a model after the late-model wait, make
+  one deduplicated live bulk-state request and check again; polling cannot
+  recover a `comm_open` that the kernel WebSocket dropped. Keep a thirty-second
+  completion cache so sequential absent models do not repeat that request, and
+  do not start it until initial restoration has completed. Preserve upstream's
+  renderer setup order and keep watching code-cell outputs for manager-less
+  placeholders. The image test must walk live widget renderers and inject a
+  manager-less renderer through the output watch; asset markers alone do not
+  protect this behavior.
   Wait for a second client's kernel connection to report
   `connected` before opening the control comm; a request sent while that
   connection settles can be lost, and the upstream connected-event restore is
