@@ -45,6 +45,15 @@ configuration. The optional Jupyter AI magic and Jupyternaut extras are not
 installed because their LiteLLM/prerelease constraints conflict with the
 validated Neurodesktop stack.
 
+Notebook Intelligence 5.3.1 imports the MCP Python SDK's v1
+``mcp.server.fastmcp`` module. MCP 2 removed that module without an upper bound
+in Notebook Intelligence's package metadata, so an unconstrained image can
+pass ``pip check`` while the server extension fails to import. Neurodesktop
+pins ``mcp>=1.28.1,<2`` until Notebook Intelligence migrates to MCP 2. The
+container test imports the v1 API and Notebook Intelligence itself; the exit
+status of ``jupyter server extension list`` alone is insufficient because that
+command still returns success when one extension fails validation.
+
 ## Chat workspace seeding
 
 Jupyter AI creates a chat as a ``.chat`` file and passes the file's parent
@@ -304,6 +313,7 @@ bugs. Retirement conditions per seam:
 | Widget renderer output watch (same patcher) | an upstream insertion API guarantees that extensions and collaboration cannot bypass the panel's manager-backed factory | the browser test injects a manager-less renderer and requires the watch to repair it |
 | ipyniivue factory, cleanup, event-driven scene sync (`patch_ipyniivue.py`) | ipyniivue [#298](https://github.com/niivue/ipyniivue/issues/298) and [#299](https://github.com/niivue/ipyniivue/issues/299) | the shared-bundle relocation is Neurodesk's optimization and stays; only the in-bundle anchors retire |
 | `ipykernel` 6.x pin (Dockerfile) | ipykernel 7 comm subshells handle delayed server-executed widgets | unrelated to the PRs; watch ipykernel release notes |
+| MCP 1.x pin (Dockerfile) | Notebook Intelligence imports the MCP 2 API without `mcp.server.fastmcp` | keep `fastmcp` independently on the version required by `jupyter-server-mcp` |
 
 To remove a seam: bump the pin in the `Dockerfile` and in the version
 assertions of `tests/container/test_widget_compatibility_image.py` and

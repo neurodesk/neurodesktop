@@ -182,9 +182,21 @@ def test_jupyter_server_mcp_banner_respects_fastmcp_setting():
 
 
 def test_jupyter_ai_server_and_frontend_extensions_are_compatible():
+    from packaging.version import Version
+
+    assert Version(importlib.metadata.version("mcp")) < Version("2")
+    assert importlib.metadata.version("notebook-intelligence") == "5.3.1"
+    from mcp.server.fastmcp import FastMCP
+
+    import notebook_intelligence
+
+    assert FastMCP is not None
+    assert notebook_intelligence is not None
+
     code, server_output = run_cmd("jupyter server extension list", timeout=60)
     assert code == 0, server_output
     for extension in (
+        "notebook_intelligence",
         "jupyter_ai_acp_client",
         "jupyter_ai_persona_manager",
         "jupyter_ai_router",
@@ -193,6 +205,7 @@ def test_jupyter_ai_server_and_frontend_extensions_are_compatible():
         "jupyterlab_chat",
     ):
         assert extension in server_output
+    assert "No module named 'mcp.server.fastmcp'" not in server_output
 
     code, lab_output = run_cmd("jupyter labextension list --verbose", timeout=60)
     assert code == 0, lab_output

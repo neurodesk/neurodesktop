@@ -587,6 +587,9 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     # The published bundle targets JupyterLab 4.2. A source rebuild below
     # installs and patches a matching JupyterLab 4.6 labextension bundle.
     notebook_intelligence==5.3.1 \
+    # Notebook Intelligence 5.3.1 imports mcp.server.fastmcp, which MCP 2
+    # removed. Keep the v1 API until Notebook Intelligence migrates.
+    "mcp>=1.28.1,<2" \
     # Jupyter AI's ACP-native chat surface. Pin the direct extension packages
     # because their independent pre-1.0 releases otherwise drift underneath
     # the stable jupyter_ai metapackage.

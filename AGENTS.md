@@ -93,7 +93,8 @@
   stays Python's call — two or more candidates send the directory rather
   than a guess — and run evidence appears without touching the spec, so the
   viewer needs its `Refresh` to see a job that finished.
-- When changing Notebook Intelligence, MyST/RISE pins or frontend rebuilds, or
+- When changing Notebook Intelligence, its MCP SDK pin, MyST/RISE pins or
+  frontend rebuilds, or
   the standalone RISE page-config patch, run `pytest
   tests/unit/test_nbi_settings_patch.py
   tests/unit/test_myst_build_workaround.py
@@ -101,6 +102,10 @@
   /opt/tests/test_nbi_labextension_patch.py
   /opt/tests/test_rise_slides_image.py` in the built image, and verify both
   extensions are compatible in `jupyter labextension list --verbose`. Keep
+  MCP on the 1.x API until Notebook Intelligence stops importing
+  `mcp.server.fastmcp`; `jupyter server extension list` exits successfully
+  even when an individual extension fails validation, so require Notebook
+  Intelligence itself to import. Keep
   the standalone app confined to `jupyterlab-rise` and the MyST bundle built
   against it; full JupyterLab extensions can require services RISE does not
   provide or disable the notebook cell executor it needs.

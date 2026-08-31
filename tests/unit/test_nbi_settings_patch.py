@@ -262,6 +262,7 @@ def test_dockerfile_rebuilds_the_nbi_531_frontend():
     dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
 
     assert "notebook_intelligence==5.3.1" in dockerfile
+    assert '"mcp>=1.28.1,<2"' in dockerfile
     assert 'ARG NBI_JUPYTERLAB_BUILDER_VERSION="4.5.10"' in dockerfile
     assert 'branch "v${NBI_VERSION}"' in dockerfile
     assert "source=config/jupyter/notebook-intelligence-5.3.1.yarn.lock" in dockerfile

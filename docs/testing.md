@@ -155,6 +155,11 @@ jupyter server extension list
 jupyter labextension list --verbose
 ```
 
+The Jupyter AI image test also imports Notebook Intelligence and the MCP v1
+``mcp.server.fastmcp`` API. ``jupyter server extension list`` returns success
+even when an individual extension reports an import error, so its process exit
+status is not a sufficient compatibility assertion by itself.
+
 The workspace test covers the checkout-safe hook behavior: only ``.chat``
 saves seed ``AGENTS.md``, project-authored guidance is never overwritten, and
 seed failures do not block chat creation. The image test drives a real
