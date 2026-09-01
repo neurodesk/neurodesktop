@@ -78,6 +78,8 @@ def test_patch_waits_for_the_kernel_and_retries_a_lost_bulk_request(tmp_path):
         renderer_source=(
             patcher.RENDERER_SETUP_BEFORE
             + patcher.RENDERER_RECOVERY_RERENDER_BEFORE
+            + patcher.RENDERER_RERENDER_SINGLE_FLIGHT_BEFORE
+            + patcher.MODEL_REGISTRATION_RERENDER_BEFORE
         ),
     )
 
@@ -94,11 +96,13 @@ def test_patch_waits_for_the_kernel_and_retries_a_lost_bulk_request(tmp_path):
     )
     assert patcher.MODEL_RETRY_MARKER in patched_text
     assert patcher.MODEL_RECOVERY_MARKER in patched_text
+    assert patcher.MODEL_RECOVERY_LIFECYCLE_MARKER in patched_text
     assert "Date.now()-o<1e4" in patched_text
     assert "__neurodesktopMissingModelRecovery" in patched_text
     assert "__neurodesktopMissingModelRecoveryAt" in patched_text
     assert "Date.now()-neurodeskRecoveredAt<30e3" in patched_text
     assert "await neurodeskRecovery" in patched_text
+    assert "this.restoreWidgets(this.context&&this.context.model" in patched_text
     assert patcher.CONTROL_TIMEOUT_MARKER in patched_text
     assert "this.__neurodesktopControlRetry?3e4:1e4" in patched_text
     assert patcher.CONTROL_RETRY_MARKER in patched_text
@@ -115,8 +119,13 @@ def test_patch_waits_for_the_kernel_and_retries_a_lost_bulk_request(tmp_path):
     renderer_text, _ = active_bundle_text(tmp_path, package_json, 160)
     assert patcher.RENDERER_OUTPUT_WATCH_MARKER in renderer_text
     assert patcher.RENDERER_RECOVERY_RERENDER_MARKER in renderer_text
+    assert patcher.RENDERER_RERENDER_SINGLE_FLIGHT_MARKER in renderer_text
+    assert patcher.MODEL_REGISTRATION_RERENDER_MARKER in renderer_text
     assert renderer_text.index("this._rerenderMimeModel=e") < renderer_text.index(
         'this.node.textContent="Error displaying widget: model not found"'
+    )
+    assert renderer_text.index("this._rerenderMimeModel=null") < (
+        renderer_text.index("this.renderModel(neurodeskMimeModel)")
     )
     assert patcher.LEGACY_RENDERER_MANAGER_ORDER_MARKER not in renderer_text
     assert renderer_text.index("for(let i of o)i.manager=s") < (
@@ -137,6 +146,8 @@ def test_patch_upgrades_the_existing_missing_model_recovery(tmp_path):
         renderer_source=(
             patcher.RENDERER_SETUP_BEFORE
             + patcher.RENDERER_RECOVERY_RERENDER_BEFORE
+            + patcher.RENDERER_RERENDER_SINGLE_FLIGHT_BEFORE
+            + patcher.MODEL_REGISTRATION_RERENDER_BEFORE
         ),
     )
 
@@ -150,9 +161,38 @@ def test_patch_upgrades_the_existing_missing_model_recovery(tmp_path):
     assert patcher.MODEL_RETRY_MARKER in patched_text
     assert patcher.MODEL_RECOVERY_MARKER in patched_text
     assert patcher.MODEL_RECOVERY_COOLDOWN_MARKER in patched_text
+    assert patcher.MODEL_RECOVERY_LIFECYCLE_MARKER in patched_text
     assert patcher.CONTROL_TIMEOUT_MARKER in patched_text
     assert patcher.CONTROL_RETRY_MARKER in patched_text
     assert patcher.CONNECTION_WAIT_MARKER in patched_text
+    assert not patcher.patch_labextension(tmp_path)
+
+
+def test_patch_upgrades_recovery_that_bypasses_restore_lifecycle(tmp_path):
+    patcher = load_patcher_module()
+    _, _, package_json = write_labextension_fixture(
+        tmp_path,
+        patcher.MODEL_RECOVERY_V2_AFTER
+        + patcher.CONTROL_TIMEOUT_AFTER
+        + patcher.CONTROL_RETRY_AFTER
+        + patcher.CONNECTION_WAIT_AFTER,
+        renderer_source=(
+            patcher.RENDERER_OUTPUT_WATCH_AFTER
+            + patcher.RENDERER_RECOVERY_RERENDER_AFTER
+            + patcher.RENDERER_RERENDER_SINGLE_FLIGHT_BEFORE
+            + patcher.MODEL_REGISTRATION_RERENDER_BEFORE
+        ),
+    )
+
+    assert patcher.patch_labextension(tmp_path)
+
+    patched_text, _ = active_bundle_text(tmp_path, package_json, 32)
+    assert patcher.MODEL_RECOVERY_LIFECYCLE_MARKER in patched_text
+    assert "this.restoreWidgets(this.context&&this.context.model" in patched_text
+    assert "neurodeskRecovery=this._loadFromKernel()" not in patched_text
+    renderer_text, _ = active_bundle_text(tmp_path, package_json, 160)
+    assert patcher.RENDERER_RERENDER_SINGLE_FLIGHT_MARKER in renderer_text
+    assert patcher.MODEL_REGISTRATION_RERENDER_MARKER in renderer_text
     assert not patcher.patch_labextension(tmp_path)
 
 
@@ -167,6 +207,8 @@ def test_patch_upgrades_the_existing_wait_workaround(tmp_path):
         renderer_source=(
             patcher.RENDERER_SETUP_BEFORE
             + patcher.RENDERER_RECOVERY_RERENDER_BEFORE
+            + patcher.RENDERER_RERENDER_SINGLE_FLIGHT_BEFORE
+            + patcher.MODEL_REGISTRATION_RERENDER_BEFORE
         ),
     )
     (tmp_path / "static" / "32.dddddddddddddddddddd.js").write_text(
@@ -203,6 +245,8 @@ def test_patch_upgrades_the_existing_two_retry_workaround(tmp_path):
         renderer_source=(
             patcher.RENDERER_OUTPUT_WATCH_AFTER
             + patcher.RENDERER_RECOVERY_RERENDER_BEFORE
+            + patcher.RENDERER_RERENDER_SINGLE_FLIGHT_BEFORE
+            + patcher.MODEL_REGISTRATION_RERENDER_BEFORE
         ),
     )
 
@@ -232,6 +276,8 @@ def test_patch_refuses_widget_manager_anchor_drift(tmp_path):
         renderer_source=(
             patcher.RENDERER_SETUP_BEFORE
             + patcher.RENDERER_RECOVERY_RERENDER_BEFORE
+            + patcher.RENDERER_RERENDER_SINGLE_FLIGHT_BEFORE
+            + patcher.MODEL_REGISTRATION_RERENDER_BEFORE
         ),
     )
 

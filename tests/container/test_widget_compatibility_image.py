@@ -213,6 +213,195 @@ WIDGET_RENDERER_OUTPUT_WATCH_EXPRESSION = r"""(async () => {
     }
 })()"""
 
+WIDGET_RECOVERY_TRANSITIONS_EXPRESSION = r"""(async () => {
+    const panel = [...window.jupyterapp.shell.widgets()].find(
+        widget => widget.context?.path === 'widget.ipynb'
+    );
+    let sourceRenderer = null;
+    let outputItem = null;
+    for (const cell of panel.content.widgets) {
+        for (const candidate of cell.outputArea?.widgets || []) {
+            const children = typeof candidate.children === 'function'
+                ? [...candidate.children()]
+                : [candidate];
+            sourceRenderer = children.find(child => child._manager?.promise);
+            if (sourceRenderer) {
+                outputItem = candidate;
+                break;
+            }
+        }
+        if (sourceRenderer) {
+            break;
+        }
+    }
+    const manager = await sourceRenderer._manager.promise;
+    const modelId = 'delayed-hbox-model-1';
+    const originalModel = await manager.get_model(modelId);
+    const originalCreateComm = manager._create_comm;
+    const originalGetCommInfo = manager._get_comm_info;
+    const originalGetModel = manager.get_model;
+    const originalRestoredStatus = manager._restoredStatus;
+    const originalRecoveryAt =
+        manager.__neurodesktopMissingModelRecoveryAt;
+    const originalControlRetry = manager.__neurodesktopControlRetry;
+    const originalControlRetryCount =
+        manager.__neurodesktopControlRetryCount;
+    const mimeModel = {data: {
+        'application/vnd.jupyter.widget-view+json': {
+            model_id: modelId,
+            version_major: 2,
+            version_minor: 0,
+        },
+    }};
+    const recoveryRenderers = [0, 1].map(() => {
+        const renderer = new sourceRenderer.constructor({
+            mimeType: 'application/vnd.jupyter.widget-view+json',
+        });
+        renderer.manager = manager;
+        outputItem.addWidget(renderer);
+        return renderer;
+    });
+    const burstRenderer = new sourceRenderer.constructor({
+        mimeType: 'application/vnd.jupyter.widget-view+json',
+    });
+    burstRenderer.manager = manager;
+    outputItem.addWidget(burstRenderer);
+    const lateRenderer = new sourceRenderer.constructor({
+        mimeType: 'application/vnd.jupyter.widget-view+json',
+    });
+    lateRenderer.manager = manager;
+    outputItem.addWidget(lateRenderer);
+    let createCommFailures = 0;
+    let commInfoFailures = 0;
+    try {
+        manager._restoredStatus = true;
+        manager.__neurodesktopMissingModelRecoveryAt = 0;
+        manager._create_comm = async () => {
+            createCommFailures += 1;
+            throw new Error('simulated control comm connection loss');
+        };
+        manager._get_comm_info = async () => {
+            commInfoFailures += 1;
+            throw new Error('simulated comm-info connection loss');
+        };
+        delete manager._models[modelId];
+        manager._modelsSync?.delete(modelId);
+
+        await Promise.all(
+            recoveryRenderers.map(renderer => renderer.renderModel(mimeModel))
+        );
+        const failedTexts = recoveryRenderers.map(
+            renderer => renderer.node.textContent
+        );
+        const retainedAfterFailure = recoveryRenderers.every(
+            renderer => renderer._rerenderMimeModel === mimeModel
+        );
+        const recoveryCleared =
+            manager.__neurodesktopMissingModelRecovery == null;
+
+        manager._create_comm = originalCreateComm;
+        manager._get_comm_info = originalGetCommInfo;
+        manager.register_model(modelId, Promise.resolve(originalModel));
+        await manager.restoreWidgets(panel.context.model, {
+            loadKernel: false,
+            loadNotebook: false,
+        });
+        const recoveryDeadline = Date.now() + 5000;
+        while (Date.now() < recoveryDeadline && recoveryRenderers.some(
+            renderer => renderer._rerenderMimeModel !== null ||
+                renderer.widgets.length !== 1
+        )) {
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        // A restore signal is an edge notification, not a render count. The
+        // renderer must consume its pending MIME model before its asynchronous
+        // render starts so adjacent notifications cannot create duplicate views.
+        burstRenderer.node.textContent =
+            'Error displaying widget: model not found';
+        burstRenderer._rerenderMimeModel = mimeModel;
+        manager._restored.emit();
+        manager._restored.emit();
+        const burstDeadline = Date.now() + 5000;
+        while (Date.now() < burstDeadline && burstRenderer.widgets.length < 1) {
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        await new Promise(resolve => setTimeout(resolve, 250));
+
+        // A delayed comm_open registers its model without running a bulk
+        // restore. Registration must wake a renderer that already exhausted
+        // recovery and retained its MIME model.
+        manager.get_model = async () => {
+            throw new Error('simulated model arriving after renderer failure');
+        };
+        await lateRenderer.renderModel(mimeModel);
+        const lateFailedText = lateRenderer.node.textContent;
+        manager.get_model = originalGetModel;
+        delete manager._models[modelId];
+        manager._modelsSync?.delete(modelId);
+        manager.register_model(modelId, Promise.resolve(originalModel));
+        const lateDeadline = Date.now() + 5000;
+        while (Date.now() < lateDeadline && (
+            lateRenderer._rerenderMimeModel !== null ||
+            lateRenderer.widgets.length !== 1
+        )) {
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        return JSON.stringify({
+            failedTexts,
+            retainedAfterFailure,
+            recoveryCleared,
+            createCommFailures,
+            commInfoFailures,
+            recoveredViewCounts: recoveryRenderers.map(
+                renderer => renderer.widgets.length
+            ),
+            recoveredTexts: recoveryRenderers.map(
+                renderer => renderer.node.textContent
+            ),
+            rerenderCleared: recoveryRenderers.every(
+                renderer => renderer._rerenderMimeModel === null
+            ),
+            burstViewCount: burstRenderer.widgets.length,
+            burstRerenderCleared:
+                burstRenderer._rerenderMimeModel === null,
+            lateFailedText,
+            lateArrivalViewCount: lateRenderer.widgets.length,
+            lateArrivalText: lateRenderer.node.textContent,
+            lateArrivalRerenderCleared:
+                lateRenderer._rerenderMimeModel === null,
+        });
+    } finally {
+        manager._create_comm = originalCreateComm;
+        manager._get_comm_info = originalGetCommInfo;
+        manager.get_model = originalGetModel;
+        manager._restoredStatus = originalRestoredStatus;
+        if (originalRecoveryAt === undefined) {
+            delete manager.__neurodesktopMissingModelRecoveryAt;
+        } else {
+            manager.__neurodesktopMissingModelRecoveryAt = originalRecoveryAt;
+        }
+        if (originalControlRetry === undefined) {
+            delete manager.__neurodesktopControlRetry;
+        } else {
+            manager.__neurodesktopControlRetry = originalControlRetry;
+        }
+        if (originalControlRetryCount === undefined) {
+            delete manager.__neurodesktopControlRetryCount;
+        } else {
+            manager.__neurodesktopControlRetryCount = originalControlRetryCount;
+        }
+        for (const renderer of [
+            ...recoveryRenderers,
+            burstRenderer,
+            lateRenderer,
+        ]) {
+            renderer.dispose();
+        }
+    }
+})()"""
+
 IPYNIIVUE_INTERVAL_PROBE_PRELOAD = """() => {
     const records = [];
     Object.defineProperty(
@@ -785,6 +974,7 @@ def test_widget_manager_waits_for_a_late_model_registration():
     assert "Date.now()-o<1e4" in bundles
     assert "__neurodesktopMissingModelRecovery" in bundles
     assert "__neurodesktopMissingModelRecoveryAt" in bundles
+    assert "neurodesktop-widget-missing-model-restore-lifecycle" in bundles
     assert "Date.now()-neurodeskRecoveredAt<30e3" in bundles
     assert "neurodesktop-widget-control-timeout-staged-retry" in bundles
     assert "this.__neurodesktopControlRetry?3e4:1e4" in bundles
@@ -799,6 +989,8 @@ def test_widget_manager_waits_for_a_late_model_registration():
     assert "neurodeskKernel.reconnect().then(()=>!0)" in bundles
     assert "neurodesktop-widget-output-watch" in bundles
     assert "neurodesktop-widget-rerender-after-recovery-failure" in bundles
+    assert "neurodesktop-widget-rerender-single-flight" in bundles
+    assert "neurodesktop-widget-rerender-on-model-registration" in bundles
 
 
 def test_widget_control_state_replies_return_to_requesting_client(monkeypatch):
@@ -1327,10 +1519,15 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
                 "let loadCalls = 0;"
                 "let recoveryCalls = 0;"
                 "const recoveryCallTimes = [];"
+                "const restoreInProgress = [];"
+                "let restoredSignals = 0;"
+                "const onRestored = () => {restoredSignals += 1;};"
+                "manager._restored.connect(onRestored);"
                 "manager._restoredStatus = true;"
                 "manager.__neurodesktopMissingModelRecoveryAt = 0;"
                 "manager._loadFromKernel = async () => {"
                 "loadCalls += 1;"
+                "restoreInProgress.push(manager._kernelRestoreInProgress);"
                 "await new Promise(resolve => setTimeout(resolve, 100));"
                 "if (manager.__neurodesktopMissingModelRecovery) {"
                 "recoveryCalls += 1;"
@@ -1365,6 +1562,8 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
                 "loadCalls,"
                 "recoveryCalls,"
                 "recoveryCallTimes,"
+                "restoreInProgress,"
+                "restoredSignals,"
                 "recoveryCompletedAt,"
                 "recoveryAgeMs: Date.now() - recoveryCompletedAt,"
                 "elapsedMs,"
@@ -1388,6 +1587,7 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
                 "manager.__neurodesktopMissingModelRecovery)"
                 "});"
                 "} finally {"
+                "manager._restored.disconnect(onRestored);"
                 "manager._loadFromKernel = originalLoad;"
                 "manager._restoredStatus = originalRestoredStatus;"
                 "if (originalRecoveryAt === undefined) {"
@@ -1413,6 +1613,9 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             missing_model_recovery["elapsedMs"],
             missing_model_recovery["sequentialElapsedMs"],
         )
+        assert missing_model_recovery["restoreInProgress"]
+        assert all(missing_model_recovery["restoreInProgress"])
+        assert missing_model_recovery["restoredSignals"] >= 1
         assert missing_model_recovery["recoveryCompletedAt"] > 0
         assert 0 <= missing_model_recovery["recoveryAgeMs"] < 30_000
         assert missing_model_recovery["elapsedMs"] < 20_000
@@ -1421,95 +1624,34 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
         )
         assert missing_model_recovery["sequentialElapsedMs"] < 20_000
 
-        # A transient connection failure can exhaust get_model()'s bounded
-        # recovery even though the kernel still owns the model.  A later
-        # successful manager restore must rerender the same output; otherwise
-        # WidgetRenderer leaves "model not found" on screen permanently.
-        transient_recovery = json.loads(
+        # Drive the real get_model(), _loadFromKernel(), retry, fallback, and
+        # restore lifecycle. Failure is injected below those methods at the
+        # control-comm boundary so the renderer's visible failure and later
+        # recovery cannot be bypassed by a successful high-level stub.
+        recovery_transitions = json.loads(
             bidi.evaluate(
                 context,
-                "(async () => {"
-                "const panel = [...window.jupyterapp.shell.widgets()].find("
-                "widget => widget.context?.path === 'widget.ipynb');"
-                "let renderer = null;"
-                "let outputItem = null;"
-                "for (const cell of panel.content.widgets) {"
-                "for (const candidate of cell.outputArea?.widgets || []) {"
-                "const children = typeof candidate.children === 'function'"
-                " ? [...candidate.children()] : [candidate];"
-                "renderer = children.find(child => child._manager?.promise);"
-                "if (renderer) {outputItem = candidate; break;}"
-                "}"
-                "if (renderer) break;"
-                "}"
-                "const manager = await renderer._manager.promise;"
-                "const modelId = 'delayed-hbox-model-1';"
-                "const original = await manager.get_model(modelId);"
-                "const originalLoad = manager._loadFromKernel.bind(manager);"
-                "const originalRestoredStatus = manager._restoredStatus;"
-                "const originalRecoveryAt = "
-                "manager.__neurodesktopMissingModelRecoveryAt;"
-                "const retryRenderer = new renderer.constructor({"
-                "mimeType: 'application/vnd.jupyter.widget-view+json'"
-                "});"
-                "retryRenderer.manager = manager;"
-                "outputItem.addWidget(retryRenderer);"
-                "const mimeModel = {data: {"
-                "'application/vnd.jupyter.widget-view+json': {"
-                "model_id: modelId, version_major: 2, version_minor: 0"
-                "}}};"
-                "let loadCalls = 0;"
-                "try {"
-                "manager._restoredStatus = true;"
-                "manager.__neurodesktopMissingModelRecoveryAt = 0;"
-                "manager._loadFromKernel = async () => {"
-                "loadCalls += 1;"
-                "if (loadCalls === 1) {"
-                "throw new Error('simulated transient widget recovery failure');"
-                "}"
-                "manager.register_model(modelId, Promise.resolve(original));"
-                "};"
-                "delete manager._models[modelId];"
-                "manager._modelsSync?.delete(modelId);"
-                "await retryRenderer.renderModel(mimeModel);"
-                "const failedText = retryRenderer.node.textContent;"
-                "const retainedMimeModel = "
-                "retryRenderer._rerenderMimeModel === mimeModel;"
-                "await manager.restoreWidgets(panel.context.model, {"
-                "loadKernel: true, loadNotebook: false"
-                "});"
-                "const deadline = Date.now() + 5000;"
-                "while (Date.now() < deadline && ("
-                "retryRenderer._rerenderMimeModel !== null || "
-                "retryRenderer.widgets.length === 0)) {"
-                "await new Promise(resolve => setTimeout(resolve, 50));"
-                "}"
-                "return JSON.stringify({"
-                "failedText, retainedMimeModel, loadCalls,"
-                "recovered: !retryRenderer.node.textContent.includes("
-                "'model not found') && retryRenderer.widgets.length > 0,"
-                "rerenderCleared: retryRenderer._rerenderMimeModel === null"
-                "});"
-                "} finally {"
-                "manager._loadFromKernel = originalLoad;"
-                "manager._restoredStatus = originalRestoredStatus;"
-                "if (originalRecoveryAt === undefined) {"
-                "delete manager.__neurodesktopMissingModelRecoveryAt;"
-                "} else {"
-                "manager.__neurodesktopMissingModelRecoveryAt = "
-                "originalRecoveryAt;"
-                "}"
-                "retryRenderer.dispose();"
-                "}"
-                "})()",
+                WIDGET_RECOVERY_TRANSITIONS_EXPRESSION,
             )
         )
-        assert transient_recovery == {
-            "failedText": "Error displaying widget: model not found",
-            "retainedMimeModel": True,
-            "loadCalls": 2,
-            "recovered": True,
+        assert recovery_transitions == {
+            "failedTexts": [
+                "Error displaying widget: model not found",
+                "Error displaying widget: model not found",
+            ],
+            "retainedAfterFailure": True,
+            "recoveryCleared": True,
+            "createCommFailures": 3,
+            "commInfoFailures": 1,
+            "recoveredViewCounts": [1, 1],
+            "recoveredTexts": ["42nested", "42nested"],
             "rerenderCleared": True,
+            "burstViewCount": 1,
+            "burstRerenderCleared": True,
+            "lateFailedText": "Error displaying widget: model not found",
+            "lateArrivalViewCount": 1,
+            "lateArrivalText": "42nested",
+            "lateArrivalRerenderCleared": True,
         }
 
         # Nine models must share one fetched bundle. Per-model delivery is

@@ -228,13 +228,19 @@
   one deduplicated live bulk-state request and check again; polling cannot
   recover a `comm_open` that the kernel WebSocket dropped. Keep a thirty-second
   completion cache so sequential absent models do not repeat that request, and
-  do not start it until initial restoration has completed. Preserve upstream's
+  do not start it until initial restoration has completed. Run that request
+  through `restoreWidgets()` so reconnect events cannot start a competing
+  restore outside `_kernelRestoreInProgress`. Preserve upstream's
   renderer setup order and keep watching code-cell outputs for manager-less
   placeholders. If a post-restore recovery fails, keep the renderer's MIME
-  model so a later successful manager restore replaces its visible error. The
+  model so a later successful manager restore or model registration replaces
+  its visible error. Consume that MIME model before asynchronous rerendering so
+  adjacent restore notifications cannot add duplicate views. The
   image test must walk live widget renderers, inject a manager-less renderer
-  through the output watch, and exercise that failed-then-restored sequence;
-  asset markers alone do not protect this behavior.
+  through the output watch, fail recovery below `_loadFromKernel()` at the
+  control-comm boundary, and exercise failed-to-restored, adjacent-restore, and
+  late-registration transitions with multiple renderers; asset markers alone
+  do not protect this behavior.
   Wait for a second client's kernel connection to report
   `connected` before opening the control comm; a request sent while that
   connection settles can be lost, and the upstream connected-event restore is

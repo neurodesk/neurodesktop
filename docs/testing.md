@@ -185,19 +185,24 @@ the active manager. This is the behavioral guard for that patch; bundle-marker
 assertions only confirm that the intended asset was installed.
 
 The missing-model test removes a live model from the frontend registry and
-replaces ``_loadFromKernel()`` with a deterministic stub that restores the
-retained model. It proves concurrent-call deduplication, the post-request model
-check, cleanup, and the short negative cache. It does not prove that the real
-control comm can reconstruct a deliberately dropped ``comm_open``. Triggering
-that transport loss deterministically would require intercepting the kernel
-WebSocket before JupyterLab receives the frame. The full browser workflow still
-drives the real bulk restore during second-client replay. Missing-model recovery
-also requires ``restoredStatus``; it will not start a competing restore while
-the initial restore remains pending. A separate renderer check makes the first
-recovery fail, then makes the manager's real restore lifecycle register the
-retained model and emit its restored signal. The same renderer must replace its
-visible error with a widget. This covers the live failure where the recovery
-request lost its connection but the running kernel still owned the model.
+uses a deterministic state injector for the eventual kernel-owned model. It
+proves concurrent-call deduplication, the post-request model check, cleanup,
+the short negative cache, and that every recovery load runs while
+``_kernelRestoreInProgress`` is true. A second transition check leaves
+``get_model()`` and ``_loadFromKernel()`` intact and fails their control-comm
+creation and comm-info fallback. Two real ``WidgetRenderer`` instances must
+show the error, retain their MIME models, and recover from one restored signal.
+Two adjacent restored signals must create one view, and direct model
+registration must wake a renderer whose recovery already failed.
+
+The test still does not prove that the real control comm reconstructs a
+deliberately dropped ``comm_open``. Deterministically creating that state means
+intercepting the kernel WebSocket before JupyterLab registers the comm; deleting
+an existing manager model is not equivalent because JupyterLab still owns its
+comm. The full browser workflow drives real bulk restoration during
+second-client replay. Missing-model recovery also requires ``restoredStatus``;
+it will not start a competing restore while the initial restore remains
+pending.
 
 The browser test requires the bulk control-state reply to survive a five-second
 scheduled kernel delay without entering the per-model fallback. The delay does

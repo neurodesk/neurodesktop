@@ -6,8 +6,11 @@ Documents sends notebook output over its collaboration WebSocket while widget
 comms use the kernel WebSocket, so a complex output can legitimately arrive
 more than two seconds before one of its nested models. A comm opened before a
 fresh IOPub subscription settles can be lost altogether. After the bounded
-wait, request the kernel's live widget state once so the browser can recover
-that model instead of making ``model not found`` permanent.
+wait, enter the manager's restore lifecycle once so the browser can recover
+that model without allowing reconnect events to start a competing restore.
+Keep failed renderers retryable on a later restore or model registration, and
+consume each pending rerender before asynchronous view creation so adjacent
+notifications cannot create duplicate views.
 
 The widget manager also abandons its bulk control-state request after four
 seconds and falls back to individual model requests that can be stranded by a
@@ -39,6 +42,9 @@ MODEL_RECOVERY_MARKER = "neurodesktop-widget-missing-model-recovery"
 MODEL_RECOVERY_COOLDOWN_MARKER = (
     "neurodesktop-widget-missing-model-recovery-cooldown"
 )
+MODEL_RECOVERY_LIFECYCLE_MARKER = (
+    "neurodesktop-widget-missing-model-restore-lifecycle"
+)
 CONTROL_TIMEOUT_V1_MARKER = "neurodesktop-widget-control-timeout"
 CONTROL_TIMEOUT_MARKER = "neurodesktop-widget-control-timeout-staged-retry"
 CONTROL_RETRY_V1_MARKER = "neurodesktop-widget-control-retry"
@@ -52,6 +58,12 @@ LEGACY_RENDERER_MANAGER_ORDER_MARKER = (
 RENDERER_OUTPUT_WATCH_MARKER = "neurodesktop-widget-output-watch"
 RENDERER_RECOVERY_RERENDER_MARKER = (
     "neurodesktop-widget-rerender-after-recovery-failure"
+)
+RENDERER_RERENDER_SINGLE_FLIGHT_MARKER = (
+    "neurodesktop-widget-rerender-single-flight"
+)
+MODEL_REGISTRATION_RERENDER_MARKER = (
+    "neurodesktop-widget-rerender-on-model-registration"
 )
 CACHE_SAFE_MARKER = "neurodesktop-widget-retry-cache-safe-entry"
 
@@ -85,7 +97,7 @@ MODEL_RECOVERY_V1_AFTER = (
     "if(void 0!==(t=this._models[e]))return t}"
 )
 
-MODEL_RECOVERY_AFTER = (
+MODEL_RECOVERY_V2_AFTER = (
     f"let o=Date.now();/*{MODEL_RETRY_MARKER}*/"
     "for(;Date.now()-o<1e4;){"
     "if(void 0!==(t=this._models[e]))return t;"
@@ -97,6 +109,30 @@ MODEL_RECOVERY_AFTER = (
     "this.__neurodesktopMissingModelRecoveryAt||0;"
     "neurodeskRecovery||Date.now()-neurodeskRecoveredAt<30e3||("
     "neurodeskRecovery=this._loadFromKernel(),"
+    "this.__neurodesktopMissingModelRecovery=neurodeskRecovery);"
+    "if(neurodeskRecovery)try{await neurodeskRecovery}"
+    "catch(neurodeskError){}finally{"
+    "this.__neurodesktopMissingModelRecoveryAt=Date.now();"
+    "this.__neurodesktopMissingModelRecovery===neurodeskRecovery&&"
+    "(this.__neurodesktopMissingModelRecovery=null)}"
+    "if(void 0!==(t=this._models[e]))return t}"
+)
+
+MODEL_RECOVERY_AFTER = (
+    f"let o=Date.now();/*{MODEL_RETRY_MARKER}*/"
+    "for(;Date.now()-o<1e4;){"
+    "if(void 0!==(t=this._models[e]))return t;"
+    "await new Promise(e=>setTimeout(e,100))}"
+    f"if(/*{MODEL_RECOVERY_MARKER}*/"
+    "this.restoredStatus&&this.restoreWidgets){"
+    "let neurodeskRecovery=this.__neurodesktopMissingModelRecovery;"
+    f"let neurodeskRecoveredAt=/*{MODEL_RECOVERY_COOLDOWN_MARKER}*/"
+    "this.__neurodesktopMissingModelRecoveryAt||0;"
+    "neurodeskRecovery||Date.now()-neurodeskRecoveredAt<30e3||("
+    "neurodeskRecovery=("
+    f"/*{MODEL_RECOVERY_LIFECYCLE_MARKER}*/"
+    "this.restoreWidgets(this.context&&this.context.model,"
+    "{loadKernel:!0,loadNotebook:!1})),"
     "this.__neurodesktopMissingModelRecovery=neurodeskRecovery);"
     "if(neurodeskRecovery)try{await neurodeskRecovery}"
     "catch(neurodeskError){}finally{"
@@ -310,6 +346,31 @@ RENDERER_RECOVERY_RERENDER_AFTER = (
     "return}this._rerenderMimeModel=null;"
 )
 
+RENDERER_RERENDER_SINGLE_FLIGHT_BEFORE = (
+    '_rerender(){this._rerenderMimeModel&&(this.node.textContent="",'
+    'this.removeClass("jupyter-widgets"),'
+    "this.renderModel(this._rerenderMimeModel))}"
+)
+
+RENDERER_RERENDER_SINGLE_FLIGHT_AFTER = (
+    "_rerender(){if(this._rerenderMimeModel){"
+    "let neurodeskMimeModel=this._rerenderMimeModel;"
+    "this._rerenderMimeModel=null;"
+    f"/*{RENDERER_RERENDER_SINGLE_FLIGHT_MARKER}*/"
+    'this.node.textContent="",this.removeClass("jupyter-widgets"),'
+    "this.renderModel(neurodeskMimeModel)}}"
+)
+
+MODEL_REGISTRATION_RERENDER_BEFORE = (
+    "register_model(e,t){super.register_model(e,t),this.setDirty()}"
+)
+
+MODEL_REGISTRATION_RERENDER_AFTER = (
+    "register_model(e,t){super.register_model(e,t),this.setDirty(),"
+    f"/*{MODEL_REGISTRATION_RERENDER_MARKER}*/"
+    "this._restoredStatus&&this._restored.emit()}"
+)
+
 HASHED_BUNDLE_NAME = re.compile(
     r"^(?P<prefix>.+)\.(?P<hash>[0-9a-f]{16,20})\.js$"
 )
@@ -382,11 +443,18 @@ def patch_labextension(labextension_dir: Path) -> bool:
     ]
     active_renderer_paths = active_paths(RENDERER_OUTPUT_WATCH_MARKER)
     active_rerender_paths = active_paths(RENDERER_RECOVERY_RERENDER_MARKER)
+    active_single_flight_paths = active_paths(
+        RENDERER_RERENDER_SINGLE_FLIGHT_MARKER
+    )
+    active_registration_paths = active_paths(
+        MODEL_REGISTRATION_RERENDER_MARKER
+    )
 
     required_markers = (
         MODEL_RETRY_MARKER,
         MODEL_RECOVERY_MARKER,
         MODEL_RECOVERY_COOLDOWN_MARKER,
+        MODEL_RECOVERY_LIFECYCLE_MARKER,
         CONTROL_TIMEOUT_MARKER,
         CONTROL_RETRY_MARKER,
         CONNECTION_WAIT_MARKER,
@@ -399,7 +467,11 @@ def patch_labextension(labextension_dir: Path) -> bool:
         )
         and len(active_renderer_paths) == 1
         and len(active_rerender_paths) == 1
+        and len(active_single_flight_paths) == 1
+        and len(active_registration_paths) == 1
         and active_renderer_paths[0] == active_rerender_paths[0]
+        and active_renderer_paths[0] == active_single_flight_paths[0]
+        and active_renderer_paths[0] == active_registration_paths[0]
         and CACHE_SAFE_MARKER in remote_text
     ):
         return False
@@ -415,6 +487,14 @@ def patch_labextension(labextension_dir: Path) -> bool:
     if len(active_rerender_paths) > 1:
         raise ValueError(
             "more than one active widget rerender workaround bundle was found"
+        )
+    if len(active_single_flight_paths) > 1:
+        raise ValueError(
+            "more than one active widget single-flight rerender bundle was found"
+        )
+    if len(active_registration_paths) > 1:
+        raise ValueError(
+            "more than one active widget registration rerender bundle was found"
         )
 
     replacements_by_path: dict[Path, list[tuple[str, str]]] = {}
@@ -444,6 +524,15 @@ def patch_labextension(labextension_dir: Path) -> bool:
         add_replacement(
             model_bundle,
             MODEL_RECOVERY_V1_AFTER,
+            MODEL_RECOVERY_AFTER,
+        )
+    elif (
+        MODEL_RECOVERY_COOLDOWN_MARKER in model_text
+        and MODEL_RECOVERY_LIFECYCLE_MARKER not in model_text
+    ):
+        add_replacement(
+            model_bundle,
+            MODEL_RECOVERY_V2_AFTER,
             MODEL_RECOVERY_AFTER,
         )
     if CONTROL_TIMEOUT_MARKER not in model_text:
@@ -512,6 +601,28 @@ def patch_labextension(labextension_dir: Path) -> bool:
             renderer_path,
             RENDERER_RECOVERY_RERENDER_BEFORE,
             RENDERER_RECOVERY_RERENDER_AFTER,
+        )
+    if active_single_flight_paths:
+        if active_single_flight_paths[0] != renderer_path:
+            raise ValueError(
+                "widget renderer workarounds are split across active bundles"
+            )
+    else:
+        add_replacement(
+            renderer_path,
+            RENDERER_RERENDER_SINGLE_FLIGHT_BEFORE,
+            RENDERER_RERENDER_SINGLE_FLIGHT_AFTER,
+        )
+    if active_registration_paths:
+        if active_registration_paths[0] != renderer_path:
+            raise ValueError(
+                "widget renderer workarounds are split across active bundles"
+            )
+    else:
+        add_replacement(
+            renderer_path,
+            MODEL_REGISTRATION_RERENDER_BEFORE,
+            MODEL_REGISTRATION_RERENDER_AFTER,
         )
 
     remote_match = HASHED_BUNDLE_NAME.match(remote_entry.name)
