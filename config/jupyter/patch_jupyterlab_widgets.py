@@ -50,6 +50,9 @@ LEGACY_RENDERER_MANAGER_ORDER_MARKER = (
     "neurodesktop-widget-manager-factory-first"
 )
 RENDERER_OUTPUT_WATCH_MARKER = "neurodesktop-widget-output-watch"
+RENDERER_RECOVERY_RERENDER_MARKER = (
+    "neurodesktop-widget-rerender-after-recovery-failure"
+)
 CACHE_SAFE_MARKER = "neurodesktop-widget-retry-cache-safe-entry"
 
 MODEL_RETRY_BEFORE = (
@@ -289,6 +292,24 @@ RENDERER_OUTPUT_WATCH_AFTER = (
     "i&&i.removeMimeType(D),s.dispose()})}"
 )
 
+RENDERER_RECOVERY_RERENDER_BEFORE = (
+    "try{t=await o.get_model(r.model_id)}catch(t){"
+    "if(o.restoredStatus){this.node.textContent="
+    '"Error displaying widget: model not found",'
+    'this.addClass("jupyter-widgets"),console.error(t);return}'
+    "this._rerenderMimeModel=e;return}this._rerenderMimeModel=null;"
+)
+
+RENDERER_RECOVERY_RERENDER_AFTER = (
+    "try{t=await o.get_model(r.model_id)}catch(t){"
+    "this._rerenderMimeModel=e;"
+    f"/*{RENDERER_RECOVERY_RERENDER_MARKER}*/"
+    "if(o.restoredStatus){this.node.textContent="
+    '"Error displaying widget: model not found",'
+    'this.addClass("jupyter-widgets"),console.error(t);return}'
+    "return}this._rerenderMimeModel=null;"
+)
+
 HASHED_BUNDLE_NAME = re.compile(
     r"^(?P<prefix>.+)\.(?P<hash>[0-9a-f]{16,20})\.js$"
 )
@@ -360,6 +381,7 @@ def patch_labextension(labextension_dir: Path) -> bool:
         and is_active_asset(path)
     ]
     active_renderer_paths = active_paths(RENDERER_OUTPUT_WATCH_MARKER)
+    active_rerender_paths = active_paths(RENDERER_RECOVERY_RERENDER_MARKER)
 
     required_markers = (
         MODEL_RETRY_MARKER,
@@ -376,6 +398,8 @@ def patch_labextension(labextension_dir: Path) -> bool:
             for marker in required_markers
         )
         and len(active_renderer_paths) == 1
+        and len(active_rerender_paths) == 1
+        and active_renderer_paths[0] == active_rerender_paths[0]
         and CACHE_SAFE_MARKER in remote_text
     ):
         return False
@@ -387,6 +411,10 @@ def patch_labextension(labextension_dir: Path) -> bool:
     if len(active_renderer_paths) > 1:
         raise ValueError(
             "more than one active widget renderer workaround bundle was found"
+        )
+    if len(active_rerender_paths) > 1:
+        raise ValueError(
+            "more than one active widget rerender workaround bundle was found"
         )
 
     replacements_by_path: dict[Path, list[tuple[str, str]]] = {}
@@ -453,7 +481,9 @@ def patch_labextension(labextension_dir: Path) -> bool:
             CONNECTION_WAIT_AFTER,
         )
 
-    if not active_renderer_paths:
+    if active_renderer_paths:
+        renderer_path = active_renderer_paths[0]
+    else:
         renderer_candidates = [
             (path, RENDERER_SETUP_BEFORE)
             for path in renderer_before_paths
@@ -471,6 +501,17 @@ def patch_labextension(labextension_dir: Path) -> bool:
             renderer_path,
             renderer_before,
             RENDERER_OUTPUT_WATCH_AFTER,
+        )
+    if active_rerender_paths:
+        if active_rerender_paths[0] != renderer_path:
+            raise ValueError(
+                "widget renderer workarounds are split across active bundles"
+            )
+    else:
+        add_replacement(
+            renderer_path,
+            RENDERER_RECOVERY_RERENDER_BEFORE,
+            RENDERER_RECOVERY_RERENDER_AFTER,
         )
 
     remote_match = HASHED_BUNDLE_NAME.match(remote_entry.name)

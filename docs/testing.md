@@ -193,7 +193,11 @@ that transport loss deterministically would require intercepting the kernel
 WebSocket before JupyterLab receives the frame. The full browser workflow still
 drives the real bulk restore during second-client replay. Missing-model recovery
 also requires ``restoredStatus``; it will not start a competing restore while
-the initial restore remains pending.
+the initial restore remains pending. A separate renderer check makes the first
+recovery fail, then makes the manager's real restore lifecycle register the
+retained model and emit its restored signal. The same renderer must replace its
+visible error with a widget. This covers the live failure where the recovery
+request lost its connection but the running kernel still owned the model.
 
 The browser test requires the bulk control-state reply to survive a five-second
 scheduled kernel delay without entering the per-model fallback. The delay does

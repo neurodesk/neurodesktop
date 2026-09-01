@@ -230,9 +230,11 @@
   completion cache so sequential absent models do not repeat that request, and
   do not start it until initial restoration has completed. Preserve upstream's
   renderer setup order and keep watching code-cell outputs for manager-less
-  placeholders. The image test must walk live widget renderers and inject a
-  manager-less renderer through the output watch; asset markers alone do not
-  protect this behavior.
+  placeholders. If a post-restore recovery fails, keep the renderer's MIME
+  model so a later successful manager restore replaces its visible error. The
+  image test must walk live widget renderers, inject a manager-less renderer
+  through the output watch, and exercise that failed-then-restored sequence;
+  asset markers alone do not protect this behavior.
   Wait for a second client's kernel connection to report
   `connected` before opening the control comm; a request sent while that
   connection settles can be lost, and the upstream connected-event restore is

@@ -75,7 +75,10 @@ def test_patch_waits_for_the_kernel_and_retries_a_lost_bulk_request(tmp_path):
     original_bundle, original_remote_entry, package_json = write_labextension_fixture(
         tmp_path,
         original_source,
-        renderer_source=patcher.RENDERER_SETUP_BEFORE,
+        renderer_source=(
+            patcher.RENDERER_SETUP_BEFORE
+            + patcher.RENDERER_RECOVERY_RERENDER_BEFORE
+        ),
     )
 
     assert patcher.patch_labextension(tmp_path)
@@ -111,6 +114,10 @@ def test_patch_waits_for_the_kernel_and_retries_a_lost_bulk_request(tmp_path):
     assert 'readiness probe")),3e3)' in patched_text
     renderer_text, _ = active_bundle_text(tmp_path, package_json, 160)
     assert patcher.RENDERER_OUTPUT_WATCH_MARKER in renderer_text
+    assert patcher.RENDERER_RECOVERY_RERENDER_MARKER in renderer_text
+    assert renderer_text.index("this._rerenderMimeModel=e") < renderer_text.index(
+        'this.node.textContent="Error displaying widget: model not found"'
+    )
     assert patcher.LEGACY_RENDERER_MANAGER_ORDER_MARKER not in renderer_text
     assert renderer_text.index("for(let i of o)i.manager=s") < (
         renderer_text.index("i.addFactory")
@@ -127,7 +134,10 @@ def test_patch_upgrades_the_existing_missing_model_recovery(tmp_path):
         + patcher.CONTROL_TIMEOUT_BEFORE
         + patcher.CONTROL_RETRY_BEFORE
         + patcher.CONNECTION_WAIT_BEFORE,
-        renderer_source=patcher.RENDERER_SETUP_BEFORE,
+        renderer_source=(
+            patcher.RENDERER_SETUP_BEFORE
+            + patcher.RENDERER_RECOVERY_RERENDER_BEFORE
+        ),
     )
 
     assert patcher.patch_labextension(tmp_path)
@@ -154,7 +164,10 @@ def test_patch_upgrades_the_existing_wait_workaround(tmp_path):
         + patcher.CONTROL_TIMEOUT_V1_AFTER
         + patcher.CONTROL_RETRY_V1_AFTER
         + patcher.CONNECTION_WAIT_BEFORE,
-        renderer_source=patcher.RENDERER_SETUP_BEFORE,
+        renderer_source=(
+            patcher.RENDERER_SETUP_BEFORE
+            + patcher.RENDERER_RECOVERY_RERENDER_BEFORE
+        ),
     )
     (tmp_path / "static" / "32.dddddddddddddddddddd.js").write_text(
         patcher.MODEL_RETRY_BEFORE
@@ -187,7 +200,10 @@ def test_patch_upgrades_the_existing_two_retry_workaround(tmp_path):
         + patcher.CONTROL_TIMEOUT_AFTER
         + patcher.CONTROL_RETRY_V2_AFTER
         + patcher.CONNECTION_WAIT_V1_AFTER,
-        renderer_source=patcher.RENDERER_OUTPUT_WATCH_AFTER,
+        renderer_source=(
+            patcher.RENDERER_OUTPUT_WATCH_AFTER
+            + patcher.RENDERER_RECOVERY_RERENDER_BEFORE
+        ),
     )
 
     assert patcher.patch_labextension(tmp_path)
@@ -202,6 +218,9 @@ def test_patch_upgrades_the_existing_two_retry_workaround(tmp_path):
     assert "neurodeskRetryKernel.reconnect()" in patched_text
     assert patcher.CONNECTION_WAIT_MARKER in patched_text
     assert "neurodeskKernel.reconnect().then(()=>!0)" in patched_text
+    renderer_text, _ = active_bundle_text(tmp_path, package_json, 160)
+    assert patcher.RENDERER_OUTPUT_WATCH_MARKER in renderer_text
+    assert patcher.RENDERER_RECOVERY_RERENDER_MARKER in renderer_text
     assert not patcher.patch_labextension(tmp_path)
 
 
@@ -210,7 +229,10 @@ def test_patch_refuses_widget_manager_anchor_drift(tmp_path):
     bundle, _, _ = write_labextension_fixture(
         tmp_path,
         "upstream changed",
-        renderer_source=patcher.RENDERER_SETUP_BEFORE,
+        renderer_source=(
+            patcher.RENDERER_SETUP_BEFORE
+            + patcher.RENDERER_RECOVERY_RERENDER_BEFORE
+        ),
     )
 
     with pytest.raises(ValueError, match="model retry anchor"):

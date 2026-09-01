@@ -104,6 +104,10 @@ cannot each start another full bulk request after their ten-second waits.
 Recovery runs only after the initial restore has completed. Starting another
 restore while that first restore is stuck would create competing control comms;
 the kernel nudge and bounded control-state retries handle that failure instead.
+If a later bulk request still fails during a connection interruption, the
+renderer keeps its MIME model while showing the error. A subsequent successful
+manager restore reruns that renderer, so the transient request failure does not
+leave ``model not found`` on screen after the model has arrived.
 
 The same widget manager abandons a bulk kernel-state request after four
 seconds. Its per-model fallback can overlap the late bulk response and leave
@@ -183,7 +187,9 @@ re-execution must not exhaust WebGL contexts. The browser removes one live
 model from the frontend registry, supplies the retained model through the
 manager's bulk-recovery seam, and requires concurrent missing-model lookups to
 share one recovery. A sequential absent model must reuse the thirty-second
-negative cache. The browser also walks every widget renderer after execution,
+negative cache. It then makes one renderer's recovery fail, restores the model,
+runs the manager's real restore lifecycle, and requires that renderer to recover
+from its visible error. The browser also walks every widget renderer after execution,
 re-execution, and replay and requires its manager promise to resolve. It then
 inserts a real manager-less renderer into an output, emits the output-length
 signal, and requires the defensive watch to repair it. It also interacts
@@ -309,7 +315,7 @@ bugs. Retirement conditions per seam:
 | CRDT stream outputs + `neurodesktop_stream_output.py` (same patcher) | fix for [#306](https://github.com/jupyter-ai-contrib/jupyter-server-documents/issues/306) | silent-case risk: check release notes for any other output-path change |
 | Server-execution cell trust, frontend (same patcher) | fix for [#307](https://github.com/jupyter-ai-contrib/jupyter-server-documents/issues/307) | |
 | Kernel WebSocket nudge + `neurodesktop_kernel_nudge.py` (same patcher) | the nudge issue/PR on jupyter-server-documents | once merged, re-evaluate the frontend probe/reconnect/retry bounds for removal — they masked this transport hole |
-| Widget late-model retry and missing-model bulk recovery (`patch_jupyterlab_widgets.py`) | ipywidgets event-driven `get_model` ([#4026](https://github.com/jupyter-widgets/ipywidgets/issues/4026)) plus recovery after a lost `comm_open` | a `get_model_timeout` setting replaces only the bounded-wait half |
+| Widget late-model retry, missing-model bulk recovery, and failed-render rerender (`patch_jupyterlab_widgets.py`) | ipywidgets event-driven `get_model` ([#4026](https://github.com/jupyter-widgets/ipywidgets/issues/4026)) plus recovery after a lost `comm_open` | a `get_model_timeout` setting replaces only the bounded-wait half; retire the rerender seam when upstream keeps failed MIME models for a later restore |
 | Widget renderer output watch (same patcher) | an upstream insertion API guarantees that extensions and collaboration cannot bypass the panel's manager-backed factory | the browser test injects a manager-less renderer and requires the watch to repair it |
 | ipyniivue factory, cleanup, event-driven scene sync (`patch_ipyniivue.py`) | ipyniivue [#298](https://github.com/niivue/ipyniivue/issues/298) and [#299](https://github.com/niivue/ipyniivue/issues/299) | the shared-bundle relocation is Neurodesk's optimization and stays; only the in-bundle anchors retire |
 | `ipykernel` 6.x pin (Dockerfile) | ipykernel 7 comm subshells handle delayed server-executed widgets | unrelated to the PRs; watch ipykernel release notes |

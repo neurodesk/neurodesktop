@@ -798,6 +798,7 @@ def test_widget_manager_waits_for_a_late_model_registration():
     assert "neurodeskKernel.requestKernelInfo()" in bundles
     assert "neurodeskKernel.reconnect().then(()=>!0)" in bundles
     assert "neurodesktop-widget-output-watch" in bundles
+    assert "neurodesktop-widget-rerender-after-recovery-failure" in bundles
 
 
 def test_widget_control_state_replies_return_to_requesting_client(monkeypatch):
@@ -1419,6 +1420,97 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             missing_model_recovery["sequentialError"]
         )
         assert missing_model_recovery["sequentialElapsedMs"] < 20_000
+
+        # A transient connection failure can exhaust get_model()'s bounded
+        # recovery even though the kernel still owns the model.  A later
+        # successful manager restore must rerender the same output; otherwise
+        # WidgetRenderer leaves "model not found" on screen permanently.
+        transient_recovery = json.loads(
+            bidi.evaluate(
+                context,
+                "(async () => {"
+                "const panel = [...window.jupyterapp.shell.widgets()].find("
+                "widget => widget.context?.path === 'widget.ipynb');"
+                "let renderer = null;"
+                "let outputItem = null;"
+                "for (const cell of panel.content.widgets) {"
+                "for (const candidate of cell.outputArea?.widgets || []) {"
+                "const children = typeof candidate.children === 'function'"
+                " ? [...candidate.children()] : [candidate];"
+                "renderer = children.find(child => child._manager?.promise);"
+                "if (renderer) {outputItem = candidate; break;}"
+                "}"
+                "if (renderer) break;"
+                "}"
+                "const manager = await renderer._manager.promise;"
+                "const modelId = 'delayed-hbox-model-1';"
+                "const original = await manager.get_model(modelId);"
+                "const originalLoad = manager._loadFromKernel.bind(manager);"
+                "const originalRestoredStatus = manager._restoredStatus;"
+                "const originalRecoveryAt = "
+                "manager.__neurodesktopMissingModelRecoveryAt;"
+                "const retryRenderer = new renderer.constructor({"
+                "mimeType: 'application/vnd.jupyter.widget-view+json'"
+                "});"
+                "retryRenderer.manager = manager;"
+                "outputItem.addWidget(retryRenderer);"
+                "const mimeModel = {data: {"
+                "'application/vnd.jupyter.widget-view+json': {"
+                "model_id: modelId, version_major: 2, version_minor: 0"
+                "}}};"
+                "let loadCalls = 0;"
+                "try {"
+                "manager._restoredStatus = true;"
+                "manager.__neurodesktopMissingModelRecoveryAt = 0;"
+                "manager._loadFromKernel = async () => {"
+                "loadCalls += 1;"
+                "if (loadCalls === 1) {"
+                "throw new Error('simulated transient widget recovery failure');"
+                "}"
+                "manager.register_model(modelId, Promise.resolve(original));"
+                "};"
+                "delete manager._models[modelId];"
+                "manager._modelsSync?.delete(modelId);"
+                "await retryRenderer.renderModel(mimeModel);"
+                "const failedText = retryRenderer.node.textContent;"
+                "const retainedMimeModel = "
+                "retryRenderer._rerenderMimeModel === mimeModel;"
+                "await manager.restoreWidgets(panel.context.model, {"
+                "loadKernel: true, loadNotebook: false"
+                "});"
+                "const deadline = Date.now() + 5000;"
+                "while (Date.now() < deadline && ("
+                "retryRenderer._rerenderMimeModel !== null || "
+                "retryRenderer.widgets.length === 0)) {"
+                "await new Promise(resolve => setTimeout(resolve, 50));"
+                "}"
+                "return JSON.stringify({"
+                "failedText, retainedMimeModel, loadCalls,"
+                "recovered: !retryRenderer.node.textContent.includes("
+                "'model not found') && retryRenderer.widgets.length > 0,"
+                "rerenderCleared: retryRenderer._rerenderMimeModel === null"
+                "});"
+                "} finally {"
+                "manager._loadFromKernel = originalLoad;"
+                "manager._restoredStatus = originalRestoredStatus;"
+                "if (originalRecoveryAt === undefined) {"
+                "delete manager.__neurodesktopMissingModelRecoveryAt;"
+                "} else {"
+                "manager.__neurodesktopMissingModelRecoveryAt = "
+                "originalRecoveryAt;"
+                "}"
+                "retryRenderer.dispose();"
+                "}"
+                "})()",
+            )
+        )
+        assert transient_recovery == {
+            "failedText": "Error displaying widget: model not found",
+            "retainedMimeModel": True,
+            "loadCalls": 2,
+            "recovered": True,
+            "rerenderCleared": True,
+        }
 
         # Nine models must share one fetched bundle. Per-model delivery is
         # the 5 MB-per-widget regression the ipyniivue workaround removes.
