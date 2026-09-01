@@ -33,7 +33,8 @@ IPYNIIVUE_TAIL = (
     'var Ih={async initialize({model:A}){let I=new $B;if(!vA){'
     'console.log("Creating new Niivue instance");vA=new t2(A)}return()=>{'
     'I.disposeAll(),A.off("change:volumes"),clearInterval(BC)}},'
-    'async render({model:A,el:I}){console.log("drawing first render");'
+    'async render({model:A,el:I}){let B=new $B;if(vA.canvas?.parentNode)'
+    'console.log("moving render around");console.log("drawing first render");'
     'return()=>{vA.canvas?.remove()}}};export{Ih as default};'
 )
 
@@ -77,7 +78,9 @@ def test_patch_shares_bundle_but_creates_one_definition_per_model(tmp_path):
     assert hashlib.sha256(shared_source.encode("utf-8")).hexdigest()[:20] in (
         shared_bundle.name
     )
-    assert "function createWidgetDefinition(){let vA;" in shared_source
+    assert "function createWidgetDefinition(){let vA,neurodeskDisposer;" in (
+        shared_source
+    )
     assert "export{createWidgetDefinition};" in shared_source
     assert "export{Ih as default};" not in shared_source
     assert patcher.MODEL_CLEANUP_MARKER in shared_source
@@ -88,6 +91,25 @@ def test_patch_shares_bundle_but_creates_one_definition_per_model(tmp_path):
     assert "let D=Reflect.apply(o,a,e)" in shared_source
     assert 'A.gl.canvas.matches(":focus")&&C(),D' in shared_source
     assert not patcher.patch_ipyniivue(package_dir, lab_static_dir)
+
+
+def test_patch_shares_one_disposer_per_model(tmp_path):
+    """render's own Disposer is never disposed upstream, so its child-model
+    listeners outlive the model and later run against a released context."""
+    patcher = load_patcher_module()
+    package_dir, widget_path, lab_static_dir = write_ipyniivue_fixture(tmp_path)
+
+    assert patcher.patch_ipyniivue(package_dir, lab_static_dir)
+
+    asset = next(lab_static_dir.glob("neurodesktop-ipyniivue.*.js"))
+    source = asset.read_text(encoding="utf-8")
+    assert patcher.SHARED_DISPOSER_MARKER in source
+    # One disposer per model: initialize owns it, render reuses it.
+    assert "let I=neurodeskDisposer=new $B;" in source
+    assert "let B=neurodeskDisposer??(neurodeskDisposer=new $B);" in source
+    # It is declared in the factory closure and released with the instance.
+    assert "let vA,neurodeskDisposer;" in source
+    assert "vA=void 0,neurodeskDisposer=void 0" in source
 
 
 def test_patch_refuses_frontend_anchor_drift(tmp_path):

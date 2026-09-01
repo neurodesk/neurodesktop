@@ -1075,6 +1075,20 @@ def test_server_documents_installs_reconnect_data_loss_guards() -> None:
     assert "p.decodeStateVector(s)" in active_source
     assert "o.id.client" in active_source
     assert "o.id.clock" in active_source
+    assert "neurodesktop-server-execution-dispatch-trust" in active_source
+    assert "neurodesktop-server-execution-restore-trust" in active_source
+    assert "neurodesktop-server-execution-trust" not in active_source
+    trust_at = active_source.index("e.model.trusted=!0")
+    assert active_source.index("l.hasNoKernel)return!0;") < trust_at
+    assert active_source.index("c({cell:e});") < trust_at
+    assert "try{e.model.trusted=!0;const n=await" in active_source
+    assert active_source.count("e.model.trusted=neurodeskPrevTrusted") == 3
+    subprocess.run(
+        ["node", "--check", str(active_bundles[0])],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def test_late_sync_step2_is_applied_without_disconnect() -> None:
@@ -1164,11 +1178,27 @@ def test_ipyniivue_uses_one_shared_bundle_with_per_model_state() -> None:
 
     shared_bundle = Path(sys.prefix) / "share/jupyter/lab/static" / asset_names[0]
     shared_source = shared_bundle.read_text(encoding="utf-8")
-    assert "function createWidgetDefinition(){let vA;" in shared_source
+    assert "function createWidgetDefinition(){let vA,neurodeskDisposer;" in (
+        shared_source
+    )
+    # One Disposer per model: upstream leaks render's own copy, whose
+    # child-model listeners outlive the model and would later run
+    # against the WebGL context this patch releases.
+    assert "let I=neurodeskDisposer=new $B;" in shared_source
+    assert "let B=neurodeskDisposer??(neurodeskDisposer=new $B);" in (
+        shared_source
+    )
+    assert "vA=void 0,neurodeskDisposer=void 0" in shared_source
     assert "neurodesktop-ipyniivue-model-cleanup" in shared_source
     assert "neurodesktop-ipyniivue-event-scene-sync" in shared_source
     assert "setInterval(" not in shared_source
     assert 'getExtension("WEBGL_lose_context")?.loseContext()' in shared_source
+    subprocess.run(
+        ["node", "--check", str(shared_bundle)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def test_server_side_stream_fragments_are_one_replay_safe_crdt_output() -> None:

@@ -163,7 +163,13 @@
   `pip check`, `jupyter server extension list`, and `jupyter labextension list
   --verbose` in that image. Keep user-initiated server-side code execution
   marking the cell trusted before its outputs arrive; otherwise unsafe rich
-  renderers fall back to `text/plain`. The widget image test must execute and
+  renderers fall back to `text/plain`. Grant that trust only after the
+  session and kernel guards, request preparation, and the execution-scheduled
+  callback. This path does not clear outputs, so trusting when Run is pressed
+  without a kernel would render stale untrusted output with unsafe renderers.
+  Keep the grant inside the request `try`, directly before dispatch, and
+  restore the previous value on every failed response or exception. The widget
+  image test must execute and
   re-execute a delayed nested widget through JupyterLab after repeated stream
   output, then replay the populated room in a second client; it must not only
   inspect installed bundles. Keep every widget control-state reply on the comm
@@ -257,7 +263,11 @@
   their original hashed URLs as immutable for one year. Keep ipyniivue's large
   ESM in one content-hashed JupyterLab asset rather than syncing it with every
   model, but create each widget definition from a fresh factory so NiiVue and
-  scene synchronization state are never shared between models. Send scene
+  scene synchronization state are never shared between models. Share one
+  `Disposer` per model between `initialize` and `render` and release it with
+  the instance; upstream's second, undisposed `render` disposer leaks
+  child-model listeners past destruction and double-registers on re-render.
+  Send scene
   changes once from each focused `NiiVue.sync()` event; never restore the
   upstream 30 ms polling interval. Model destruction must run NiiVue cleanup
   and relinquish its WebGL context; view removal alone must keep supporting

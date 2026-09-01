@@ -22,6 +22,7 @@ from pathlib import Path
 BOOTSTRAP_MARKER = "neurodesktop-ipyniivue-shared-bundle"
 MODEL_CLEANUP_MARKER = "neurodesktop-ipyniivue-model-cleanup"
 SCENE_SYNC_MARKER = "neurodesktop-ipyniivue-event-scene-sync"
+SHARED_DISPOSER_MARKER = "neurodesktop-ipyniivue-shared-disposer"
 ASSET_PATTERN = re.compile(
     r"neurodesktop-ipyniivue\.(?P<hash>[0-9a-f]{20})\.js"
 )
@@ -46,7 +47,8 @@ SYNC_BEFORE = (
     '":focus")){C=!1;return}C=!0}})}'
 )
 SYNC_AFTER = (
-    f'function createWidgetDefinition(){{let vA;function S0(A,I){{'
+    f'function createWidgetDefinition(){{let vA,neurodeskDisposer;'
+    f'function S0(A,I){{'
     f'/*{SCENE_SYNC_MARKER}*/let B=I.get("scene");const C=async()=>{{'
     'let g=I.get("this_model_id");if(!g)return;let Q;try{'
     'Q=await I.widget_manager.get_model(g)}catch{return}let E={'
@@ -66,8 +68,28 @@ CLEANUP_BEFORE = "clearInterval(BC)}},async render"
 CLEANUP_AFTER = (
     f"/*{MODEL_CLEANUP_MARKER}*/vA.cleanup(),"
     'vA.gl?.getExtension("WEBGL_lose_context")?.loseContext(),'
-    "vA=void 0}},async render"
+    "vA=void 0,neurodeskDisposer=void 0}},async render"
 )
+# ipyniivue creates a second Disposer inside `render` and never disposes it,
+# so every child-model listener registered there outlives model destruction:
+# it retains the NiiVue instance and its volumes, and a later trait change
+# runs those handlers against the WebGL context this patch has already
+# released. Re-rendering also registers a second listener set, because the
+# two disposers disagree about which child models are already set up. Share
+# one disposer per model instead, owned by the factory closure and disposed
+# with the instance.
+DISPOSER_INIT_BEFORE = "async initialize({model:A}){let I=new $B;"
+DISPOSER_INIT_AFTER = (
+    f"async initialize({{model:A}}){{/*{SHARED_DISPOSER_MARKER}*/"
+    "let I=neurodeskDisposer=new $B;"
+)
+
+DISPOSER_RENDER_BEFORE = "let B=new $B;if(vA.canvas?.parentNode)"
+DISPOSER_RENDER_AFTER = (
+    "let B=neurodeskDisposer??(neurodeskDisposer=new $B);"
+    "if(vA.canvas?.parentNode)"
+)
+
 EXPORT_BEFORE = "};export{Ih as default};"
 EXPORT_AFTER = "};return Ih}export{createWidgetDefinition};"
 
@@ -129,6 +151,7 @@ def patch_ipyniivue(package_dir: Path, lab_static_dir: Path) -> bool:
         if (
             asset_hash != assets[0]
             or MODEL_CLEANUP_MARKER not in asset_source
+            or SHARED_DISPOSER_MARKER not in asset_source
             or SCENE_SYNC_MARKER not in asset_source
             or "export{createWidgetDefinition};" not in asset_source
         ):
@@ -137,6 +160,12 @@ def patch_ipyniivue(package_dir: Path, lab_static_dir: Path) -> bool:
 
     patched = _replace_once(source, STATE_BEFORE, STATE_AFTER, "state")
     patched = _replace_once(patched, SYNC_BEFORE, SYNC_AFTER, "scene sync")
+    patched = _replace_once(
+        patched, DISPOSER_INIT_BEFORE, DISPOSER_INIT_AFTER, "disposer init"
+    )
+    patched = _replace_once(
+        patched, DISPOSER_RENDER_BEFORE, DISPOSER_RENDER_AFTER, "disposer render"
+    )
     patched = _replace_once(patched, CLEANUP_BEFORE, CLEANUP_AFTER, "cleanup")
     patched = _replace_once(patched, EXPORT_BEFORE, EXPORT_AFTER, "export")
 

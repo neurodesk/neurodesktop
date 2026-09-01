@@ -240,10 +240,35 @@ def write_upstream_fixture(package_dir):
     )
 
 
-def write_frontend_fixture(labextension_dir, source, *, include_repair=True):
+def write_frontend_fixture(
+    labextension_dir, source, *, include_repair=True, include_restore=True
+):
     static_dir = labextension_dir / "static"
     static_dir.mkdir(parents=True)
     bundle = static_dir / "278.aaaaaaaaaaaaaaaaaaaa.js"
+    patcher = load_patcher_module()
+    if (
+        any(
+            trust_anchor in source
+            for trust_anchor in (
+                patcher.WIDGET_TRUST_BEFORE,
+                patcher.WIDGET_TRUST_V1_AFTER,
+                patcher.WIDGET_TRUST_GUARD_AFTER,
+            )
+        )
+        and patcher.WIDGET_TRUST_AFTER not in source
+        and patcher.TRUST_DISPATCH_BEFORE not in source
+    ):
+        source += "\n" + patcher.TRUST_DISPATCH_BEFORE
+    if include_restore:
+        marker = patcher.WIDGET_TRUST_RESTORE_MARKER
+        if marker not in source:
+            source += "\n" + (
+                patcher.TRUST_RESTORE_AFTER
+                if patcher.WIDGET_TRUST_MARKER in source
+                and "neurodeskPrevTrusted" in source
+                else patcher.TRUST_RESTORE_BEFORE
+            )
     if include_repair:
         source += "\n" + patcher_source_divergent_repair_before()
     bundle.write_text(source, encoding="utf-8")
@@ -441,6 +466,125 @@ def test_patch_refuses_anchor_drift_without_partial_changes(tmp_path):
         tmp_path / "outputs/output_processor.py"
     ).read_text(encoding="utf-8") == OUTPUT_PROCESSOR_SOURCE
     assert not (tmp_path / "outputs/_neurodesktop_stream.py").exists()
+
+
+def test_no_workaround_marker_contains_another(tmp_path):
+    """A marker that is a prefix of another breaks migration detection.
+
+    Both trust markers hit this: the original grant marker is a prefix of
+    naive names for the moved grant and for the restore.
+    """
+    patcher = load_patcher_module()
+    markers = {
+        name: value
+        for name, value in vars(patcher).items()
+        if name.endswith("_MARKER") and isinstance(value, str)
+    }
+    contained = [
+        (outer, inner)
+        for inner, inner_value in markers.items()
+        for outer, outer_value in markers.items()
+        if inner != outer and inner_value in outer_value
+    ]
+    assert not contained, contained
+
+
+def test_a_failed_request_restores_the_previous_trust_state(tmp_path):
+    """The server keeps the cell's outputs on 409, so trust must be undone."""
+    patcher = load_patcher_module()
+    write_frontend_fixture(tmp_path, patcher.WIDGET_TRUST_BEFORE)
+
+    assert patcher.patch_widget_trust(tmp_path)
+
+    patched = next(
+        path.read_text(encoding="utf-8")
+        for path in (tmp_path / "static").glob("278.*.js")
+        if patcher.WIDGET_TRUST_RESTORE_MARKER in path.read_text(encoding="utf-8")
+    )
+    # The previous value is captured once and restored on all three failure
+    # paths: 409, a non-OK response, and a thrown request.
+    assert patched.count("const neurodeskPrevTrusted=e.model.trusted") == 1
+    assert patched.count("e.model.trusted=neurodeskPrevTrusted") == 3
+    assert patched.index("const neurodeskPrevTrusted") < patched.index(
+        "e.model.trusted=neurodeskPrevTrusted"
+    )
+
+
+def test_patch_refuses_a_trust_grant_without_its_restore(tmp_path):
+    """A grant that cannot be undone is worse than no patch at all."""
+    patcher = load_patcher_module()
+    write_frontend_fixture(
+        tmp_path, patcher.WIDGET_TRUST_AFTER, include_restore=False
+    )
+
+    with pytest.raises(ValueError, match="trust restore anchor"):
+        patcher.patch_widget_trust(tmp_path)
+
+
+def test_trust_is_granted_only_after_the_kernel_guards(tmp_path):
+    """Trusting before the guards trusts stale output when no kernel runs.
+
+    Pressing Run without a kernel returns early, so nothing executes; because
+    this path does not clear outputs, a cell trusted at that point renders
+    previously loaded untrusted output with unsafe renderers.
+    """
+    patcher = load_patcher_module()
+    _, _, _ = write_frontend_fixture(tmp_path, patcher.WIDGET_TRUST_BEFORE)
+
+    assert patcher.patch_widget_trust(tmp_path)
+
+    patched = next(
+        path.read_text(encoding="utf-8")
+        for path in (tmp_path / "static").glob("278.*.js")
+        if patcher.WIDGET_TRUST_MARKER in path.read_text(encoding="utf-8")
+    )
+    trust_at = patched.index("e.model.trusted=!0")
+    # Both early returns must precede the assignment.
+    assert patched.index("if(!l)return!0;") < trust_at
+    assert patched.index("l.hasNoKernel)return!0;") < trust_at
+    assert patched.index("c({cell:e});") < trust_at
+    assert "try{e.model.trusted=!0;const n=await" in patched
+
+
+def test_trust_patch_migrates_the_unsafe_pre_guard_placement(tmp_path):
+    """An image built with the v1 placement is moved, not left alone."""
+    patcher = load_patcher_module()
+    _, _, _ = write_frontend_fixture(tmp_path, patcher.WIDGET_TRUST_V1_AFTER)
+
+    assert patcher.patch_widget_trust(tmp_path)
+
+    patched = next(
+        path.read_text(encoding="utf-8")
+        for path in (tmp_path / "static").glob("278.*.js")
+        if patcher.WIDGET_TRUST_MARKER in path.read_text(encoding="utf-8")
+    )
+    assert patcher.WIDGET_TRUST_V1_MARKER not in patched
+    assert patched.count("e.model.trusted=!0") == 1
+    assert patched.index("l.hasNoKernel)return!0;") < patched.index(
+        "e.model.trusted=!0"
+    )
+
+
+def test_trust_patch_migrates_the_pre_request_try_placement(tmp_path):
+    """The intermediate post-guard placement still had uncovered throws."""
+    patcher = load_patcher_module()
+    _, _, _ = write_frontend_fixture(
+        tmp_path, patcher.WIDGET_TRUST_GUARD_AFTER
+    )
+
+    assert patcher.patch_widget_trust(tmp_path)
+
+    patched = next(
+        path.read_text(encoding="utf-8")
+        for path in (tmp_path / "static").glob("278.*.js")
+        if patcher.WIDGET_TRUST_RESTORE_MARKER in path.read_text(encoding="utf-8")
+        and patcher.WIDGET_TRUST_AFTER in path.read_text(encoding="utf-8")
+    )
+    assert patcher.WIDGET_TRUST_GUARD_AFTER not in patched
+    assert patched.index("c({cell:e});") < patched.index(
+        "e.model.trusted=!0"
+    )
+    assert "try{e.model.trusted=!0;const n=await" in patched
 
 
 def test_patch_marks_server_executed_code_cells_trusted(tmp_path):

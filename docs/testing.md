@@ -238,6 +238,10 @@ requires event-driven scene synchronization plus WebGL cleanup on model
 destruction. The other frontend unit tests
 require changed federated chunks and remote entries to use new content-hashed
 names, so an immutable cached copy cannot conceal a fix.
+The installed-asset checks also parse the complete patched server-documents
+and ipyniivue bundles with Node. They require server-side execution to grant
+trust inside the request ``try``, after both kernel guards and the scheduled
+callback, and to restore the previous value on every request failure path.
 The same unit and image suites require the server-documents reconnect guards:
 a handshake timeout must resume broadcasts without disconnecting the client,
 a late SyncStep2 must still be applied, and divergent repair must delete only

@@ -177,7 +177,15 @@ Neurodesktop moves the heavy module into one content-hashed JupyterLab static
 asset and leaves a small bootstrap in the Python package. The shared module
 exports a factory, and each bootstrap invocation creates a separate widget
 definition so its NiiVue instance and scene synchronization state stay
-model-local. Upstream polls every 30 ms after a focused canvas synchronizes;
+model-local. Upstream also creates a second ``Disposer`` inside ``render``
+and never disposes it, so the child-model listeners registered there outlive
+the model: they retain the NiiVue instance and its volumes, a later trait
+change runs them against the context this patch has already released, and a
+re-render registers a duplicate listener set because the two disposers
+disagree about which child models are set up. The patched definition shares
+one disposer per model, owned by the same closure as the instance and
+released with it. Upstream polls every 30 ms after a focused canvas
+synchronizes;
 the patched definition instead computes and sends one scene delta directly
 from each focused ``NiiVue.sync()`` event, then does no work while the viewer
 is idle. When a model is destroyed, the definition runs NiiVue cleanup and
@@ -247,7 +255,17 @@ The same server-side executor bypasses JupyterLab's normal code-cell execution
 path, which marks a cell trusted before its outputs arrive. Without that state,
 JupyterLab refuses unsafe rich renderers and displays an ipywidget's
 ``text/plain`` representation instead. The anchored server-documents patch
-marks user-executed code cells trusted, and the image regression executes a
+marks user-executed code cells trusted **after** the session and kernel
+guards, request preparation, and the execution-scheduled callback. It grants
+trust inside the request ``try``, directly before dispatch. Granting trust
+earlier, as the first version of this workaround did, trusts a cell when
+Run is pressed with no kernel and nothing executes; because this path does
+not clear outputs the way JupyterLab's ``clearExecution()`` does, stale
+untrusted rich output would then render with unsafe renderers. The executor
+records the previous trust value immediately before dispatch and restores it
+when the request returns 409, returns another non-success response, or throws.
+The patcher migrates an image built with the earlier placement rather than
+leaving it in place. The image regression executes a
 real ``IntSlider`` through JupyterLab to distinguish a rendered widget from its
 plain Python representation. Because Jupyter serves federated extension assets
 with a one-year immutable cache, the patch leaves the upstream bundle intact,

@@ -59,7 +59,9 @@ YDOC_OUTPUT_MARKER = "neurodesktop-crdt-notebook-output"
 YDOC_STREAM_TEXT_MARKER = "neurodesktop-crdt-stream-text"
 YDOC_STREAM_MERGE_MARKER = "neurodesktop-crdt-stream-merge"
 KERNEL_NUDGE_MARKER = "neurodesktop-kernel-ws-nudge"
-WIDGET_TRUST_MARKER = "neurodesktop-server-execution-trust"
+WIDGET_TRUST_V1_MARKER = "neurodesktop-server-execution-trust"
+WIDGET_TRUST_MARKER = "neurodesktop-server-execution-dispatch-trust"
+WIDGET_TRUST_RESTORE_MARKER = "neurodesktop-server-execution-restore-trust"
 WIDGET_CACHE_SAFE_MARKER = "neurodesktop-widget-cache-safe-entry"
 DIVERGENT_REPAIR_MARKER = "neurodesktop-idempotent-divergent-repair"
 
@@ -357,17 +359,85 @@ YDOC_STREAM_HELPERS_AFTER = '''    def _stream_positions(self):
         self._discard_stream_position(cell_id)
 '''
 
-WIDGET_TRUST_BEFORE = (
+# Trust must be granted only once execution is actually dispatched. The
+# first version of this workaround set it immediately after the non-code-cell
+# early return, which is before the session and kernel guards: pressing Run
+# with no kernel then marked the cell trusted although nothing executed, and
+# because this path does not clear outputs the way JupyterLab's
+# `clearExecution()` does, stale untrusted rich output became trusted. Anchor
+# through both guards for clean and v1 detection, then inject the assignment
+# inside the request try directly before makeRequest(), after request
+# preparation and the execution-scheduled callback. Remember the previous
+# value and restore it if the request returns 409, returns another non-success
+# response, or throws. The successful path keeps the cell trusted before its
+# rich outputs arrive.
+TRUST_HEAD = (
     'if("code"!==e.model.type)return"markdown"===e.model.type&&'
     '(e.rendered=!0,e.inputHidden=!1),s({cell:e,success:!0}),!0;'
+)
+
+TRUST_KERNEL_GUARDS = (
     "if(!l)return!0;"
+    "if(l.hasNoKernel&&await l.startKernel()&&d&&await d.selectKernel(l),"
+    "l.hasNoKernel)return!0;"
+)
+
+WIDGET_TRUST_BEFORE = TRUST_HEAD + TRUST_KERNEL_GUARDS
+
+WIDGET_TRUST_V1_AFTER = (
+    TRUST_HEAD
+    + f"/*{WIDGET_TRUST_V1_MARKER}*/e.model.trusted=!0;"
+    + TRUST_KERNEL_GUARDS
+)
+
+WIDGET_TRUST_GUARD_AFTER = (
+    TRUST_HEAD
+    + TRUST_KERNEL_GUARDS
+    + f"/*{WIDGET_TRUST_MARKER}*/"
+    + "const neurodeskPrevTrusted=e.model.trusted;e.model.trusted=!0;"
+)
+
+# Keep every operation after the trust grant inside the request try. Building
+# the request and notifying the execution observer can both throw, so granting
+# trust immediately after the kernel guards still has an uncovered failure
+# path. The assignment belongs directly before makeRequest(), after the
+# execution-scheduled callback has completed.
+TRUST_DISPATCH_BEFORE = (
+    "c({cell:e});try{const n=await i.ServerConnection.makeRequest"
 )
 
 WIDGET_TRUST_AFTER = (
-    'if("code"!==e.model.type)return"markdown"===e.model.type&&'
-    '(e.rendered=!0,e.inputHidden=!1),s({cell:e,success:!0}),!0;'
-    f"/*{WIDGET_TRUST_MARKER}*/e.model.trusted=!0;"
-    "if(!l)return!0;"
+    "c({cell:e});"
+    f"/*{WIDGET_TRUST_MARKER}*/"
+    "const neurodeskPrevTrusted=e.model.trusted;"
+    "try{e.model.trusted=!0;"
+    "const n=await i.ServerConnection.makeRequest"
+)
+
+# A request that fails after a kernel exists must not leave the cell trusted:
+# the server preserves the cell's outputs on 409 (it verifies every source
+# hash before touching any state), so without this the old untrusted outputs
+# would stay on screen and now be trusted.
+TRUST_RESTORE_BEFORE = (
+    "return 409===n.status?(o.delete(P),"
+    'a.Notification.warning("Cell not executed: the cell source changed '
+    'while the request was in flight. Please re-run the cell.",'
+    "{autoClose:5e3}),s({cell:e,success:!1}),!1):"
+    "(n.ok||o.delete(P),s({cell:e,success:n.ok}),n.ok)}"
+    "catch(t){if(s({cell:e,success:!1}),!e.isDisposed)throw t;return!1}"
+)
+
+TRUST_RESTORE_AFTER = (
+    f"/*{WIDGET_TRUST_RESTORE_MARKER}*/"
+    "return 409===n.status?(o.delete(P),"
+    "e.model.trusted=neurodeskPrevTrusted,"
+    'a.Notification.warning("Cell not executed: the cell source changed '
+    'while the request was in flight. Please re-run the cell.",'
+    "{autoClose:5e3}),s({cell:e,success:!1}),!1):"
+    "(n.ok||(o.delete(P),e.model.trusted=neurodeskPrevTrusted),"
+    "s({cell:e,success:n.ok}),n.ok)}"
+    "catch(t){if(e.model.trusted=neurodeskPrevTrusted,"
+    "s({cell:e,success:!1}),!e.isDisposed)throw t;return!1}"
 )
 
 DIVERGENT_REPAIR_CALL_BEFORE = (
@@ -621,6 +691,8 @@ def patch_widget_trust(labextension_dir: Path) -> bool:
                 anchor in text
                 for anchor in (
                     WIDGET_TRUST_BEFORE,
+                    WIDGET_TRUST_V1_AFTER,
+                    WIDGET_TRUST_GUARD_AFTER,
                     WIDGET_TRUST_AFTER,
                     DIVERGENT_REPAIR_CALL_BEFORE,
                     DIVERGENT_REPAIR_CALL_AFTER,
@@ -639,9 +711,31 @@ def patch_widget_trust(labextension_dir: Path) -> bool:
     source_bundle = active_executor_paths[0]
     source_text = texts[source_bundle]
 
-    trust_clean = source_text.count(WIDGET_TRUST_BEFORE) == 1
     trust_patched = source_text.count(WIDGET_TRUST_AFTER) == 1
-    if trust_clean == trust_patched:
+    trust_v1 = source_text.count(WIDGET_TRUST_V1_AFTER) == 1
+    trust_at_guards = source_text.count(WIDGET_TRUST_GUARD_AFTER) == 1
+    trust_clean = (
+        not trust_patched
+        and not trust_v1
+        and not trust_at_guards
+        and source_text.count(WIDGET_TRUST_BEFORE) == 1
+        and source_text.count(TRUST_DISPATCH_BEFORE) == 1
+    )
+    restore_patched = source_text.count(TRUST_RESTORE_AFTER) == 1
+    restore_clean = (
+        not restore_patched and source_text.count(TRUST_RESTORE_BEFORE) == 1
+    )
+    if restore_clean == restore_patched:
+        raise ValueError(
+            "server-side trust restore anchor did not match exactly once; "
+            "reassess the widget trust workaround"
+        )
+    if (trust_patched or trust_at_guards) != restore_patched:
+        raise ValueError(
+            "partial server-side cell trust workaround detected; "
+            "refusing to continue"
+        )
+    if [trust_clean, trust_v1, trust_at_guards, trust_patched].count(True) != 1:
         raise ValueError(
             "server-side cell trust anchor did not match exactly once; "
             "reassess the widget trust workaround"
@@ -662,7 +756,7 @@ def patch_widget_trust(labextension_dir: Path) -> bool:
             "partial divergent-history repair detected; refusing to continue"
         )
 
-    if trust_patched and repair_patched and cache_safe_entry:
+    if trust_patched and restore_patched and repair_patched and cache_safe_entry:
         return False
 
     source_match = HASHED_BUNDLE_NAME.match(source_bundle.name)
@@ -677,9 +771,24 @@ def patch_widget_trust(labextension_dir: Path) -> bool:
         )
 
     patched_bundle_text = source_text
-    if trust_clean:
+    if trust_v1:
+        # Migrate an image built with the unsafe pre-guard placement.
         patched_bundle_text = patched_bundle_text.replace(
-            WIDGET_TRUST_BEFORE, WIDGET_TRUST_AFTER
+            WIDGET_TRUST_V1_AFTER, WIDGET_TRUST_BEFORE
+        )
+    elif trust_at_guards:
+        # Migrate the intermediate placement after the kernel guards but
+        # before request preparation and its execution-scheduled callback.
+        patched_bundle_text = patched_bundle_text.replace(
+            WIDGET_TRUST_GUARD_AFTER, WIDGET_TRUST_BEFORE
+        )
+    if trust_clean or trust_v1 or trust_at_guards:
+        patched_bundle_text = patched_bundle_text.replace(
+            TRUST_DISPATCH_BEFORE, WIDGET_TRUST_AFTER
+        )
+    if restore_clean:
+        patched_bundle_text = patched_bundle_text.replace(
+            TRUST_RESTORE_BEFORE, TRUST_RESTORE_AFTER
         )
     if repair_clean:
         patched_bundle_text = patched_bundle_text.replace(
