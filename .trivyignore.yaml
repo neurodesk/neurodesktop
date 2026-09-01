@@ -1,4 +1,12 @@
 vulnerabilities:
+  - id: CVE-2026-56854
+    statement: >-
+      Trivy finds golang.org/x/crypto/ssh in the Apptainer and bundled
+      gocryptfs binaries, but the vulnerable code path is the SSH server-only
+      NewServerConn authentication callback. Neither binary implements an SSH
+      server or calls NewServerConn, so the source-address authentication
+      bypass is not reachable. Remove this ignore if either binary gains an
+      SSH server.
   - id: CVE-2026-53215
     statement: >-
       linux-libc-dev is retained only because the CERN CVMFS runtime package
