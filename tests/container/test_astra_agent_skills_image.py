@@ -220,8 +220,12 @@ def test_opencode_finds_every_reproduction_skill_in_a_restored_home(tmp_path):
     assert restored_hooks.is_file(), output
     assert not restored_hooks.is_symlink()
 
+    # Skill discovery does not need to initialize external plugins. In
+    # particular, the Lightcone adapter runs its session-start hook while it
+    # loads, which makes this read-only assertion depend on unrelated external
+    # work. The adapter itself is exercised by the focused test below.
     code, output = run_cmd(
-        "/usr/bin/opencode debug skill", env={"HOME": str(home)}, timeout=30
+        "/usr/bin/opencode debug skill --pure", env={"HOME": str(home)}, timeout=30
     )
     assert code == 0, output
     discovered = {skill["name"] for skill in json.loads(output)}
