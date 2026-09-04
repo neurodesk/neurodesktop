@@ -176,30 +176,18 @@ def test_upstream_checkouts_are_pinned_to_an_exact_commit():
     exist: a reference that disappears has to fail here rather than reduce
     this to a vacuous pass.
     """
-    references = ["AGENT_SKILLS_REF", "JUPYTER_COLLABORATION_REF"]
+    references = ["AGENT_SKILLS_REF"]
 
     for reference in references:
         assert f"ARG {reference}=" in DOCKERFILE, reference
         assert f'rev-parse HEAD)" = "${{{reference}}}"' in DOCKERFILE, reference
 
 
-def test_collaboration_frontends_are_rebuilt_for_jupyterlab_46_ydoc():
-    """The 4.x wheels exclude YDoc 4 even though they target JupyterLab 4."""
-    assert 'ARG JUPYTER_COLLABORATION_VERSION="4.4.2"' in DOCKERFILE
+def test_collaboration_frontends_use_release_with_jupyterlab_46_ydoc():
+    """The 5.x wheels publish frontends built for JupyterLab 4.6 and YDoc 4."""
+    assert 'ARG JUPYTER_COLLABORATION_VERSION="5.0.0"' in DOCKERFILE
     assert (
         "jupyter-collaboration==${JUPYTER_COLLABORATION_VERSION}" in DOCKERFILE
     )
-    assert (
-        'npm pkg set "resolutions.@jupyter/ydoc=${MYST_YDOC_VERSION}"'
-        in DOCKERFILE
-    )
-    assert "packages/collaboration-extension" in DOCKERFILE
-    assert "packages/docprovider-extension" in DOCKERFILE
-    assert (
-        "COLLAB_DEST=/opt/conda/share/jupyter/labextensions/"
-        "@jupyter/collaboration-extension" in DOCKERFILE
-    )
-    assert (
-        "DOCPROVIDER_DEST=/opt/conda/share/jupyter/labextensions/"
-        "@jupyter/docprovider-extension" in DOCKERFILE
-    )
+    assert "JUPYTER_COLLABORATION_REF" not in DOCKERFILE
+    assert "/tmp/jupyter-collaboration" not in DOCKERFILE

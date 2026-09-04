@@ -209,8 +209,8 @@ def test_jupyter_ai_server_and_frontend_extensions_are_compatible():
 
     code, lab_output = run_cmd("jupyter labextension list --verbose", timeout=60)
     assert code == 0, lab_output
-    assert "@jupyter/collaboration-extension v4.4.2" in lab_output
-    assert "@jupyter/docprovider-extension v4.4.2" in lab_output
+    assert "@jupyter/collaboration-extension v5.0.2" in lab_output
+    assert "@jupyter/docprovider-extension v5.0.2" in lab_output
     assert "not compatible with the current JupyterLab" not in lab_output
 
 

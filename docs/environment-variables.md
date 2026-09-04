@@ -222,10 +222,9 @@ reviewed; the Dockerfile itself is authoritative.
 - `CODEX_CLI_VERSION`: the `@openai/codex` CLI release
   installed globally; defaults to `0.147.0` and must stay inside the range the
   pinned codex-acp adapter declares, because the adapter drives this binary
-- `JUPYTER_COLLABORATION_VERSION`, `JUPYTER_COLLABORATION_REF`: release and
-  exact source commit used to rebuild Jupyter AI's collaboration frontends for
-  JupyterLab 4.6's YDoc 4 contract; defaults to `4.4.2` and
-  `3bf11cb7b271b554998105a11e6c9b8c3e376615`
+- `JUPYTER_COLLABORATION_VERSION`: Jupyter Collaboration release installed for
+  Jupyter AI; defaults to `5.0.0`, whose published frontends support JupyterLab
+  4.6 and YDoc 4
 - `MYST_PNPM_VERSION`, `MYST_YDOC_VERSION`: pnpm and Jupyter
   YDoc releases used for the MyST/RISE compatibility rebuild; defaults to
   `11.21.0` and `4.1.1`

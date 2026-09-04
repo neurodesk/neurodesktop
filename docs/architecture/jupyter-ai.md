@@ -74,12 +74,11 @@ registration site; a different hook overriding ours still warns.
 
 ## Collaboration stack and server workarounds
 
-Jupyter AI 3.1.2 is installed with Jupyter Collaboration 4.4.2. The release
-targets JupyterLab 4, but its published collaboration and document-provider
-frontends support `@jupyter/ydoc` only through version 3. Neurodesktop rebuilds
-those two bundles against the image's JupyterLab 4.6 YDoc 4.1.1 contract. The
-image test requires both rebuilt extensions to report `OK` in `jupyter
-labextension list --verbose`.
+Jupyter AI 3.1.2 is installed with Jupyter Collaboration 5.0.0. Its published
+collaboration and document-provider frontends target JupyterLab 4.6 and
+`@jupyter/ydoc` 4, so the image uses the wheels without rebuilding them. The
+image test requires both extensions to report `OK` in `jupyter labextension
+list --verbose`.
 
 Jupyter AI 3.1.x requires `jupyter-server-documents`; removing the package or
 disabling its server extension is not a supported fallback for this release.
