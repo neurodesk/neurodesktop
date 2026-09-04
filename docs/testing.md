@@ -75,6 +75,7 @@ non-obvious tiers protect.
 
 | Area | On a checkout | In the built image |
 | --- | --- | --- |
+| Lmod availability-list defaults | `pytest tests/unit/test_lmod_avail_extensions.py` | `pytest /opt/tests/test_lmod_avail_extensions.py` |
 | Apptainer NVIDIA auto-configuration | `pytest tests/unit/test_apptainer_nv.py` | — |
 | Access-URL banner (`print_access_url.sh`) | `pytest tests/unit/test_print_access_url.py` | — |
 | Sherlock launcher (`scripts/connectSherlock.sh`) | `pytest tests/unit/test_connect_sherlock.py` | — |

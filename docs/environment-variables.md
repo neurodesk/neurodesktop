@@ -19,6 +19,9 @@ are listed at the end. The subsystems themselves are described in
 - `CVMFS_MODULES`: CVMFS module catalogue path used when refreshing
   `MODULEPATH`. Fixed to `/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/` by
   `environment_variables.sh`; not a user override
+- `LMOD_AVAIL_EXTENSIONS`: controls whether Lmod includes module extensions in
+  `module avail` and `ml av` output. The image defaults it to `no` so those
+  listings focus on loadable modules; set it to `yes` to include extensions
 - `NEURODESKTOP_CVMFS_SELECTION_TTL_SECONDS`: lifetime of the cached CVMFS
   server ranking produced by `cvmfs_server_select.sh`; defaults to `604800`
   (7 days). Set to `0` to re-probe on every startup

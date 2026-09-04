@@ -27,6 +27,13 @@
 - `docs/architecture.md`, `docs/testing.md`, and
   `docs/environment-variables.md` are referenced by path from tests and the
   compiled agentic workflows; do not move or rename them.
+- When changing the Lmod availability-list defaults in the `Dockerfile`, run
+  `pytest tests/unit/test_lmod_avail_extensions.py` from a checkout and
+  `pytest /opt/tests/test_lmod_avail_extensions.py` in the built image. Keep
+  `LMOD_AVAIL_EXTENSIONS=no` as an overridable image default, and keep the
+  image test exercising the terminal's real `ml av` command with a synthetic
+  extension so it proves extension entries are omitted unless explicitly
+  enabled.
 - When changing the automatic `APPTAINER_NV` setup in
   `environment_variables.sh`, run `pytest tests/unit/test_apptainer_nv.py`
   from a checkout. Gate the default on the loaded proprietary driver at

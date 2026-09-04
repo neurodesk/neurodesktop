@@ -1123,6 +1123,7 @@ EOF
 
 ENV DONT_PROMPT_WSL_INSTALL=1
 ENV LMOD_CMD=/usr/share/lmod/lmod/libexec/lmod
+ENV LMOD_AVAIL_EXTENSIONS=no
 # jupyter_server_mcp embeds FastMCP, whose startup banner (an ASCII box with a
 # hosting ad) would otherwise land in the Jupyter server log on every boot.
 ENV FASTMCP_SHOW_SERVER_BANNER=0
