@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-28"
+last-reviewed: "2026-09-04"
 ---
 
 # Build-Time Behaviors
@@ -149,9 +149,11 @@ anchor fails the image build and requires the patch to be reassessed.
 
 The Dockerfile builds Apptainer from upstream source in a dedicated build stage
 and copies `/opt/apptainer` into the runtime image. The build is controlled by
-`APPTAINER_VERSION`, `APPTAINER_GO_VERSION`, and `APPTAINER_GRPC_VERSION` so the
-image can move to scanner-fixed Go toolchain and module versions before a
-matching upstream multi-arch runtime image is published.
+`APPTAINER_VERSION`, `APPTAINER_GO_VERSION`, `APPTAINER_GRPC_VERSION`, and
+`APPTAINER_CRYPTO_VERSION` so the image can move to scanner-fixed Go toolchain
+and module versions before a matching upstream multi-arch runtime image is
+published. The crypto override is applied to both Apptainer and its separately
+vendored gocryptfs build.
 
 macOS Docker/root sessions use `--overlay /tmp/apptainer_overlay` for writable
 container sessions. This works around the "FATAL:   image targets 'amd64',

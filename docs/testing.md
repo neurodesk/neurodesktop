@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-08-31"
+last-reviewed: "2026-09-04"
 ---
 
 # Testing
@@ -109,6 +109,7 @@ live user desktop unless stopping or reconfiguring xrdp is acceptable.
 For focused Apptainer build checks:
 
 ```bash
+pytest tests/unit/test_apptainer_crypto_security.py
 docker buildx build --check .
 docker buildx build --target apptainer --progress=plain .
 ```

@@ -6,6 +6,7 @@ ARG BASE_IMAGE_TAG=2026-08-10
 ARG APPTAINER_VERSION=1.5.3
 ARG APPTAINER_GO_VERSION=1.26.5
 ARG APPTAINER_GRPC_VERSION=1.83.0
+ARG APPTAINER_CRYPTO_VERSION=0.55.0
 ARG CVMFS_VERSION=2.13.3+ubuntu24.04
 ARG CVMFS_RELEASE_VERSION=4.9
 ARG CVMFS_RELEASE_SHA256=88f4bb658c2c85e77aec39181f61dea8ab641b3481a0db2b00f453beabb05395
@@ -14,6 +15,7 @@ FROM golang:${APPTAINER_GO_VERSION}-bookworm AS apptainer
 
 ARG APPTAINER_VERSION
 ARG APPTAINER_GRPC_VERSION
+ARG APPTAINER_CRYPTO_VERSION
 
 COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
 
@@ -49,7 +51,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     git clone --depth 1 --branch "v${APPTAINER_VERSION}" https://github.com/apptainer/apptainer.git /tmp/apptainer \
     && cd /tmp/apptainer \
     && for i in 1 2 3; do \
-        go get "google.golang.org/grpc@v${APPTAINER_GRPC_VERSION}" \
+        go get \
+            "google.golang.org/grpc@v${APPTAINER_GRPC_VERSION}" \
+            "golang.org/x/crypto@v${APPTAINER_CRYPTO_VERSION}" \
         && go mod tidy \
         && go mod download \
         && break \
@@ -66,6 +70,24 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         echo "download-dependencies attempt ${attempt}/5 failed; retrying." >&2; \
         sleep "$((attempt * 10))"; \
     done \
+    && test "$(go list -m -f '{{.Version}}' golang.org/x/crypto)" = "v${APPTAINER_CRYPTO_VERSION}" \
+    && gocryptfs_archive="$(echo gocryptfs_v*_src-deps.tar.gz)" \
+    && test -f "${gocryptfs_archive}" \
+    && gocryptfs_dir="${gocryptfs_archive%.tar.gz}" \
+    && tar -xf "${gocryptfs_archive}" \
+    && cd "${gocryptfs_dir}" \
+    && for i in 1 2 3; do \
+        go get "golang.org/x/crypto@v${APPTAINER_CRYPTO_VERSION}" \
+        && go mod tidy \
+        && go mod vendor \
+        && break \
+        || { if [ "$i" -eq 3 ]; then exit 1; fi; sleep 5; }; \
+    done \
+    && test "$(go list -m -f '{{.Version}}' golang.org/x/crypto)" = "v${APPTAINER_CRYPTO_VERSION}" \
+    && cd .. \
+    && tar -czf "${gocryptfs_archive}.patched" "${gocryptfs_dir}" \
+    && mv "${gocryptfs_archive}.patched" "${gocryptfs_archive}" \
+    && rm -rf "${gocryptfs_dir}" \
     && ./scripts/compile-dependencies \
     && printf '%s\n' "${APPTAINER_VERSION}" > VERSION \
     && ./mconfig --prefix=/opt/apptainer --with-suid \
@@ -227,7 +249,7 @@ RUN mkdir -p /opt/strace \
     && chmod +x /opt/strace
 
 ARG TOMCAT_REL="11"
-ARG TOMCAT_VERSION="11.0.24"
+ARG TOMCAT_VERSION="11.0.25"
 ARG TOMCAT_MIGRATION_VERSION="1.0.12"
 ARG GUACAMOLE_VERSION="1.6.0"
 ENV LANG=""

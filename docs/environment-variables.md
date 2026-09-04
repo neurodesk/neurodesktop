@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-08-25"
+last-reviewed: "2026-09-04"
 ---
 
 # Environment Variables
@@ -229,13 +229,15 @@ reviewed; the Dockerfile itself is authoritative.
 - `MYST_PNPM_VERSION`, `MYST_YDOC_VERSION`: pnpm and Jupyter
   YDoc releases used for the MyST/RISE compatibility rebuild; defaults to
   `11.21.0` and `4.1.1`
-- `APPTAINER_VERSION`, `APPTAINER_GO_VERSION`, `APPTAINER_GRPC_VERSION`:
-  Apptainer source release and the Go toolchain/grpc module versions used in
-  its dedicated build stage; defaults to `1.5.3`, `1.26.5`, and `1.83.0`
+- `APPTAINER_VERSION`, `APPTAINER_GO_VERSION`, `APPTAINER_GRPC_VERSION`,
+  `APPTAINER_CRYPTO_VERSION`: Apptainer source release and the Go
+  toolchain/grpc/crypto module versions used in its dedicated build stage;
+  defaults to `1.5.3`, `1.26.5`, `1.83.0`, and `0.55.0`. The crypto override
+  also updates the separately vendored gocryptfs build.
 - `BASE_IMAGE_TAG`: tag of the upstream Jupyter Docker base image
 - `GUACAMOLE_VERSION`, `TOMCAT_REL`, `TOMCAT_VERSION`,
   `TOMCAT_MIGRATION_VERSION`: Guacamole release (`1.6.0`) and the Tomcat
-  major/exact/migration-tool versions serving it (`11`, `11.0.24`, `1.0.12`)
+  major/exact/migration-tool versions serving it (`11`, `11.0.25`, `1.0.12`)
 - `CODE_SERVER_VERSION`: code-server release; defaults to `4.132.0`
 - `NEUROCOMMAND_REF`: neurocommand git ref cloned during the build; CI passes
   a resolved `main` SHA so neurocommand changes invalidate the install layer
