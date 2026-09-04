@@ -110,12 +110,18 @@ completion signal.
 - Use the pre-authenticated shell `gh` CLI for GitHub reads and never for
   writes. Use `safeoutputs` for every GitHub write and completion signal.
 - Work directly without sub-agents, progress narration, or a todo list.
-- The run is complete only after exactly one safe-output tool call:
-  `add_comment` or `noop`. Never finish with a plan, progress message,
-  checklist, or ordinary assistant response.
-- Publish the best supported partial conclusion if evidence is incomplete.
-  Preserve the final six model invocations for formatting recovery and the
-  terminal safe-output call.
+- The run is complete only after exactly one safe-output CLI command. Run
+  `safeoutputs add_comment --item_number <issue-number> --body <diagnosis>` or,
+  only when an equivalent diagnosis is already present, run
+  `safeoutputs noop --message <reason>`. Never finish with a plan, progress
+  message, checklist, diagnosis in ordinary assistant text, or any other
+  assistant response.
+- If evidence is incomplete, put the best supported partial conclusion in the
+  `--body` of `safeoutputs add_comment`; do not narrate that conclusion as an
+  assistant response. A workflow run that is still in progress or whose log is
+  not yet available still requires that terminal comment command.
+- Preserve the final six model invocations for formatting recovery and the
+  terminal safe-output command. After that command succeeds, stop immediately.
 
 ## Evidence Collection Budget
 
@@ -135,8 +141,9 @@ completion signal.
 ## Hard Output Deadline
 
 - The eighth read command is a hard decision deadline. Do not start another
-  hypothesis after it.
-- Call the selected safe-output tool before turn 24. A supported partial
+  hypothesis after it. The next command must be the selected `safeoutputs`
+  command; do not emit the diagnosis as assistant text first.
+- Run the selected safe-output command before turn 24. A supported partial
   conclusion is better than exhausting the hard model-invocation ceiling.
 
 ## Classification and Output
@@ -145,7 +152,8 @@ Classify the issue as exactly one of: `repository defect`, `transient
 infrastructure/setup failure`, `productive run exhausted its model-invocation
 budget`, `runaway/retry loop`, `needs clarification`, or `duplicate`.
 
-Use `add_comment` with:
+Run `safeoutputs add_comment` with the resolved issue number as `--item_number`
+and a `--body` containing:
 
 1. the classification and concise root cause;
 2. exact evidence, including run/job identifiers and the last productive action;
@@ -154,5 +162,5 @@ Use `add_comment` with:
 5. for a repository defect, instructions to manually dispatch `Issue Fixer`
    with this issue number after a human accepts the diagnosis.
 
-Use `noop` only when an equivalent current diagnosis is already present and no
-new evidence or next action would be added.
+Run `safeoutputs noop --message <reason>` only when an equivalent current
+diagnosis is already present and no new evidence or next action would be added.

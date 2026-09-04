@@ -113,9 +113,12 @@ def test_issue_investigator_is_a_bounded_diagnose_and_comment_phase():
     assert "Use `safeoutputs` for every GitHub write and completion signal" in workflow
     assert "Never use the shell `gh` CLI" not in workflow
     assert "Work directly without sub-agents" in workflow
-    assert "The run is complete only after exactly one safe-output tool call" in workflow
+    assert "The run is complete only after exactly one safe-output CLI command" in workflow
+    assert "safeoutputs add_comment --item_number <issue-number> --body <diagnosis>" in workflow
+    assert "safeoutputs noop --message <reason>" in workflow
     assert "{{#runtime-import .github/workflows/issue-investigator.md}}" in lock
-    assert "Never finish with a plan, progress message" in normalized_workflow
+    assert "diagnosis in ordinary assistant text" in normalized_workflow
+    assert "After that command succeeds, stop immediately" in normalized_workflow
     assert "## Evidence Collection Budget" in workflow
     assert "Use a maximum of 8 read commands" in workflow
     assert "one representative failing job log" in workflow
@@ -125,9 +128,14 @@ def test_issue_investigator_is_a_bounded_diagnose_and_comment_phase():
     assert "Do not retry a failing read or probe more than once" in normalized_workflow
     assert "call a safe-output tool immediately" in normalized_workflow
     assert "The eighth read command is a hard decision deadline" in workflow
+    assert (
+        "The next command must be the selected `safeoutputs` command"
+        in normalized_workflow
+    )
     assert "Do not edit repository files" in normalized_workflow
-    assert "Call the selected safe-output tool before turn 24" in workflow
-    assert "`add_comment` or `noop`" in normalized_workflow
+    assert "Run the selected safe-output command before turn 24" in workflow
+    assert "whose log is not yet available still requires" in normalized_workflow
+    assert "resolved issue number as `--item_number`" in normalized_workflow
     assert "create-pull-request:" not in workflow
     assert "dispatch-workflow:" not in workflow
     assert "create_pull_request" not in lock
