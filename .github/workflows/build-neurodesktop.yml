@@ -398,7 +398,7 @@ jobs:
         run: docker pull "$IMAGEID:amd64"
       - name: Initialize CVMFS
         if: matrix.needs_cvmfs
-        uses: cvmfs-contrib/github-action-cvmfs@v3
+        run: .github/scripts/install_cvmfs.sh
       - name: Configure Neurodesk CVMFS
         if: matrix.needs_cvmfs
         run: |
