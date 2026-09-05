@@ -7,6 +7,15 @@ from testlib import repo_path
 
 
 WORKFLOW = repo_path(".github/workflows/build-neurodesktop.yml")
+IMAGE_TEST_WORKFLOWS = (
+    WORKFLOW,
+    repo_path(".github/workflows/build-neurodesktop-dev.yml"),
+    repo_path(".github/workflows/build-neurodesktop-test.yml"),
+)
+CVMFS_ACTION = (
+    "cvmfs-contrib/github-action-cvmfs@"
+    "10197e000cc0add8e54ac4fb73d3ed44e2de72b4 # v5.5"
+)
 
 
 def _tag_step(workflow):
@@ -91,6 +100,14 @@ def test_production_build_checkouts_stay_on_the_run_sha():
     assert checkout_count > 0
     assert workflow.count("ref: ${{ github.sha }}") == checkout_count
     assert "ref: ${{ github.ref }}" not in workflow
+
+
+def test_image_tests_use_cvmfs_action_without_stale_apt_package_lists():
+    for workflow_path in IMAGE_TEST_WORKFLOWS:
+        workflow = workflow_path.read_text()
+
+        assert CVMFS_ACTION in workflow
+        assert "github-action-cvmfs@v3" not in workflow
 
 
 def test_production_build_updates_the_date_tag_without_deleting_it():

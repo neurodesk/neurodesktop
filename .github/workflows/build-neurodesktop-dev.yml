@@ -253,7 +253,7 @@ jobs:
         run: docker pull "$IMAGEID:latest"
       - name: Initialize CVMFS
         if: matrix.needs_cvmfs
-        uses: cvmfs-contrib/github-action-cvmfs@v3
+        uses: cvmfs-contrib/github-action-cvmfs@10197e000cc0add8e54ac4fb73d3ed44e2de72b4 # v5.5
       - name: Configure Neurodesk CVMFS
         if: matrix.needs_cvmfs
         run: |
