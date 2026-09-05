@@ -1,6 +1,8 @@
 # CodeRabbit configuration
 # Reference: https://docs.coderabbit.ai/reference/yaml-template
 reviews:
+  review_status: false
+  in_progress_fortune: false
   auto_review:
     enabled: true
     # Agentic workflows open draft pull requests so review must start before
