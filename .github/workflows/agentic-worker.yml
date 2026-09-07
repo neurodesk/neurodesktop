@@ -1,0 +1,151 @@
+name: Agentic worker
+
+on:
+  workflow_call:
+    inputs:
+      kind:
+        required: true
+        type: string
+      subject:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    if: vars.AGENTIC_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      actions: read
+    outputs:
+      skip: ${{ steps.task.outputs.skip }}
+      base_sha: ${{ steps.task.outputs.base_sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Prepare task from trusted controller
+        id: task
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TASK_KIND: ${{ inputs.kind }}
+          TASK_SUBJECT: ${{ inputs.subject }}
+        run: python3 .github/scripts/agentic_worker.py prepare --directory "$RUNNER_TEMP/task"
+      - name: Save trusted task and controller
+        if: steps.task.outputs.skip != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: agentic-control
+          include-hidden-files: true
+          path: |
+            .github/scripts/agentic_worker.py
+            .github/scripts/check_agentic_sandbox.py
+            config/agentic/
+          retention-days: 7
+      - name: Save trusted task identity
+        if: steps.task.outputs.skip != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: agentic-task
+          path: ${{ runner.temp }}/task/task.json
+          retention-days: 7
+
+  candidate:
+    needs: prepare
+    if: needs.prepare.result == 'success' && needs.prepare.outputs.skip == 'false'
+    runs-on: ${{ vars.AGENTIC_RUNNER || 'neurodesk-syd-arcrunner-neurodesktop' }}
+    timeout-minutes: 125
+    permissions:
+      contents: read
+    concurrency:
+      group: neurodesktop-codex-subscription
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          path: candidate
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: agentic-control
+          path: ${{ runner.temp }}/agentic-control
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: agentic-task
+          path: ${{ runner.temp }}/agentic-output
+      - name: Build pinned execution image from trusted configuration
+        run: >-
+          docker build --tag neurodesktop-agentic:codex-0.153.4
+          --build-arg WORKER_UID="$(id -u)" --build-arg WORKER_GID="$(id -g)"
+          "$RUNNER_TEMP/agentic-control/config/agentic"
+      - name: Verify container mounts and Codex sandbox without credentials
+        run: python3 "$RUNNER_TEMP/agentic-control/.github/scripts/check_agentic_sandbox.py"
+      - name: Generate and independently validate a candidate
+        env:
+          AGENTIC_CODEX_HOME: ${{ vars.AGENTIC_CODEX_HOME || '/var/lib/neurodesktop-codex' }}
+          AGENTIC_CODEX_MODEL: ${{ vars.AGENTIC_CODEX_MODEL || 'gpt-5.6-sol' }}
+        run: >-
+          python3 "$RUNNER_TEMP/agentic-control/.github/scripts/agentic_worker.py" run
+          --directory "$RUNNER_TEMP/agentic-output"
+          --workspace "$GITHUB_WORKSPACE/candidate"
+          --control "$RUNNER_TEMP/agentic-control/config/agentic"
+      - name: Stop task container after completion or cancellation
+        if: always()
+        run: >-
+          python3 "$RUNNER_TEMP/agentic-control/.github/scripts/agentic_worker.py" cleanup
+          --directory "$RUNNER_TEMP/agentic-output"
+      - name: Save candidate for isolated publication
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: agentic-candidate
+          path: |
+            ${{ runner.temp }}/agentic-output/result.json
+            ${{ runner.temp }}/agentic-output/change.patch
+            ${{ runner.temp }}/agentic-output/validation.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [prepare, candidate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: agentic-control
+          path: ${{ runner.temp }}/agentic-control
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: agentic-candidate
+          path: ${{ runner.temp }}/agentic-output
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: agentic-task
+          path: ${{ runner.temp }}/agentic-output
+      - name: Publish draft or evidence-backed outcome
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AGENTIC_CI_TOKEN: ${{ secrets.AGENTIC_CI_TOKEN }}
+          AGENTIC_PUSH_TOKEN: ${{ secrets.AGENTIC_PUSH_TOKEN }}
+        run: >-
+          python3 "$RUNNER_TEMP/agentic-control/.github/scripts/agentic_worker.py" publish
+          --directory "$RUNNER_TEMP/agentic-output"
+          --workspace "$GITHUB_WORKSPACE"

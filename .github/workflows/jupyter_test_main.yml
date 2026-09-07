@@ -50,9 +50,6 @@ jobs:
       ADMIN_TOKEN: ${{ secrets[matrix.token_secret] }}
       USER: ${{ vars[matrix.user_var] || matrix.default_user }}
       API_URL: ${{ vars[matrix.url_var] || matrix.default_url }}
-      # JasonEtco/create-an-issue still ships Node 20 only (no v24 release
-      # as of 2026-05); force runners to execute it on Node 24.
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -484,17 +481,3 @@ jobs:
           echo "❌ Some tests failed. Check logs above for details."
           exit 1
         fi
-    # Create issue only for play servers when they fail
-    - name: Generate issue on job failure
-      if: always() && failure() && contains(fromJSON('["play-eu", "play-america", "play-aus", "edu-neurodesk"]'), matrix.server_name)
-      uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5
-      env: 
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GITHUB_WORKFLOW: ${{ github.workflow }}
-        GITHUB_SERVER_URL: ${{ github.server_url }}
-        GITHUB_REPOSITORY: ${{ github.repository }}
-        GITHUB_RUN_ID: ${{ github.run_id }}
-        SERVER_NAME: ${{ matrix.server_name }}
-        SERVER_URL: ${{ matrix.default_url }}
-      with:
-        filename: .github/jupyterhub_failure_issue_template.md

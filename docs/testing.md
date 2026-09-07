@@ -85,7 +85,7 @@ non-obvious tiers protect.
 | Jupyter AI, ACP personas, collaboration/widget compatibility and server patches | see [below](#jupyter-ai-and-acp-personas) | `pytest /opt/tests/test_astra_jupyter_ai_image.py /opt/tests/test_widget_compatibility_image.py` |
 | Notebook Intelligence / MyST and standalone RISE | `pytest tests/unit/test_nbi_settings_patch.py tests/unit/test_myst_build_workaround.py tests/unit/test_jupyterlab_rise_patch.py` | `pytest /opt/tests/test_nbi_labextension_patch.py /opt/tests/test_rise_slides_image.py` |
 | Launcher extension, workspace link routing | `pytest tests/unit/test_workspace_link_routing.py` | `pytest /opt/tests/test_workspace_link_routing_image.py` |
-| Agentic workflows under `.github/workflows/*.md` | `pytest tests/unit/test_report_job_failure_action.py tests/unit/test_agentic_maintenance_workflows.py` | — |
+| Subscription agent workflows and failure reporting | `pytest tests/unit/test_agentic_*.py tests/unit/test_report_workflow_failure.py` | Worker Docker sandbox probe |
 
 ### Jupyter Server Proxy response limits
 

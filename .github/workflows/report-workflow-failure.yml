@@ -1,0 +1,51 @@
+name: Report workflow failure
+
+on:
+  workflow_run:
+    workflows:
+      - Build neurodesktop
+      - Build neurodesktop-test
+      - Build neurodesktop-dev
+      - Backfill neurodesktop history
+      - Unit tests
+      - Codespell
+      - Test Objectstorage
+      - Test cvmfs
+      - Self-hosted Runner Test
+      - JupyterHub API Testing (All instances)
+      - JupyterHub Notebook Testing (All instances)
+      - Agentic issue repair
+      - Agentic maintenance
+      - Agentic PR review
+      - Agentic runner readiness
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+concurrency:
+  group: failure-report-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  report:
+    if: contains(fromJSON('["failure", "timed_out"]'), github.event.workflow_run.conclusion)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted reporting code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: Report completed run and dispatch issue repair
+        env:
+          AGENTIC_ENABLED: ${{ vars.AGENTIC_ENABLED }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { reportWorkflowFailure } = require('./.github/scripts/report_workflow_failure.cjs');
+            await reportWorkflowFailure({ github, context, core, repairEnabled: process.env.AGENTIC_ENABLED === 'true' });

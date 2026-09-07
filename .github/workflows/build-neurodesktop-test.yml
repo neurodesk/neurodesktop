@@ -27,9 +27,6 @@ on:
 env:
   DOCKERHUB_ORG: ${{ vars.DOCKERHUB_ORG }}
   QUAY_ORG: ${{ vars.QUAY_ORG }}
-  # Opt the lone Node 20 holdout (JasonEtco/create-an-issue, no Node 24
-  # release as of 2026-05) into Node 24 to silence deprecation warnings.
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   # Set only for self-hosted runners to optimize build performance
   # MAKEFLAGS: "-j4"
   # NINJA_STATUS: "[%f/%t] "
@@ -208,13 +205,6 @@ jobs:
           echo "::group::Network bytes since pod start (/proc/net/dev)"
           cat /proc/net/dev
           echo "::endgroup::"
-      - name: Report job failure
-        if: always() && failure()
-        uses: ./.github/actions/report-job-failure
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          details: ${{ matrix.platform.arch }}
-
   merge-manifests:
     needs: build-image
     runs-on: neurodesk-syd-arcrunner-neurodesktop
@@ -333,18 +323,6 @@ jobs:
               echo "| DockerHub image | Not configured; \`DOCKERHUB_ORG\` is empty. |"
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
-      - name: Checkout repository for failure issue template
-        if: always() && failure()
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ github.ref }}
-      - name: Report job failure
-        if: always() && failure()
-        uses: ./.github/actions/report-job-failure
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          details: merge-manifests
-
   test-image:
     name: test-image (${{ matrix.arch }} / ${{ matrix.profile.test_profile }})
     needs: build-image
@@ -604,14 +582,3 @@ jobs:
           trivyignores: ./.trivyignore.yaml
           timeout: 25m0s
           skip-files: /opt/rclone-v1.60.1-linux-amd64/README.txt,/opt/rclone-v1.60.1-linux-amd64/README.html,/opt/rclone-v1.60.1-linux-amd64/rclone.1,/opt/code-server/lib/vscode/package.json,/opt/code-server/lib/vscode/extensions/handlebars/package.json
-      - name: Checkout repository for failure issue template
-        if: always() && failure()
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ github.ref }}
-      - name: Report job failure
-        if: always() && failure()
-        uses: ./.github/actions/report-job-failure
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          details: ${{ matrix.arch }}

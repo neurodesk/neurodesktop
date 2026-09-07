@@ -1,0 +1,38 @@
+name: Agentic issue repair
+
+on:
+  issues:
+    types: [opened, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      issue-number:
+        description: Issue to investigate and fix
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: agentic-issue-${{ github.event.issue.number || inputs.issue-number }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  repair:
+    if: >-
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      (github.event_name == 'workflow_dispatch' ||
+       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association) ||
+       contains(github.event.issue.labels.*.name, 'agentic-approved')) &&
+      (github.event.action != 'labeled' || github.event.label.name == 'agentic-approved') &&
+      !contains(github.event.issue.labels.*.name, 'agentic-operations') &&
+      !contains(github.event.issue.labels.*.name, 'agentic-ignore')
+    uses: ./.github/workflows/agentic-worker.yml
+    with:
+      kind: issue
+      subject: ${{ format('{0}', github.event.issue.number || inputs.issue-number) }}
+    secrets: inherit
