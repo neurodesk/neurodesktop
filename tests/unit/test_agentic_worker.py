@@ -147,6 +147,7 @@ def test_review_has_three_commit_bound(worker, github, tmp_path, count, skip):
     task = worker.prepare("review", "42", "owner/repo", "100", tmp_path)
     assert task["skip"] is skip
     assert task["base_sha"] == "b" * 40
+    assert task["validation_sha"] == "a" * 40
 
 
 @pytest.mark.parametrize("pr", [
@@ -455,7 +456,7 @@ def candidate(worker, git_repo, tmp_path, monkeypatch):
 
 def test_candidate_runs_independent_credential_free_validation(worker, candidate):
     state, repo, control, output, auth, _ = candidate
-    worker.run_candidate({"kind": "issue", "base_sha": state["base_sha"]}, repo, control, output, auth, "chosen-model")
+    worker.run_candidate({"kind": "issue", "base_sha": state["base_sha"], "validation_sha": state["base_sha"]}, repo, control, output, auth, "chosen-model")
     assert len(state["calls"]) == 2
     agent, validation = state["calls"]
     assert "chosen-model" in agent and 'forced_login_method="chatgpt"' in agent
@@ -473,7 +474,7 @@ def test_candidate_runs_independent_credential_free_validation(worker, candidate
 def test_candidate_failed_validation_becomes_blocked(worker, candidate, error):
     state, repo, control, output, auth, _ = candidate
     state["validation_error"] = error
-    worker.run_candidate({"kind": "issue", "base_sha": state["base_sha"]}, repo, control, output, auth, "chosen-model")
+    worker.run_candidate({"kind": "issue", "base_sha": state["base_sha"], "validation_sha": state["base_sha"]}, repo, control, output, auth, "chosen-model")
     result = json.loads((output / "result.json").read_text())
     assert result["outcome"] == "blocked"
     proof, log = (output / "validation.txt").read_text().split("\n", 1)
@@ -489,7 +490,7 @@ def test_candidate_rejects_subscription_token_in_artifacts(worker, candidate, lo
     else:
         state["result"]["body"] = token
     with pytest.raises(ValueError, match="Credential"):
-        worker.run_candidate({"kind": "issue", "base_sha": state["base_sha"]}, repo, control, output, auth, "chosen-model")
+        worker.run_candidate({"kind": "issue", "base_sha": state["base_sha"], "validation_sha": state["base_sha"]}, repo, control, output, auth, "chosen-model")
     assert not (output / "change.patch").exists()
     assert not (output / "result.json").exists()
     assert len(state["calls"]) == 1
@@ -499,7 +500,7 @@ def test_candidate_refuses_pr_without_patch(worker, candidate):
     state, repo, control, output, auth, _ = candidate
     state["edit"] = None
     with pytest.raises(ValueError, match="without a patch"):
-        worker.run_candidate({"kind": "issue", "base_sha": state["base_sha"]}, repo, control, output, auth, "chosen-model")
+        worker.run_candidate({"kind": "issue", "base_sha": state["base_sha"], "validation_sha": state["base_sha"]}, repo, control, output, auth, "chosen-model")
     assert len(state["calls"]) == 1
 
 
@@ -508,7 +509,7 @@ def test_candidate_rejects_auth_inside_checkout(worker, candidate):
     auth = repo / "auth"
     auth.mkdir()
     with pytest.raises(ValueError, match="outside the checkout"):
-        worker.run_candidate({"kind": "issue", "base_sha": state["base_sha"]}, repo, control, output, auth, "chosen-model")
+        worker.run_candidate({"kind": "issue", "base_sha": state["base_sha"], "validation_sha": state["base_sha"]}, repo, control, output, auth, "chosen-model")
     assert not state["calls"]
 
 
@@ -772,3 +773,27 @@ def test_result_reserves_room_for_publication_evidence(worker):
     with pytest.raises(ValueError, match="insufficient room"):
         worker.validate_result(valid_result(body="b" * 30000,
                                             pending_validation=["p" * 1000] * 50))
+
+
+def test_fetch_revision_materializes_an_older_task_without_checking_it_out(worker, proposal, tmp_path):
+    task, _, repo, remote = proposal
+    (repo / "file.txt").write_text("new default branch\n")
+    worker.git("add", "--all", cwd=repo)
+    worker.git("commit", "-m", "Later main", cwd=repo)
+    worker.git("push", "origin", "main", cwd=repo)
+    checkout = tmp_path / "fresh"
+    worker.git("clone", "--depth=1", "--branch", "main", remote.as_uri(), str(checkout))
+    current = worker.git("rev-parse", "HEAD", cwd=checkout)
+    with pytest.raises(worker.CommandFailure):
+        worker.git("cat-file", "-e", task["base_sha"], cwd=checkout)
+    worker.fetch_revision(checkout, task["base_sha"])
+    assert worker.git("cat-file", "-t", task["base_sha"], cwd=checkout) == "commit"
+    assert worker.git("rev-parse", "HEAD", cwd=checkout) == current
+
+
+def test_fetch_revision_rejects_refs_and_options_before_git(worker, monkeypatch, tmp_path):
+    def forbidden(*a, **k):
+        pytest.fail("Invalid revision reached git")
+    monkeypatch.setattr(worker, "git", forbidden)
+    with pytest.raises(ValueError, match="revision SHA"):
+        worker.fetch_revision(tmp_path, "--upload-pack=evil")

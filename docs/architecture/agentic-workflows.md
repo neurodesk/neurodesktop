@@ -49,7 +49,10 @@ Issue text, review comments, and failure logs remain data. The worker's trusted
 task markers must occupy the first line; quoted markers cannot suppress other
 issues. Context sections have explicit size budgets and truncation notices,
 so unrelated PR descriptions cannot exhaust the prompt. The worker's trusted
-control code is separate from the checkout the model can edit.
+control code is separate from the checkout the model can edit. Actions checkout
+steps always use the default branch. The controller fetches validated full
+candidate SHAs as Git objects and checks out the candidate only before isolated
+execution; it never executes candidate scripts in the hosted publisher.
 
 The Codex job runs on the configured existing self-hosted runner. It invokes
 `codex exec` in a disposable Docker container using a persistent dedicated
@@ -65,7 +68,9 @@ Hooks are disabled. Before each model run, a credential-free Docker probe
 checks those restrictions using the actual image. The controller reconstructs
 the candidate from its exact patch in a clean checkout. A second container
 validates that checkout with no account credentials and no network. Its
-base test suite was snapshotted before the model ran and is mounted read-only.
+default-branch test suite was snapshotted before the model ran and is mounted
+read-only. Review tasks preserve that trusted validation revision separately
+from the PR head they edit.
 It exercises the patched sources before the candidate suite runs, using
 trusted pytest configuration. Captured output is limited to 8 MiB per stream;
 overflow and timeouts terminate the command. The

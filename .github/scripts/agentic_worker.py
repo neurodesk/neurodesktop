@@ -262,7 +262,7 @@ def prepare(kind, subject, repo, run_id, output):
     base = api(f"repos/{repo}/commits/{branch}")["sha"]
     task = {
         "kind": kind, "subject": subject, "repo": repo, "base_branch": branch,
-        "base_sha": base, "run_id": run_id, "skip": False, "context": {},
+        "base_sha": base, "validation_sha": base, "run_id": run_id, "skip": False, "context": {},
     }
     pulls = pages(f"repos/{repo}/pulls?state=open&per_page=100")
     owned = [pr for pr in pulls if owned_pull(pr, repo)]
@@ -458,7 +458,7 @@ def run_candidate(task, workspace, control, output, auth, model):
     with tempfile.TemporaryDirectory(prefix="neurodesktop-agentic-baseline-", dir=output.parent) as directory:
         baseline = Path(directory)
         # The model never receives this mount. Snapshot before it can alter the checkout.
-        snapshot_validation_baseline(workspace, task["base_sha"], baseline)
+        snapshot_validation_baseline(workspace, task["validation_sha"], baseline)
         with (auth / ".neurodesktop-worker.lock").open("w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             secrets = token_values(auth)
@@ -680,6 +680,12 @@ def trigger_ci(task, workspace):
     push_branch(task["branch"], workspace, token=token)
 
 
+def fetch_revision(workspace, revision):
+    if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("Task is missing a trusted full revision SHA")
+    git("fetch", "--no-tags", "--depth=1", "origin", revision, cwd=workspace)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=("prepare", "run", "publish", "cleanup"))
@@ -694,7 +700,10 @@ def main():
         prepare(os.environ["TASK_KIND"], os.environ["TASK_SUBJECT"], os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_RUN_ID"], output)
     else:
         task = json.loads((output / "task.json").read_text())
+        fetch_revision(args.workspace.resolve(), task["base_sha"])
         if args.phase == "run":
+            fetch_revision(args.workspace.resolve(), task["validation_sha"])
+            git("checkout", "--detach", "--force", task["base_sha"], cwd=args.workspace.resolve())
             run_candidate(task, args.workspace.resolve(), args.control.resolve(), output,
                           Path(os.environ["AGENTIC_CODEX_HOME"]), os.environ["AGENTIC_CODEX_MODEL"])
         else:

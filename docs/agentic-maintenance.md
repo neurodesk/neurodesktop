@@ -217,7 +217,8 @@ possible transformed disclosure and is not a replacement for the sandbox.
 
 Before independent testing, the controller resets the checkout and reapplies
 exactly `change.patch`, removing ignored or untracked state left by the agent.
-Before the model starts, the controller snapshots the base revision's tests.
+Before the model starts, the controller snapshots the trusted default-branch
+revision's tests, including for review tasks whose candidate is a PR head.
 The validator mounts that snapshot read-only and runs it against the patched
 source using trusted pytest settings, then runs the candidate's own suite.
 A candidate `conftest.py` cannot silence the preserved suite. Imported candidate

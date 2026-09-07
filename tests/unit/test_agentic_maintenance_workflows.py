@@ -60,6 +60,9 @@ def test_model_runner_and_publisher_have_separate_permissions_and_artifacts():
     assert 'queue: max' in candidate and 'cancel-in-progress: false' in candidate
     assert 'timeout-minutes: 125' in candidate
     assert 'persist-credentials: false' in candidate
+    assert 'ref: ${{ needs.prepare.outputs.base_sha }}' not in workflow
+    assert 'ref: ${{ github.event.repository.default_branch }}' in candidate
+    assert 'ref: ${{ github.event.repository.default_branch }}' in publish
     assert 'GH_TOKEN:' not in candidate and 'secrets.' not in candidate
     assert 'contents: write' not in candidate and 'pull-requests: write' not in candidate
     assert "needs.prepare.result == 'success' && needs.prepare.outputs.skip == 'false'" in candidate
