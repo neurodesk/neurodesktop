@@ -3,7 +3,7 @@ title: Subscription-based agentic workflow redesign
 description: Replace report-oriented gh-aw jobs with conventional Actions that use the existing Codex subscription and produce validated draft PRs
 parent: index.md
 status: implemented
-last-reviewed: "2026-09-05"
+last-reviewed: "2026-09-07"
 ---
 
 # Subscription-based agentic workflow redesign
@@ -170,7 +170,7 @@ pytest tests/unit/test_agentic_worker.py \
   tests/unit/test_agentic_maintenance_workflows.py
 ```
 
-The final worker image passed all 519 checkout unit tests in 44 seconds.
+The final worker image passed all 543 checkout unit tests in 53 seconds.
 `python3 .github/scripts/check_agentic_sandbox.py` passed against that Docker
 image with dummy credentials and no model call. Actionlint passed every
 changed workflow. Documentation frontmatter and relative links also passed

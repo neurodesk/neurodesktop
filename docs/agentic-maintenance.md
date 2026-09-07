@@ -3,7 +3,7 @@ title: Agentic maintenance workflows
 description: Run subscription-authenticated Codex on the existing self-hosted runner and review its proposed fixes
 parent: index.md
 status: current
-last-reviewed: "2026-09-05"
+last-reviewed: "2026-09-07"
 ---
 
 # Agentic maintenance workflows
@@ -121,7 +121,7 @@ remain explicit in the PR. Confirm the resulting branch and PR before enabling
 unattended operation. A completed agent process without a published PR is not
 proof that publication works.
 
-The final worker image passed all 519 checkout unit tests and the Docker
+The final worker image passed all 543 checkout unit tests and the Docker
 sandbox probe passed locally with dummy credentials. Actionlint passed the
 changed workflows. No model request or live subscription login was made.
 The production runner's persistent mounts, account access, and complete
@@ -217,6 +217,13 @@ possible transformed disclosure and is not a replacement for the sandbox.
 
 Before independent testing, the controller resets the checkout and reapplies
 exactly `change.patch`, removing ignored or untracked state left by the agent.
+Before the model starts, the controller snapshots the base revision's tests.
+The validator mounts that snapshot read-only and runs it against the patched
+source using trusted pytest settings, then runs the candidate's own suite.
+A candidate `conftest.py` cannot silence the preserved suite. Imported candidate
+code still runs inside pytest, so these results are not a security proof.
+Subprocess stdout and stderr are each capped at 8 MiB; overflow or timeout
+terminates the command instead of retaining unbounded output on the host.
 The first line of `validation.txt` records whether validation passed and the
 patch's SHA-256. The publisher checks that proof against the submitted patch.
 Failed validation retains a bounded test-log tail for diagnosis.
@@ -232,9 +239,7 @@ artifact used by their current run.
 For changes to these workflows or their controller scripts, run:
 
 ```bash
-pytest tests/unit/test_agentic_worker.py \
-  tests/unit/test_report_workflow_failure.py \
-  tests/unit/test_agentic_maintenance_workflows.py
+pytest tests/unit/test_agentic_*.py tests/unit/test_report_workflow_failure.py
 ```
 
 The PR API uses the normal `GITHUB_TOKEN`, so PRs remain authored by

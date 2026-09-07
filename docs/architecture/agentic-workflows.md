@@ -3,7 +3,7 @@ title: Agentic CI workflows
 description: Failure reporting, issue repair, scheduled maintenance, and subscription-authenticated Codex execution through conventional Actions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-05"
+last-reviewed: "2026-09-07"
 ---
 
 # Agentic CI workflows
@@ -65,6 +65,10 @@ Hooks are disabled. Before each model run, a credential-free Docker probe
 checks those restrictions using the actual image. The controller reconstructs
 the candidate from its exact patch in a clean checkout. A second container
 validates that checkout with no account credentials and no network. Its
+base test suite was snapshotted before the model ran and is mounted read-only.
+It exercises the patched sources before the candidate suite runs, using
+trusted pytest configuration. Captured output is limited to 8 MiB per stream;
+overflow and timeouts terminate the command. The
 validation record includes the patch hash and retains bounded failure logs.
 This separates the agent's own test claims from the checks that authorize
 publication.

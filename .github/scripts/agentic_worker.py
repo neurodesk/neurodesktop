@@ -420,6 +420,11 @@ def snapshot_validation_baseline(workspace, base_sha, destination):
                             stream.write(chunk)
                 else:
                     raise ValueError("Base test archive contains a non-regular file")
+    except BaseException:
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+        raise
     finally:
         if process.stdout is not None:
             process.stdout.close()
