@@ -121,7 +121,7 @@ remain explicit in the PR. Confirm the resulting branch and PR before enabling
 unattended operation. A completed agent process without a published PR is not
 proof that publication works.
 
-The final worker image passed all 543 checkout unit tests and the Docker
+The final worker image passed all 568 checkout unit tests and the Docker
 sandbox probe passed locally with dummy credentials. Actionlint passed the
 changed workflows. No model request or live subscription login was made.
 The production runner's persistent mounts, account access, and complete
