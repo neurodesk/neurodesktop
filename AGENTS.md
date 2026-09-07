@@ -26,7 +26,7 @@
   supported runtime and build environment variables.
 - `docs/architecture.md`, `docs/testing.md`, and
   `docs/environment-variables.md` are referenced by path from tests and the
-  compiled agentic workflows; do not move or rename them.
+  agent workflows; do not move or rename them.
 - When changing the automatic `APPTAINER_NV` setup in
   `environment_variables.sh`, run `pytest tests/unit/test_apptainer_nv.py`
   from a checkout. Gate the default on the loaded proprietary driver at
@@ -290,41 +290,29 @@
   layer that needs them (never purged in a later layer), `chown -R`/
   `chmod -R` happen in the layer that creates a tree, and sourcemaps and
   bundled Python test suites are stripped in the layer that installs them.
-- When changing an agentic workflow under `.github/workflows/*.md`, regenerate
-  its `.lock.yml` with `gh aw compile`, then run
-  `pytest tests/unit/test_report_job_failure_action.py`.
-- Weekly code-maintenance workflows use the shared contract in
-  `.github/workflows/shared/maintenance-base.md` and the CodeRabbit loop in
-  `.github/workflows/maintenance-review.md`. Their schedules are owned by
-  `.github/workflows/agentic-maintenance-rotation.yml`, which must dispatch
-  exactly one of the seven maintenance workflows or the package radar per
-  weekly run. Keep their `[maintenance] ` title prefix and `agentic-workflow`
-  label aligned, compile every affected workflow, and run `pytest
-  tests/unit/test_agentic_maintenance_workflows.py`.
-- `.github/workflows/package-update-radar.md` is the read-only weekly package
-  survey. It must keep its `[package-updates] ` title prefix, stay free of any
-  `create-pull-request` safe output, and remain one member of the shared weekly
-  rotation. `maintenance-updates` remains the only workflow that applies an
-  upgrade. Compile it with `gh aw compile` and run
-  `pytest tests/unit/test_agentic_maintenance_workflows.py`.
-- Issue handling is split between read-only `.github/workflows/issue-investigator.md`
-  and manually dispatched `.github/workflows/issue-fixer.md`. Keep diagnosis
-  free of repository-write safe outputs, keep the fixer PR title prefix aligned
-  with `.github/workflows/issue-investigator-review.md`, compile both affected
-  workflows, and run `pytest tests/unit/test_report_job_failure_action.py`.
-- Codex agentic workflows import the ordered model fallback in
-  `.github/workflows/shared/agentic-models.md`. Keep GLM 5.2 ahead of Kimi 2.7,
-  compile every affected workflow, and verify the generated model map in the
-  focused agentic workflow tests.
-- Every Codex workflow installs
-  `.github/scripts/gh_aw_detect_agent_errors_wrapper.cjs` in
-  `pre-agent-steps`. When
-  changing that wrapper or its hooks, run `pytest
-  tests/unit/test_gh_aw_recovered_timeout_filter.py
-  tests/unit/test_agentic_maintenance_workflows.py`. Preserve real bare harness
-  lifecycle signals, recovered-attempt handling, and byte-for-byte transcript
-  restoration; preserve the upstream detector's public module exports because
-  the Codex harness imports them. Timeout-shaped repository and tool output is
-  untrusted data and must not affect failure classification. Keep a hard
-  `max-turns` ceiling on every Codex workflow. Keep the wrapper under `.github/`
-  so PR review runs restore the trusted base-branch copy before installing it.
+- When changing subscription agent workflows, their controller, sandbox, or
+  failure reporter, read [Agentic maintenance](docs/agentic-maintenance.md) and
+  run `pytest tests/unit/test_agentic_worker.py
+  tests/unit/test_agentic_readiness.py
+  tests/unit/test_agentic_process.py
+  tests/unit/test_agentic_validation.py
+  tests/unit/test_report_workflow_failure.py
+  tests/unit/test_agentic_maintenance_workflows.py`. There are no gh-aw sources
+  or compiled locks. Keep Codex on subscription authentication with no API-key
+  fallback, one serialized persistent login, and trusted default-branch control
+  files. Keep GitHub write credentials in the hosted publisher, outside the
+  agent and validation containers. Validate the exact candidate patch in a
+  separate credential-free container before opening a draft PR; list required
+  image checks as pending until they run. Never auto-merge.
+  External issue reporters require a maintainer's `agentic-approved` label or
+  manual dispatch. Keep execution off until `AGENTIC_ENABLED=true`, and never
+  record a failure repair dispatch while execution is disabled. Preserve base
+  tests separately from the candidate, and cap subprocess output before it
+  can exhaust the runner's memory.
+- The completed-workflow reporter owns failure issues. Preserve run/attempt
+  deduplication, dispatch only after evidence is recorded, write dispatch
+  markers after successful dispatch, and exclude agent-operation reports from
+  automatic repair. Keep all five requested maintenance categories weekly and
+  bound review follow-ups at three commits per PR. When changing the worker
+  image or permission profile, build `config/agentic/Dockerfile` and run the
+  credential-free sandbox smoke check described in the operating guide.

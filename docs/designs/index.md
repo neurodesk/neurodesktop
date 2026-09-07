@@ -4,7 +4,7 @@ description: Assessments, implementation plans, and audits kept as the record
   of why the tree is shaped the way it is
 parent: ../index.md
 status: current
-last-reviewed: "2026-08-13"
+last-reviewed: "2026-09-05"
 ---
 
 # Design records
@@ -17,6 +17,8 @@ current behavior see [Architecture](../architecture.md),
 
 | Record | Status | What it decided |
 | --- | --- | --- |
+| [Subscription-based agentic workflow redesign](agentic-subscription-redesign.md) | implemented | Use the existing runner and Codex subscription for issue repairs, five weekly maintenance categories, independent validation, and draft PR publication |
+| [Codex authentication research](agentic-codex-auth-research.md) | research | Verify subscription CLI behavior, gh-aw authentication limits, and the explicit public-repository caveat in official CI guidance |
 | [Agentic workflow reliability remediation](agentic-workflow-reliability-remediation.md) | implemented | Size hard invocation ceilings from transcripts, split diagnosis from fixing, rotate maintenance, and stop conflating scheduled infrastructure failures with agent failures |
 | [ASTRA and Lightcone integration](astra-lightcone-integration.md) | implemented | Adopt the ASTRA specification layer and build the read-only provenance viewer; defer Lightcone execution behind explicit upstream blockers |
 | [OpenCode web interface plan](opencode-integration-plan.md) | implemented | Ship the official OpenCode web UI behind a rewriting reverse proxy with browser-based key setup |

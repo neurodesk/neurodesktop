@@ -1,128 +1,299 @@
 ---
 title: Agentic maintenance workflows
-description: Weekly agentic maintenance checks, the package-update radar, and
-  the CodeRabbit pull-request review loop
+description: Run subscription-authenticated Codex on the existing self-hosted runner and review its proposed fixes
 parent: index.md
 status: current
-last-reviewed: "2026-08-13"
+last-reviewed: "2026-09-05"
 ---
 
-# Agentic Maintenance Workflows
+# Agentic maintenance workflows
 
-The architecture context for these workflows (including the issue
-investigator they share their review loop with) is in
-[Agentic CI workflows](architecture/agentic-workflows.md).
+Neurodesktop uses the existing self-hosted Actions runner to run Codex with a
+dedicated ChatGPT subscription login. New issues lead to investigation and a
+proposed fix in a draft pull request. Scheduled jobs cover five maintenance
+categories each week. GitHub-hosted jobs prepare tasks and publish changes.
 
-Neurodesktop has seven agentic maintenance checks and one read-only package
-survey. A conventional `agentic-maintenance-rotation.yml` controller dispatches
-exactly one of them each week, so adding a maintenance category does not create
-another independent schedule. Every member also supports manual dispatch; use
-that path to canary one workflow before a shared harness, model, or compiler
-change is rolled across the fleet.
+This page covers setup and operation. See
+[Agentic CI workflows](architecture/agentic-workflows.md) for the trust
+boundaries and [the redesign record](designs/agentic-subscription-redesign.md)
+for the reasons behind the change.
 
-All maintenance, package-survey, and issue-investigation workflows import the
-shared `.github/workflows/shared/agentic-models.md` alias. The ordered
-`neurodesk` candidates prefer GLM 5.2 and use Kimi 2.7 as the secondary model.
+## Configure the worker
 
-| Workflow | Focus | Non-negotiable guardrail |
+The repository contains the workflow implementation. The runner still needs
+a persistent authentication directory and a working Docker daemon before the
+first live run. Repository changes do not provision these resources.
+
+| Repository variable | Default | Purpose |
 | --- | --- | --- |
-| `maintenance-test-pruning` | Redundant or obsolete tests | A remaining test must protect the same observable contract. |
-| `maintenance-test-coverage` | Important untested behavior | Add behavioral, not line-coverage-only, protection. |
-| `maintenance-updates` | Dependencies, tools, actions, and base images | One pinned update with upstream compatibility evidence. |
-| `maintenance-abstraction-police` | Duplicate domain abstractions | Consolidate semantic duplication, not similar-looking code. |
-| `maintenance-dead-code` | Unused code, configuration, assets, or dependencies | Check dynamic, build, workflow, and runtime callers before deletion. |
-| `maintenance-docs-drift` | Documentation that disagrees with current behavior | Change documentation only when the implementation is authoritative. |
-| `maintenance-flaky-tests` | Recurrent nondeterministic failures | Require repeated evidence and fix the cause without retries or weaker tests. |
+| `AGENTIC_ENABLED` | unset | Set to `true` after runner readiness checks to enable issue, maintenance, and review execution |
+| `AGENTIC_RUNNER` | `neurodesk-syd-arcrunner-neurodesktop` | Runner label for the Codex job |
+| `AGENTIC_CODEX_HOME` | `/var/lib/neurodesktop-codex` | Persistent dedicated Codex authentication directory on that runner |
+| `AGENTIC_CODEX_MODEL` | `gpt-5.6-sol` | Explicit model for the agent |
 
-## Package Update Radar
+The directory must survive replacement of the runner process or pod. The
+existing Actions Runner Controller setup uses a Docker-in-Docker sidecar.
+Bind-mount sources must exist at identical absolute paths in both the runner
+container and the Docker daemon's container. That includes the checkout,
+`RUNNER_TEMP`, and the persistent authentication directory. A path visible
+only in the runner container cannot be mounted by the sidecar's Docker daemon.
 
-`package-update-radar` is the only weekly agentic workflow that produces no
-code. It inventories every pinned third-party version — `Dockerfile` build
-arguments and base image tag, pip/npm/conda/apt pins, the version-sensitive
-JupyterLab extensions, the launcher extension manifests, composite actions, and
-pinned tool versions under `scripts/` and `config/` — probes each component's
-upstream release once, and classifies the gap as security, ready, needs review,
-or blocked.
+An administrator must provide the persistent volume claim and mount the
+credential directory into both containers. Match ownership to the account
+that launches the worker. Do not use a personal home directory containing
+unrelated credentials. The repository does not configure the runner's PVC or
+Kubernetes mounts.
 
-The report lands in a single tracking issue titled
-`[package-updates] Pinned dependency radar` and labeled `agentic-workflow`.
-Later runs add a comment with the complete current report and collapse the
-previous ones, so the issue never fans out into a new issue per week. The
-workflow has no `create-pull-request` safe output at all, so it cannot edit
-files even if a run misbehaves.
+Each worker run builds `neurodesktop-agentic:codex-0.153.4` from the trusted
+[`config/agentic/Dockerfile`](../config/agentic/Dockerfile), reusing the runner's
+Docker cache. The image pins Codex CLI `0.153.4`. Verify Docker can build and
+run that image on the selected runner. The first build needs outbound access
+to its package and base-image sources.
 
-The radar and `maintenance-updates` are deliberately split: the radar keeps a
-ranked candidate list across the whole inventory, and `maintenance-updates`
-applies at most one of those candidates per week with its own upstream
-verification and container validation. A radar entry is a lead, not an
-approval — `maintenance-updates` still has to prove the update independently.
+On the trusted runner, build the image and create the private directory as
+an administrator. Run these commands as the account that runs Actions jobs:
 
-## Pull Request and Review Loop
+```bash
+docker build --tag neurodesktop-agentic:codex-0.153.4 \
+  --build-arg WORKER_UID="$(id -u)" --build-arg WORKER_GID="$(id -g)" \
+  config/agentic
+sudo install -d -m 700 -o "$(id -u)" -g "$(id -g)" /var/lib/neurodesktop-codex
+docker run --rm -it --user "$(id -u):$(id -g)" \
+  --env CODEX_HOME=/codex \
+  --mount type=bind,src=/var/lib/neurodesktop-codex,dst=/codex \
+  neurodesktop-agentic:codex-0.153.4 \
+  codex -c 'cli_auth_credentials_store="file"' login --device-auth
+```
 
-The seven maintenance workflows import the shared
-`.github/workflows/shared/maintenance-base.md` contract
-(`package-update-radar` deliberately does not — it has no pull-request
-outputs, and its bounds live in its own body;
-`tests/unit/test_agentic_maintenance_workflows.py` asserts it stays that
-way). A run first checks for
-an open pull request in its category, investigates one bounded candidate, and
-either opens one narrow draft PR or exits with `noop`. Empty, speculative,
-untested, and duplicate PRs are forbidden. The safe-output allowlist excludes
-agentic workflow sources and generated lock files so a maintenance run cannot
-rewrite its own controls.
+Complete the device login in your browser. Use the configured path if
+`AGENTIC_CODEX_HOME` differs from the default. If the directory already exists,
+check that it belongs to the runner account before changing its ownership.
+Do not replace a healthy existing authentication file. The image's pinned CLI
+creates file-backed credentials in the same directory used by normal jobs.
+The build arguments create the runner's UID/GID entry inside the image, which
+tools such as `ssh-keygen` require.
+If device login is unavailable, follow OpenAI's headless-login alternatives
+linked from the [authentication research](designs/agentic-codex-auth-research.md).
 
-Maintenance PR titles start with `[maintenance] <category>:` and carry the
-`agentic-workflow` label. `.coderabbit.yaml` enables automatic CodeRabbit review
-while the PR is still a draft. A CodeRabbit summary update triggers
-`maintenance-review.md`, which reads the complete current review, validates each
-finding against the latest head, batches valid fixes into one tested commit,
-pushes once to the existing PR branch, and comments exactly
-`@coderabbitai review` to start the next incremental review. The loop stops when
-no actionable findings remain. It never marks a PR ready or merges it.
+After building the image, run the credential-free sandbox check:
 
-## Operational Limits
+```bash
+python3 .github/scripts/check_agentic_sandbox.py
+```
 
-- Each category permits one open PR and one coherent change per run.
-- Maintenance and radar runs have a hard 60 model-invocation ceiling. The
-  read-only issue diagnosis has 30, the separately dispatched fix phase has 80,
-  and PR review loops retain 30. Prompts begin terminal output before the hard
-  boundary, but the firewall ceiling remains authoritative when prose budgets
-  are ignored.
-- Investigation and network reads are bounded in the shared contract (for the
-  radar, in its own workflow body).
-- Scheduled maintenance and radar runs set `report-failure-as-issue: false`;
-  setup, service, and budget failures remain visible in Actions without
-  creating indistinguishable noise issues. Event-driven diagnosis and review
-  workflows retain failure reporting.
-- All Codex workflows install the shared provenance-aware timeout filter before
-  execution. Only bare harness lifecycle records may report a process signal;
-  repository files, test fixtures, and command output are untrusted transcript
-  content and cannot manufacture a timeout. The wrapper must also forward all
-  upstream detector exports used by the Codex harness.
-- Product behavior changes require focused regression tests and the validation
-  described in `docs/testing.md`.
-- Protected or out-of-scope files require human review instead of an automated
-  workaround.
-- Generated `.lock.yml` files are changed only by `gh aw compile` during
-  workflow development.
-- `package-update-radar` permits one open tracking issue and no code changes.
-  Its upstream probes are capped per run; a truncated survey must say so in the
-  report's `Coverage` section rather than silently narrowing.
-- Compiler, harness, or model migrations are deployed through one manually
-  selected workflow first. Expand only after that run reaches a terminal safe
-  output and its failure class is unambiguous.
+Use `--sudo` only when your local Docker installation requires `sudo -n`.
+The probe uses dummy credentials and makes no model call. It verifies stdin,
+checkout writes, denied credential/process/output reads, protected writes,
+and denied tool network access. It also checks that temporary bind mounts
+are visible to Docker. Every worker run executes this probe before Codex.
+The administrator must still verify the real persistent auth mount.
 
-## Further Candidates
+The workflows use no `OPENAI_API_KEY` or `CODEX_API_KEY`. Do not copy the login
+file into GitHub secrets, caches, logs, or artifacts. Normal runs preserve
+Codex's refreshed credentials. A global Actions concurrency group queues
+workers, and host and container file locks prevent simultaneous use of the
+authentication directory. The container retains its lock if the runner
+process disappears and stops Codex after 5,350 seconds. Do not share that
+login with another uncoordinated worker.
 
-Two additional checks would be useful if the weekly PR volume remains
-manageable:
+OpenAI documents subscription login and saved-auth reuse in `codex exec`.
+Its account-authentication CI guide explicitly says not to use this pattern
+for public/open-source repositories. This public repository's subscription
+worker does not comply with that guidance; a private runner does not erase
+that caveat. See the exact sources and implications in
+[Codex authentication research](designs/agentic-codex-auth-research.md).
 
-- **Security-exception expiry:** verify that Trivy allowlist and ignore entries
-  still apply to present dependencies, then remove one expired suppression with
-  a clean scan.
-- **Image/startup budget:** compare built-image size and measured startup phases
-  against a recorded baseline, then propose one evidence-backed reduction when
-  a persistent regression appears.
+## Verify setup with one issue
 
-These should not be enabled until their baseline artifacts and reproducible
-validators exist; without those, they would produce speculative cleanup PRs.
+After configuring the runner and completing login, manually run **Agentic
+runner readiness**. It provisions the four agent labels, then checks the real Docker mounts, sandbox, private file
+permissions, and matching authentication storage in the runner and daemon.
+It does not call a model or prove the saved session is still valid.
+
+Set the repository variable `AGENTIC_ENABLED=true`, then manually dispatch
+the issue workflow for a small existing bug. Verify that
+preparation completes on a hosted runner, the Codex job acquires the configured
+self-hosted runner, and validation runs in a separate container.
+
+A successful fix produces a draft PR with the issue link, the concrete change,
+and checkout test evidence. Required image validation that could not run must
+remain explicit in the PR. Confirm the resulting branch and PR before enabling
+unattended operation. A completed agent process without a published PR is not
+proof that publication works.
+
+The final worker image passed all 519 checkout unit tests and the Docker
+sandbox probe passed locally with dummy credentials. Actionlint passed the
+changed workflows. No model request or live subscription login was made.
+The production runner's persistent mounts, account access, and complete
+issue-to-PR canary still require administrator verification.
+
+Until that variable is set, failure reporting still creates issues but does
+not dispatch repair or record a dispatch marker. After activation, manually
+dispatch repair for any earlier failure issue that still needs attention.
+Clear the variable to stop new work while repairing runner
+configuration. Existing running jobs must be canceled separately.
+
+## Issue and failure handling
+
+[`agentic-issue.yml`](../.github/workflows/agentic-issue.yml) handles incoming
+issues and delegates to the reusable worker. It skips issues labeled
+`agentic-operations` or `agentic-ignore`. Manual dispatch accepts an issue
+number. Issues from repository owners, organization members, and collaborators
+start automatically. For an external reporter's issue, a maintainer must add
+`agentic-approved` or manually dispatch repair. Adding other labels does not
+start work. This admission check limits public consumption of the subscription;
+issue contents remain untrusted even after approval. Failure reports from fork branches
+also need approval or manual dispatch, so fork CI cannot bypass issue admission.
+A confirmed repository defect leads to implementation and validation in the
+same task. The agent must not
+stop at a diagnosis when it can produce a fix. Insufficient evidence,
+external-service failures, and requests with no safe code change produce an
+explicit blocker or no-change result instead of an empty PR.
+
+The completed-workflow reporter watches CI, deployment, and agent jobs. It
+creates or updates a failure issue with a link to the run. Product failures
+enter normal issue handling. Agent authentication, runner, and other
+operational failures are marked as operational so their reports do not launch
+a recursive chain of repair jobs.
+
+Issue branches use `agentic/issue-N-RUNID`; maintenance branches use
+`agentic/maintenance-category-YYYY-Www`. Preparation skips an issue or category that already has an owned open PR.
+Retrying a failed publisher reuses its original prepared task and artifacts. It must not create another PR for
+the same issue. Publication verifies the current branch state before writing
+and never merges changes.
+
+## Weekly maintenance
+
+[`agentic-maintenance.yml`](../.github/workflows/agentic-maintenance.yml)
+runs at 04:23 UTC on weekdays, selecting one category by UTC weekday. Each
+category therefore runs weekly,
+rather than once every several weeks. Manual dispatch supports a focused
+canary or a rerun.
+
+| UTC weekday | Category | Expected work |
+| --- | --- | --- |
+| Monday | `updates` | Check upstream releases and implement one justified compatible update |
+| Tuesday | `security` | Investigate one concrete vulnerability, stale exception, or hardening opportunity |
+| Wednesday | `dead-code` | Prove code, configuration, or a dependency has no remaining callers before removing it |
+| Thursday | `test-coverage` | Add a behavioral test for an important unprotected contract |
+| Friday | `refactoring` | Improve one confusing structure or domain concept with demonstrated benefit |
+
+Each run makes one coherent change. It checks for an existing PR in its
+category before starting another. Findings are implemented when validation
+is feasible. A useful no-change result states what was examined and why no
+change is justified. A blocked result names the missing evidence or check.
+There is no separate report-only package radar that stops before an update PR.
+
+## Review and validation
+
+CodeRabbit can review generated drafts. Its review activity triggers
+[`agentic-review.yml`](../.github/workflows/agentic-review.yml), which collects
+feedback for the existing PR. The worker checks each finding against the
+current head, applies accepted fixes together, validates them, and updates the
+same branch. At most three automatic follow-up commits are allowed per PR.
+Each follow-up comment identifies the published revision and includes its
+independent validation evidence and pending checks. Later feedback remains for
+human review. The workflow never marks a draft
+ready or merges it.
+
+The agent container has subscription credentials but no GitHub publishing
+token. Validation runs in another container with neither authentication nor
+network access. Hosted publication consumes `task.json`, `result.json`, `change.patch`, and
+`validation.txt`. Raw Codex stdout and account state are not uploaded. Container
+isolation separates the host from the agent, while the named Codex `worker`
+permissions profile blocks model tools from reading `/codex`, `/proc`, and
+`/output`. Tools can edit the checkout, but cannot write its Git metadata or
+use the network. Codex hooks and multi-agent execution are disabled. The
+pre-run sandbox probe checks these restrictions against the actual image.
+
+The outer authentication container permits unconfined seccomp and AppArmor
+profiles so Codex can create the nested Bubblewrap sandbox. It still drops
+all Linux capabilities and forbids privilege escalation. These exceptions
+make the tested inner sandbox necessary; Docker alone does not conceal auth.
+Codex itself can access the login to authenticate and refresh it. An exact
+credential-value scan rejects the proposed patch or result if either contains
+known pre-run or refreshed token values. That scan does not detect every
+possible transformed disclosure and is not a replacement for the sandbox.
+
+Before independent testing, the controller resets the checkout and reapplies
+exactly `change.patch`, removing ignored or untracked state left by the agent.
+The first line of `validation.txt` records whether validation passed and the
+patch's SHA-256. The publisher checks that proof against the submitted patch.
+Failed validation retains a bounded test-log tail for diagnosis.
+
+The full checkout unit suite must pass before a draft PR is published. Container-dependent
+checks follow [Testing](testing.md). A draft can state that image checks are
+pending, but must not claim they passed. Failing checkout tests, invalid
+patches, credential or Git-metadata paths, and stale PR heads stop publication.
+Patches are bounded to 50 files and 2 MiB, and new symlinks or submodules need
+manual changes. Proposed workflow edits cannot replace the trusted controller
+artifact used by their current run.
+
+For changes to these workflows or their controller scripts, run:
+
+```bash
+pytest tests/unit/test_agentic_worker.py \
+  tests/unit/test_report_workflow_failure.py \
+  tests/unit/test_agentic_maintenance_workflows.py
+```
+
+The PR API uses the normal `GITHUB_TOKEN`, so PRs remain authored by
+`github-actions[bot]`. Two optional GitHub repository secrets have distinct
+roles. They are GitHub credentials, not OpenAI model API keys.
+
+| Secret | Repository permissions | Hosted publisher use |
+| --- | --- | --- |
+| `AGENTIC_PUSH_TOKEN` | Contents: write; Workflows: write | Push initial and review patches, including proposed workflow changes |
+| `AGENTIC_CI_TOKEN` | Contents: write | Push an empty commit after publication to trigger ordinary PR CI |
+
+Scope a fine-grained token to this repository and the listed permissions.
+Never pass either token into the Codex or validation container. The default
+push uses `GITHUB_TOKEN` when no push token is configured.
+
+When a proposal changes `.github/workflows`, the publisher first creates its
+branch at the trusted base with `GITHUB_TOKEN`. It then pushes the candidate
+with `AGENTIC_PUSH_TOKEN` and a `[skip ci]` commit message. The CI helper checks
+the cumulative workflow diff, including earlier review commits, and refuses
+the automatic empty commit while workflow changes remain. A maintainer must
+review those changes before running their checks. This prevents a proposed
+workflow from immediately executing through the more capable push token.
+
+For ordinary code changes, `AGENTIC_CI_TOKEN` triggers CI without changing the
+PR author. With only `GITHUB_TOKEN`, PR CI can wait for a maintainer to select
+**Approve workflows to run**. GitHub suppresses other token-generated events
+such as ordinary pushes.
+[GitHub workflow triggering](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow)
+
+The workflows are conventional YAML. There are no gh-aw source Markdown files,
+compiled locks, or custom gh-aw timeout detector to regenerate.
+
+## Recover a stopped run
+
+For authentication failures, sign in again on the runner using its dedicated
+Codex home. Do not reset that directory during a healthy run. Subscription
+limits are shared with other work on the account, so exhausted capacity needs
+the allowance to reset or the account's available credits to change.
+
+For a queued job, check the runner label, runner availability, and the job
+currently holding the global worker slot. Check persistent storage and the
+host lock if the runner is available but cannot acquire authentication state.
+
+For publication failures, choose **Re-run failed jobs** after correcting the
+cause. This preserves the prepared task and candidate artifacts for the
+publisher's reconciliation. **Re-run all jobs** prepares a new task and skips
+an issue that already has an open agent PR, so it cannot repair an incomplete
+publication after that PR was created. Artifacts expire after seven days.
+
+If GitHub rejects a workflow-file push, configure `AGENTIC_PUSH_TOKEN` with
+repository Contents and Workflows write permissions, then rerun the failed
+publisher. `AGENTIC_CI_TOKEN` does not authenticate that initial patch push.
+Keep the candidate artifacts while resolving permissions. Workflow-change
+PRs still require maintainer review before their checks run.
+
+For validation failures, read the result or issue comment and correct the
+candidate before submitting it again. A blocked result does not publish the
+patch. Keep existing task branches and PRs so retries can reconcile them.
+An unconditional cleanup step removes the recorded agent or validator
+container after failure or cancellation. If the runner itself disappeared,
+check its Docker daemon for the recorded container before restarting work.
+Do not bypass validation or start a competing worker to clear the queue.

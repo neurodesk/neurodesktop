@@ -1,0 +1,31 @@
+name: Agentic PR review
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: agentic-review-${{ github.event.issue.number }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  review:
+    if: >-
+      github.event.issue.pull_request != null &&
+      github.event.issue.state == 'open' &&
+      github.event.comment.user.login == 'coderabbitai[bot]' &&
+      github.event.issue.user.login == 'github-actions[bot]' &&
+      contains(github.event.issue.labels.*.name, 'agentic-workflow') &&
+      contains(github.event.comment.body, 'summarize by coderabbit.ai')
+    uses: ./.github/workflows/agentic-worker.yml
+    with:
+      kind: review
+      subject: ${{ format('{0}', github.event.issue.number) }}
+    secrets: inherit

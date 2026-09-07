@@ -1,0 +1,57 @@
+name: Agentic runner readiness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: neurodesktop-codex-subscription
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  labels:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Ensure operational and review labels exist
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            for (const [name, color] of [
+              ['agentic-operations', 'b60205'], ['agentic-workflow', '5319e7'],
+              ['agentic-approved', '0e8a16'], ['agentic-ignore', 'eeeeee']
+            ]) {
+              try {
+                await github.rest.issues.getLabel({ ...context.repo, name });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                await github.rest.issues.createLabel({ ...context.repo, name, color });
+              }
+            }
+  readiness:
+    needs: labels
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ${{ vars.AGENTIC_RUNNER || 'neurodesk-syd-arcrunner-neurodesktop' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Build worker image
+        run: >-
+          docker build --tag neurodesktop-agentic:codex-0.153.4
+          --build-arg WORKER_UID="$(id -u)" --build-arg WORKER_GID="$(id -g)"
+          config/agentic
+      - name: Check real mounts and sandbox with dummy credentials
+        run: python3 .github/scripts/check_agentic_sandbox.py
+      - name: Check persistent login without displaying credentials or calling a model
+        env:
+          AGENTIC_CODEX_HOME: ${{ vars.AGENTIC_CODEX_HOME || '/var/lib/neurodesktop-codex' }}
+        run: python3 .github/scripts/check_agentic_readiness.py

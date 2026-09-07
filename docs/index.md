@@ -65,4 +65,4 @@ last-reviewed: "2026-07-31" # last time the content was verified against code
   links so they stay valid from any renderer.
 - `docs/architecture.md`, `docs/testing.md`, and
   `docs/environment-variables.md` are referenced by path from `AGENTS.md`,
-  tests, and the compiled agentic workflows — do not move or rename them.
+  tests, and the agent workflows — do not move or rename them.

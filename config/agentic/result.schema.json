@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "outcome": {"type": "string", "enum": ["change", "no_change", "blocked"]},
+    "title": {"type": "string"},
+    "body": {"type": "string"},
+    "pending_validation": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["outcome", "title", "body", "pending_validation"],
+  "additionalProperties": false
+}

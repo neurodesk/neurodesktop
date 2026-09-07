@@ -1,0 +1,54 @@
+name: Agentic maintenance
+
+on:
+  schedule:
+    - cron: '23 4 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      category:
+        description: One maintenance category
+        required: true
+        type: choice
+        options: [updates, security, dead-code, test-coverage, refactoring]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: agentic-maintenance
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  select:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      category: ${{ steps.select.outputs.category }}
+    steps:
+      - id: select
+        env:
+          REQUESTED_CATEGORY: ${{ inputs.category }}
+        run: |
+          python3 - <<'PY'
+          from datetime import datetime, timezone
+          import os
+          categories = ('updates', 'security', 'dead-code', 'test-coverage', 'refactoring')
+          category = os.environ['REQUESTED_CATEGORY'] or categories[datetime.now(timezone.utc).weekday() % 5]
+          if category not in categories:
+              raise SystemExit('Unknown category')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'category={category}\n')
+          PY
+  maintain:
+    needs: select
+    uses: ./.github/workflows/agentic-worker.yml
+    with:
+      kind: maintenance
+      subject: ${{ needs.select.outputs.category }}
+    secrets: inherit

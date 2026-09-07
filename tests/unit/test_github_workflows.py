@@ -6,7 +6,6 @@ from testlib import repo_path
 
 JUPYTER_TEST_WORKFLOW = repo_path(".github/workflows/jupyter_test_main.yml")
 NOTEBOOK_TEST_WORKFLOW = repo_path(".github/workflows/notebook_(FSL_bet)_workflow.yml")
-NOTEBOOK_FAILURE_TEMPLATE = repo_path(".github/notebook_failure_issue_template.md")
 CODESPELL_WORKFLOW = repo_path(".github/workflows/codespell.yml")
 
 
@@ -231,18 +230,12 @@ def test_notebook_server_start_reports_transport_failures_and_reconciles_retries
 
 def test_notebook_failure_cleanup_and_report_preserve_the_primary_failure():
     workflow = NOTEBOOK_TEST_WORKFLOW.read_text()
-    issue_template = NOTEBOOK_FAILURE_TEMPLATE.read_text()
 
     assert 'if [ -z "${TERMINAL_NAME:-}" ]; then' in workflow
     assert 'NOTEBOOK_SUCCESS=false' in workflow
     assert 'PATTERN_COUNT=0' in workflow
     assert 'NOTEBOOK_CREATED=true' in workflow
     assert 'echo "TERMINAL_NAME=$TERMINAL_NAME" >> "$GITHUB_ENV"' in workflow
-    assert 'SERVER_START_DIAGNOSTIC: ${{ env.SERVER_START_DIAGNOSTIC }}' in workflow
-    assert "**Server Start:** {{ env.SERVER_START_SUCCEEDED }}" in issue_template
-    assert "**Primary Diagnostic:** {{ env.SERVER_START_DIAGNOSTIC }}" in issue_template
-    # A stop timeout must not report a passing test, and the failure issue
-    # must carry the server-stop status.
+    # A stop timeout must not report a passing test; the central reporter
+    # links the complete failed job log.
     assert '&& [ "$SERVER_STOP_STATUS" = "true" ]; then' in workflow
-    assert 'SERVER_STOP_SUCCEEDED: ${{ env.SERVER_STOP_SUCCEEDED }}' in workflow
-    assert "**Server Stop:** {{ env.SERVER_STOP_SUCCEEDED }}" in issue_template
