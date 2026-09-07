@@ -78,3 +78,14 @@ def test_command_returns_stdout_and_accepts_stdin(worker):
     )
 
     assert output == "HELLO\n"
+
+
+def test_command_binary_mode_preserves_non_utf8_output(worker):
+    expected = b"\x00\xffbinary\x80output\n"
+
+    output = worker.command(
+        [sys.executable, "-c", f"import os; os.write(1, {expected!r})"],
+        binary=True,
+    )
+
+    assert output == expected

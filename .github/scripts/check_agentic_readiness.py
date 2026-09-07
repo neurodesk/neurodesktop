@@ -22,7 +22,8 @@ def check_auth_directory(auth):
             raise ValueError("Codex directory and auth.json must be private to the runner user")
         if path != auth and not stat.S_ISREG(metadata.st_mode):
             raise ValueError("Codex auth.json must be a regular file")
-    worker.token_values(auth)
+    if not worker.token_values(auth):
+        raise ValueError("Codex auth.json must contain a usable subscription token")
     return auth
 
 

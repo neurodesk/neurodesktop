@@ -190,11 +190,17 @@ CodeRabbit can review generated drafts. Its review activity triggers
 [`agentic-review.yml`](../.github/workflows/agentic-review.yml), which collects
 feedback for the existing PR. The worker checks each finding against the
 current head, applies accepted fixes together, validates them, and updates the
-same branch. At most three automatic follow-up commits are allowed per PR.
+same branch. A completed CodeRabbit review must name the current head SHA.
+The publisher records each processed head, including no-change and blocked
+outcomes, so repeated summary edits do not start another run for that head.
+At most three automatic follow-up commits are allowed per PR.
 Each follow-up comment identifies the published revision and includes its
 independent validation evidence and pending checks. Later feedback remains for
 human review. The workflow never marks a draft
 ready or merges it.
+
+All Actions checkouts disable persisted Git credentials. The hosted publisher
+passes authentication to Git through process environment configuration.
 
 The agent container has subscription credentials but no GitHub publishing
 token. Validation runs in another container with neither authentication nor

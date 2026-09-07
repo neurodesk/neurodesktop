@@ -42,6 +42,15 @@ def test_readiness_rejects_symlink_auth(readiness, auth):
         readiness.check_auth_directory(auth)
 
 
+@pytest.mark.parametrize("token", ["short", 42, None])
+def test_readiness_rejects_auth_without_a_usable_subscription_token(readiness, auth, token):
+    (auth / "auth.json").write_text(json.dumps({
+        "auth_mode": "chatgpt", "tokens": {"access_token": token},
+    }))
+    with pytest.raises(ValueError, match="usable subscription token"):
+        readiness.check_auth_directory(auth)
+
+
 def test_readiness_refuses_mismatched_daemon_mount(readiness, auth, monkeypatch, capsys):
     monkeypatch.setenv("AGENTIC_CODEX_HOME", str(auth))
     from types import SimpleNamespace

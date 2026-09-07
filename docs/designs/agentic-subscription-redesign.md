@@ -162,7 +162,7 @@ The draft must not imply that container behavior was verified by unit tests.
 A failed check or invalid proposal produces a visible failure rather than a
 false successful fix.
 
-The repository verification targets are:
+The focused workflow verification subset is:
 
 ```bash
 pytest tests/unit/test_agentic_worker.py \
@@ -170,7 +170,10 @@ pytest tests/unit/test_agentic_worker.py \
   tests/unit/test_agentic_maintenance_workflows.py
 ```
 
-The final worker image passed all 543 checkout unit tests in 53 seconds.
+Full checkout verification runs `pytest tests/unit -q`, which includes the
+focused subset above and the other repository unit tests. The worker image
+passed all 543 tests in that full suite in 53 seconds at implementation
+verification.
 `python3 .github/scripts/check_agentic_sandbox.py` passed against that Docker
 image with dummy credentials and no model call. Actionlint passed every
 changed workflow. Documentation frontmatter and relative links also passed
@@ -223,3 +226,23 @@ The deployment now starts inactive. A manual readiness workflow checks the
 real runner's mounts and authentication-file permissions without using a
 model; `AGENTIC_ENABLED=true` then permits the issue-to-PR canary and unattended
 work. This does not change OpenAI's public-repository account-auth guidance.
+
+## CodeRabbit review on PR #899
+
+All eight inline findings and both additional suggestions were addressed:
+context budgets now measure serialized JSON, patch artifacts preserve binary
+and non-UTF-8 bytes, readiness rejects unusable tokens, failure links escape
+Markdown delimiters, review outcomes are deduplicated by the reviewed head,
+and publisher Git credentials remain in process environment configuration.
+The research record now explicitly treats task text as untrusted, and the
+verification record distinguishes focused checks from the full suite.
+
+The sandbox probe also checks attempted credential overwrite, rename, and
+deletion against unchanged host bytes. A regression verifies that passing
+frozen tests cannot mask a failing candidate suite. After these fixes, all
+568 checkout unit tests passed in the offline worker image in 52 seconds;
+156 focused agentic tests, Actionlint, and the real sandbox probe passed.
+
+CodeRabbit's separate docstring coverage metric is informational here: the
+repository does not require docstrings on individual regression tests, and
+adding boilerplate to satisfy that metric would not improve these checks.

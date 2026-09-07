@@ -142,6 +142,19 @@ def test_completed_run_aggregates_matrix_failures_and_dispatches_default_branch(
     assert any(call.get("attempt_number") == 1 for call in output["calls"])
 
 
+def test_malicious_job_name_cannot_change_its_report_link():
+    output = run_reporter(jobs=[{
+        "id": 99,
+        "name": "job](https://attacker.invalid)\\[",
+        "conclusion": "failure",
+    }])
+    comment = output["comments"][0]["body"]
+    trusted_url = "https://github.com/NeuroDesk/neurodesktop/actions/runs/1234/job/99"
+    assert f"]({trusted_url})" in comment
+    assert "](https://attacker.invalid)" not in comment
+    assert "job\\]\\(https://attacker.invalid\\)\\\\\\[" in comment
+
+
 def test_duplicate_delivery_reuses_issue_comment_and_successful_dispatch():
     output = run_reporter(runs=[{}, {}])
     assert len(output["issues"]) == 1

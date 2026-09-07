@@ -136,3 +136,8 @@ def test_reporter_catalog_covers_each_top_level_test_deployment_and_agent_workfl
             continue
         name = re.search(r'^name: (.+)$', path.read_text(), re.M).group(1).strip('"\'')
         assert f'- {name}\n' in reporter, path.name
+
+
+def test_all_worker_checkouts_disable_persisted_credentials():
+    workflow = source('agentic-worker.yml')
+    assert workflow.count('persist-credentials: false') == workflow.count('uses: actions/checkout@')

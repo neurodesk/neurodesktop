@@ -12,6 +12,7 @@ from testlib import load_source_module
 
 @pytest.fixture
 def worker(monkeypatch):
+    monkeypatch.delenv("GH_TOKEN", raising=False)
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
     monkeypatch.delenv("AGENTIC_CI_TOKEN", raising=False)
@@ -136,7 +137,10 @@ def review_context(github, pr, count=0):
         "repos/owner/repo/pulls/42/commits?per_page=100": [
             {"commit": {"message": "[agentic-review] fix"}} for _ in range(count)
         ],
-        "repos/owner/repo/pulls/42/reviews?per_page=100": [],
+        "repos/owner/repo/pulls/42/reviews?per_page=100": [{
+            "user": {"login": "coderabbitai[bot]"},
+            "commit_id": pr["head"]["sha"], "state": "COMMENTED",
+        }],
         "repos/owner/repo/pulls/42/comments?per_page=100": [],
     })
 
@@ -218,7 +222,31 @@ def test_check_patch_reads_real_staged_content(worker, git_repo):
     (git_repo / "file.txt").write_text("after\n")
     worker.git("add", "file.txt", cwd=git_repo)
     patch = worker.check_patch(git_repo)
-    assert "-before\n+after" in patch
+    assert b"-before\n+after" in patch
+
+
+def test_check_patch_round_trips_non_utf8_text_and_binary_blobs(worker, git_repo, tmp_path):
+    text_path = git_repo / "non-utf8.txt"
+    blob_path = git_repo / "blob.bin"
+    text_path.write_bytes(b"before\n")
+    blob_path.write_bytes(b"before\x00blob\n")
+    worker.git("add", "non-utf8.txt", "blob.bin", cwd=git_repo)
+    worker.git("commit", "-m", "binary fixtures", cwd=git_repo)
+
+    expected_text = b"after\xfftext\n"
+    expected_blob = b"after\x00blob\xff\n"
+    text_path.write_bytes(expected_text)
+    blob_path.write_bytes(expected_blob)
+    worker.git("add", "non-utf8.txt", "blob.bin", cwd=git_repo)
+
+    patch = worker.check_patch(git_repo)
+    patch_path = tmp_path / "change.patch"
+    patch_path.write_bytes(patch)
+    worker.git("reset", "--hard", "HEAD", cwd=git_repo)
+    worker.git("apply", "--index", str(patch_path), cwd=git_repo)
+
+    assert text_path.read_bytes() == expected_text
+    assert blob_path.read_bytes() == expected_blob
 
 
 @pytest.mark.parametrize("name", [".env", "config/auth.json", "nested/credentials.json"])
@@ -257,7 +285,7 @@ def proposal(worker, git_repo, tmp_path):
     worker.git("add", "--all", cwd=git_repo)
     output = tmp_path / "output"
     output.mkdir()
-    (output / "change.patch").write_text(worker.check_patch(git_repo))
+    (output / "change.patch").write_bytes(worker.check_patch(git_repo))
     worker.git("reset", "--hard", base, cwd=git_repo)
     worker.write_json(output / "result.json", valid_result(pending_validation=["Container image tests"]))
     proof = {"passed": True, "patch_sha256": hashlib.sha256((output / "change.patch").read_bytes()).hexdigest()}
@@ -674,8 +702,8 @@ def test_workflow_patch_seeds_base_and_retries_scoped_push(worker, proposal, pub
     path.write_text("name: Example\non: workflow_dispatch\njobs: {}\n")
     worker.git("add", "--all", cwd=repo)
     patch = worker.check_patch(repo)
-    (output / "change.patch").write_text(patch)
-    proof = {"passed": True, "patch_sha256": hashlib.sha256(patch.encode()).hexdigest()}
+    (output / "change.patch").write_bytes(patch)
+    proof = {"passed": True, "patch_sha256": hashlib.sha256(patch).hexdigest()}
     (output / "validation.txt").write_text(json.dumps(proof) + "\n12 passed\n")
     worker.git("reset", "--hard", task["base_sha"], cwd=repo)
     monkeypatch.setenv("AGENTIC_PUSH_TOKEN", "private-test-token")
@@ -764,6 +792,7 @@ def test_review_comment_contains_current_revision_and_validation(worker, proposa
     revision = worker.git('rev-parse', task['branch'], cwd=remote)
     comment = next(payload['body'] for path, payload in calls
                    if path.endswith('/comments') and 'Review revision:' in payload['body'])
+    assert comment.startswith(worker.review_marker(task) + '\n')
     assert revision in comment
     assert '12 passed in 1.0s' in comment
     assert 'New subsystem image check' in comment
@@ -797,3 +826,57 @@ def test_fetch_revision_rejects_refs_and_options_before_git(worker, monkeypatch,
     monkeypatch.setattr(worker, "git", forbidden)
     with pytest.raises(ValueError, match="revision SHA"):
         worker.fetch_revision(tmp_path, "--upload-pack=evil")
+
+
+@pytest.mark.parametrize("change", [
+    {"commit_id": "c" * 40}, {"state": "PENDING"},
+    {"user": {"login": "stranger"}},
+])
+def test_review_requires_completed_coderabbit_review_of_current_head(worker, github, tmp_path, change):
+    review_context(github, pull())
+    github[0]["repos/owner/repo/pulls/42/reviews?per_page=100"][0].update(change)
+    assert worker.prepare("review", "42", "owner/repo", "100", tmp_path)["skip"]
+
+
+@pytest.mark.parametrize("author,head,skip", [
+    ("github-actions[bot]", "b", True), ("stranger", "b", False),
+    ("github-actions[bot]", "c", False),
+])
+def test_review_deduplicates_completed_head_by_trusted_marker(worker, github, tmp_path, author, head, skip):
+    review_context(github, pull())
+    github[0]["repos/owner/repo/issues/42/comments?per_page=100"] = [{
+        "user": {"login": author},
+        "body": worker.review_marker({"base_sha": head * 40}) + "\nCompleted",
+    }]
+    assert worker.prepare("review", "42", "owner/repo", "101", tmp_path)["skip"] is skip
+
+
+@pytest.mark.parametrize("outcome", ["no_change", "blocked"])
+def test_review_without_patch_records_head_once(worker, proposal, publisher_api, outcome):
+    task, output, repo, _ = proposal
+    task["kind"] = "review"
+    worker.write_json(output / "result.json", valid_result(outcome=outcome))
+    worker.publish(task, output, repo)
+    worker.publish({**task, "run_id": "101"}, output, repo)
+    bodies = [payload["body"] for path, payload in publisher_api[0] if path.endswith("/comments")]
+    assert len(bodies) == 1
+    assert bodies[0].startswith(worker.review_marker(task) + "\n")
+
+
+@pytest.mark.parametrize("operation", ["fetch", "ls-remote", "push"])
+def test_git_uses_ephemeral_publisher_auth(worker, monkeypatch, tmp_path, operation):
+    import base64
+    monkeypatch.setenv("GH_TOKEN", "publisher-token")
+    monkeypatch.setenv("AGENTIC_PUSH_TOKEN", "workflow-token")
+    calls = []
+    def command(args, **kwargs):
+        calls.append((args, kwargs))
+        return ""
+    monkeypatch.setattr(worker, "command", command)
+    worker.git(operation, "origin", "main", cwd=tmp_path)
+    args, kwargs = calls[0]
+    assert "publisher-token" not in str(args)
+    assert kwargs["env"]["GIT_CONFIG_VALUE_0"] == ""
+    header = kwargs["env"]["GIT_CONFIG_VALUE_1"].split()[-1]
+    assert base64.b64decode(header) == b"x-access-token:publisher-token"
+    assert not list(tmp_path.iterdir())

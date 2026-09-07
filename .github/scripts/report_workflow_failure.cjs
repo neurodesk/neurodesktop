@@ -28,7 +28,14 @@ function ownsMarker(item, marker) {
 }
 
 function inline(value) {
-  return String(value).replace(/[\r\n`]/g, " ").slice(0, 300);
+  const escaped = String(value)
+    .replace(/\\/g, "\\\\")
+    .replace(/[\[\]()]/g, "\\$&")
+    .replace(/[\r\n`]/g, " ");
+  let limited = escaped.slice(0, 300);
+  const trailingBackslashes = limited.match(/\\+$/)?.[0].length || 0;
+  if (trailingBackslashes % 2) limited = limited.slice(0, -1);
+  return limited;
 }
 
 async function reportWorkflowFailure({ github, context, core, repairEnabled = true }) {

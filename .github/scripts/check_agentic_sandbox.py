@@ -25,6 +25,18 @@ for name in ("/codex/auth.json", "/proc/1/environ", "/output/secret"):
         pass
     else:
         raise AssertionError("Sandbox read a forbidden path: " + name)
+auth = Path("/codex/auth.json")
+for action in (
+    lambda: auth.write_text("overwritten"),
+    lambda: auth.rename("/codex/auth-renamed.json"),
+    auth.unlink,
+):
+    try:
+        action()
+    except (OSError, PermissionError):
+        pass
+    else:
+        raise AssertionError("Sandbox changed the subscription credential")
 Path("/workspace/probe.txt").write_text("allowed")
 for name in ("/workspace/.git/config", "/control/probe.txt"):
     try:
@@ -53,6 +65,7 @@ def main():
         for path in (workspace, control, output, auth, workspace / ".git"):
             path.mkdir()
         (auth / "auth.json").write_text('{"dummy": "not-a-credential"}')
+        auth_bytes = (auth / "auth.json").read_bytes()
         (output / "secret").write_text("dummy-output")
         (workspace / ".git/config").write_text("dummy-git")
         name = f"neurodesktop-sandbox-{uuid.uuid4().hex}"
@@ -63,6 +76,7 @@ def main():
             completed = subprocess.run(prefix + command, input="stdin-reaches-container", text=True, capture_output=True, timeout=60)
         finally:
             subprocess.run(prefix + ["docker", "rm", "-f", name], capture_output=True, timeout=30)
+        assert (auth / "auth.json").read_bytes() == auth_bytes
         if completed.returncode:
             raise SystemExit(completed.stderr or completed.stdout)
         assert json.loads(completed.stdout) == {"sandbox": "passed", "stdin": "passed"}

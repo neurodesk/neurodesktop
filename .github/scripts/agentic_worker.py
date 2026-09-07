@@ -33,7 +33,7 @@ class CommandFailure(RuntimeError):
         self.output = result.stdout + result.stderr
 
 
-def command(argv, *, cwd=None, data=None, timeout=120, env=None):
+def command(argv, *, cwd=None, data=None, timeout=120, env=None, binary=False):
     process = subprocess.Popen(
         argv, cwd=cwd, stdin=subprocess.PIPE if data is not None else None,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -69,7 +69,8 @@ def command(argv, *, cwd=None, data=None, timeout=120, env=None):
     if data is not None:
         def write_stdin():
             try:
-                process.stdin.write(data.encode())
+                payload = data if isinstance(data, bytes) else data.encode()
+                process.stdin.write(payload)
                 process.stdin.flush()
             except (BrokenPipeError, OSError):
                 pass
@@ -104,18 +105,22 @@ def command(argv, *, cwd=None, data=None, timeout=120, env=None):
     if writer is not None:
         writer.join(timeout=1)
 
-    stdout = bytes(captured["stdout"]).decode(errors="replace")
-    stderr = bytes(captured["stderr"]).decode(errors="replace")
+    stdout_bytes = bytes(captured["stdout"])
+    stderr_bytes = bytes(captured["stderr"])
     if stopped_for == "timeout":
+        stdout = stdout_bytes if binary else stdout_bytes.decode(errors="replace")
+        stderr = stderr_bytes if binary else stderr_bytes.decode(errors="replace")
         raise subprocess.TimeoutExpired(argv, timeout, output=stdout, stderr=stderr)
     if stopped_for == "output":
         streams = " and ".join(dict.fromkeys(exceeded))
-        notice = f"\n[command {streams} output exceeded {MAX_COMMAND_OUTPUT} bytes; process killed]\n"
-        stderr = (stderr.encode()[:max(0, MAX_COMMAND_OUTPUT - len(notice.encode()))]
-                  + notice.encode()).decode(errors="replace")
+        notice = f"\n[command {streams} output exceeded {MAX_COMMAND_OUTPUT} bytes; process killed]\n".encode()
+        notice = notice[:MAX_COMMAND_OUTPUT]
+        stderr_bytes = stderr_bytes[:MAX_COMMAND_OUTPUT - len(notice)] + notice
         returncode = process.returncode or -signal.SIGKILL
     else:
         returncode = process.returncode
+    stdout = stdout_bytes if binary else stdout_bytes.decode(errors="replace")
+    stderr = stderr_bytes if binary else stderr_bytes.decode(errors="replace")
     result = subprocess.CompletedProcess(argv, returncode, stdout, stderr)
     if result.returncode:
         # Do not include subprocess output: a failed tool may echo credentials.
@@ -123,10 +128,22 @@ def command(argv, *, cwd=None, data=None, timeout=120, env=None):
     return result.stdout
 
 
+def git_environment(token=None):
+    token = token or os.environ.get("GH_TOKEN")
+    if not token:
+        return GIT_ENV
+    header = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return {
+        **GIT_ENV, "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader", "GIT_CONFIG_VALUE_0": "",
+        "GIT_CONFIG_KEY_1": "http.https://github.com/.extraheader", "GIT_CONFIG_VALUE_1": f"AUTHORIZATION: basic {header}",
+    }
+
+
 def git(*args, cwd=None):
     return command(
         ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", *args],
-        cwd=cwd, env=GIT_ENV,
+        cwd=cwd, env=git_environment(),
     ).rstrip("\n")
 
 
@@ -151,6 +168,10 @@ def marker(task):
     return f"<!-- neurodesktop-agentic:{task['kind']}:{task['subject']} -->"
 
 
+def review_marker(task):
+    return f"<!-- neurodesktop-agentic-reviewed:{task['base_sha']} -->"
+
+
 def has_task_marker(pr, task):
     return (pr.get("body") or "").split("\n", 1)[0] == marker(task)
 
@@ -164,8 +185,15 @@ def bounded_context(context):
             return value
         notices.append(path)
         if isinstance(value, str):
-            # Reserve twelve JSON characters for escaped surrogate pairs.
-            return value[:max(0, (budget - 100) // 12)] + "\n[Evidence truncated]"
+            suffix = "\n[Evidence truncated]"
+            lower, upper = 0, len(value)
+            while lower < upper:
+                middle = (lower + upper + 1) // 2
+                if len(json.dumps(value[:middle] + suffix)) <= budget:
+                    lower = middle
+                else:
+                    upper = middle - 1
+            return value[:lower] + suffix
         if isinstance(value, list):
             result = []
             # Retain recent discussion; the issue itself is a separate section.
@@ -312,6 +340,16 @@ def prepare(kind, subject, repo, run_id, output):
             "review_comments": pages(f"repos/{repo}/pulls/{subject}/comments?per_page=100"),
             "comments": pages(f"repos/{repo}/issues/{subject}/comments?per_page=100"),
         }
+        task["skip"] |= not any(
+            review.get("user", {}).get("login") == "coderabbitai[bot]"
+            and review.get("commit_id") == task["base_sha"]
+            and review.get("state") in {"COMMENTED", "CHANGES_REQUESTED", "APPROVED"}
+            for review in task["context"]["reviews"]
+        ) or any(
+            comment.get("user", {}).get("login") == "github-actions[bot]"
+            and (comment.get("body") or "").split("\n", 1)[0] == review_marker(task)
+            for comment in task["context"]["comments"]
+        )
     task["context"] = bounded_context(task["context"])
     output.mkdir(parents=True, exist_ok=True)
     write_json(output / "task.json", task)
@@ -375,19 +413,26 @@ def token_values(auth):
 
 
 def check_patch(workspace):
-    names = git("diff", "--cached", "--name-only", "-z", cwd=workspace).split("\0")
-    names = [name for name in names if name]
+    prefix = ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
+    names = command(
+        [*prefix, "diff", "--cached", "--name-only", "-z"],
+        cwd=workspace, env=GIT_ENV, binary=True,
+    ).split(b"\0")
+    names = [os.fsdecode(name) for name in names if name]
     if len(names) > 50:
         raise ValueError("Patch changes more than 50 files")
     for name in names:
         if any(part in {".git", ".env"} for part in Path(name).parts) or Path(name).name in {"auth.json", "credentials.json"}:
             raise ValueError("Patch includes a credential or Git metadata path")
-    patch = git("diff", "--cached", "--binary", "--no-ext-diff", "--no-textconv", cwd=workspace) + "\n"
-    if len(patch.encode()) > MAX_PATCH:
+    patch = command(
+        [*prefix, "diff", "--cached", "--binary", "--no-ext-diff", "--no-textconv"],
+        cwd=workspace, env=GIT_ENV, binary=True,
+    )
+    if len(patch) > MAX_PATCH:
         raise ValueError("Patch exceeds 2 MiB")
-    if re.search(r"^(?:new file mode|new mode) (?:120000|160000)$", patch, re.M):
+    if re.search(rb"^(?:new file mode|new mode) (?:120000|160000)$", patch, re.M):
         raise ValueError("New symlinks and submodules require manual changes")
-    return patch if names else ""
+    return patch if names else b""
 
 
 def snapshot_validation_baseline(workspace, base_sha, destination):
@@ -485,10 +530,10 @@ def run_candidate(task, workspace, control, output, auth, model):
             result = validate_result(json.loads((output / "result.json").read_text()))
             git("add", "--all", cwd=workspace)
             patch = check_patch(workspace)
-            if any(secret in patch or secret in json.dumps(result) for secret in secrets):
+            if any(secret.encode() in patch or secret in json.dumps(result) for secret in secrets):
                 (output / "result.json").unlink()
                 raise ValueError("Credential material detected; refusing artifacts")
-            (output / "change.patch").write_text(patch)
+            (output / "change.patch").write_bytes(patch)
         if result["outcome"] == "change":
             if not patch:
                 raise ValueError("Codex requested a PR without a patch")
@@ -508,7 +553,7 @@ def run_candidate(task, workspace, control, output, auth, model):
                 validation = "FAILED: immutable baseline and candidate unit tests\n" + details[-24000:]
             # Tests may modify files. Publish exactly the patch inspected before tests.
             write_json(output / "result.json", result)
-            proof = {"passed": result["outcome"] == "change", "patch_sha256": hashlib.sha256(patch.encode()).hexdigest()}
+            proof = {"passed": result["outcome"] == "change", "patch_sha256": hashlib.sha256(patch).hexdigest()}
             (output / "validation.txt").write_text(json.dumps(proof) + "\n" + validation[-30000:])
         else:
             (output / "validation.txt").write_text("No change submitted for independent validation.\n")
@@ -523,10 +568,10 @@ def cleanup(output):
         subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=30)
 
 
-def comment_once(task, body, *, number=None, purpose="result"):
+def comment_once(task, body, *, number=None, purpose="result", key=None):
     repo = task["repo"]
     number = task["subject"] if number is None else number
-    key = f"<!-- neurodesktop-agentic-{purpose}:{task['run_id']} -->"
+    key = key or f"<!-- neurodesktop-agentic-{purpose}:{task['run_id']} -->"
     comments = pages(f"repos/{repo}/issues/{number}/comments?per_page=100")
     if not any(
         c["user"]["login"] == "github-actions[bot]"
@@ -558,7 +603,7 @@ def complete_publication(task, pr, result, workspace, validation):
     elif task["kind"] == "review":
         revision = git("rev-parse", "HEAD", cwd=workspace)
         comment_once(task, f"Review revision: `{revision}`\n\n{result['body']}"
-                     + validation_evidence(result, validation))
+                     + validation_evidence(result, validation), key=review_marker(task))
     comment_once(task, "@coderabbitai review", number=number, purpose="review-request")
     return number
 
@@ -569,7 +614,8 @@ def publish(task, output, workspace):
     repo = task["repo"]
     if result["outcome"] != "change":
         if task["kind"] in {"issue", "review"}:
-            comment_once(task, f"{result['outcome']}: {result['body']}")
+            comment_once(task, f"{result['outcome']}: {result['body']}",
+                         key=review_marker(task) if task["kind"] == "review" else None)
         if os.environ.get("GITHUB_STEP_SUMMARY"):
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as stream:
                 stream.write(f"{result['outcome']}: {result['body']}\n")
@@ -647,12 +693,8 @@ def push_branch(branch, workspace, token=None):
     if not token:
         git("push", "origin", f"HEAD:refs/heads/{branch}", cwd=workspace)
         return
-    header = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-    command(["git", "-c", "core.hooksPath=/dev/null", "push", "origin", f"HEAD:refs/heads/{branch}"], cwd=workspace, env={
-        **GIT_ENV, "GIT_CONFIG_COUNT": "2",
-        "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader", "GIT_CONFIG_VALUE_0": "",
-        "GIT_CONFIG_KEY_1": "http.https://github.com/.extraheader", "GIT_CONFIG_VALUE_1": f"AUTHORIZATION: basic {header}",
-    })
+    command(["git", "-c", "core.hooksPath=/dev/null", "push", "origin", f"HEAD:refs/heads/{branch}"],
+            cwd=workspace, env=git_environment(token))
 
 
 def workflow_base(task, workspace):

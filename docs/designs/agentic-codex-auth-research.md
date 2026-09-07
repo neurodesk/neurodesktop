@@ -125,9 +125,14 @@ and [gh-aw Codex engine](https://github.github.com/gh-aw/engines/codex/).
 
 Hosted preparation gathers issue, review, or maintenance context. The
 self-hosted job runs the agent in a disposable container against a clean
-checkout. Issue bodies, comments, and logs are task data, never shell commands
-or configuration. The agent gets local Codex authentication, but no GitHub
-publication token, SSH keys, Docker socket, or unrelated host files.
+checkout. Issue bodies, comments, and logs are untrusted task text. The
+controller passes them as JSON evidence in the prompt rather than interpolating
+them into shell commands or configuration. The prompt instructs Codex to treat
+that text as evidence, and sandbox permissions restrict its tools. These
+controls reduce prompt-injection risk; they do not guarantee that the model
+will ignore malicious instructions. The agent gets local Codex authentication,
+but no GitHub publication token, SSH keys, Docker socket, or unrelated host
+files.
 
 The controller reconstructs the exact patch in a clean checkout. A second
 container validates it without Codex credentials or network access. Hosted

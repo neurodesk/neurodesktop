@@ -80,3 +80,25 @@ def test_frozen_baseline_redirects_testlib_to_patched_workspace(tmp_path):
     assert result.returncode == 0
     assert "1 passed" in result.stdout
     assert "=== candidate tests ===" in result.stdout
+
+
+def test_candidate_failure_blocks_a_passing_frozen_baseline(tmp_path):
+    baseline = tmp_path / "baseline"
+    workspace = tmp_path / "workspace"
+    write_baseline(baseline)
+    (workspace / "subject.txt").parent.mkdir(parents=True)
+    (workspace / "subject.txt").write_text("good\n")
+    candidate = workspace / "tests" / "unit"
+    candidate.mkdir(parents=True)
+    (candidate / "test_candidate.py").write_text(
+        "def test_candidate_failure():\n"
+        "    assert False, 'candidate test failed'\n"
+    )
+
+    result = validate(baseline, workspace)
+
+    assert result.returncode == 1
+    assert "=== frozen baseline against patched workspace ===" in result.stdout
+    assert "1 passed" in result.stdout
+    assert "=== candidate tests ===" in result.stdout
+    assert "candidate test failed" in result.stdout
