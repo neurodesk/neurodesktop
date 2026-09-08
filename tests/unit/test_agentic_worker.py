@@ -383,12 +383,44 @@ def test_worker_requires_subscription_authentication(worker, tmp_path, auth_data
         worker.token_values(tmp_path)
 
 
+@pytest.mark.parametrize("conclusion", ["success", "failure", "timed_out"])
+def test_failure_evidence_reads_jobs_from_paginated_objects(worker, monkeypatch, conclusion):
+    jobs = [{"id": 123, "name": "check", "conclusion": conclusion}]
+    calls = []
+
+    def command(args, **kwargs):
+        calls.append(args)
+        if args[:2] == ["gh", "api"]:
+            if "--paginate" in args:
+                return json.dumps([
+                    {"total_count": 2, "jobs": [{"id": 122, "conclusion": "success"}]},
+                    {"total_count": 2, "jobs": jobs},
+                ])
+            return json.dumps({"id": 20})
+        assert args[:3] == ["gh", "run", "view"]
+        return "failed job evidence"
+
+    monkeypatch.setattr(worker, "command", command)
+    evidence = worker.failure_context("owner/repo", "https://github.com/owner/repo/actions/runs/20")
+    assert evidence[0]["jobs"] == ([] if conclusion == "success" else jobs)
+    assert evidence[0]["logs"] == ([] if conclusion == "success" else [
+        {"job": "check", "tail": "failed job evidence"},
+    ])
+    assert len(calls) == (2 if conclusion == "success" else 3)
+
+
+def test_pages_preserves_list_responses(worker, monkeypatch):
+    monkeypatch.setattr(worker, "command", lambda args: json.dumps([[{"id": 1}], [], [{"id": 2}]]))
+    assert worker.pages("repos/owner/repo/pulls") == [{"id": 1}, {"id": 2}]
+
+
 def test_failure_evidence_uses_only_this_repository_and_bounded_logs(worker, monkeypatch):
     calls = []
     def api(path):
         calls.append(path)
         return {"id": path.rsplit("/", 1)[-1]}
-    def pages(path):
+    def pages(path, *, key):
+        assert key == "jobs"
         calls.append(path)
         return [{"id": i, "name": f"job-{i}", "conclusion": "failure"} for i in range(4)]
     def command(args):
