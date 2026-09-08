@@ -3,7 +3,7 @@ title: Agentic maintenance workflows
 description: Run subscription-authenticated Codex on the existing self-hosted runner and review its proposed fixes
 parent: index.md
 status: current
-last-reviewed: "2026-09-07"
+last-reviewed: "2026-09-08"
 ---
 
 # Agentic maintenance workflows
@@ -109,6 +109,13 @@ After configuring the runner and completing login, manually run **Agentic
 runner readiness**. It provisions the four agent labels, then checks the real Docker mounts, sandbox, private file
 permissions, and matching authentication storage in the runner and daemon.
 It does not call a model or prove the saved session is still valid.
+
+Readiness distinguishes storage setup from account authentication. If the
+configured directory is absent, check the runner's `AGENTIC_CODEX_HOME` value
+and persistent-volume mounts. If that directory exists but lacks `auth.json`,
+the dedicated Codex login has not saved data there. The readiness check reports
+these cases without including credentials in its diagnostic or claiming that an
+account session is unauthenticated.
 
 Set the repository variable `AGENTIC_ENABLED=true`, then manually dispatch
 the issue workflow for a small existing bug. Verify that
