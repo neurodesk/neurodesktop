@@ -154,10 +154,10 @@ def api(path, payload=None):
     return json.loads(command(args, data=json.dumps(payload) if payload is not None else None))
 
 
-def pages(path):
+def pages(path, *, key=None):
     return [item for page in json.loads(command(
         ["gh", "api", path, "--paginate", "--slurp"]
-    )) for item in page]
+    )) for item in (page[key] if key is not None else page)]
 
 
 def write_json(path, value):
@@ -260,7 +260,7 @@ def failure_context(repo, body):
         rf"https://github\.com/{re.escape(repo)}/actions/runs/(\d+)", body
     )))[:2]:
         run = api(f"repos/{repo}/actions/runs/{run_id}")
-        jobs = pages(f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100")
+        jobs = pages(f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100", key="jobs")
         failed = [j for j in jobs if j["conclusion"] in {"failure", "timed_out"}]
         logs = []
         for job in failed[:2]:
