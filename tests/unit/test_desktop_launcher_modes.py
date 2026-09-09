@@ -442,6 +442,20 @@ def test_guacamole_script_gates_rdp_and_vnc_startup():
     assert 'remove_mapping_connection "vnc"' in script
 
 
+def test_every_guacamole_source_is_consumed_by_the_image_build():
+    """Checked-in Guacamole config must not be hidden by the bind mount."""
+    dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
+    guacamole_dir = repo_path("config/guacamole")
+
+    unused = sorted(
+        path.name
+        for path in guacamole_dir.iterdir()
+        if path.is_file() and f"/tmp/guacamole/{path.name}" not in dockerfile
+    )
+
+    assert unused == []
+
+
 def test_vncserver_uses_mesa_only_for_virtual_x_server_startup():
     wrapper = repo_path("config/lxde/Xtigervnc").read_text(encoding="utf-8")
     dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
