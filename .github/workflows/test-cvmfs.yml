@@ -37,7 +37,7 @@ jobs:
                         "cvmfs-jetstream.neurodesk.org",
                         "s1ral-cvmfs.openhtc.io",
                         "s1nikhef-cvmfs.openhtc.io",
-                        "cvmfs-stratum-one.ihep.ac.cn",
+                        "cvmfs-stratum-one.ihep.ac.cn:8000",
                         "s1sampa-cvmfs.openhtc.io:8080",
                         "stratum0.neurodesk.cloud.edu.au",
                         "cvmfs-geoproximity.neurodesk.org"]
