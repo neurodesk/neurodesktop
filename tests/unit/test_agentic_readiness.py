@@ -27,6 +27,31 @@ def test_readiness_accepts_private_subscription_storage(readiness, auth):
     assert readiness.check_auth_directory(auth) == auth
 
 
+def test_readiness_reports_missing_configured_auth_directory(readiness, tmp_path):
+    auth = tmp_path / "missing-auth-directory"
+
+    with pytest.raises(ValueError) as raised:
+        readiness.check_auth_directory(auth)
+
+    message = str(raised.value)
+    assert "AGENTIC_CODEX_HOME" in message
+    assert "directory does not exist" in message
+    assert str(auth) in message
+    assert "unauthenticated" not in message
+
+
+def test_readiness_reports_missing_saved_login_data(readiness, auth):
+    (auth / "auth.json").unlink()
+
+    with pytest.raises(ValueError) as raised:
+        readiness.check_auth_directory(auth)
+
+    message = str(raised.value)
+    assert "auth.json" in message
+    assert "saved login data is missing" in message
+    assert str(auth) in message
+
+
 @pytest.mark.parametrize("target", ["directory", "file"])
 def test_readiness_rejects_shared_credentials(readiness, auth, target):
     (auth if target == "directory" else auth / "auth.json").chmod(0o755)

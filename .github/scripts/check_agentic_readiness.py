@@ -15,9 +15,24 @@ spec.loader.exec_module(worker)
 
 
 def check_auth_directory(auth):
-    auth = auth.resolve(strict=True)
+    configured_auth = auth
+    try:
+        auth = auth.resolve(strict=True)
+    except FileNotFoundError:
+        raise ValueError(
+            f"AGENTIC_CODEX_HOME directory does not exist: {configured_auth}"
+        ) from None
     for path in (auth, auth / "auth.json"):
-        metadata = path.lstat()
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            if path == auth:
+                raise ValueError(
+                    f"AGENTIC_CODEX_HOME directory does not exist: {configured_auth}"
+                ) from None
+            raise ValueError(
+                f"Codex saved login data is missing from AGENTIC_CODEX_HOME: {path}"
+            ) from None
         if metadata.st_uid != os.getuid() or metadata.st_mode & 0o077:
             raise ValueError("Codex directory and auth.json must be private to the runner user")
         if path != auth and not stat.S_ISREG(metadata.st_mode):
