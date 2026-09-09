@@ -64,7 +64,6 @@ http://cvmfs-frankfurt.neurodesk.org
 http://cvmfs01.nikhef.nl:8000
 http://cvmfs-s1bnl.opensciencegrid.org:8000
 http://cvmfs-s1goc.opensciencegrid.org:8000
-http://cvmfs-stratum-one.ihep.ac.cn:8000
 http://sampacs01.if.usp.br:8000
 http://s1brisbane-cvmfs.openhtc.io
 http://s1melbourne-cvmfs.openhtc.io
