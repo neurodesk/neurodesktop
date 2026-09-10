@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-09-04"
+last-reviewed: "2026-09-10"
 ---
 
 # Environment Variables
@@ -142,6 +142,11 @@ are listed at the end. The subsystems themselves are described in
   `https://llm.jetstream-cloud.org/v1`
 - `BR_MCP_TOKEN`: Brain Researcher MCP token consumed by the Claude wrapper
   and mirrored into Notebook Intelligence by `nbi_setup.sh`
+- `CODEX_PATH`, `CLAUDE_CODE_EXECUTABLE`: executable paths used by the Jupyter
+  AI ACP adapters. They default to quiet selectors under `/opt/neurodesktop/`.
+  Each selector prefers the user-managed executable in `~/.local/bin` and
+  falls back to the version installed in the image. An explicit value replaces
+  the selector
 - `OLLAMA_HOST`: Ollama endpoint used by the AI tools; defaults to
   `http://host.docker.internal:11434` (an Ollama server on the Docker host —
   the image does not bundle Ollama itself). At container startup,
@@ -190,10 +195,13 @@ reviewed; the Dockerfile itself is authoritative.
 
 - `OPENCODE_VERSION`: the OpenCode release installed into
   the image; defaults to the validated pin in the Dockerfile (currently
-  `1.18.16`). Override to bump the pin, or set it to an empty value to
+  `1.18.30`). Override to bump the pin, or set it to an empty value to
   install the latest release
+- `CLAUDE_CODE_VERSION`: exact Claude Code native release installed as the
+  image fallback; defaults to `2.1.267`. The direct-version audit compares the
+  pin with the official `@anthropic-ai/claude-code` release stream
 - `CVMFS_VERSION`: exact Ubuntu CVMFS client package version;
-  defaults to `2.13.3+ubuntu24.04`
+  defaults to `2.14.1+ubuntu24.04`
 - `CVMFS_RELEASE_VERSION`, `CVMFS_RELEASE_SHA256`: expected
   version and SHA-256 digest of the CVMFS apt repository bootstrap package;
   defaults to release `4.9` and its validated digest
@@ -202,43 +210,57 @@ reviewed; the Dockerfile itself is authoritative.
   defaults to
   `4.5.10`
 - `UV_VERSION`, `ASTRA_TOOLS_VERSION`, `ASTRA_SPEC_VERSION`,
-  `ANYWIDGET_VERSION`, `LIGHTCONE_CLI_VERSION`: exact `uv`,
+  `ANYWIDGET_VERSION`, `LIGHTCONE_CLI_VERSION`, `LIGHTCONE_CLI_SHA256`: exact `uv`,
   ASTRA CLI/schema, viewer runtime, and isolated Lightcone CLI releases
-  installed in the image; defaults to `0.12.3`, `0.2.11`, `0.0.12`, `0.11.0`,
-  and `0.4.0`
+  installed in the image; defaults to `0.12.12`, `0.2.17`, `0.0.14`, `0.11.0`,
+  `0.4.2`, and the verified SHA-256 of that Lightcone source archive
+- `SNAKEMAKE_VERSION`: user-facing Snakemake workflow release; defaults to
+  `9.26.1` in the main and isolated Lightcone environments. Its current
+  metadata requires `packaging<26`, so the image holds that infrastructure
+  library at the newest compatible release, `25.0`
 - `AGENT_SKILLS_REF`: exact commit of
   `LightconeResearch/agent-skills` used for the Codex and Claude reproduction
   plugin and OpenCode's copied skills and hook adapter;
-  defaults to `4ded682be8487d8aa05831678ef84ef12068d50d`
+  defaults to `4ded682be8487d8aa05831678ef84ef12068d50d`, the last reviewed
+  commit containing the stable reproduction plugin; the build updates that
+  plugin's ASTRA pins with exact anchors
 - `JUPYTER_AI_VERSION`: Jupyter AI metapackage release;
-  defaults to `3.1.2`, with its direct pre-1.0 extensions and Jupyter
+  defaults to `3.2.0`, with its direct pre-1.0 extensions and Jupyter
   Collaboration pinned alongside it
 - `CODEX_ACP_VERSION`, `CLAUDE_AGENT_ACP_VERSION`: pinned
   ACP adapters that expose the Codex and Claude personas in Jupyter AI;
-  defaults to `1.1.14` and `0.66.0`. They install without their vendored agent
-  binaries and drive the image's own CLIs through `CODEX_PATH` and
+  defaults to `1.11.0` and `0.76.0`. They install without their vendored agent
+  binaries and drive the selected user or image CLIs through `CODEX_PATH` and
   `CLAUDE_CODE_EXECUTABLE` (runtime variables exported by
   `environment_variables.sh`)
 - `CODEX_CLI_VERSION`: the `@openai/codex` CLI release
-  installed globally; defaults to `0.147.0` and must stay inside the range the
-  pinned codex-acp adapter declares, because the adapter drives this binary
+  installed globally; defaults to `0.154.0` and must stay inside the range the
+  pinned codex-acp adapter declares, because this is the tested fallback for
+  the adapter. A user can install a newer release with `codex update`
 - `JUPYTER_COLLABORATION_VERSION`, `JUPYTER_COLLABORATION_REF`: release and
   exact source commit used to rebuild Jupyter AI's collaboration frontends for
   JupyterLab 4.6's YDoc 4 contract; defaults to `4.4.2` and
   `3bf11cb7b271b554998105a11e6c9b8c3e376615`
 - `MYST_PNPM_VERSION`, `MYST_YDOC_VERSION`: pnpm and Jupyter
   YDoc releases used for the MyST/RISE compatibility rebuild; defaults to
-  `11.21.0` and `4.1.1`
+  `11.26.0` and `4.1.1`
 - `APPTAINER_VERSION`, `APPTAINER_GO_VERSION`, `APPTAINER_GRPC_VERSION`,
   `APPTAINER_CRYPTO_VERSION`: Apptainer source release and the Go
   toolchain/grpc/crypto module versions used in its dedicated build stage;
-  defaults to `1.5.3`, `1.26.5`, `1.83.0`, and `0.55.0`. The crypto override
+  defaults to `1.5.3`, `1.27.1`, `1.83.2`, and `0.57.0`. The crypto override
   also updates the separately vendored gocryptfs build.
-- `BASE_IMAGE_TAG`: tag of the upstream Jupyter Docker base image
+- `BASE_IMAGE_TAG`: tag of the upstream Jupyter Docker base image; defaults to
+  the multi-architecture `2026-09-07` release
+- `NPM_VERSION`: npm release installed with the runtime Node.js distribution;
+  defaults to `12.0.2`
+- `JUPYTER_BUILDER_VERSION`, `JUPYTERLAB_SLURM_REF`: current Jupyter Builder
+  release and exact `jupyterlab-slurm` source revision used to build its
+  JupyterLab 4 extension; defaults to `1.2.3` and
+  `c34354f0aaa1b12f6243224bed631cf07c858409`
 - `GUACAMOLE_VERSION`, `TOMCAT_REL`, `TOMCAT_VERSION`,
   `TOMCAT_MIGRATION_VERSION`: Guacamole release (`1.6.0`) and the Tomcat
   major/exact/migration-tool versions serving it (`11`, `11.0.25`, `1.0.12`)
-- `CODE_SERVER_VERSION`: code-server release; defaults to `4.132.0`
+- `CODE_SERVER_VERSION`: code-server release; defaults to `4.136.2`
 - `NEUROCOMMAND_REF`: neurocommand git ref cloned during the build; CI passes
   a resolved `main` SHA so neurocommand changes invalidate the install layer
 - `NODE_TAR_VERSION`: patched `node-tar` version applied to every bundled

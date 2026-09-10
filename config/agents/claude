@@ -39,8 +39,8 @@ load_br_mcp_token_from_bashrc() {
     fi
 }
 
-# Neurodesktop ships a pinned Claude CLI build; auto-updates are managed
-# centrally by the container image, so disable the in-process updater.
+# Neurodesktop ships a tested fallback build. Disable background updates, while
+# leaving the explicit `claude update` command available for persistent homes.
 export DISABLE_AUTOUPDATER=1
 
 # Copy AGENTS.md from home directory to current directory as CLAUDE.md
@@ -62,44 +62,11 @@ else
     echo "Brain Researcher MCP server: inactive (run 'opencode' to set BR_MCP_TOKEN)"
 fi
 
-# Keep the standard user-local path for tools that expect it, but make it a
-# symlink to the image-owned Claude binary. Replacing an old persistent copy on
-# every image upgrade ensures the wrapper cannot keep running a stale version,
-# and avoids duplicating the ~230MB binary on network-mounted homes.
-CLAUDE_BIN="${HOME}/.local/bin/claude"
-DEFAULT_CLAUDE_BIN="/opt/jovyan_defaults/.local/bin/claude"
+CLAUDE_EXEC="/opt/neurodesktop/claude-exec"
 
-if [ ! -x "${DEFAULT_CLAUDE_BIN}" ]; then
-    echo "Claude binary not found at ${DEFAULT_CLAUDE_BIN}." >&2
+if [ ! -x "${CLAUDE_EXEC}" ]; then
+    echo "Claude executable selector not found at ${CLAUDE_EXEC}." >&2
     exit 127
-fi
-
-CLAUDE_BIN_DIR=$(dirname "${CLAUDE_BIN}")
-CLAUDE_LINK_TMP="${CLAUDE_BIN}.tmp.$$"
-
-if mkdir -p "${CLAUDE_BIN_DIR}"; then
-    if [ ! -L "${CLAUDE_BIN}" ] || [ "$(readlink "${CLAUDE_BIN}")" != "${DEFAULT_CLAUDE_BIN}" ]; then
-        rm -f "${CLAUDE_LINK_TMP}"
-        # `mv -T` is a GNU extension, so the relink silently degraded to the
-        # warning branch under a BSD userland. The only thing -T guarded was
-        # moving the link *into* a directory sitting at CLAUDE_BIN; test for
-        # that directly and keep the replacement itself POSIX, matching how
-        # every other atomic replace in this image is written.
-        if ln -s "${DEFAULT_CLAUDE_BIN}" "${CLAUDE_LINK_TMP}" \
-            && [ ! -d "${CLAUDE_BIN}" ] \
-            && mv -f "${CLAUDE_LINK_TMP}" "${CLAUDE_BIN}"; then
-            :
-        else
-            rm -f "${CLAUDE_LINK_TMP}"
-            echo "Warning: could not link ${CLAUDE_BIN} to the image-owned Claude binary; using it directly." >&2
-        fi
-    fi
-else
-    echo "Warning: could not create ${CLAUDE_BIN_DIR}; using the image-owned Claude binary directly." >&2
-fi
-
-if [ ! -L "${CLAUDE_BIN}" ] || [ "$(readlink "${CLAUDE_BIN}")" != "${DEFAULT_CLAUDE_BIN}" ]; then
-    CLAUDE_BIN="${DEFAULT_CLAUDE_BIN}"
 fi
 
 extra_args=()
@@ -132,4 +99,4 @@ elif [ "${has_mcp_config_arg}" -eq 0 ] && [ -n "${BR_MCP_TOKEN:-}" ] && [ -f "${
     extra_args+=(--mcp-config "${CLAUDE_DEFAULT_MCP_CONFIG}")
 fi
 
-exec "${CLAUDE_BIN}" --allow-dangerously-skip-permissions "${extra_args[@]}" "$@"
+exec "${CLAUDE_EXEC}" --allow-dangerously-skip-permissions "${extra_args[@]}" "$@"

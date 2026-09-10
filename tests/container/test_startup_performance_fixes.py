@@ -78,8 +78,8 @@ def test_restore_home_defaults_skips_claude_binary(tmp_path):
     assert code == 0, f"restore_home_defaults.sh failed: {output}"
 
     assert not (home / ".local/bin/claude").exists(), (
-        "claude binary must not be copied at boot; /usr/local/sbin/claude "
-        "links to the image-owned binary on first use"
+        "claude binary must not be copied at boot; the selector uses the "
+        "image fallback until the user installs an update"
     )
     # Other defaults must still be restored.
     assert (home / ".vnc/xstartup").is_file(), "other defaults were not restored"

@@ -1,0 +1,27 @@
+#!/bin/bash
+# Select a user-managed Claude Code install, with the image copy as fallback.
+
+IMAGE_CLAUDE_BIN="/opt/jovyan_defaults/.local/bin/claude"
+USER_CLAUDE_BIN="${HOME:+${HOME}/.local/bin/claude}"
+
+# Older Neurodesktop images created this link on every launch. Remove it once
+# so Anthropic's native updater can recreate the path under the user's control.
+if [ -n "${USER_CLAUDE_BIN}" ] && [ -L "${USER_CLAUDE_BIN}" ]; then
+    link_target=$(readlink "${USER_CLAUDE_BIN}" 2>/dev/null || true)
+    case "${link_target}" in
+        "${IMAGE_CLAUDE_BIN}"|/usr/local/sbin/claude|/opt/neurodesktop/claude-exec)
+            rm -f "${USER_CLAUDE_BIN}" 2>/dev/null || true
+            ;;
+    esac
+fi
+
+if [ -n "${USER_CLAUDE_BIN}" ] && [ -x "${USER_CLAUDE_BIN}" ]; then
+    exec "${USER_CLAUDE_BIN}" "$@"
+fi
+
+if [ -x "${IMAGE_CLAUDE_BIN}" ]; then
+    exec "${IMAGE_CLAUDE_BIN}" "$@"
+fi
+
+echo "Claude binary not found in the user home or the image." >&2
+exit 127

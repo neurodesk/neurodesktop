@@ -99,7 +99,7 @@ def test_patch_refuses_partial_prior_application(tmp_path):
 def test_dockerfile_applies_workaround_after_pinned_package_install():
     dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
 
-    package_pin = dockerfile.index("jupyter-ai-acp-client==0.2.1")
+    package_pin = dockerfile.index("jupyter-ai-acp-client==0.3.0")
     patch_install = dockerfile.index(
         "/opt/neurodesktop/patch_jupyter_ai_acp_client.py"
     )
