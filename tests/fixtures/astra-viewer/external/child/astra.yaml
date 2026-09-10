@@ -1,4 +1,4 @@
-version: "0.0.12"
+version: "0.0.14"
 name: "External child"
 inputs:
   - id: child_input
@@ -15,4 +15,3 @@ outputs:
     type: metric
     inputs: [child_input]
     decisions: [child_choice]
-

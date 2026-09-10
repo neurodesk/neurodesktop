@@ -4,7 +4,7 @@ description: The astra/lc command-line tools, Lightcone agent skills and hooks
   for the bundled coding agents, and the read-only provenance viewer
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-03"
+last-reviewed: "2026-09-10"
 ---
 
 # ASTRA integration
@@ -17,16 +17,24 @@ focused tests are listed in
 
 ## ASTRA and Lightcone command-line tools
 
-`astra` comes from the single `astra-tools` install in the conda environment —
-the same one the viewer imports — so the CLI and the schema the viewer
-validates against can never drift apart. A second isolated copy is deliberately
-not installed; the build asserts that exactly `/opt/conda/bin/astra` answers on
-`PATH`.
+`astra` on the image `PATH` comes from the `astra-tools` install in the conda
+environment — the same one the viewer imports. The isolated Lightcone tool
+environment receives the exact same ASTRA pin, but does not expose a second
+`astra` entry point on the image `PATH`, so its schema cannot drift from the
+viewer. The build asserts that exactly `/opt/conda/bin/astra` answers there.
 
 `lc` (`lightcone-cli`) is installed as an isolated `uv` tool under
 `/opt/uv/tools/lightcone-cli` and linked onto `PATH`, so its Dask and Snakemake
 dependency graph cannot perturb JupyterLab. `uv` itself is on `PATH` for that
 reason; ordinary `uv tool` operations stay user-local at runtime.
+
+The latest stable Lightcone release, 0.4.2, still pins ASTRA Tools 0.2.11
+because ASTRA 0.2.14 added required arguments to the idempotent `astra init`
+callback. The image verifies the Lightcone source archive, updates that one
+dependency declaration, and adapts its one callback before building the tool.
+Both edits use exact anchors so a changed upstream release stops the build and
+forces the workaround to be reassessed. This keeps the stable Lightcone
+pipeline on the same current ASTRA release used by the viewer and agent skill.
 
 ## Executing an analysis with `lc`
 
@@ -40,7 +48,7 @@ project that wants the badge to reflect a real run. `lc run` never submits to
 Slurm itself: it always dispatches through Dask, and when `SLURM_JOB_ID` is set
 it starts an in-process scheduler and launches one `dask worker` per allocated
 node with `srun`. So `lc` goes *inside* an allocation rather than in front of
-one, which is all the template is. Released `lightcone-cli` 0.4.0 has no
+one, which is all the template is. Released `lightcone-cli` 0.4.2 has no
 `--async` or `sbatch` submission of its own.
 
 The template exports `/opt/uv/tools/lightcone-cli/bin` onto `PATH` because `lc`
@@ -72,6 +80,13 @@ at `/opt/neurodesktop/agent-skills`. The self-contained `reproduction` plugin
 provides `astra`, `assess-reproducibility`, `reproduce`, and
 `figure-comparison`; all three bundled coding agents get the same four skills
 without a first-run marketplace download:
+
+The checkout stays at the last reviewed commit that contains that plugin.
+Newer upstream commits removed it and introduced a `lightcone` plugin written
+for the incompatible 0.5.0 release candidate. During the image build, exact
+anchors update the retained plugin's `astra-pins.sh` from its historical
+versions to the image's current ASTRA Tools and ASTRA Spec pins. This preserves
+the stable reproduction workflow without letting its validator schema drift.
 
 | Agent | Mechanism | Hooks |
 | --- | --- | --- |
@@ -116,7 +131,7 @@ AstraView(
 )
 ```
 
-`adapter.py` is the only viewer module coupled to `astra-spec==0.0.12`. It runs
+`adapter.py` is the only viewer module coupled to `astra-spec==0.0.14`. It runs
 the public schema and semantic validators over raw YAML, resolves external
 analysis and child-universe references recursively, and checks every resolved
 real path against the ASTRA project root before it is opened. A spec that

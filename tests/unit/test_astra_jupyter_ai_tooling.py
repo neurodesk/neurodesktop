@@ -107,7 +107,7 @@ def test_acp_adapters_are_installed_after_every_frontend_build():
 def test_acp_adapters_exclude_their_vendored_agent_binaries():
     """Each adapter's optionalDependency chain vendors a ~250 MB duplicate of
     an agent binary the image already installs; the adapters are pointed at
-    those installs via CODEX_PATH and CLAUDE_CODE_EXECUTABLE instead. npm
+    home-first selectors via CODEX_PATH and CLAUDE_CODE_EXECUTABLE instead. npm
     ignores omit-optional for global installs, so the Dockerfile must delete
     the vendored platform packages explicitly and keep the size guard."""
     for removal in (
@@ -120,8 +120,17 @@ def test_acp_adapters_exclude_their_vendored_agent_binaries():
     environment = repo_path("config/jupyter/environment_variables.sh").read_text(
         encoding="utf-8"
     )
-    assert 'CODEX_PATH="${CODEX_PATH:-/usr/bin/codex}"' in environment
-    assert "CLAUDE_CODE_EXECUTABLE" in environment
+    assert (
+        'CODEX_PATH="${CODEX_PATH:-/opt/neurodesktop/codex-exec}"' in environment
+    )
+    assert (
+        'CLAUDE_CODE_EXECUTABLE="${CLAUDE_CODE_EXECUTABLE:-/opt/neurodesktop/claude-exec}"'
+        in environment
+    )
+    assert "source=config/agents/codex_exec" in DOCKERFILE
+    assert "source=config/agents/claude_exec" in DOCKERFILE
+    assert "/opt/neurodesktop/codex-exec" in DOCKERFILE
+    assert "/opt/neurodesktop/claude-exec" in DOCKERFILE
 
 
 def test_codex_acp_persona_defaults_to_full_access_mode():
@@ -181,6 +190,21 @@ def test_upstream_checkouts_are_pinned_to_an_exact_commit():
     for reference in references:
         assert f"ARG {reference}=" in DOCKERFILE, reference
         assert f'rev-parse HEAD)" = "${{{reference}}}"' in DOCKERFILE, reference
+
+
+def test_reproduction_plugin_stays_on_the_last_stable_lightcone_workflow():
+    """The replacement upstream plugin requires the unreleased Lightcone 0.5 CLI."""
+    assert (
+        'ARG AGENT_SKILLS_REF="4ded682be8487d8aa05831678ef84ef12068d50d"'
+        in DOCKERFILE
+    )
+    for historical_pin in (
+        "ASTRA_TOOLS_PIN=\"0.2.11\"",
+        "ASTRA_SPEC_PIN=\"0.0.12\"",
+    ):
+        assert f"grep -qx '{historical_pin}'" in DOCKERFILE
+    assert 'ASTRA_TOOLS_PIN=\\"${ASTRA_TOOLS_VERSION}\\"' in DOCKERFILE
+    assert 'ASTRA_SPEC_PIN=\\"${ASTRA_SPEC_VERSION}\\"' in DOCKERFILE
 
 
 def test_collaboration_frontends_are_rebuilt_for_jupyterlab_46_ydoc():

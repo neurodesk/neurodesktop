@@ -2,14 +2,16 @@
 
 # Pin to a specific jupyter/base-notebook date for reproducibility.
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
-ARG BASE_IMAGE_TAG=2026-08-10
+ARG BASE_IMAGE_TAG=2026-09-07
 ARG APPTAINER_VERSION=1.5.3
-ARG APPTAINER_GO_VERSION=1.26.5
-ARG APPTAINER_GRPC_VERSION=1.83.0
-ARG APPTAINER_CRYPTO_VERSION=0.55.0
-ARG CVMFS_VERSION=2.13.3+ubuntu24.04
+ARG APPTAINER_GO_VERSION=1.27.1
+ARG APPTAINER_GRPC_VERSION=1.83.2
+ARG APPTAINER_CRYPTO_VERSION=0.57.0
+ARG CVMFS_VERSION=2.14.1+ubuntu24.04
 ARG CVMFS_RELEASE_VERSION=4.9
 ARG CVMFS_RELEASE_SHA256=88f4bb658c2c85e77aec39181f61dea8ab641b3481a0db2b00f453beabb05395
+ARG NPM_VERSION=12.0.2
+ARG JUPYTER_BUILDER_VERSION=1.2.3
 
 FROM golang:${APPTAINER_GO_VERSION}-bookworm AS apptainer
 
@@ -106,7 +108,7 @@ USER root
 
 ARG BUILD_ONLY_APT_PACKAGES="build-essential libcairo2-dev libjpeg-turbo8-dev libpng-dev libtool-bin freerdp2-dev libvncserver-dev libssl-dev libwebp-dev libssh2-1-dev libpango1.0-dev"
 ARG GUACAMOLE_VERSION="1.6.0"
-ARG CODE_SERVER_VERSION="4.132.0"
+ARG CODE_SERVER_VERSION="4.136.2"
 
 COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
 
@@ -159,7 +161,7 @@ RUN set -eux; \
     # Keep basic-ftp current in case code-server's shrinkwrap lags the patched package.
     cd /opt/code-server; \
     npm update --no-audit --no-fund basic-ftp; \
-    # Ensure bundled tar is patched against CVE-2026-59873 until code-server ships 7.5.19+.
+    # Normalize code-server's bundled tar to the current audited release.
     npm update --no-audit --no-fund tar; \
     # Keep VS Code's nested shell-quote copy on the current audited release.
     shell_quote_tar="$(npm pack --silent shell-quote@1.10.0)"; \
@@ -221,6 +223,7 @@ RUN apt-install-retry \
     gpg-agent \
     apt-transport-https \
     xz-utils \
+    && DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade --yes \
     && usermod -a -G ssl-cert xrdp \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -274,8 +277,14 @@ RUN ln -sf /opt/apptainer/bin/apptainer /usr/local/bin/apptainer \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && rm -rf /root/.cache && rm -rf /home/${NB_USER}/.cache
 
-# Install Apache Tomcat
-RUN retry wget -q https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v${TOMCAT_VERSION}/bin/apache-tomcat-${TOMCAT_VERSION}.tar.gz -P /tmp \
+# Install Apache Tomcat. New releases reach the archive only after rotating
+# off the primary mirror, so keep both official locations available.
+RUN retry bash -o pipefail -c 'wget -q \
+    "https://dlcdn.apache.org/tomcat/tomcat-${TOMCAT_REL}/v${TOMCAT_VERSION}/bin/apache-tomcat-${TOMCAT_VERSION}.tar.gz" \
+    -O "/tmp/apache-tomcat-${TOMCAT_VERSION}.tar.gz" \
+    || wget -q \
+    "https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_REL}/v${TOMCAT_VERSION}/bin/apache-tomcat-${TOMCAT_VERSION}.tar.gz" \
+    -O "/tmp/apache-tomcat-${TOMCAT_VERSION}.tar.gz"' \
     && tar -xf /tmp/apache-tomcat-${TOMCAT_VERSION}.tar.gz -C /tmp \
     && rm -rf /tmp/apache-tomcat-${TOMCAT_VERSION}.tar.gz \
     && mv /tmp/apache-tomcat-${TOMCAT_VERSION} /usr/local/tomcat \
@@ -516,8 +525,10 @@ RUN mkdir -p "${NF_TEST_HOME}" \
 # purged inside the pip layer itself: purging in a later layer only masks
 # the files with whiteouts while this layer's history keeps shipping the
 # ~200 MB toolchain.
+ARG NPM_VERSION
 RUN retry bash -o pipefail -c 'curl -fsSL https://deb.nodesource.com/setup_24.x | bash -' \
     && apt-install-retry nodejs \
+    && npm install --global "npm@${NPM_VERSION}" \
     # Node's C headers only serve node-gyp source builds, and node-gyp
     # downloads matching headers itself; nothing in this image compiles
     # native node modules against the system copy (~65 MB).
@@ -575,27 +586,43 @@ RUN retry conda install -c conda-forge nb_conda_kernels \
 # ${NB_USER} via runuser so /opt/conda stays user-owned exactly as before;
 # `env PATH=` restores the conda-first PATH that runuser resets (the
 # jupyterlab-slurm source build needs jlpm and node on PATH).
-ARG BUST_CACHE_PIP=3
-ARG UV_VERSION="0.12.3"
-ARG JUPYTER_AI_VERSION="3.1.2"
+ARG BUST_CACHE_PIP=4
+ARG UV_VERSION="0.12.12"
+ARG JUPYTER_AI_VERSION="3.2.0"
 ARG JUPYTER_COLLABORATION_VERSION="4.4.2"
 ARG JUPYTER_COLLABORATION_REF="3bf11cb7b271b554998105a11e6c9b8c3e376615"
-ARG ASTRA_SPEC_VERSION="0.0.12"
-ARG ASTRA_TOOLS_VERSION="0.2.11"
+ARG ASTRA_SPEC_VERSION="0.0.14"
+ARG ASTRA_TOOLS_VERSION="0.2.17"
 ARG ANYWIDGET_VERSION="0.11.0"
 ARG IPYNIIVUE_VERSION="2.4.4"
+ARG SNAKEMAKE_VERSION="9.26.1"
+ARG JUPYTER_BUILDER_VERSION
+ARG JUPYTERLAB_SLURM_REF="c34354f0aaa1b12f6243224bed631cf07c858409"
 USER root
 RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch_ipyniivue.py,ro \
     install -d -m 0755 -o root -g users /opt/neurodesktop \
     && apt-install-retry build-essential \
-    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install \
+    # jupyterlab-slurm main is the current JupyterLab 4 implementation but its
+    # stale @jupyterlab/builder declaration selects the retired 4.0 builder.
+    # Pin the source and make the upstream-recommended package rename before
+    # building so the extension uses the current Jupyter Builder toolchain.
+    && retry git clone https://github.com/NERSC/jupyterlab-slurm.git /tmp/jupyterlab-slurm \
+    && git -C /tmp/jupyterlab-slurm checkout --detach "${JUPYTERLAB_SLURM_REF}" \
+    && test "$(git -C /tmp/jupyterlab-slurm rev-parse HEAD)" = "${JUPYTERLAB_SLURM_REF}" \
+    && test "$(jq -r '.devDependencies["@jupyterlab/builder"]' /tmp/jupyterlab-slurm/package.json)" = "^4.0.0" \
+    && jq --arg version "^${JUPYTER_BUILDER_VERSION}" \
+        'del(.devDependencies["@jupyterlab/builder"]) | .devDependencies["@jupyter/builder"] = $version' \
+        /tmp/jupyterlab-slurm/package.json > /tmp/jupyterlab-slurm/package.json.patched \
+    && mv /tmp/jupyterlab-slurm/package.json.patched /tmp/jupyterlab-slurm/package.json \
+    && chown -R ${NB_UID}:${NB_GID} /tmp/jupyterlab-slurm \
+    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade \
     datalad \
     nipype \
     niwrap \
     nbdev \
     nf-core \
-    snakemake \
-    pydra==1.0a9 \
+    snakemake==${SNAKEMAKE_VERSION} \
+    pydra==1.0a10 \
     nipoppy \
     matplotlib \
     datalad-container \
@@ -611,22 +638,22 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     notebook_intelligence==5.3.1 \
     # Notebook Intelligence 5.3.1 imports mcp.server.fastmcp, which MCP 2
     # removed. Keep the v1 API until Notebook Intelligence migrates.
-    "mcp>=1.28.1,<2" \
+    "mcp>=1.30.0,<2" \
     # Jupyter AI's ACP-native chat surface. Pin the direct extension packages
     # because their independent pre-1.0 releases otherwise drift underneath
     # the stable jupyter_ai metapackage.
     jupyter_ai==${JUPYTER_AI_VERSION} \
-    jupyter-ai-acp-client==0.2.1 \
+    jupyter-ai-acp-client==0.3.0 \
     jupyter-ai-chat-commands==0.0.4 \
-    jupyter-ai-persona-manager==0.1.2 \
-    jupyter-ai-router==0.0.7 \
-    jupyter-ai-tools==0.6.1 \
+    jupyter-ai-persona-manager==0.2.0 \
+    jupyter-ai-router==0.1.1 \
+    jupyter-ai-tools==0.7.0 \
     # 0.3.2 still ships the issue #271 bug; the anchored build-time patch
     # below verifies its seams against every bump and fails loudly on a fix.
     jupyter-server-documents==0.3.3 \
-    jupyter-server-mcp==0.2.1 \
-    jupyterlab-chat==0.23.2 \
-    jupyterlab-commands-toolkit==0.1.6 \
+    jupyter-server-mcp==0.3.0 \
+    jupyterlab-chat==0.25.0 \
+    jupyterlab-commands-toolkit==0.2.0 \
     jupyterlab-notebook-awareness==0.2.0 \
     # Stay on the JupyterLab 4 collaboration line. Its published frontends
     # need the scoped YDoc 4 rebuild below before JupyterLab 4.6 accepts them.
@@ -639,7 +666,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     ipycanvas \
     jupyter-resource-usage \
     jupyter_scheduler \
-    jupyterlab-slurm@git+https://github.com/NERSC/jupyterlab-slurm.git@main \
+    "jupyterlab-slurm @ file:///tmp/jupyterlab-slurm" \
     httpx \
     astra-spec==${ASTRA_SPEC_VERSION} \
     astra-tools==${ASTRA_TOOLS_VERSION} \
@@ -657,10 +684,12 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     xnat \
     pytest \
     bash_kernel \
-    "packaging>=26.0" \
+    # Snakemake 9.26.1 declares packaging<26. Keep its newest compatible
+    # release rather than silently backtracking the user-facing workflow CLI.
+    "packaging==25.0" \
     "requests>=2.34.2" \
     "chardet<8" \
-    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade "litellm>=1.85.0" \
+    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade "litellm>=1.100.1" \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/python -m bash_kernel.install --sys-prefix \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
     && rm -rf "/opt/conda/share/jupyter/labextensions/@jupyterlab/mathjax3-extension" \
@@ -696,7 +725,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     && apt-mark manual autofs cvmfs libc6-dev linux-libc-dev uuid-dev \
     && DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove build-essential \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
-    && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.npm /root/.cache
+    && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.npm /root/.cache /tmp/jupyterlab-slurm
 
 #========================================#
 # Configuration (as root user)
@@ -776,7 +805,7 @@ RUN --mount=type=bind,source=config/jupyter/notebook-intelligence-5.3.1.yarn.loc
 # MyST 2.7.0 uses pnpm. Its published metadata requests @jupyter/ydoc 3.x,
 # while JupyterLab 4.6 provides 4.x, so compile against an exact current YDoc
 # and retain that exact version in both the manifest and lockfile.
-ARG MYST_PNPM_VERSION="11.21.0"
+ARG MYST_PNPM_VERSION="11.26.0"
 ARG MYST_YDOC_VERSION="4.1.1"
 RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
     && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
@@ -887,11 +916,12 @@ RUN echo "Installing neurocommand ref ${NEUROCOMMAND_REF}" \
 # frontend assets. CODEX_CLI_VERSION must stay inside the @openai/codex range
 # pinned by the codex-acp adapter (CODEX_ACP_VERSION below): the adapter is
 # installed without its bundled binary and drives this install via CODEX_PATH.
-ARG CODEX_CLI_VERSION="0.147.0"
+ARG CODEX_CLI_VERSION="0.154.0"
+ARG CLAUDE_CODE_VERSION="2.1.267"
 RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_CLI_VERSION}" \
     && find "$(npm root -g)/@openai" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
     && rm -rf /root/.npm /tmp/npm-root-cache /home/${NB_USER}/.npm \
-    && su - "${NB_USER}" -c 'retry bash -o pipefail -c "curl -fsSL https://claude.ai/install.sh | bash -s -- stable"' \
+    && su - "${NB_USER}" -c "retry bash -o pipefail -c 'curl -fsSL https://claude.ai/install.sh | bash -s -- ${CLAUDE_CODE_VERSION}'" \
     && mkdir -p /opt/jovyan_defaults/.local/bin \
     && if [ -x /home/jovyan/.local/bin/claude ]; then \
     cp -L /home/jovyan/.local/bin/claude /opt/jovyan_defaults/.local/bin/claude; \
@@ -906,7 +936,7 @@ RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_C
 # the release so the terminal wrapper and the default config are tested as a
 # set; override at build time to bump it, or set it to an empty value to
 # install the latest release.
-ARG OPENCODE_VERSION="1.18.16"
+ARG OPENCODE_VERSION="1.18.30"
 RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash -s -- ${OPENCODE_VERSION:+--version "${OPENCODE_VERSION}"}' \
     && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
@@ -918,13 +948,14 @@ RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash -s 
 # Each adapter vendors a full copy of its agent binary (~250 MB each) through
 # an optionalDependency chain; npm ignores every omit-optional spelling for
 # global installs, so the platform packages are deleted explicitly instead.
-# The adapters drive the binaries already in this image via CODEX_PATH and
-# CLAUDE_CODE_EXECUTABLE, exported in environment_variables.sh; codex-acp's
-# supported range for that binary is what pins CODEX_CLI_VERSION above. The
+# The adapters drive home-first selectors via CODEX_PATH and
+# CLAUDE_CODE_EXECUTABLE, exported in environment_variables.sh. Those selectors
+# fall back to the image binaries; codex-acp's supported range for that fallback
+# is what pins CODEX_CLI_VERSION above. The
 # size assertion fails the build if a future adapter release relocates its
 # vendored binary and reintroduces the duplicate.
-ARG CODEX_ACP_VERSION="1.1.14"
-ARG CLAUDE_AGENT_ACP_VERSION="0.66.0"
+ARG CODEX_ACP_VERSION="1.11.0"
+ARG CLAUDE_AGENT_ACP_VERSION="0.76.0"
 RUN npm_config_cache=/tmp/npm-acp-cache retry npm install -g \
     "@agentclientprotocol/codex-acp@${CODEX_ACP_VERSION}" \
     "@agentclientprotocol/claude-agent-acp@${CLAUDE_AGENT_ACP_VERSION}" \
@@ -941,19 +972,32 @@ RUN npm_config_cache=/tmp/npm-acp-cache retry npm install -g \
 # environment's bin directory so `lc` and its `dask worker` share one runtime.
 # ASTRA_SPEC_VERSION and ASTRA_TOOLS_VERSION are still in scope from their
 # single declaration above; do not redeclare them here.
-ARG LIGHTCONE_CLI_VERSION="0.4.0"
-RUN UV_TOOL_DIR=/opt/uv/tools UV_TOOL_BIN_DIR=/usr/local/bin \
-    /opt/conda/bin/uv tool install "lightcone-cli==${LIGHTCONE_CLI_VERSION}" \
+ARG LIGHTCONE_CLI_VERSION="0.4.2"
+ARG LIGHTCONE_CLI_SHA256="f3105f04b6f6ea6cb049a6e2240ca3461c7aa999930344d7ff9bdbef422fbcae"
+RUN --mount=type=bind,source=config/agents/patch_lightcone_cli.py,target=/tmp/patch_lightcone_cli.py,ro \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 \
+    "https://files.pythonhosted.org/packages/source/l/lightcone-cli/lightcone_cli-${LIGHTCONE_CLI_VERSION}.tar.gz" \
+    -o /tmp/lightcone-cli.tar.gz \
+    && echo "${LIGHTCONE_CLI_SHA256}  /tmp/lightcone-cli.tar.gz" | sha256sum -c - \
+    && mkdir -p /tmp/lightcone-cli-src \
+    && tar -xzf /tmp/lightcone-cli.tar.gz -C /tmp/lightcone-cli-src --strip-components=1 \
+    && /opt/conda/bin/python /tmp/patch_lightcone_cli.py \
+    /tmp/lightcone-cli-src "${ASTRA_TOOLS_VERSION}" \
+    && UV_TOOL_DIR=/opt/uv/tools UV_TOOL_BIN_DIR=/usr/local/bin \
+    /opt/conda/bin/uv tool install /tmp/lightcone-cli-src \
     --with "astra-tools==${ASTRA_TOOLS_VERSION}" \
     --with "astra-spec==${ASTRA_SPEC_VERSION}" \
+    --with "snakemake==${SNAKEMAKE_VERSION}" \
+    --with "packaging==25.0" \
     # --no-cache keeps uv's wheel cache out of this layer; without it the
     # Dask/Snakemake graph would be baked into the image a second time.
     --no-cache \
     --python /opt/conda/bin/python --no-python-downloads \
     && test "$(lc --version)" = "lc, version ${LIGHTCONE_CLI_VERSION}" \
     && /opt/uv/tools/lightcone-cli/bin/python -c \
-    "import importlib.metadata as m; assert m.version('astra-tools') == '${ASTRA_TOOLS_VERSION}'; assert m.version('astra-spec') == '${ASTRA_SPEC_VERSION}'" \
-    && PATH=/opt/uv/tools/lightcone-cli/bin:${PATH} dask --version
+    "import importlib.metadata as m; assert m.version('astra-tools') == '${ASTRA_TOOLS_VERSION}'; assert m.version('astra-spec') == '${ASTRA_SPEC_VERSION}'; assert m.version('snakemake') == '${SNAKEMAKE_VERSION}'; assert m.version('packaging') == '25.0'" \
+    && PATH=/opt/uv/tools/lightcone-cli/bin:${PATH} dask --version \
+    && rm -rf /tmp/lightcone-cli-src /tmp/lightcone-cli.tar.gz
 
 # Build the local JupyterLab extensions here: their sources are the most
 # frequently edited build inputs in the repository, so everything above this
@@ -1211,6 +1255,16 @@ RUN git init -q /opt/neurodesktop/agent-skills \
     && retry git -C /opt/neurodesktop/agent-skills fetch --depth 1 origin "${AGENT_SKILLS_REF}" \
     && git -C /opt/neurodesktop/agent-skills checkout --detach FETCH_HEAD \
     && test "$(git -C /opt/neurodesktop/agent-skills rev-parse HEAD)" = "${AGENT_SKILLS_REF}" \
+    # This is the last reviewed reproduction plugin. Newer upstream commits
+    # removed it in favour of a Lightcone 0.5 release-candidate workflow.
+    # Keep its resolver pins aligned with the image's current ASTRA packages.
+    && ASTRA_PINS=/opt/neurodesktop/agent-skills/plugins/reproduction/hooks/scripts/astra-pins.sh \
+    && grep -qx 'ASTRA_TOOLS_PIN="0.2.11"' "${ASTRA_PINS}" \
+    && grep -qx 'ASTRA_SPEC_PIN="0.0.12"' "${ASTRA_PINS}" \
+    && sed -i \
+    -e "s/^ASTRA_TOOLS_PIN=.*/ASTRA_TOOLS_PIN=\"${ASTRA_TOOLS_VERSION}\"/" \
+    -e "s/^ASTRA_SPEC_PIN=.*/ASTRA_SPEC_PIN=\"${ASTRA_SPEC_VERSION}\"/" \
+    "${ASTRA_PINS}" \
     && HOME=/opt/jovyan_defaults CODEX_HOME=/opt/jovyan_defaults/.codex \
     /usr/bin/codex plugin marketplace add /opt/neurodesktop/agent-skills \
     && HOME=/opt/jovyan_defaults CODEX_HOME=/opt/jovyan_defaults/.codex \
@@ -1255,18 +1309,22 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     --mount=type=bind,source=config/jupyter/update_page_config.py,target=/tmp/update_page_config.py,ro \
     --mount=type=bind,source=config/agents/AGENTS.md,target=/tmp/agents/AGENTS.md,ro \
     --mount=type=bind,source=config/agents/claude,target=/tmp/agents/claude,ro \
+    --mount=type=bind,source=config/agents/claude_exec,target=/tmp/agents/claude_exec,ro \
     --mount=type=bind,source=config/agents/opencode,target=/tmp/agents/opencode,ro \
     --mount=type=bind,source=config/agents/opencode_bash_env.sh,target=/tmp/agents/opencode_bash_env.sh,ro \
     --mount=type=bind,source=config/agents/codex,target=/tmp/agents/codex,ro \
+    --mount=type=bind,source=config/agents/codex_exec,target=/tmp/agents/codex_exec,ro \
     --mount=type=bind,source=config/agents/opencode_prune_sessions.py,target=/tmp/agents/opencode_prune_sessions.py,ro \
     --mount=type=bind,source=config/agents/patch_nbi.py,target=/tmp/agents/patch_nbi.py,ro \
     install -m 0755 -o root -g users /tmp/restore_home_defaults.sh /opt/neurodesktop/restore_home_defaults.sh \
     && install -m 0755 -o root -g users /tmp/update_page_config.py /opt/neurodesktop/update_page_config.py \
     && install -D -m 0644 /tmp/agents/AGENTS.md /opt/AGENTS.md \
     && install -m 0755 -o root -g root /tmp/agents/claude /usr/local/sbin/claude \
+    && install -m 0755 -o root -g root /tmp/agents/claude_exec /opt/neurodesktop/claude-exec \
     && install -m 0755 -o root -g root /tmp/agents/opencode /usr/local/sbin/opencode \
     && install -m 0644 -o root -g users /tmp/agents/opencode_bash_env.sh /opt/neurodesktop/opencode_bash_env.sh \
     && install -m 0755 -o root -g root /tmp/agents/codex /usr/local/sbin/codex \
+    && install -m 0755 -o root -g root /tmp/agents/codex_exec /opt/neurodesktop/codex-exec \
     # Startup cleanup: drop sessions whose working directory has been deleted.
     && install -m 0755 -o root -g users /tmp/agents/opencode_prune_sessions.py /opt/neurodesktop/opencode_prune_sessions.py \
     # Anchored Notebook Intelligence patch (see patch_nbi.py): make the
@@ -1381,7 +1439,10 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     /opt/neurodesktop/webapp_wrapper/webapp_wrapper.py \
     && chmod +r /opt/neurodesktop/webapp_wrapper/splash_template.html \
     /opt/neurodesktop/webapps.json \
-    && chown -R root:users /opt/config /opt/neurodesktop /opt/tests
+    && chown -R root:users /opt/config /opt/neurodesktop /opt/tests \
+    # Git checkout modes depend on the builder's umask. The examples and test
+    # tier are read-only image assets, so normalize them for the jovyan user.
+    && chmod -R a+rX /opt/neurodesktop/examples /opt/tests
 
 
 # jupyter-server-proxy 4.5.0 constructs SimpleAsyncHTTPClient directly for

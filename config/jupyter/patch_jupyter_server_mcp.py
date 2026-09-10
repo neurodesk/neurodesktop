@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Make jupyter_server_mcp honor FASTMCP_SHOW_SERVER_BANNER.
 
-``jupyter-server-mcp==0.2.1`` starts FastMCP through its own embedded HTTP
+``jupyter-server-mcp==0.3.0`` starts FastMCP through its own embedded HTTP
 runner and calls ``log_server_banner()`` unconditionally, bypassing
 FastMCP's ``show_server_banner`` setting. The banner is a multi-line ASCII
 box (including a hosting ad) printed into the Jupyter server log on every

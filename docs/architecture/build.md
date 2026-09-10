@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-04"
+last-reviewed: "2026-09-10"
 ---
 
 # Build-Time Behaviors
@@ -40,10 +40,29 @@ all of `tests/` was mounted) would needlessly rebuild everything downstream.
 When adding a layer, mount individual files and place the layer at the
 band matching its most volatile input.
 
+The runtime stage starts from the pinned multi-architecture
+`jupyter/base-notebook` date tag and runs an apt `dist-upgrade` against fresh
+Ubuntu metadata before installing Neurodesktop's runtime packages. The pip
+layer upgrades every direct requested distribution while retaining explicit
+compatibility holds. Resolver-selected dependencies inherit the new base and
+fresh direct solves; the build does not run an unbounded post-solve pip or
+conda upgrade that could replace the base image's tested Jupyter environment.
+Where two current direct packages conflict, the user-facing tool wins: both
+the main image environment and Lightcone's isolated tool environment install
+Snakemake 9.26.1 and hold its infrastructure dependency `packaging` at the
+newest allowed release, 25.0.
+
 The ipyniivue patch is one deliberate exception: its version-coupled source is
 mounted into the pip layer because that layer must replace the installed 5 MB
 bundle before it is committed. Applying the patch in the later local-file band
 would leave the unused package copy in image history.
+
+The pip layer also builds `jupyterlab-slurm` from an exact source revision.
+That source still names the retired `@jupyterlab/builder` package, so the build
+asserts the old declaration and replaces it with the current
+`@jupyter/builder` package before producing the wheel. The assertion turns an
+upstream fix or dependency change into an explicit image-build failure instead
+of silently carrying the workaround forward.
 
 ## Image Size Hygiene
 

@@ -11,8 +11,8 @@ EXAMPLE = Path("/opt/neurodesktop/examples/astra-bet")
 
 def test_astra_viewer_and_schema_dependencies_are_installed_at_exact_versions():
     assert importlib.metadata.version("neurodesk-astra-view") == "0.1.0"
-    assert importlib.metadata.version("astra-spec") == "0.0.12"
-    assert importlib.metadata.version("astra-tools") == "0.2.11"
+    assert importlib.metadata.version("astra-spec") == "0.0.14"
+    assert importlib.metadata.version("astra-tools") == "0.2.17"
     assert importlib.metadata.version("anywidget") == "0.11.0"
     assert importlib.metadata.version("ipywidgets") == "8.1.9"
 

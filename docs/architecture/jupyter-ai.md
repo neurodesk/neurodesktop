@@ -4,7 +4,7 @@ description: The ACP-native Jupyter AI chat surface, its Claude/Codex/OpenCode
   personas, workspace seeding, and collaboration-stack workarounds
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-31"
+last-reviewed: "2026-09-10"
 ---
 
 # Jupyter AI
@@ -74,7 +74,7 @@ registration site; a different hook overriding ours still warns.
 
 ## Collaboration stack and server workarounds
 
-Jupyter AI 3.1.2 is installed with Jupyter Collaboration 4.4.2. The release
+Jupyter AI 3.2.0 is installed with Jupyter Collaboration 4.4.2. The release
 targets JupyterLab 4, but its published collaboration and document-provider
 frontends support `@jupyter/ydoc` only through version 3. Neurodesktop rebuilds
 those two bundles against the image's JupyterLab 4.6 YDoc 4.1.1 contract. The
@@ -359,7 +359,7 @@ tests and drop only marker-presence assertions; update the AGENTS.md bullet
 and this page. When a patcher has no seams left, delete the script, its
 Dockerfile `RUN` layer, and its unit-test file.
 
-`jupyter-ai-acp-client` 0.2.1 logs every streamed message chunk at INFO — two
+`jupyter-ai-acp-client` 0.3.0 logs every streamed message chunk at INFO — two
 lines per chunk, where a chunk is often a few characters — plus one line per
 tool-call start and per once-a-second progress tick, so a single persona reply
 floods the Jupyter server log with thousands of lines. A second anchored
@@ -368,7 +368,7 @@ per-event log statements to DEBUG; rarer events such as permission requests
 stay at INFO. Like the issue-271 patch, it fails the image build if a future
 release changes any source seam.
 
-`jupyter-server-mcp` 0.2.1 starts FastMCP through its own embedded HTTP
+`jupyter-server-mcp` 0.3.0 starts FastMCP through its own embedded HTTP
 runner and prints the FastMCP ASCII banner unconditionally, ignoring
 FastMCP's `show_server_banner` setting. The image exports
 `FASTMCP_SHOW_SERVER_BANNER=0` and a third anchored build-time patch

@@ -17,6 +17,7 @@ current behavior see [Architecture](../architecture.md),
 
 | Record | Status | What it decided |
 | --- | --- | --- |
+| [Image dependency upgrade audit](image-dependency-upgrade.md) | implemented | Derive current image pins from the root Dockerfile, keep only authority and compatibility policy in the catalog, and report upstream and compatible releases separately |
 | [Subscription-based agentic workflow redesign](agentic-subscription-redesign.md) | implemented | Use the existing runner and Codex subscription for issue repairs, five weekly maintenance categories, independent validation, and draft PR publication |
 | [Codex authentication research](agentic-codex-auth-research.md) | research | Verify subscription CLI behavior, gh-aw authentication limits, and the explicit public-repository caveat in official CI guidance |
 | [Agentic workflow reliability remediation](agentic-workflow-reliability-remediation.md) | implemented | Size hard invocation ceilings from transcripts, split diagnosis from fixing, rotate maintenance, and stop conflating scheduled infrastructure failures with agent failures |

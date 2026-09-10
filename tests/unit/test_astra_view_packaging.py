@@ -8,6 +8,9 @@ from testlib import repo_path
 ROOT = repo_path("extensions/astra-viewer")
 EXAMPLE = repo_path("tests/fixtures/astra-bet")
 DOCKERFILE = repo_path("Dockerfile").read_text(encoding="utf-8")
+UNIT_TEST_WORKFLOW = repo_path(".github/workflows/unit-tests.yml").read_text(
+    encoding="utf-8"
+)
 
 
 def test_viewer_has_no_npm_builder_or_runtime_network_import():
@@ -202,6 +205,18 @@ def test_viewer_pins_match_the_image_pins():
         match = re.search(rf'ARG {argument}="([^"]+)"', DOCKERFILE)
         assert match, argument
         assert f'"{package}=={match.group(1)}"' in pyproject, package
+
+
+def test_ci_astra_pins_match_the_image_pins():
+    """CI must exercise the released schema versions installed in the image."""
+    for package, argument in (
+        ("astra-spec", "ASTRA_SPEC_VERSION"),
+        ("astra-tools", "ASTRA_TOOLS_VERSION"),
+        ("anywidget", "ANYWIDGET_VERSION"),
+    ):
+        match = re.search(rf'ARG {argument}="([^"]+)"', DOCKERFILE)
+        assert match, argument
+        assert f"{package}=={match.group(1)}" in UNIT_TEST_WORKFLOW, package
 
 
 def test_adapter_is_the_only_schema_aware_viewer_module():

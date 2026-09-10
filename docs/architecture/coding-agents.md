@@ -1,10 +1,10 @@
 ---
 title: Coding agents
-description: Claude Code installation, the OpenCode terminal wrapper, and
-  OpenCode session pruning
+description: Claude Code and Codex installation, the OpenCode terminal wrapper,
+  and OpenCode session pruning
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-25"
+last-reviewed: "2026-09-10"
 ---
 
 # Coding agents
@@ -53,21 +53,41 @@ reintroducing a web interface waits on an upstream solution.
 
 ## Claude Code
 
-Claude Code is installed into `/opt/jovyan_defaults/.local/bin/claude` when the
-image is built and is launched through `/usr/local/sbin/claude`. On each launch,
-the wrapper replaces `~/.local/bin/claude` with a symlink to that image-owned
-binary. Persistent homes therefore pick up the Claude version in a newly
-deployed image without retaining a stale per-user binary or duplicating the
-large executable. Claude's in-process auto-updater remains disabled because
-version updates are managed by the container image.
+The current audited Claude Code release is installed into
+`/opt/jovyan_defaults/.local/bin/claude` when the image is built and is launched
+through `/usr/local/sbin/claude`. The quiet
+`/opt/neurodesktop/claude-exec` selector uses a native installation at
+`~/.local/bin/claude` when one exists. Otherwise, it uses the image binary.
+The selector removes the legacy Neurodesktop symlink to the image binary once,
+which lets `claude update` create and manage Anthropic's native installation
+under `~/.local/share/claude/versions/`. A read-only or fresh home continues to
+use the image binary without a download or a copy into the home.
+
+Background updates remain disabled. Users can run `claude update` explicitly.
+The updated executable takes effect on the next terminal or Jupyter AI Claude
+process. A home installation stays authoritative across image upgrades. Remove
+the native home installation to return to the version supplied by the image.
 
 The image seeds a user-level `~/.claude/settings.json` (from
 [`config/agents/claude_settings.json`](../../config/agents/claude_settings.json))
 that defaults the permission mode to `auto` and the effort level to `high` for
 both the CLI and the Jupyter AI Claude persona; per-project
 `.claude/settings.local.json` files seeded by the wrapper still layer the
-Neurodesktop tool allowlist on top. Codex likewise defaults to
-`model_reasoning_effort = "high"` in its seeded `~/.codex/config.toml`.
+Neurodesktop tool allowlist on top.
+
+## Codex CLI
+
+The image installs its tested Codex version at `/usr/bin/codex`. The terminal
+wrapper sets `NPM_CONFIG_PREFIX=~/.local` for `codex update`, so npm installs
+the new version into the persistent home without root access. The quiet
+`/opt/neurodesktop/codex-exec` selector prefers `~/.local/bin/codex` and uses
+`/usr/bin/codex` as its fallback. New terminal and Jupyter AI Codex processes
+therefore use the updated version immediately.
+
+Codex defaults to `model_reasoning_effort = "high"` in its seeded
+`~/.codex/config.toml`. A user-installed version can move outside the version
+range tested with the image's pinned `codex-acp`; removing the home installation
+restores the tested image version.
 
 ## OpenCode terminal wrapper
 

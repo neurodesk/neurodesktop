@@ -1,6 +1,6 @@
 """Build-time workaround contract for the jupyter-server-mcp FastMCP banner.
 
-jupyter-server-mcp 0.2.1 starts FastMCP through its own embedded HTTP runner
+jupyter-server-mcp 0.3.0 starts FastMCP through its own embedded HTTP runner
 and calls log_server_banner() unconditionally, so FASTMCP_SHOW_SERVER_BANNER
 is ignored and a multi-line ASCII banner lands in the Jupyter server log on
 every boot. The patcher gates the call on the FastMCP setting the image
@@ -97,7 +97,7 @@ def test_image_disables_the_banner_and_applies_workaround_after_pin():
     # The setting the patched call honors must be exported image-wide.
     assert "ENV FASTMCP_SHOW_SERVER_BANNER=0" in dockerfile
 
-    package_pin = dockerfile.index("jupyter-server-mcp==0.2.1")
+    package_pin = dockerfile.index("jupyter-server-mcp==0.3.0")
     patch_install = dockerfile.index("/opt/neurodesktop/patch_jupyter_server_mcp.py")
     patch_run = dockerfile.index(
         "/opt/conda/bin/python /opt/neurodesktop/patch_jupyter_server_mcp.py"
