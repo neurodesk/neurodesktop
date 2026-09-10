@@ -1,14 +1,21 @@
-# set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-sudo apt-get install lsb-release
-wget https://cvmrepo.web.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../.." && pwd)
+
+sudo bash "${REPO_ROOT}/scripts/apt_install_retry.sh" lsb-release
+bash "${REPO_ROOT}/scripts/retry.sh" wget -q \
+    https://cvmrepo.web.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb \
+    -O cvmfs-release-latest_all.deb
 
 echo "[DEBUG]: adding cfms repo"
 sudo dpkg -i cvmfs-release-latest_all.deb
-echo "[DEBUG]: apt-get update"
-sudo apt-get update --allow-unauthenticated
 echo "[DEBUG]: apt-get install cvmfs"
-sudo apt-get install cvmfs --allow-unauthenticated
+sudo bash "${REPO_ROOT}/scripts/apt_install_retry.sh" \
+    cvmfs \
+    cvmfs-fuse3 \
+    cvmfs-libs
 
 sudo mkdir -p /etc/cvmfs/keys/ardc.edu.au/
 
@@ -46,7 +53,9 @@ cvmfs_config stat -v neurodesk.ardc.edu.au
 
 
 ## Test if containers are on CVMFS:
-wget https://raw.githubusercontent.com/NeuroDesk/neurocommand/main/cvmfs/log.txt
+bash "${REPO_ROOT}/scripts/retry.sh" wget -q \
+    https://raw.githubusercontent.com/NeuroDesk/neurocommand/main/cvmfs/log.txt \
+    -O log.txt
 echo "debug logfile:"
 cat log.txt
 

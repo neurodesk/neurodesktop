@@ -1,18 +1,24 @@
 #!/usr/bin/env bash
-# set -e
+set -euo pipefail
 
-SERVERIP=$1
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../.." && pwd)
+
+SERVERIP=${1:?usage: test_cvmfs.sh SERVER}
 # SERVERIP=203.101.231.144
 
-sudo apt-get install lsb-release
-wget https://cvmrepo.web.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb
+sudo bash "${REPO_ROOT}/scripts/apt_install_retry.sh" lsb-release
+bash "${REPO_ROOT}/scripts/retry.sh" wget -q \
+    https://cvmrepo.web.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb \
+    -O cvmfs-release-latest_all.deb
 
 echo "[DEBUG]: adding cfms repo"
 sudo dpkg -i cvmfs-release-latest_all.deb
-echo "[DEBUG]: apt-get update"
-sudo apt-get update --allow-unauthenticated
 echo "[DEBUG]: apt-get install cvmfs"
-sudo apt-get install cvmfs --allow-unauthenticated
+sudo bash "${REPO_ROOT}/scripts/apt_install_retry.sh" \
+    cvmfs \
+    cvmfs-fuse3 \
+    cvmfs-libs
 
 sudo mkdir -p /etc/cvmfs/keys/ardc.edu.au/
 
@@ -43,20 +49,27 @@ sudo cvmfs_config chksetup
 ls /cvmfs/neurodesk.ardc.edu.au
 
 echo "[DEBUG]: Resolving DNS name cvmfs-geoproximity.neurodesk.org"
-resolved_ip=$(dig +short cvmfs-geoproximity.neurodesk.org)
-echo "[DEBUG]: Resolved IP for cvmfs-geoproximity.neurodesk.org: $resolved_ip"
+if resolved_ip=$(dig +short cvmfs-geoproximity.neurodesk.org); then
+    echo "[DEBUG]: Resolved IP for cvmfs-geoproximity.neurodesk.org: $resolved_ip"
+else
+    echo "[WARN]: DNS diagnostic for cvmfs-geoproximity.neurodesk.org failed"
+fi
 
 echo "[DEBUG]: Test download from cvmfs-geoproximity.neurodesk.org"
-curl --head http://cvmfs-geoproximity.neurodesk.org/cvmfs/neurodesk.ardc.edu.au/.cvmfspublished
+curl --head http://cvmfs-geoproximity.neurodesk.org/cvmfs/neurodesk.ardc.edu.au/.cvmfspublished \
+    || echo "[WARN]: geoproximity download diagnostic failed"
 
 echo "[DEBUG]: Test download from cvmfs.neurodesk.org"
-curl --head http://cvmfs.neurodesk.org/cvmfs/neurodesk.ardc.edu.au/.cvmfspublished
+curl --head http://cvmfs.neurodesk.org/cvmfs/neurodesk.ardc.edu.au/.cvmfspublished \
+    || echo "[WARN]: cvmfs.neurodesk.org download diagnostic failed"
 
 cvmfs_config stat -v neurodesk.ardc.edu.au
 
 
 ## Test if containers are on CVMFS:
-wget https://raw.githubusercontent.com/NeuroDesk/neurocommand/main/cvmfs/log.txt
+bash "${REPO_ROOT}/scripts/retry.sh" wget -q \
+    https://raw.githubusercontent.com/NeuroDesk/neurocommand/main/cvmfs/log.txt \
+    -O log.txt
 echo "debug logfile:"
 cat log.txt
 
