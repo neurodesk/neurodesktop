@@ -8,6 +8,9 @@ from testlib import repo_path
 ROOT = repo_path("extensions/astra-viewer")
 EXAMPLE = repo_path("tests/fixtures/astra-bet")
 DOCKERFILE = repo_path("Dockerfile").read_text(encoding="utf-8")
+UNIT_TEST_WORKFLOW = repo_path(".github/workflows/unit-tests.yml").read_text(
+    encoding="utf-8"
+)
 
 
 def test_viewer_has_no_npm_builder_or_runtime_network_import():
@@ -202,6 +205,18 @@ def test_viewer_pins_match_the_image_pins():
         match = re.search(rf'ARG {argument}="([^"]+)"', DOCKERFILE)
         assert match, argument
         assert f'"{package}=={match.group(1)}"' in pyproject, package
+
+
+def test_unit_workflow_resolves_viewer_dependencies_from_package_metadata():
+    """CI must not carry a second copy of the viewer's exact dependency pins.
+
+    Installing the local viewer project makes pip resolve the same ASTRA stack
+    declared by its wheel.  A literal workflow pin can otherwise remain stale
+    during an image upgrade and run the adapter against a different schema.
+    """
+    assert "./extensions/astra-viewer" in UNIT_TEST_WORKFLOW
+    for package in ("astra-spec", "astra-tools", "anywidget"):
+        assert not re.search(rf"\b{re.escape(package)}==", UNIT_TEST_WORKFLOW)
 
 
 def test_adapter_is_the_only_schema_aware_viewer_module():

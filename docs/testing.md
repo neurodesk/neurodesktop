@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-09-04"
+last-reviewed: "2026-09-10"
 ---
 
 # Testing
@@ -43,9 +43,12 @@ Two modules need heavier optional dependencies and skip cleanly when they are
 absent rather than failing a plain checkout; CI installs them, so they always
 run there:
 
-- `tests/unit/test_astra_view_graph.py` needs `astra-spec==0.0.12`,
-  `astra-tools==0.2.11`, and `anywidget==0.11.0`, because it runs the released
-  ASTRA validators. Those pull in ~50 further packages.
+- `tests/unit/test_astra_view_graph.py` needs the exact `astra-spec`,
+  `astra-tools`, and `anywidget` versions declared by
+  `extensions/astra-viewer/pyproject.toml`, because it runs the released ASTRA
+  validators. CI installs that local project so the test environment cannot
+  drift from the viewer package metadata. Those dependencies pull in ~50
+  further packages.
 - `tests/unit/test_astra_view_filebrowser.py` needs `jupyter-server` to drive
   the file-browser server extension.
 

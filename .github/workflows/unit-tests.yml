@@ -42,9 +42,10 @@ jobs:
           python -m pip install --upgrade pip
           # jupyter-server: exercise the astra.yaml file-browser server
           # extension (test_astra_view_filebrowser.py skips without it)
+          # Install the local viewer project so its package metadata remains
+          # the single source for the exact ASTRA/anywidget dependency pins.
           python -m pip install pytest httpx traitlets \
-            astra-spec==0.0.12 astra-tools==0.2.11 anywidget==0.11.0 \
-            jupyter-server
+            jupyter-server ./extensions/astra-viewer
           # ssh-keygen, for the ensure_ssh_keys.sh tests
           sudo apt-get update -qq
           sudo apt-get install -y -qq openssh-client
