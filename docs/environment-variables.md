@@ -122,6 +122,27 @@ are listed at the end. The subsystems themselves are described in
 
 ## AI tooling (providers, agents, Notebook Intelligence)
 
+### T3 Code server
+
+- `NEURODESKTOP_T3_CODE_ENABLE`: starts the T3 sidecar with Jupyter when set
+  to `1`, `true`, `yes`, or `on`; defaults to disabled
+- `NEURODESKTOP_T3_CODE_HOST`: interface passed to T3; defaults to
+  `127.0.0.1`. Use `0.0.0.0` inside Docker when publishing port 3773 on the
+  Docker host
+- `NEURODESKTOP_T3_CODE_PORT`: fixed server port; defaults to `3773`
+- `NEURODESKTOP_T3_CODE_HOME`: persistent T3 data directory; defaults to
+  `~/.t3`
+- `NEURODESKTOP_T3_CODE_WORKDIR`: initial project directory; defaults to the
+  notebook user's home
+- `NEURODESKTOP_T3_CODE_EXECUTABLE`,
+  `NEURODESKTOP_T3_CODE_PROVIDER_BIN`: installed server and quiet provider
+  directory overrides. These are intended for image tests and development.
+  The defaults are `/opt/t3-code/node_modules/.bin/t3` and
+  `/opt/neurodesktop/t3-provider-bin`.
+
+See [T3 Code remote access](architecture/t3-code.md) for the Docker and T3
+Connect procedures.
+
 - `NEURODESK_API_KEY`: API key for `https://llm.neurodesk.org`. Shared by
   OpenCode and by the Notebook Intelligence JupyterLab plugin. OpenCode
   persists it to `~/.bashrc` on first setup, and `nbi_setup.sh` injects it
@@ -237,6 +258,8 @@ reviewed; the Dockerfile itself is authoritative.
   installed globally; defaults to `0.154.0` and must stay inside the range the
   pinned codex-acp adapter declares, because this is the tested fallback for
   the adapter. A user can install a newer release with `codex update`
+- `T3_CODE_VERSION`: the headless T3 Code server release installed from the
+  checked lockfile; defaults to `0.0.40`
 - `JUPYTER_COLLABORATION_VERSION`, `JUPYTER_COLLABORATION_REF`: release and
   exact source commit used to rebuild Jupyter AI's collaboration frontends for
   JupyterLab 4.6's YDoc 4 contract; defaults to `4.4.2` and

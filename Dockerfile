@@ -941,6 +941,47 @@ RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash -s 
     && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 
+# Install the headless T3 Code server in an isolated, locked npm tree. T3 uses
+# node-pty on Linux, so its exact install script is approved in the locked
+# manifest and its compiler toolchain is installed and purged in this layer.
+# The unused msgpackr native extractor stays explicitly denied. T3's Claude
+# SDK dependency also installs a full platform-specific Claude binary; the
+# image already owns one, so remove that duplicate before the layer is
+# committed.
+ARG T3_CODE_VERSION="0.0.40"
+RUN --mount=type=bind,source=config/agents/t3-code/package.json,target=/tmp/t3-code/package.json,ro \
+    --mount=type=bind,source=config/agents/t3-code/package-lock.json,target=/tmp/t3-code/package-lock.json,ro \
+    --mount=type=bind,source=config/agents/t3-provider-bin,target=/tmp/t3-provider-bin,ro \
+    set -eux; \
+    node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 24 || (major === 24 && minor < 10)) process.exit(1)'; \
+    test "$(node -p 'require("/tmp/t3-code/package.json").dependencies.t3')" = "${T3_CODE_VERSION}"; \
+    apt-get update; \
+    apt-install-retry build-essential; \
+    install -d -m 0755 /opt/t3-code /opt/neurodesktop/t3-provider-bin; \
+    install -m 0644 /tmp/t3-code/package.json /tmp/t3-code/package-lock.json /opt/t3-code/; \
+    cd /opt/t3-code; \
+    npm_config_cache=/tmp/npm-t3-cache npm ci --omit=dev --no-audit --no-fund; \
+    test "$(/opt/t3-code/node_modules/.bin/t3 --version)" = "t3 v${T3_CODE_VERSION}"; \
+    node -e 'const p=require("/opt/t3-code/node_modules/node-pty"); const x=p.spawn("/bin/sh",["-c","exit 0"]); x.onExit(({exitCode})=>process.exit(exitCode))'; \
+    rm -rf /opt/t3-code/node_modules/@anthropic-ai/claude-agent-sdk-* \
+        /opt/t3-code/node_modules/node-pty/prebuilds \
+        /opt/t3-code/node_modules/node-pty/deps/winpty; \
+    find /opt/t3-code -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete; \
+    test -z "$(find /opt/t3-code/node_modules/@anthropic-ai -maxdepth 1 -type d -name 'claude-agent-sdk-*' -print -quit)"; \
+    test ! -e /opt/t3-code/node_modules/node-pty/prebuilds; \
+    test "$(/opt/t3-code/node_modules/.bin/t3 --version)" = "t3 v${T3_CODE_VERSION}"; \
+    node -e 'const p=require("/opt/t3-code/node_modules/node-pty"); const x=p.spawn("/bin/sh",["-c","exit 0"]); x.onExit(({exitCode})=>process.exit(exitCode))'; \
+    install -m 0755 /tmp/t3-provider-bin/codex /tmp/t3-provider-bin/claude \
+        /tmp/t3-provider-bin/opencode /opt/neurodesktop/t3-provider-bin/; \
+    ln -s /opt/t3-code/node_modules/.bin/t3 /usr/local/bin/t3; \
+    chown -R root:users /opt/t3-code /opt/neurodesktop/t3-provider-bin; \
+    chmod -R a+rX /opt/t3-code /opt/neurodesktop/t3-provider-bin; \
+    apt-mark manual autofs cvmfs libc6-dev linux-libc-dev uuid-dev; \
+    DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove build-essential; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/* /tmp/npm-t3-cache /root/.npm /root/.cache/node-gyp \
+        /home/${NB_USER}/.npm /home/${NB_USER}/.cache/node-gyp
+
 # Expose the installed agent families as Jupyter AI ACP personas. These
 # adapters are runtime-only and deliberately live after the expensive
 # third-party labextension rebuilds so adapter bumps never invalidate them.
@@ -1028,6 +1069,12 @@ RUN --mount=type=bind,source=extensions/astra-viewer,target=/tmp/astra-viewer-sr
     && cp -R /tmp/astra-viewer-src/. /tmp/astra-viewer/ \
     && /opt/conda/bin/pip install --no-deps /tmp/astra-viewer \
     && rm -rf /tmp/astra-viewer /home/${NB_USER}/.cache
+
+# Install the server extension that owns the optional T3 process for exactly
+# the lifetime of Jupyter Server. It has no frontend build or extra dependency.
+RUN --mount=type=bind,source=extensions/t3-code-server,target=/tmp/t3-code-server-src,ro \
+    /opt/conda/bin/pip install --no-deps /tmp/t3-code-server-src \
+    && rm -rf /home/${NB_USER}/.cache
 
 USER root
 

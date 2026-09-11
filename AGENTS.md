@@ -49,6 +49,16 @@
   on the copy in this repository and let the Neurodesktop image own
   `ServerApp.jpserver_extensions`; the Sherlock launcher must not disable
   `jupyter_server_fileid`, which `jupyter-server-documents` requires.
+- When changing the T3 Code package pin, server extension, provider launchers,
+  Docker port settings, or lifecycle variables, run `pytest
+  tests/unit/test_t3_code_server.py` from a checkout and `pytest
+  /opt/tests/test_t3_code_server_image.py` in the built image. Keep T3 opt-in,
+  run it as the notebook user, and let the Jupyter extension own its process
+  group. Keep its state under the persistent home. Never copy a startup or
+  pairing token into Jupyter or container logs. Keep the fixed port aligned
+  with Docker publication, use the quiet image-owned provider binaries, and
+  remove T3's duplicate Claude binary and foreign `node-pty` payload in their
+  install layer.
 - When changing Jupyter Server Proxy response buffering or the Tornado HTTP
   client limits in `jupyter_server_config_extra.py` or
   `patch_jupyter_server_proxy.py`, run `pytest

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "neurodesk-t3-code"
+version = "0.1.0"
+description = "Jupyter-owned T3 Code sidecar for Neurodesktop"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+dependencies = ["jupyter-server>=2.15"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["neurodesk_t3_code"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"jupyter-config/jupyter_server_config.d" = "etc/jupyter/jupyter_server_config.d"
