@@ -4,7 +4,7 @@ description: Startup flow, services, directory layout, and the map of
   per-subsystem architecture pages
 parent: index.md
 status: current
-last-reviewed: "2026-08-27"
+last-reviewed: "2026-09-10"
 ---
 
 # Architecture
@@ -24,6 +24,7 @@ under [`docs/architecture/`](architecture/). The wiki entry point is
 | [Workspace link routing](architecture/workspace-link-routing.md) | Opening agent-authored absolute file links inside JupyterLab |
 | [ASTRA integration](architecture/astra.md) | `astra`/`lc` CLIs, the shared agent skill, and the provenance viewer |
 | [Coding agents](architecture/coding-agents.md) | Claude Code, the OpenCode terminal wrapper, and session pruning |
+| [T3 Code remote access](architecture/t3-code.md) | Optional headless T3 server, lifecycle, providers, and desktop connection |
 | [Jupyter AI](architecture/jupyter-ai.md) | ACP personas, chat workspace seeding, collaboration-stack workarounds |
 | [Agentic CI workflows](architecture/agentic-workflows.md) | Issue investigation and the weekly maintenance suite |
 | [Build-time behaviors](architecture/build.md) | Notebook Intelligence and MyST/RISE rebuilds, Apptainer build stage, user permissions |
@@ -68,6 +69,7 @@ The startup sequence follows this order (per
 - RDP and VNC: desktop access through Guacamole, started on demand by the
   selected launcher entry
 - SSH: optional SSH server proxy
+- T3 Code: optional desktop-accessible coding-agent server on port 3773
 - Slurm: integrated single-node scheduler (or host-cluster mode); see
   [`config/slurm/README.md`](../config/slurm/README.md)
 
