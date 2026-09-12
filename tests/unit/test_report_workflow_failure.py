@@ -72,7 +72,7 @@ const github = {
         workflow_run: {
           id: 1234, run_attempt: 1, status: 'completed', conclusion: 'failure',
           name: 'Unit tests', repository: { full_name: 'NeuroDesk/neurodesktop' },
-          event: 'pull_request', head_branch: 'user-branch', head_sha: 'a'.repeat(40),
+          event: 'pull_request', head_branch: 'main', head_sha: 'a'.repeat(40),
           head_repository: { full_name: 'NeuroDesk/neurodesktop' },
           pull_requests: [{ number: 23 }], ...override,
         },
@@ -140,6 +140,18 @@ def test_completed_run_aggregates_matrix_failures_and_dispatches_default_branch(
     assert dispatch["ref"] == "main"
     assert dispatch["inputs"] == {"issue-number": "100"}
     assert any(call.get("attempt_number") == 1 for call in output["calls"])
+
+
+def test_feature_branch_failure_is_reported_without_default_branch_dispatch():
+    output = run_reporter(runs=[{"head_branch": "user-branch"}])
+
+    assert len(output["issues"]) == 1
+    issue_body = output["issues"][0]["body"]
+    assert "feature-branch failure" in issue_body
+    assert "Related pull requests: #23." in issue_body
+    assert calls_of(output, "comment")
+    assert not calls_of(output, "dispatch")
+    assert not any("failure-dispatched:" in c["body"] for c in output["comments"])
 
 
 def test_malicious_job_name_cannot_change_its_report_link():
