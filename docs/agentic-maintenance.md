@@ -159,9 +159,11 @@ explicit blocker or no-change result instead of an empty PR.
 
 The completed-workflow reporter watches CI, deployment, and agent jobs. It
 creates or updates a failure issue with a link to the run. Product failures
-enter normal issue handling. Agent authentication, runner, and other
-operational failures are marked as operational so their reports do not launch
-a recursive chain of repair jobs.
+on the default branch enter automatic issue handling. Feature-branch failures
+are recorded with their related pull requests but do not dispatch a repair
+worker, because issue repair edits the default branch. Agent authentication,
+runner, and other operational failures are marked as operational so their
+reports do not launch a recursive chain of repair jobs.
 
 Issue branches use `agentic/issue-N-RUNID`; maintenance branches use
 `agentic/maintenance-category-YYYY-Www`. Preparation skips an issue or category that already has an owned open PR.
