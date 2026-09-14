@@ -82,7 +82,7 @@ def test_wrong_declared_version_warns_but_still_renders(tmp_path):
     project = tmp_path / "project"
     shutil.copytree(BET, project)
     spec = project / "astra.yaml"
-    spec.write_text(spec.read_text().replace('version: "0.0.12"', 'version: "9.9.9"'))
+    spec.write_text(spec.read_text().replace('version: "0.0.14"', 'version: "9.9.9"'))
 
     graph = build_graph(spec)
 
@@ -91,7 +91,7 @@ def test_wrong_declared_version_warns_but_still_renders(tmp_path):
     assert len(graph["nodes"]) > 0
     assert len(graph["warnings"]) == 1
     assert "'9.9.9'" in graph["warnings"][0]
-    assert "0.0.12" in graph["warnings"][0]
+    assert "0.0.14" in graph["warnings"][0]
 
 
 def test_matching_version_renders_without_warnings():
@@ -144,7 +144,7 @@ def test_a_retired_narrative_is_read_as_a_description_not_rejected(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
     (project / "astra.yaml").write_text(
-        'version: "0.0.12"\nname: drifted\nauthors: [someone]\n'
+        'version: "0.0.14"\nname: drifted\nauthors: [someone]\n'
         "narrative:\n"
         "  summary: |\n    What this analysis is.\n"
         "  methods: |\n    How it was done.\n"
@@ -176,7 +176,7 @@ def test_a_retired_field_in_an_inline_sub_analysis_is_adopted_too(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
     (project / "astra.yaml").write_text(
-        'version: "0.0.12"\nname: parent\ninputs: []\noutputs: []\n'
+        'version: "0.0.14"\nname: parent\ninputs: []\noutputs: []\n'
         "analyses:\n"
         "  child:\n"
         "    name: Child\n"
@@ -203,7 +203,7 @@ def test_option_insights_naming_an_ancestor_insight_still_resolve(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
     (project / "astra.yaml").write_text(
-        'version: "0.0.12"\nname: parent\ninputs: []\noutputs: []\n'
+        'version: "0.0.14"\nname: parent\ninputs: []\noutputs: []\n'
         "prior_insights:\n"
         "  upstairs:\n"
         '    label: "Known upstairs"\n'
@@ -251,7 +251,7 @@ def test_a_genuine_schema_error_is_still_an_error(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
     (project / "astra.yaml").write_text(
-        'version: "0.0.12"\nname: broken\ninputs: []\noutputs: []\n'
+        'version: "0.0.14"\nname: broken\ninputs: []\noutputs: []\n'
         "decisions:\n"
         "  pick:\n"
         '    label: "Pick"\n'
@@ -621,7 +621,7 @@ def test_external_analysis_escape_is_rejected_before_loading(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
     (project / "astra.yaml").write_text(
-        'version: "0.0.12"\nname: escape\ninputs: []\noutputs: []\n'
+        'version: "0.0.14"\nname: escape\ninputs: []\noutputs: []\n'
         "analyses:\n  child:\n    path: ../outside\n"
     )
 

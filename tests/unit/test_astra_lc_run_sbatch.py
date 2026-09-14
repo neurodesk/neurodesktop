@@ -153,7 +153,7 @@ def test_guard_refuses_a_declared_container(tmp_path, spec, where):
 # ---------------------------------------------------------------------------
 # What `lc status --json` actually produces
 #
-# Recorded from lightcone-cli 0.4.0 against tests/fixtures/astra-bet. The
+# Recorded from lightcone-cli 0.4.2 against tests/fixtures/astra-bet. The
 # viewer parses this shape directly, so a drift upstream shows up here rather
 # than as a blank graph.
 

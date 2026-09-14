@@ -5,6 +5,7 @@
 CODEX_HOME_DIR="${CODEX_HOME:-${HOME}/.codex}"
 CODEX_CONFIG_TOML="${CODEX_HOME_DIR}/config.toml"
 CODEX_DEFAULT_CONFIG_TOML="/opt/jovyan_defaults/.codex/config.toml"
+CODEX_EXEC="/opt/neurodesktop/codex-exec"
 
 load_br_mcp_token_from_bashrc() {
     local bashrc_file="${HOME}/.bashrc"
@@ -129,6 +130,14 @@ else
     echo "Brain Researcher MCP server: inactive (run 'opencode' to set BR_MCP_TOKEN)"
 fi
 
+# The image install lives under /usr and cannot be replaced by an unprivileged
+# user. Keep `codex update` inside the persistent home instead.
+if [ "${1:-}" = "update" ]; then
+    export NPM_CONFIG_PREFIX="${NPM_CONFIG_PREFIX:-${HOME}/.local}"
+    export npm_config_cache="${npm_config_cache:-${HOME}/.cache/npm}"
+    exec "${CODEX_EXEC}" "$@"
+fi
+
 # In browser-proxied environments (e.g., code-server behind Jupyter),
 # localhost OAuth callbacks can fail. Default `codex login` to device auth
 # unless the caller already requested an explicit auth mode.
@@ -136,10 +145,10 @@ if [ "${1:-}" = "login" ]; then
     shift
     for arg in "$@"; do
         if [ "$arg" = "--device-auth" ] || [ "$arg" = "--with-api-key" ]; then
-            exec /usr/bin/codex login "$@"
+            exec "${CODEX_EXEC}" login "$@"
         fi
     done
-    exec /usr/bin/codex login --device-auth "$@"
+    exec "${CODEX_EXEC}" login --device-auth "$@"
 fi
 
 # Default to no approval prompts and no Codex-managed sandbox. Neurodesktop
@@ -169,7 +178,7 @@ done
 
 # Start Codex CLI using the actual binary path (not this wrapper)
 if [ "${has_yolo_or_bypass}" -eq 1 ] || [ "${has_full_auto}" -eq 1 ]; then
-    exec /usr/bin/codex "$@"
+    exec "${CODEX_EXEC}" "$@"
 fi
 
 codex_args=()
@@ -180,4 +189,4 @@ if [ "${has_sandbox_mode}" -eq 0 ]; then
     codex_args+=(--sandbox danger-full-access)
 fi
 
-exec /usr/bin/codex "${codex_args[@]}" "$@"
+exec "${CODEX_EXEC}" "${codex_args[@]}" "$@"

@@ -11,8 +11,8 @@ license = {text = "MIT"}
 requires-python = ">=3.11"
 dependencies = [
     "anywidget==0.11.0",
-    "astra-spec==0.0.12",
-    "astra-tools==0.2.11",
+    "astra-spec==0.0.14",
+    "astra-tools==0.2.17",
     "jupyter-server>=2.0",
     "PyYAML>=6.0",
 ]

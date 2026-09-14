@@ -208,12 +208,6 @@ def test_viewer_pins_match_the_image_pins():
 
 
 def test_unit_workflow_resolves_viewer_dependencies_from_package_metadata():
-    """CI must not carry a second copy of the viewer's exact dependency pins.
-
-    Installing the local viewer project makes pip resolve the same ASTRA stack
-    declared by its wheel.  A literal workflow pin can otherwise remain stale
-    during an image upgrade and run the adapter against a different schema.
-    """
     assert "./extensions/astra-viewer" in UNIT_TEST_WORKFLOW
     for package in ("astra-spec", "astra-tools", "anywidget"):
         assert not re.search(rf"\b{re.escape(package)}==", UNIT_TEST_WORKFLOW)

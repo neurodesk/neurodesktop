@@ -1,0 +1,7 @@
+{
+  "ServerApp": {
+    "jpserver_extensions": {
+      "neurodesk_t3_code": true
+    }
+  }
+}

@@ -27,8 +27,28 @@ def codex_wrapper_path():
     return resolve_source("/usr/local/sbin/codex", "config/agents/codex")
 
 
+def codex_exec_path():
+    return resolve_source("/opt/neurodesktop/codex-exec", "config/agents/codex_exec")
+
+
 def claude_wrapper_path():
     return resolve_source("/usr/local/sbin/claude", "config/agents/claude")
+
+
+def claude_exec_path():
+    return resolve_source(
+        "/opt/neurodesktop/claude-exec", "config/agents/claude_exec"
+    )
+
+
+def test_dockerfile_pins_the_native_claude_install():
+    dockerfile = resolve_source("/opt/Dockerfile", "Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'ARG CLAUDE_CODE_VERSION="2.1.267"' in dockerfile
+    assert "bash -s -- ${CLAUDE_CODE_VERSION}" in dockerfile
+    assert "bash -s -- stable" not in dockerfile
 
 
 def test_agent_slurm_template_uses_the_submission_directory():
@@ -902,7 +922,9 @@ def test_codex_yolo_no_full_auto(tmp_path):
 
     test_wrapper = tmp_path / "codex-wrapper-test"
     wrapper_contents = wrapper_path.read_text(encoding="utf-8")
-    wrapper_contents = wrapper_contents.replace("/usr/bin/codex", str(fake_codex))
+    wrapper_contents = wrapper_contents.replace(
+        "/opt/neurodesktop/codex-exec", str(fake_codex)
+    )
     test_wrapper.write_text(wrapper_contents, encoding="utf-8")
     test_wrapper.chmod(0o755)
 
@@ -944,7 +966,9 @@ def test_codex_default_no_approval_prompts_without_managed_sandbox(tmp_path):
 
     test_wrapper = tmp_path / "codex-wrapper-test"
     wrapper_contents = wrapper_path.read_text(encoding="utf-8")
-    wrapper_contents = wrapper_contents.replace("/usr/bin/codex", str(fake_codex))
+    wrapper_contents = wrapper_contents.replace(
+        "/opt/neurodesktop/codex-exec", str(fake_codex)
+    )
     test_wrapper.write_text(wrapper_contents, encoding="utf-8")
     test_wrapper.chmod(0o755)
 
@@ -990,7 +1014,9 @@ def test_codex_respects_explicit_approval_and_sandbox_flags(tmp_path):
 
     test_wrapper = tmp_path / "codex-wrapper-test"
     wrapper_contents = wrapper_path.read_text(encoding="utf-8")
-    wrapper_contents = wrapper_contents.replace("/usr/bin/codex", str(fake_codex))
+    wrapper_contents = wrapper_contents.replace(
+        "/opt/neurodesktop/codex-exec", str(fake_codex)
+    )
     test_wrapper.write_text(wrapper_contents, encoding="utf-8")
     test_wrapper.chmod(0o755)
 
@@ -1018,39 +1044,29 @@ def test_codex_respects_explicit_approval_and_sandbox_flags(tmp_path):
     assert "ARG:never" not in result.stdout
     assert "ARG:danger-full-access" not in result.stdout
 
-@pytest.mark.parametrize("existing_kind", ["regular_file", "dangling_symlink"])
-def test_claude_links_user_binary_to_image_binary(tmp_path, existing_kind):
-    """The wrapper replaces stale user binaries with the image-owned binary."""
+
+def test_claude_wrapper_preserves_home_managed_binary(tmp_path):
+    """The wrapper leaves the native installer's launcher under user control."""
     wrapper_path = claude_wrapper_path()
 
     home_dir = tmp_path / "home"
     bin_dir = home_dir / ".local" / "bin"
     bin_dir.mkdir(parents=True)
 
-    claude_link = bin_dir / "claude"
-    if existing_kind == "regular_file":
-        claude_link.write_text(
-            "#!/bin/sh\n"
-            "echo STALE_LOCAL_CLAUDE\n",
-            encoding="utf-8",
-        )
-        claude_link.chmod(0o755)
-    else:
-        claude_link.symlink_to(home_dir / "missing" / "claude")
+    home_claude = bin_dir / "claude"
+    home_claude.write_text("home-managed\n", encoding="utf-8")
 
-    fake_default_claude = tmp_path / "default-claude"
-    fake_default_claude.write_text(
-        "#!/bin/sh\n"
-        "echo \"$0 $@\"\n",
+    fake_selector = tmp_path / "claude-exec"
+    fake_selector.write_text(
+        "#!/bin/sh\nfor arg in \"$@\"; do echo \"ARG:$arg\"; done\n",
         encoding="utf-8",
     )
-    fake_default_claude.chmod(0o755)
+    fake_selector.chmod(0o755)
 
     test_wrapper = tmp_path / "claude-wrapper-test"
     wrapper_contents = wrapper_path.read_text(encoding="utf-8")
     wrapper_contents = wrapper_contents.replace(
-        'DEFAULT_CLAUDE_BIN="/opt/jovyan_defaults/.local/bin/claude"',
-        f'DEFAULT_CLAUDE_BIN="{fake_default_claude}"',
+        "/opt/neurodesktop/claude-exec", str(fake_selector)
     )
     test_wrapper.write_text(wrapper_contents, encoding="utf-8")
     test_wrapper.chmod(0o755)
@@ -1069,14 +1085,140 @@ def test_claude_links_user_binary_to_image_binary(tmp_path, existing_kind):
     )
 
     assert result.returncode == 0, f"Wrapper execution failed: {result.stdout}"
-    assert claude_link.is_symlink(), (
-        "The user-local Claude path must be a symlink, not a persistent binary copy"
+    assert home_claude.read_text(encoding="utf-8") == "home-managed\n"
+    assert "ARG:--allow-dangerously-skip-permissions" in result.stdout
+    assert "ARG:--version" in result.stdout
+
+
+def _test_agent_exec(selector_path, tmp_path, image_binary_path, image_binary):
+    test_selector = tmp_path / selector_path.name
+    selector_contents = selector_path.read_text(encoding="utf-8").replace(
+        image_binary_path, str(image_binary)
     )
-    assert claude_link.resolve() == fake_default_claude.resolve()
-    assert "STALE_LOCAL_CLAUDE" not in result.stdout
-    assert str(claude_link) in result.stdout, "Wrapper did not execute the managed symlink"
-    assert "--allow-dangerously-skip-permissions" in result.stdout
-    assert "--version" in result.stdout
+    test_selector.write_text(selector_contents, encoding="utf-8")
+    test_selector.chmod(0o755)
+    return test_selector
+
+
+def _fake_agent(path, message):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f'#!/bin/sh\necho "{message}:$*"\n', encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def test_claude_exec_prefers_home_managed_install(tmp_path):
+    home = tmp_path / "home"
+    home_claude = _fake_agent(home / ".local/bin/claude", "HOME_CLAUDE")
+    image_claude = _fake_agent(tmp_path / "image-claude", "IMAGE_CLAUDE")
+    selector = _test_agent_exec(
+        claude_exec_path(),
+        tmp_path,
+        "/opt/jovyan_defaults/.local/bin/claude",
+        image_claude,
+    )
+
+    result = subprocess.run(
+        [str(selector), "--version"],
+        env={**os.environ, "HOME": str(home)},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "HOME_CLAUDE:--version"
+    assert home_claude.exists()
+
+
+def test_claude_exec_removes_legacy_image_link_and_falls_back(tmp_path):
+    home = tmp_path / "home"
+    image_claude = _fake_agent(tmp_path / "image-claude", "IMAGE_CLAUDE")
+    home_link = home / ".local/bin/claude"
+    home_link.parent.mkdir(parents=True)
+    home_link.symlink_to(image_claude)
+    selector = _test_agent_exec(
+        claude_exec_path(),
+        tmp_path,
+        "/opt/jovyan_defaults/.local/bin/claude",
+        image_claude,
+    )
+
+    result = subprocess.run(
+        [str(selector), "update"],
+        env={**os.environ, "HOME": str(home)},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "IMAGE_CLAUDE:update"
+    assert not home_link.exists() and not home_link.is_symlink()
+
+
+def test_codex_exec_prefers_home_install_with_image_fallback(tmp_path):
+    image_codex = _fake_agent(tmp_path / "image-codex", "IMAGE_CODEX")
+    selector = _test_agent_exec(
+        codex_exec_path(), tmp_path, "/usr/bin/codex", image_codex
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+
+    fallback = subprocess.run(
+        [str(selector), "--version"],
+        env={**os.environ, "HOME": str(home)},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert fallback.returncode == 0, fallback.stderr
+    assert fallback.stdout.strip() == "IMAGE_CODEX:--version"
+
+    _fake_agent(home / ".local/bin/codex", "HOME_CODEX")
+    preferred = subprocess.run(
+        [str(selector), "--version"],
+        env={**os.environ, "HOME": str(home)},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert preferred.returncode == 0, preferred.stderr
+    assert preferred.stdout.strip() == "HOME_CODEX:--version"
+
+
+def test_codex_update_installs_into_home_prefix(tmp_path):
+    fake_codex = _fake_agent(
+        tmp_path / "codex-exec",
+        "PREFIX:${NPM_CONFIG_PREFIX:-unset}:CACHE:${npm_config_cache:-unset}",
+    )
+    test_wrapper = tmp_path / "codex-wrapper-test"
+    wrapper_contents = codex_wrapper_path().read_text(encoding="utf-8")
+    wrapper_contents = wrapper_contents.replace(
+        "/opt/neurodesktop/codex-exec", str(fake_codex)
+    ).replace(
+        'CODEX_DEFAULT_CONFIG_TOML="/opt/jovyan_defaults/.codex/config.toml"',
+        f'CODEX_DEFAULT_CONFIG_TOML="{tmp_path / "missing-default.toml"}"',
+    )
+    test_wrapper.write_text(wrapper_contents, encoding="utf-8")
+    test_wrapper.chmod(0o755)
+    (tmp_path / "AGENTS.md").write_text("test", encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+
+    result = subprocess.run(
+        [str(test_wrapper), "update"],
+        cwd=tmp_path,
+        env={**os.environ, "HOME": str(home)},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"PREFIX:{home / '.local'}" in result.stdout
+    assert f"CACHE:{home / '.cache/npm'}" in result.stdout
+    assert result.stdout.rstrip().endswith(":update")
 
 
 def test_opencode_brain_researcher_mcp_setup_accept(tmp_path):
@@ -1213,8 +1355,7 @@ def _make_claude_wrapper_with_token(tmp_path, bashrc_contents, env_token=None):
     test_wrapper = tmp_path / "claude-wrapper-test"
     wrapper_contents = wrapper_path.read_text(encoding="utf-8")
     wrapper_contents = wrapper_contents.replace(
-        'DEFAULT_CLAUDE_BIN="/opt/jovyan_defaults/.local/bin/claude"',
-        f'DEFAULT_CLAUDE_BIN="{fake_default_claude}"',
+        "/opt/neurodesktop/claude-exec", str(fake_default_claude)
     )
     wrapper_contents = wrapper_contents.replace(
         'CLAUDE_DEFAULT_MCP_CONFIG="/opt/jovyan_defaults/.claude/mcp_config.json"',
@@ -1289,7 +1430,9 @@ def _make_codex_wrapper(tmp_path, bashrc_contents="", preexisting_toml=None):
 
     test_wrapper = tmp_path / "codex-wrapper-test"
     wrapper_contents = wrapper_path.read_text(encoding="utf-8")
-    wrapper_contents = wrapper_contents.replace("/usr/bin/codex", str(fake_codex))
+    wrapper_contents = wrapper_contents.replace(
+        "/opt/neurodesktop/codex-exec", str(fake_codex)
+    )
     # Neutralize the default-config copy since /opt/jovyan_defaults may or may
     # not exist in the test environment.
     wrapper_contents = wrapper_contents.replace(

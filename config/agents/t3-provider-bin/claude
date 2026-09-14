@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+
+exec /opt/jovyan_defaults/.local/bin/claude "$@"

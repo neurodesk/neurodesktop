@@ -1,4 +1,4 @@
-version: "0.0.12"
+version: "0.0.14"
 name: "ASTRA viewer gap fixture"
 inputs:
   - id: used_input

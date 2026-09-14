@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Demote jupyter-ai-acp-client's per-event INFO logging to DEBUG.
 
-``jupyter-ai-acp-client==0.2.1`` logs every streamed agent message chunk at
+``jupyter-ai-acp-client==0.3.0`` logs every streamed agent message chunk at
 INFO — two lines per chunk, where a chunk is often a handful of characters —
 plus one line per tool-call start and per once-a-second tool-call progress
 tick. A single agent reply floods the Jupyter server log with thousands of
