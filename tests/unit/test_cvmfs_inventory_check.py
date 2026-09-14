@@ -3,6 +3,8 @@
 import os
 import subprocess
 
+import pytest
+
 from testlib import repo_path
 
 
@@ -108,6 +110,18 @@ def test_inventory_check_rejects_failed_or_empty_download(tmp_path):
 
     assert result.returncode != 0
     assert "could not download CVMFS inventory" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "invalid", [" missing", "\tmissing", " invalid/name", "../outside", ".", ".."]
+)
+def test_inventory_check_rejects_malformed_records(tmp_path, invalid):
+    result, _ = _run_checker(
+        tmp_path, f"present\n{invalid}\n", present=("present",)
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "invalid container identifier" in result.stdout
 
 
 def test_health_jobs_share_the_inventory_checker():

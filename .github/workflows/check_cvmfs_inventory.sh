@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 
-# Validate the desired Neurodesk container inventory against one mounted CVMFS
-# snapshot. Keep this independent of client setup so both health-check jobs can
-# share the behavior and the checkout unit tests can exercise it without CVMFS.
 set -euo pipefail
 
 INVENTORY_URL="${CVMFS_INVENTORY_URL:-https://raw.githubusercontent.com/NeuroDesk/neurocommand/main/cvmfs/log.txt}"
@@ -27,14 +24,12 @@ entry_count=0
 invalid_count=0
 missing_count=0
 while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -n "$line" ]] || continue
     image="${line%%[[:space:]]*}"
-    [[ -n "$image" ]] || continue
 
-    # Container identifiers become path components below. Treat malformed
-    # publisher metadata as a failed health check instead of following it.
     case "$image" in
-        *[!A-Za-z0-9._+-]*)
-            echo "ERROR: invalid container identifier in CVMFS inventory: $image"
+        ""|.|..|*[!A-Za-z0-9._+-]*)
+            echo "ERROR: invalid container identifier in CVMFS inventory: $line"
             invalid_count=$((invalid_count + 1))
             continue
             ;;
