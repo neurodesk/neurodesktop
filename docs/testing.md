@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-09-04"
+last-reviewed: "2026-09-10"
 ---
 
 # Testing
@@ -29,7 +29,9 @@ rationale for this split is recorded in the
 
 Only `tests/container/` is copied into the image (together with
 `conftest.py`, `testlib.py`, and `pytest.ini`), so nothing under
-`tests/unit/` is available at `/opt/tests/`.
+`tests/unit/` is available at `/opt/tests/`. The build normalizes that test
+tier and the installed ASTRA example to be world-readable so tests run as
+`jovyan` even when the source checkout was created with a restrictive umask.
 
 ```bash
 pytest tests/unit          # from a checkout, no container needed
@@ -43,8 +45,8 @@ Two modules need heavier optional dependencies and skip cleanly when they are
 absent rather than failing a plain checkout; CI installs them, so they always
 run there:
 
-- `tests/unit/test_astra_view_graph.py` needs `astra-spec==0.0.12`,
-  `astra-tools==0.2.11`, and `anywidget==0.11.0`, because it runs the released
+- `tests/unit/test_astra_view_graph.py` needs `astra-spec==0.0.14`,
+  `astra-tools==0.2.17`, and `anywidget==0.11.0`, because it runs the released
   ASTRA validators. Those pull in ~50 further packages.
 - `tests/unit/test_astra_view_filebrowser.py` needs `jupyter-server` to drive
   the file-browser server extension.
@@ -78,10 +80,11 @@ non-obvious tiers protect.
 | Apptainer NVIDIA auto-configuration | `pytest tests/unit/test_apptainer_nv.py` | — |
 | Access-URL banner (`print_access_url.sh`) | `pytest tests/unit/test_print_access_url.py` | — |
 | Sherlock launcher (`scripts/connectSherlock.sh`) | `pytest tests/unit/test_connect_sherlock.py` | — |
+| T3 Code server, lifecycle, and packaging | `pytest tests/unit/test_t3_code_server.py` | `pytest /opt/tests/test_t3_code_server_image.py` |
 | Jupyter Server Proxy response limits | `pytest tests/unit/test_jupyter_server_proxy_limits.py` | `pytest /opt/tests/test_jupyter_server_proxy_limits.py`, then real large-response proxy check |
 | ASTRA viewer core (adapter, graph, widget, previews) | `pytest tests/unit/test_astra_view_graph.py tests/unit/test_astra_view_packaging.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py` | `pytest /opt/tests/test_astra_view_image.py` |
-| `astra`/`lc` installs, Lightcone skills and hooks | `pytest tests/unit/test_astra_jupyter_ai_tooling.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
+| `astra`/`lc` installs, Lightcone skills and hooks | `pytest tests/unit/test_astra_jupyter_ai_tooling.py tests/unit/test_lightcone_cli_patch.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
 | Jupyter AI, ACP personas, collaboration/widget compatibility and server patches | see [below](#jupyter-ai-and-acp-personas) | `pytest /opt/tests/test_astra_jupyter_ai_image.py /opt/tests/test_widget_compatibility_image.py` |
 | Notebook Intelligence / MyST and standalone RISE | `pytest tests/unit/test_nbi_settings_patch.py tests/unit/test_myst_build_workaround.py tests/unit/test_jupyterlab_rise_patch.py` | `pytest /opt/tests/test_nbi_labextension_patch.py /opt/tests/test_rise_slides_image.py` |
 | Launcher extension, workspace link routing | `pytest tests/unit/test_workspace_link_routing.py` | `pytest /opt/tests/test_workspace_link_routing_image.py` |
@@ -96,6 +99,19 @@ Unix-socket clients to assert matching 1024 MiB buffer and body limits. A
 runtime check must proxy a response larger than Tornado's 100 MiB default
 through a fully initialized single-user server in a built image; the unit
 construction test does not prove the full installed proxy request succeeds.
+
+### T3 Code server
+
+The checkout test drives the process supervisor with a real temporary child
+process. It also checks the pinned package, image cleanup, server extension,
+provider launchers, and direct Docker port settings. The image test starts the
+installed T3 server, loads its native PTY module, and verifies that the build
+removed foreign native payloads and the duplicate Claude binary.
+
+After an image build, pair the matching T3 Code desktop release through port
+3773. Start a harmless provider thread, restart the container with the same
+home volume, and confirm that the environment reconnects with its project and
+provider settings intact.
 
 ### Desktop tests
 

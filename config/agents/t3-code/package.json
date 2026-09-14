@@ -1,0 +1,12 @@
+{
+  "name": "neurodesktop-t3-code-runtime",
+  "private": true,
+  "version": "0.0.0",
+  "allowScripts": {
+    "msgpackr-extract@3.0.4": false,
+    "node-pty@1.1.0": true
+  },
+  "dependencies": {
+    "t3": "0.0.40"
+  }
+}

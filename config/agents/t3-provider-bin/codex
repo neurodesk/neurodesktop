@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+if [ ! -e ./AGENTS.md ] && [ -r /opt/AGENTS.md ]; then
+    cp /opt/AGENTS.md ./AGENTS.md
+fi
+
+exec /usr/bin/codex "$@"

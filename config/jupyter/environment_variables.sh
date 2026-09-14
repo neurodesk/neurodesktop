@@ -16,25 +16,19 @@ fi
 
 # The Jupyter AI ACP adapters' vendored agent binaries are deleted in the
 # Dockerfile (npm ignores --omit=optional for global installs); these
-# variables point the adapters at the agent CLIs already in this image
-# instead. The adapter subprocesses inherit the Jupyter server environment,
-# which sources this file via before_notebook.sh. The image-owned claude
-# copy comes first: restore_home_defaults.sh skips copying the ~230 MB
-# binary into $HOME, so the home path only exists on user-managed installs.
-export CODEX_PATH="${CODEX_PATH:-/usr/bin/codex}"
+# variables point the adapters at home-first selectors instead. The adapter
+# subprocesses inherit the Jupyter server environment, which sources this file
+# via before_notebook.sh. The selectors prefer user-managed installs and fall
+# back to the image copies.
+# restore_home_defaults.sh does not copy these large binaries into every home.
+export CODEX_PATH="${CODEX_PATH:-/opt/neurodesktop/codex-exec}"
 # Start the Codex persona in "Agent (full access)"; codex-acp otherwise
 # hardcodes the sandboxed "Agent" preset regardless of ~/.codex/config.toml,
 # while this image already runs Codex without approval prompts inside the
 # container boundary. Only codex-acp reads this variable, and users can still
 # pick another mode per session in the chat's mode selector.
 export INITIAL_AGENT_MODE="${INITIAL_AGENT_MODE:-agent-full-access}"
-if [ -z "${CLAUDE_CODE_EXECUTABLE}" ]; then
-    if [ -x "/opt/jovyan_defaults/.local/bin/claude" ]; then
-        export CLAUDE_CODE_EXECUTABLE="/opt/jovyan_defaults/.local/bin/claude"
-    else
-        export CLAUDE_CODE_EXECUTABLE="${HOME}/.local/bin/claude"
-    fi
-fi
+export CLAUDE_CODE_EXECUTABLE="${CLAUDE_CODE_EXECUTABLE:-/opt/neurodesktop/claude-exec}"
 
 # MODULEPATH and CVMFS detection run on every source so that new shells
 # pick up CVMFS after a deferred (lazy) mount completes.

@@ -18,7 +18,7 @@ import sysconfig
 def test_claude_agent_sdk_bundled_cli_removed():
     """claude-agent-sdk vendors a ~260 MB Claude Code CLI the image never
     uses: NBI resolves `claude` from PATH and passes it as cli_path, and the
-    image ships its own pinned binary under /opt/jovyan_defaults."""
+    image ships its own fallback binary under /opt/jovyan_defaults."""
     import claude_agent_sdk
 
     package_dir = os.path.dirname(claude_agent_sdk.__file__)

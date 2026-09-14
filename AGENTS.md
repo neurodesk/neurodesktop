@@ -9,7 +9,9 @@
   tests/unit` and is the default home for new tests; `tests/container/` runs
   inside the built image with `pytest /opt/tests/` and is only for assertions
   that need a running container. Only `tests/container/` is copied into the
-  image. Resolve a test's subject through the helpers in `tests/testlib.py`.
+  image. Keep `/opt/tests` readable by the unprivileged `jovyan` test user even
+  when the checkout has a restrictive umask. Resolve a test's subject through
+  the helpers in `tests/testlib.py`.
 - The docs are a hierarchical wiki rooted at [`docs/index.md`](docs/index.md):
   every page carries YAML frontmatter (`title`, `description`, `parent`,
   `status`, `last-reviewed`) and cross-references relatives with markdown
@@ -18,6 +20,12 @@
   in the reference pages, not in the records.
 - Follow the project testing and container validation expectations in
   [`docs/testing.md`](docs/testing.md).
+- When changing the root image's base tag or direct package pins, run
+  `python scripts/audit_image_versions.py` for the live release report and
+  `pytest tests/unit/test_audit_image_versions.py`. The Dockerfile owns current
+  versions; keep only package authority and compatibility policy in the audit
+  catalog. A complete upgrade still requires a built-image inventory and the
+  subsystem checks selected by the changed packages.
 - Use [`docs/architecture.md`](docs/architecture.md) for project architecture,
   startup flow, and directory layout; it links to one page per subsystem
   under [`docs/architecture/`](docs/architecture/), including
@@ -41,6 +49,16 @@
   on the copy in this repository and let the Neurodesktop image own
   `ServerApp.jpserver_extensions`; the Sherlock launcher must not disable
   `jupyter_server_fileid`, which `jupyter-server-documents` requires.
+- When changing the T3 Code package pin, server extension, provider launchers,
+  Docker port settings, or lifecycle variables, run `pytest
+  tests/unit/test_t3_code_server.py` from a checkout and `pytest
+  /opt/tests/test_t3_code_server_image.py` in the built image. Keep T3 opt-in,
+  run it as the notebook user, and let the Jupyter extension own its process
+  group. Keep its state under the persistent home. Never copy a startup or
+  pairing token into Jupyter or container logs. Keep the fixed port aligned
+  with Docker publication, use the quiet image-owned provider binaries, and
+  remove T3's duplicate Claude binary and foreign `node-pty` payload in their
+  install layer.
 - When changing Jupyter Server Proxy response buffering or the Tornado HTTP
   client limits in `jupyter_server_config_extra.py` or
   `patch_jupyter_server_proxy.py`, run `pytest
@@ -133,17 +151,23 @@
   synthesizes the verification record `lc verify` does not write.
 - When changing the `astra`/`lc` installs, `AGENT_SKILLS_REF`, or how the ASTRA
   skill reaches Codex, Claude, or OpenCode, run `pytest
-  tests/unit/test_astra_jupyter_ai_tooling.py` from a checkout and `pytest
+  tests/unit/test_astra_jupyter_ai_tooling.py
+  tests/unit/test_lightcone_cli_patch.py` from a checkout and `pytest
   /opt/tests/test_astra_agent_skills_image.py` in the built image. Keep
   `astra-tools` installed exactly once so the CLI cannot drift from the schema
-  the viewer imports, keep `jq` installed for the plugin hooks, and bump
-  `AGENT_SKILLS_REF` together with the ASTRA pins so the skill teaches the
-  schema `astra validate` speaks. The Lightcone `reproduction` plugin already
+  the viewer imports, keep `jq` installed for the plugin hooks, and keep the
+  marketplace checkout's exact pin rewrite in step with the ASTRA pins so the
+  skill teaches the schema `astra validate` speaks. Only bump
+  `AGENT_SKILLS_REF` to a commit that still contains a stable-compatible
+  reproduction workflow. The Lightcone `reproduction` plugin already
   bundles ASTRA, so install it instead of installing both plugins. OpenCode
   receives the plugin's complete skill closure and adapts the same pinned hook
   scripts through `config/agents/opencode_lightcone_hooks.js`; keep hook
   failures non-blocking and return their context through the system prompt or
-  tool output so the model actually sees it.
+  tool output so the model actually sees it. Lightcone 0.4.2's compatibility
+  rewrite must verify its source archive and preserve exact anchors for both
+  its ASTRA dependency and the changed `astra init` callback; upstream drift
+  must fail the build rather than carrying that rewrite forward silently.
 - When changing Jupyter AI, Jupyter Collaboration, its ACP personas,
   the Jupyter Server Documents workaround, the widget pins used with
   server-side notebook execution, or the jupyter-server-mcp banner patch,
@@ -276,10 +300,15 @@
   an existing `AGENTS.md`, and never make a seed failure block the chat save.
   Keep the ACP adapters' vendored agent binaries
   deleted after install (npm ignores omit-optional for global installs) and
-  keep the adapters driving the image's own agent CLIs via `CODEX_PATH` and
-  `CLAUDE_CODE_EXECUTABLE`; the vendored copies would otherwise add ~500 MB
-  of duplicates, and `CODEX_CLI_VERSION` must stay inside the `@openai/codex`
-  range the pinned codex-acp declares. The same vendored-duplicate policy
+  keep the adapters driving the home-first executable selectors via
+  `CODEX_PATH` and `CLAUDE_CODE_EXECUTABLE`; each selector must fall back to
+  the image CLI without copying it into the home, and an explicit variable
+  override must still win. Keep `claude update` and `codex update` owned by the
+  unprivileged persistent home, and never overwrite their user-managed
+  launchers during startup. The vendored copies would otherwise add ~500 MB of
+  duplicates, and `CODEX_CLI_VERSION` must stay inside the `@openai/codex`
+  range the pinned codex-acp declares as the tested fallback. The same
+  vendored-duplicate policy
   covers `claude-agent-sdk/_bundled` (a second ~260 MB Claude CLI pulled in
   via notebook_intelligence): it is deleted in the pip layer and guarded by
   `pytest /opt/tests/test_image_size_hygiene.py`.
@@ -290,6 +319,11 @@
   layer that needs them (never purged in a later layer), `chown -R`/
   `chmod -R` happen in the layer that creates a tree, and sourcemaps and
   bundled Python test suites are stripped in the layer that installs them.
+- When changing the `jupyterlab-slurm` source pin or its Jupyter Builder
+  compatibility rewrite, run `pytest tests/unit/test_jupyterlab_slurm_build.py`
+  from a checkout and require a successful image build. Keep the source ref
+  exact and keep the rewrite anchored to the obsolete dependency name so an
+  upstream fix fails loudly instead of preserving the workaround silently.
 - When changing subscription agent workflows, their controller, sandbox, or
   failure reporter, read [Agentic maintenance](docs/agentic-maintenance.md) and
   run `pytest tests/unit/test_agentic_worker.py

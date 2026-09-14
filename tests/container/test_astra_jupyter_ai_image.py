@@ -15,8 +15,8 @@ from testlib import load_source_module, run_cmd
 
 
 def test_jupyter_ai_acp_stack_registers_neurodesktop_agent_personas():
-    assert importlib.metadata.version("jupyter_ai") == "3.1.2"
-    assert importlib.metadata.version("jupyter-ai-acp-client") == "0.2.1"
+    assert importlib.metadata.version("jupyter_ai") == "3.2.0"
+    assert importlib.metadata.version("jupyter-ai-acp-client") == "0.3.0"
 
     from jupyter_ai_acp_client.acp_personas.claude import ClaudeAcpPersona
     from jupyter_ai_acp_client.acp_personas.codex import CodexAcpPersona
@@ -214,11 +214,10 @@ def test_jupyter_ai_server_and_frontend_extensions_are_compatible():
     assert "not compatible with the current JupyterLab" not in lab_output
 
 
-def test_acp_adapters_use_the_image_agent_binaries_not_vendored_copies():
+def test_acp_adapters_use_home_first_selectors_not_vendored_copies():
     """npm ignores --omit=optional for global installs, so the Dockerfile
     deletes the adapters' vendored ~250 MB agent binaries explicitly;
-    environment_variables.sh points them at the CLIs already in the image
-    instead."""
+    environment_variables.sh points them at selectors with image fallbacks."""
     code, npm_root = run_cmd("npm root -g")
     assert code == 0, npm_root
     scope = Path(npm_root.strip()) / "@agentclientprotocol"
@@ -232,6 +231,8 @@ def test_acp_adapters_use_the_image_agent_binaries_not_vendored_copies():
 
     code, output = run_cmd(
         "bash -c 'source /opt/neurodesktop/environment_variables.sh"
+        " && test \"${CODEX_PATH}\" = /opt/neurodesktop/codex-exec"
+        " && test \"${CLAUDE_CODE_EXECUTABLE}\" = /opt/neurodesktop/claude-exec"
         " && test -x \"${CODEX_PATH}\" && test -x \"${CLAUDE_CODE_EXECUTABLE}\"'"
     )
     assert code == 0, output

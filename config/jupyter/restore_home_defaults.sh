@@ -201,10 +201,10 @@ restore_defaults() {
             continue
         fi
 
-        # Skip the claude binary (~230MB): /usr/local/sbin/claude (first in
-        # PATH) replaces this path with a symlink to the image-owned binary on
-        # first use. Copying it into every possibly network-mounted home would
-        # only slow startup and leave persistent users on a stale version.
+        # Skip the Claude fallback (~230MB). The executable selector uses it
+        # directly until the user runs `claude update`. Copying it into every
+        # possibly network-mounted home would slow startup and would overwrite
+        # a user-managed installation when the image default changes.
         if [[ "$src_file" == *"/.local/bin/claude" ]]; then
             continue
         fi

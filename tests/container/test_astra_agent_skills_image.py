@@ -18,7 +18,7 @@ from pathlib import Path
 from testlib import run_cmd
 
 
-ASTRA_TOOLS_VERSION = "0.2.11"
+ASTRA_TOOLS_VERSION = "0.2.17"
 
 SKILLS_CHECKOUT = Path("/opt/neurodesktop/agent-skills")
 HOOK_SCRIPTS = SKILLS_CHECKOUT / "plugins/reproduction/hooks/scripts"
@@ -90,7 +90,7 @@ def test_pinned_astra_cli_wins_with_one_image_owned_install():
     # environment so its Dask/Snakemake graph cannot perturb JupyterLab.
     code, output = run_cmd("uv --version")
     assert code == 0, output
-    assert output.startswith("uv 0.12.3")
+    assert output.startswith("uv 0.12.12")
 
 
 def test_skill_toolchain_pins_match_the_installed_toolchain():

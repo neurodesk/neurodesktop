@@ -4,10 +4,11 @@ from testlib import repo_path, resolve_source
 
 
 IHEP_HOST = "cvmfs-stratum-one.ihep.ac.cn"
+IHEP_ENDPOINT = f"{IHEP_HOST}:8000"
 
 
-def test_incomplete_ihep_replica_is_not_offered_or_marked_healthy():
-    """Do not direct users to a replica that lacks published repository data."""
+def test_ihep_stratum_one_uses_its_published_service_port_everywhere():
+    """Clients and monitoring must not silently probe IHEP on HTTP port 80."""
     selector = resolve_source(
         "/opt/neurodesktop/cvmfs_server_select.sh",
         "config/jupyter/cvmfs_server_select.sh",
@@ -16,5 +17,8 @@ def test_incomplete_ihep_replica_is_not_offered_or_marked_healthy():
         encoding="utf-8"
     )
 
-    assert IHEP_HOST not in selector
-    assert IHEP_HOST not in workflow
+    assert f"http://{IHEP_ENDPOINT}" in selector
+    assert f'"{IHEP_ENDPOINT}"' in workflow
+
+    assert f"http://{IHEP_HOST}\n" not in selector
+    assert f'"{IHEP_HOST}"' not in workflow

@@ -1,0 +1,16 @@
+#!/bin/bash
+# Select a user-managed Codex install, with the image copy as fallback.
+
+IMAGE_CODEX_BIN="/usr/bin/codex"
+USER_CODEX_BIN="${HOME:+${HOME}/.local/bin/codex}"
+
+if [ -n "${USER_CODEX_BIN}" ] && [ -x "${USER_CODEX_BIN}" ]; then
+    exec "${USER_CODEX_BIN}" "$@"
+fi
+
+if [ -x "${IMAGE_CODEX_BIN}" ]; then
+    exec "${IMAGE_CODEX_BIN}" "$@"
+fi
+
+echo "Codex binary not found in the user home or the image." >&2
+exit 127
