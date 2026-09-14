@@ -55,34 +55,9 @@ curl --head http://cvmfs.neurodesk.org/cvmfs/neurodesk.ardc.edu.au/.cvmfspublish
 cvmfs_config stat -v neurodesk.ardc.edu.au
 
 
-## Test if containers are on CVMFS:
-wget https://raw.githubusercontent.com/NeuroDesk/neurocommand/main/cvmfs/log.txt
-echo "debug logfile:"
-cat log.txt
-
-ls /cvmfs/neurodesk.ardc.edu.au
-
-while IFS= read -r LINE
-do
-    echo "[DEBUG] LINE: $LINE"
-    IMAGENAME_BUILDDATE="$(cut -d' ' -f1 <<< ${LINE})"
-    echo "IMAGENAME_BUILDDATE: $IMAGENAME_BUILDDATE"
-
-    IMAGENAME="$(cut -d'_' -f1,2 <<< ${IMAGENAME_BUILDDATE})"
-    BUILDDATE="$(cut -d'_' -f3 <<< ${IMAGENAME_BUILDDATE})"
-    echo "[DEBUG] IMAGENAME: $IMAGENAME"
-    echo "[DEBUG] BUILDDATE: $BUILDDATE"
-
-    if [[ -f "/cvmfs/neurodesk.ardc.edu.au/containers/$IMAGENAME_BUILDDATE/commands.txt" ]]
-    then
-        echo "Container exists on CVMFS."
-    else
-        echo "+++++++++++++++++++++++++++++++++++++++++++++++++++++++"
-        echo "[DEBUG] Container does not exist on CVMFS"
-        echo "+++++++++++++++++++++++++++++++++++++++++++++++++++++++"
-        exit 2
-    fi
-done < log.txt
+## Test if every container in the desired inventory is on CVMFS. The shared
+## checker reports the complete mismatch rather than stopping at the first one.
+/bin/bash "$(dirname "${BASH_SOURCE[0]}")/check_cvmfs_inventory.sh" || exit $?
 
 
 ## test if files can be accessed ok:

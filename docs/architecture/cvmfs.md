@@ -4,7 +4,7 @@ description: CVMFS server selection and mount configuration, and the
   neurocommand CLI/module system for neuroimaging tools
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-07-31"
+last-reviewed: "2026-09-09"
 ---
 
 # CVMFS and Neurocommand
@@ -41,6 +41,14 @@ disabled with `CVMFS_DISABLE=true`. The Dockerfile pins both the CVMFS client
 package and the repository bootstrap package; the bootstrap download is also
 verified by SHA-256 so the `latest` URL cannot silently change a reproducible
 build.
+
+The scheduled [CVMFS health workflow](../../.github/workflows/test-cvmfs.yml)
+mounts each advertised endpoint and compares it with neurocommand's desired
+container inventory. Both its single-server and fallback-list jobs use
+[`check_cvmfs_inventory.sh`](../../.github/workflows/check_cvmfs_inventory.sh),
+which fails unavailable or empty inventory downloads and reports every missing
+container in the snapshot before failing. Complete mismatch output is
+important when a publisher update affects every replica at once.
 
 ## Build-time CVMFS setup
 
