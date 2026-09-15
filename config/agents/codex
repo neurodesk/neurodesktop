@@ -2,6 +2,13 @@
 # OpenAI Codex CLI wrapper script
 # Copies AGENTS.md to current directory as AGENTS.md, then starts Codex CLI
 
+# T3 reloads the login-shell PATH and may find this interactive wrapper before
+# its quiet provider directory. Keep its JSON protocol free of banners, config
+# rewrites, and injected CLI flags, using the image-owned provider launcher.
+if [ -n "${T3CODE_HOME:-}" ] && [ "${1:-}" = "app-server" ]; then
+    exec /opt/neurodesktop/t3-provider-bin/codex "$@"
+fi
+
 CODEX_HOME_DIR="${CODEX_HOME:-${HOME}/.codex}"
 CODEX_CONFIG_TOML="${CODEX_HOME_DIR}/config.toml"
 CODEX_DEFAULT_CONFIG_TOML="/opt/jovyan_defaults/.codex/config.toml"

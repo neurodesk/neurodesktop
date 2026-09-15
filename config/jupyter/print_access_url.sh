@@ -36,7 +36,7 @@ emit_lines() {
 # watcher can run as root while the server runs as ${NB_USER}, so check both
 # HOME-derived locations.
 newest_server_info() {
-    local dir
+    local dir candidate
     local -a candidates=()
     for dir in \
         "${JUPYTER_RUNTIME_DIR:-}" \
@@ -44,7 +44,13 @@ newest_server_info() {
         "/home/${NB_USER:-jovyan}/.local/share/jupyter/runtime"
     do
         if [ -n "${dir}" ] && [ -d "${dir}" ]; then
-            candidates+=("${dir}"/jpserver-*.json)
+            for candidate in "${dir}"/jpserver-*.json; do
+                # MCP writes jpserver-mcp-<pid>.json in the same directory.
+                # Only numeric PID filenames belong to Jupyter ServerApp.
+                if [[ "${candidate##*/}" =~ ^jpserver-[0-9]+\.json$ ]]; then
+                    candidates+=("${candidate}")
+                fi
+            done
         fi
     done
     if [ "${#candidates[@]}" -eq 0 ]; then

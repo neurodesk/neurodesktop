@@ -30,6 +30,10 @@ export CODEX_PATH="${CODEX_PATH:-/opt/neurodesktop/codex-exec}"
 export INITIAL_AGENT_MODE="${INITIAL_AGENT_MODE:-agent-full-access}"
 export CLAUDE_CODE_EXECUTABLE="${CLAUDE_CODE_EXECUTABLE:-/opt/neurodesktop/claude-exec}"
 
+# Keep `ml av` focused on loadable modules, without the extension inventory.
+# Users can opt back in with LMOD_AVAIL_EXTENSIONS=yes.
+export LMOD_AVAIL_EXTENSIONS="${LMOD_AVAIL_EXTENSIONS:-no}"
+
 # MODULEPATH and CVMFS detection run on every source so that new shells
 # pick up CVMFS after a deferred (lazy) mount completes.
 export NEURODESKTOP_LOCAL_CONTAINERS="${NEURODESKTOP_LOCAL_CONTAINERS:-/neurodesktop-storage/containers}"

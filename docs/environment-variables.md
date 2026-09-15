@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-09-10"
+last-reviewed: "2026-09-14"
 ---
 
 # Environment Variables
@@ -15,6 +15,9 @@ are listed at the end. The subsystems themselves are described in
 
 ## CVMFS and modules
 
+- `LMOD_AVAIL_EXTENSIONS`: defaults to `no`, hiding the extension inventory
+  from `ml av` and `module avail`. Set to `yes` to show it again. Module
+  loading and `module spider` searches are unchanged.
 - `CVMFS_DISABLE`: set to `true` to disable CVMFS mounting
 - `CVMFS_MODULES`: CVMFS module catalogue path used when refreshing
   `MODULEPATH`. Fixed to `/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/` by
@@ -65,7 +68,8 @@ are listed at the end. The subsystems themselves are described in
 - `NEURODESKTOP_PRINT_ACCESS_URL`: set to `0` to disable the end-of-startup
   access-link banner that `print_access_url.sh` reprints once the Jupyter
   server answers HTTP (the ServerApp's own token banner scrolls away behind
-  extension startup logs)
+  extension startup logs). The banner reads only numeric
+  `jpserver-<pid>.json` files, excluding the MCP server's runtime file
 - `NEURODESKTOP_ACCESS_URL_MAX_WAIT`: seconds `print_access_url.sh` waits for
   the Jupyter server to answer before giving up; defaults to `180`
 - `NEURODESKTOP_ACCESS_URL_SETTLE`: seconds `print_access_url.sh` waits after
@@ -127,8 +131,8 @@ are listed at the end. The subsystems themselves are described in
 - `NEURODESKTOP_T3_CODE_ENABLE`: starts the T3 sidecar with Jupyter when set
   to `1`, `true`, `yes`, or `on`; defaults to disabled
 - `NEURODESKTOP_T3_CODE_HOST`: interface passed to T3; defaults to
-  `127.0.0.1`. Use `0.0.0.0` inside Docker when publishing port 3773 on the
-  Docker host
+  `127.0.0.1`. Use `0.0.0.0` inside Docker when publishing container port
+  `3773`; the launcher maps it to host loopback port `3774`
 - `NEURODESKTOP_T3_CODE_PORT`: fixed server port; defaults to `3773`
 - `NEURODESKTOP_T3_CODE_HOME`: persistent T3 data directory; defaults to
   `~/.t3`
@@ -260,6 +264,11 @@ reviewed; the Dockerfile itself is authoritative.
   the adapter. A user can install a newer release with `codex update`
 - `T3_CODE_VERSION`: the headless T3 Code server release installed from the
   checked lockfile; defaults to `0.0.40`
+- `TAILSCALE_VERSION`: static Tailscale CLI and daemon release; defaults to
+  `1.102.4`. Update `TAILSCALE_AMD64_SHA256` and `TAILSCALE_ARM64_SHA256`
+  together with the version, using the official archive checksums. Installation
+  does not start or authenticate the daemon; see
+  [manual userspace setup](architecture/t3-code.md#connect-through-tailscale-inside-the-container).
 - `JUPYTER_COLLABORATION_VERSION`, `JUPYTER_COLLABORATION_REF`: release and
   exact source commit used to rebuild Jupyter AI's collaboration frontends for
   JupyterLab 4.6's YDoc 4 contract; defaults to `4.4.2` and

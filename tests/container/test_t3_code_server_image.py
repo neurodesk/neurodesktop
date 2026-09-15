@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 import shutil
 import signal
@@ -51,6 +52,7 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path):
     environment.update(
         {
             "HOME": str(tmp_path),
+            "T3CODE_HOME": str(tmp_path / ".t3"),
             "PATH": f"/opt/neurodesktop/t3-provider-bin:{environment['PATH']}",
             "T3CODE_LOG_LEVEL": "Warn",
             "T3CODE_TRACE_MIN_LEVEL": "Warn",
@@ -89,6 +91,24 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path):
             time.sleep(0.1)
         else:
             raise AssertionError("T3 did not listen within 20 seconds")
+
+        # Server startup reloads the login-shell PATH, which can put the
+        # interactive Codex wrapper ahead of the quiet provider directory.
+        # A listening port alone misses protocol-breaking wrapper banners.
+        cache = tmp_path / ".t3/caches/codex.json"
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            assert process.poll() is None, "T3 exited before its provider probe completed"
+            if cache.exists():
+                snapshot = json.loads(cache.read_text())
+                if snapshot.get("version") or snapshot.get("status") == "error":
+                    assert snapshot["installed"] is True
+                    assert snapshot["version"] is not None, snapshot.get("message")
+                    assert "decode-wire-message" not in (snapshot.get("message") or "")
+                    break
+            time.sleep(0.1)
+        else:
+            raise AssertionError("T3 did not finish its Codex provider probe within 30 seconds")
     finally:
         os.killpg(process.pid, signal.SIGTERM)
         try:

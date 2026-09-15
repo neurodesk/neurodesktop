@@ -941,6 +941,29 @@ RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash -s 
     && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 
+# Install only the static Tailscale CLI and daemon; starting and authenticating
+# the userspace daemon is an explicit user action. Do not install systemd units.
+ARG TAILSCALE_VERSION="1.102.4"
+ARG TAILSCALE_AMD64_SHA256="50748df1045e60b5b695f19f4c56b0da36c019948b440fb456b6584a50f0d8b9"
+ARG TAILSCALE_ARM64_SHA256="9dd1e6a592a014bbaea0103167ffe299adeda4ba14e078ce9c2895364f6c4c3f"
+RUN set -eu; \
+    tailscale_arch="$(dpkg --print-architecture)"; \
+    case "${tailscale_arch}" in \
+        amd64) tailscale_sha256="${TAILSCALE_AMD64_SHA256}" ;; \
+        arm64) tailscale_sha256="${TAILSCALE_ARM64_SHA256}" ;; \
+        *) echo "Unsupported Tailscale architecture: ${tailscale_arch}" >&2; exit 1 ;; \
+    esac; \
+    tailscale_archive="tailscale_${TAILSCALE_VERSION}_${tailscale_arch}"; \
+    curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 300 \
+        "https://pkgs.tailscale.com/stable/${tailscale_archive}.tgz" -o /tmp/tailscale.tgz; \
+    printf '%s  %s\n' "${tailscale_sha256}" /tmp/tailscale.tgz | sha256sum -c -; \
+    tar -xzf /tmp/tailscale.tgz -C /tmp \
+        "${tailscale_archive}/tailscale" "${tailscale_archive}/tailscaled"; \
+    install -m 0755 "/tmp/${tailscale_archive}/tailscale" "/tmp/${tailscale_archive}/tailscaled" /usr/local/bin/; \
+    test "$(tailscale version | head -n 1)" = "${TAILSCALE_VERSION}"; \
+    test "$(tailscaled --version | head -n 1)" = "${TAILSCALE_VERSION}"; \
+    rm -rf /tmp/tailscale.tgz "/tmp/${tailscale_archive}"
+
 # Install the headless T3 Code server in an isolated, locked npm tree. T3 uses
 # node-pty on Linux, so its exact install script is approved in the locked
 # manifest and its compiler toolchain is installed and purged in this layer.
@@ -1363,6 +1386,7 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     --mount=type=bind,source=config/agents/codex_exec,target=/tmp/agents/codex_exec,ro \
     --mount=type=bind,source=config/agents/opencode_prune_sessions.py,target=/tmp/agents/opencode_prune_sessions.py,ro \
     --mount=type=bind,source=config/agents/patch_nbi.py,target=/tmp/agents/patch_nbi.py,ro \
+    --mount=type=bind,source=scripts/t3_tailscale_setup.py,target=/tmp/t3_tailscale_setup.py,ro \
     install -m 0755 -o root -g users /tmp/restore_home_defaults.sh /opt/neurodesktop/restore_home_defaults.sh \
     && install -m 0755 -o root -g users /tmp/update_page_config.py /opt/neurodesktop/update_page_config.py \
     && install -D -m 0644 /tmp/agents/AGENTS.md /opt/AGENTS.md \
@@ -1372,6 +1396,8 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     && install -m 0644 -o root -g users /tmp/agents/opencode_bash_env.sh /opt/neurodesktop/opencode_bash_env.sh \
     && install -m 0755 -o root -g root /tmp/agents/codex /usr/local/sbin/codex \
     && install -m 0755 -o root -g root /tmp/agents/codex_exec /opt/neurodesktop/codex-exec \
+    && install -m 0755 -o root -g users /tmp/t3_tailscale_setup.py /opt/neurodesktop/t3_tailscale_setup.py \
+    && ln -s /opt/neurodesktop/t3_tailscale_setup.py /usr/local/bin/neurodesktop-t3-setup \
     # Startup cleanup: drop sessions whose working directory has been deleted.
     && install -m 0755 -o root -g users /tmp/agents/opencode_prune_sessions.py /opt/neurodesktop/opencode_prune_sessions.py \
     # Anchored Notebook Intelligence patch (see patch_nbi.py): make the

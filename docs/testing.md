@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-09-10"
+last-reviewed: "2026-09-14"
 ---
 
 # Testing
@@ -80,10 +80,13 @@ non-obvious tiers protect.
 
 | Area | On a checkout | In the built image |
 | --- | --- | --- |
+| Lmod extension listing default | `pytest tests/unit/test_lmod_extensions.py` | — |
 | Apptainer NVIDIA auto-configuration | `pytest tests/unit/test_apptainer_nv.py` | — |
 | Access-URL banner (`print_access_url.sh`) | `pytest tests/unit/test_print_access_url.py` | — |
 | Sherlock launcher (`scripts/connectSherlock.sh`) | `pytest tests/unit/test_connect_sherlock.py` | — |
 | T3 Code server, lifecycle, and packaging | `pytest tests/unit/test_t3_code_server.py` | `pytest /opt/tests/test_t3_code_server_image.py` |
+| Tailscale binary packaging | `pytest tests/unit/test_tailscale_packaging.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_tailscale_image.py` |
+| Guided T3/Tailscale setup | `pytest tests/unit/test_t3_tailscale_setup.py tests/unit/test_t3_code_server.py` | `pytest /opt/tests/test_tailscale_image.py /opt/tests/test_t3_code_server_image.py` |
 | Jupyter Server Proxy response limits | `pytest tests/unit/test_jupyter_server_proxy_limits.py` | `pytest /opt/tests/test_jupyter_server_proxy_limits.py`, then real large-response proxy check |
 | ASTRA viewer core (adapter, graph, widget, previews) | `pytest tests/unit/test_astra_view_graph.py tests/unit/test_astra_view_packaging.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py` | `pytest /opt/tests/test_astra_view_image.py` |
@@ -103,7 +106,31 @@ runtime check must proxy a response larger than Tornado's 100 MiB default
 through a fully initialized single-user server in a built image; the unit
 construction test does not prove the full installed proxy request succeeds.
 
+### Tailscale binaries
+
+The checkout test guards architecture selection, pinned checksums, extraction,
+and cleanup. The image test checks both executable versions and starts a fresh
+userspace daemon as the unprivileged notebook user. It requires the local API
+to report `NeedsLogin`, then stops the daemon. Run it with no network, no
+capabilities, and no `/dev/net/tun` to check the restricted-pod case. It uses
+temporary state and never authenticates to a tailnet. A real desktop pairing
+over Tailscale remains a separate manual check requiring a tailnet login.
+
+The [guided setup](architecture/t3-code.md#connect-through-tailscale-inside-the-container)
+unit tests simulate CLI responses and terminal input to cover login, reuse,
+conflicting Serve configurations, desktop confirmation, identity mismatches,
+and token-free diagnostics. The image test also starts and reuses a real
+daemon through the installed wizard and checks that it has its own session.
+For manual acceptance, run `neurodesktop-t3-setup` in a JupyterLab terminal,
+follow its desktop connectivity check, complete pairing in T3, and verify
+the remote providers. Then rerun `neurodesktop-t3-setup --check`.
+
 ### T3 Code server
+
+The real-server image test also waits for the Codex provider probe to report
+its CLI version. This exercises T3's login-shell PATH reload and catches
+interactive wrapper banners that corrupt the app-server JSON stream. An
+unauthenticated Codex account is acceptable; a protocol decoding error is not.
 
 The checkout test drives the process supervisor with a real temporary child
 process. It also checks the pinned package, image cleanup, server extension,

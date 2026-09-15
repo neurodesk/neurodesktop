@@ -81,6 +81,7 @@ CATALOG = (
     CatalogEntry("arg:MYST_YDOC_VERSION", "npm:@jupyter/ydoc", "npm"),
     CatalogEntry("arg:CODEX_CLI_VERSION", "npm:@openai/codex", "npm"),
     CatalogEntry("arg:T3_CODE_VERSION", "npm:t3", "npm"),
+    CatalogEntry("arg:TAILSCALE_VERSION", "github:tailscale/tailscale", "github-releases"),
     CatalogEntry("arg:CLAUDE_CODE_VERSION", "npm:@anthropic-ai/claude-code", "npm"),
     CatalogEntry("arg:OPENCODE_VERSION", "github:anomalyco/opencode", "github-releases"),
     CatalogEntry("arg:CODEX_ACP_VERSION", "npm:@agentclientprotocol/codex-acp", "npm"),

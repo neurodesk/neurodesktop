@@ -108,6 +108,25 @@ def test_uses_newest_server_info_file(tmp_path):
         server.shutdown()
 
 
+def test_ignores_newer_mcp_runtime_info(tmp_path):
+    server, port = _serve_on_free_port()
+    try:
+        runtime_dir = tmp_path / "runtime"
+        _write_server_info(runtime_dir, port, token="jupytertoken")
+        jupyter_info = runtime_dir / "jpserver-101.json"
+        old = jupyter_info.stat().st_mtime - 3600
+        os.utime(jupyter_info, (old, old))
+        (runtime_dir / "jpserver-mcp-101.json").write_text(
+            json.dumps({"port": port, "url": f"http://localhost:{port}/mcp"})
+        )
+
+        code, output = _run_watcher(runtime_dir)
+        assert code == 0, output
+        assert f"http://localhost:{port}/lab?token=jupytertoken" in output
+    finally:
+        server.shutdown()
+
+
 def test_disabled_via_env_prints_nothing(tmp_path):
     code, output = _run_watcher(
         tmp_path / "runtime", env={"NEURODESKTOP_PRINT_ACCESS_URL": "0"}

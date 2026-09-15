@@ -252,6 +252,43 @@ def test_extension_package_and_image_install_contract():
 def test_convenience_docker_run_publishes_the_direct_pairing_port():
     launcher = repo_path("build_and_run.sh").read_text(encoding="utf-8")
 
-    assert "-p 127.0.0.1:3773:3773" in launcher
+    assert "-p 127.0.0.1:3774:3773" in launcher
+    assert "-p 127.0.0.1:3773:3773" not in launcher
     assert "NEURODESKTOP_T3_CODE_ENABLE=1" in launcher
     assert "NEURODESKTOP_T3_CODE_HOST=0.0.0.0" in launcher
+
+
+def test_login_path_codex_wrapper_keeps_t3_app_server_stdout_clean(tmp_path):
+    """T3 hydrates the login PATH and can select the interactive wrapper."""
+    import subprocess
+
+    home = tmp_path / "home"
+    home.mkdir()
+    quiet = tmp_path / "quiet-codex"
+    quiet.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "print(json.dumps({'argv': sys.argv[1:]}))\n"
+    )
+    quiet.chmod(0o755)
+    wrapper = tmp_path / "codex"
+    wrapper.write_text(
+        repo_path("config/agents/codex").read_text().replace(
+            "/opt/neurodesktop/t3-provider-bin/codex", str(quiet)
+        ).replace(
+            "/opt/neurodesktop/codex-exec", str(quiet)
+        )
+    )
+    wrapper.chmod(0o755)
+    (tmp_path / "AGENTS.md").write_text("existing guidance\n")
+    args = ["app-server", "--config", 'model="model with spaces"']
+    result = subprocess.run(
+        [str(wrapper), *args], cwd=tmp_path,
+        env={**os.environ, "HOME": str(home), "CODEX_HOME": str(home / ".codex"),
+             "T3CODE_HOME": str(home / ".t3")},
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"argv": args}
+    assert result.stderr == ""
+    assert not (home / ".codex").exists()
