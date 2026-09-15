@@ -48,11 +48,14 @@ runs:
           fi
         }
 
+        # Quay answers writes during maintenance with "DENIED: System is
+        # currently read-only"; that is transient, so only the remaining
+        # lines decide whether the failure is a real auth error.
         is_auth_failure() {
           local log_file="$1"
           grep -Eiq \
             '(unauthorized|unauthenticated|authentication required|incorrect username|invalid username|forbidden|denied:|requested access.*denied)' \
-            "$log_file"
+            < <(grep -Eiv 'denied: system is currently read-only' "$log_file")
         }
 
         retry_delay_seconds() {
