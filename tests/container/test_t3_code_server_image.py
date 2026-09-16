@@ -1,4 +1,4 @@
-"""Installed-image checks for the optional T3 Code server."""
+"""Installed-image checks for the T3 Code server."""
 
 from __future__ import annotations
 

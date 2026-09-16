@@ -102,3 +102,13 @@ def test_candidate_failure_blocks_a_passing_frozen_baseline(tmp_path):
     assert "1 passed" in result.stdout
     assert "=== candidate tests ===" in result.stdout
     assert "candidate test failed" in result.stdout
+
+
+def test_worker_pins_match_viewer_dependencies():
+    import tomllib
+
+    viewer = tomllib.loads(repo_path("extensions/astra-viewer/pyproject.toml").read_text())
+    worker = repo_path("config/agentic/Dockerfile").read_text()
+    for requirement in viewer["project"]["dependencies"]:
+        if requirement.startswith(("astra-spec==", "astra-tools==", "anywidget==")):
+            assert requirement in worker, f"Worker dependency drift: {requirement}"

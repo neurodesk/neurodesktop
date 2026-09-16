@@ -4,6 +4,7 @@ set -euo pipefail
 
 INVENTORY_URL="${CVMFS_INVENTORY_URL:-https://raw.githubusercontent.com/NeuroDesk/neurocommand/main/cvmfs/log.txt}"
 REPOSITORY_ROOT="${CVMFS_REPOSITORY_ROOT:-/cvmfs/neurodesk.ardc.edu.au}"
+REPOSITORY_NAME="${CVMFS_REPOSITORY_NAME:-$(basename "$REPOSITORY_ROOT")}"
 
 inventory_file=$(mktemp) || {
     echo "ERROR: could not create a temporary CVMFS inventory file."
@@ -20,9 +21,8 @@ if [[ ! -s "$inventory_file" ]]; then
     exit 1
 fi
 
-entry_count=0
+images=()
 invalid_count=0
-missing_count=0
 while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -n "$line" ]] || continue
     image="${line%%[[:space:]]*}"
@@ -35,15 +35,10 @@ while IFS= read -r line || [[ -n "$line" ]]; do
             ;;
     esac
 
-    entry_count=$((entry_count + 1))
-    commands_file="$REPOSITORY_ROOT/containers/$image/commands.txt"
-    if [[ ! -f "$commands_file" ]]; then
-        echo "ERROR: CVMFS inventory entry is missing commands.txt: $image"
-        echo "::error title=CVMFS inventory mismatch::$image is missing from the mounted repository"
-        missing_count=$((missing_count + 1))
-    fi
+    images+=("$image")
 done < "$inventory_file"
 
+entry_count=${#images[@]}
 if [[ "$entry_count" -eq 0 ]]; then
     echo "ERROR: CVMFS inventory did not contain any container entries."
     exit 1
@@ -52,7 +47,53 @@ if [[ "$invalid_count" -ne 0 ]]; then
     echo "ERROR: $invalid_count invalid CVMFS inventory entries were found."
     exit 1
 fi
+
+missing_images=()
+find_missing_images() {
+    local image
+    local commands_file
+
+    missing_images=()
+    for image in "${images[@]}"; do
+        commands_file="$REPOSITORY_ROOT/containers/$image/commands.txt"
+        if [[ ! -f "$commands_file" ]]; then
+            missing_images+=("$image")
+        fi
+    done
+}
+
+# The health jobs run on Linux with GNU timeout and passwordless sudo.
+# Diagnostics are best effort; a failed refresh never hides omissions.
+catalog_status() {
+    timeout --kill-after=5s 10s cvmfs_config stat -v "$REPOSITORY_NAME" || true
+}
+
+refresh_catalog() {
+    local -a prefix=()
+    if [[ "$EUID" -ne 0 ]]; then
+        prefix=(sudo -n)
+    fi
+    "${prefix[@]}" timeout --kill-after=5s 45s \
+        cvmfs_talk -i "$REPOSITORY_NAME" remount sync
+}
+
+find_missing_images
+if [[ "${#missing_images[@]}" -ne 0 ]]; then
+    echo "WARNING: ${#missing_images[@]} CVMFS inventory entries were not visible; refreshing the catalog before the final check."
+    catalog_status
+    if ! refresh_catalog; then
+        echo "WARNING: CVMFS catalog refresh failed or timed out; checking the same inventory again."
+    fi
+    catalog_status
+    find_missing_images
+fi
+
+missing_count=${#missing_images[@]}
 if [[ "$missing_count" -ne 0 ]]; then
+    for image in "${missing_images[@]}"; do
+        echo "ERROR: CVMFS inventory entry is missing commands.txt: $image"
+        echo "::error title=CVMFS inventory mismatch::$image is missing from the mounted repository"
+    done
     echo "ERROR: $missing_count of $entry_count CVMFS inventory entries are missing."
     exit 2
 fi

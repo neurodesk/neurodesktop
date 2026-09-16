@@ -140,7 +140,7 @@ def test_viewer_plugin_is_registered_alongside_the_launcher():
 
     assert "import astraViewerPlugin from './astraViewer';" in index
     assert (
-        "export default [plugin, workspaceLinksPlugin, astraViewerPlugin];"
+        "export default [plugin, workspaceLinksPlugin, astraViewerPlugin, t3CodePlugin];"
         in index
     )
     assert "id: 'neurodesk-launcher:astra-viewer'" in FRONTEND

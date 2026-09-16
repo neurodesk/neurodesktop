@@ -6,6 +6,7 @@ import {
 import workspaceLinksPlugin from './workspaceLinks';
 
 import astraViewerPlugin from './astraViewer';
+import t3CodePlugin from './t3Code';
 
 import { Notification } from '@jupyterlab/apputils';
 
@@ -624,4 +625,4 @@ const plugin: JupyterFrontEndPlugin<void> = {
   }
 };
 
-export default [plugin, workspaceLinksPlugin, astraViewerPlugin];
+export default [plugin, workspaceLinksPlugin, astraViewerPlugin, t3CodePlugin];

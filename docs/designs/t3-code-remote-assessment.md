@@ -11,6 +11,8 @@ last-reviewed: "2026-09-10"
 
 Part of [Design records](index.md). See
 [T3 Code remote access](../architecture/t3-code.md) for current behavior.
+The original opt-in startup described here was replaced by automatic startup
+with Jupyter on 2026-09-16.
 
 ## Feasibility
 

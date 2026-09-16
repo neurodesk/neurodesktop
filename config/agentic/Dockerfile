@@ -16,7 +16,7 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && apt-get install -y --no-install-recommends bash git curl openssh-client ripgrep ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir pytest==8.4.2 httpx==0.28.1 traitlets==5.14.3 \
-       PyYAML==6.0.2 jupyter-server==2.17.0 \
-       astra-spec==0.0.12 astra-tools==0.2.11 anywidget==0.11.0
+       PyYAML==6.0.2 jupyter-server==2.17.0 jupyter-server-proxy==4.5.0 \
+       astra-spec==0.0.14 astra-tools==0.2.17 anywidget==0.11.0
 ENV PYTHONDONTWRITEBYTECODE=1
 WORKDIR /workspace

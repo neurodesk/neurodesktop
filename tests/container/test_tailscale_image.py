@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import time
@@ -67,10 +68,11 @@ def test_tailscaled_starts_as_unprivileged_user_without_tun():
 def test_setup_command_starts_and_reuses_rootless_daemon(monkeypatch):
     assert os.geteuid() != 0, "Run as the unprivileged notebook user"
     script = load_source_module(
-        "t3_setup", "/opt/neurodesktop/t3_tailscale_setup.py",
-        "scripts/t3_tailscale_setup.py",
+        "t3_setup", "/opt/neurodesktop/t3_neurodesk_setup.py",
+        "scripts/t3_neurodesk_setup.py",
     )
-    command = binary("neurodesktop-t3-setup")
+    command = binary("t3_neurodesk_setup")
+    assert shutil.which("neurodesktop-t3-setup") is None
     help_result = subprocess.run([command, "--help"], capture_output=True, text=True, timeout=10)
     assert help_result.returncode == 0
     assert "--check" in help_result.stdout

@@ -690,7 +690,6 @@ docker run --shm-size=1gb -it --privileged --user=root \
     -e GRANT_SUDO=yes \
     -p 127.0.0.1:8888:8888 \
     -p 127.0.0.1:3774:3773 \
-    -e NEURODESKTOP_T3_CODE_ENABLE=1 \
     -e NEURODESKTOP_T3_CODE_HOST=0.0.0.0 \
     --cpus=10 --memory=32g \
     -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \

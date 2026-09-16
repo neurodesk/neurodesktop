@@ -8,11 +8,13 @@ import os
 
 from jupyter_server.extension.application import ExtensionApp
 
-from .supervisor import ConfigError, Disabled, T3Supervisor, policy_from_environment
+from .web import T3ProxyHandler, T3StatusHandler
+
+from .supervisor import ConfigError, T3Supervisor, policy_from_environment
 
 
 class NeurodeskT3CodeApp(ExtensionApp):
-    """Start the opt-in sidecar after Jupyter's event loop is running."""
+    """Start the sidecar automatically after Jupyter's event loop is running."""
 
     name = "neurodesk_t3_code"
     load_other_extensions = True
@@ -22,14 +24,17 @@ class NeurodeskT3CodeApp(ExtensionApp):
         self._supervisor: T3Supervisor | None = None
         self._readiness_task: asyncio.Task[None] | None = None
 
+    def initialize_handlers(self) -> None:
+        self.handlers.extend([
+            (r"/neurodesk-t3-status", T3StatusHandler, {"t3_app": self}),
+            (r"/neurodesk-t3/(.*)", T3ProxyHandler, {"t3_app": self}),
+        ])
+
     async def _start_jupyter_server_extension(self, _serverapp) -> None:
         try:
             policy = policy_from_environment(os.environ)
         except ConfigError as error:
             self.log.warning("T3 Code sidecar was not started: %s", error)
-            return
-        if isinstance(policy, Disabled):
-            self.log.info("T3 Code sidecar is disabled.")
             return
 
         self._supervisor = T3Supervisor(policy, logger=self.log)

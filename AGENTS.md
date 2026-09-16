@@ -52,13 +52,24 @@
 - When changing the T3 Code package pin, server extension, provider launchers,
   Docker port settings, or lifecycle variables, run `pytest
   tests/unit/test_t3_code_server.py` from a checkout and `pytest
-  /opt/tests/test_t3_code_server_image.py` in the built image. Keep T3 opt-in,
+  /opt/tests/test_t3_code_server_image.py` in the built image. Start T3 automatically with Jupyter,
   run it as the notebook user, and let the Jupyter extension own its process
   group. Keep its state under the persistent home. Never copy a startup or
   pairing token into Jupyter or container logs. Keep the fixed port aligned
   with Docker publication, use the quiet image-owned provider binaries, and
   remove T3's duplicate Claude binary and foreign `node-pty` payload in their
   install layer.
+  For its JupyterLab web view, also run `pytest tests/unit/test_t3_code_web.py`
+  and `pytest /opt/tests/test_t3_code_web_image.py` in the built image. Keep
+  proxy targets tied to the supervised process, authenticate HTTP and
+  WebSockets through Jupyter, strip Jupyter credentials upstream, and scope
+  T3 cookies to the proxy path. Keep root-path compatibility changes confined
+  to the proxied client, fail on pinned bundle anchor drift, and test pairing
+  at both root and JupyterHub-style base URLs.
+  The guided desktop/Tailscale setup command is `t3_neurodesk_setup`, installed
+  from `scripts/t3_neurodesk_setup.py`. When changing it, run `pytest
+  tests/unit/test_t3_neurodesk_setup.py` and `pytest
+  /opt/tests/test_tailscale_image.py` in the built image.
 - When changing Jupyter Server Proxy response buffering or the Tornado HTTP
   client limits in `jupyter_server_config_extra.py` or
   `patch_jupyter_server_proxy.py`, run `pytest
@@ -319,6 +330,14 @@
   layer that needs them (never purged in a later layer), `chown -R`/
   `chmod -R` happen in the layer that creates a tree, and sourcemaps and
   bundled Python test suites are stripped in the layer that installs them.
+- When changing Jupyter Python build dependencies, run `pytest
+  tests/unit/test_jupyter_build_constraints.py` and build both source wheels
+  with fresh isolated build environments. Keep the launcher metadata and
+  `config/jupyter/build-constraints.txt` aligned; runtime pip constraints do
+  not constrain isolated builds.
+- When changing the CVMFS inventory health checker, run `pytest
+  tests/unit/test_cvmfs_inventory_check.py`. Keep one bounded synchronous
+  refresh, recheck the complete original inventory, and fail persistent gaps.
 - When changing the `jupyterlab-slurm` source pin or its Jupyter Builder
   compatibility rewrite, run `pytest tests/unit/test_jupyterlab_slurm_build.py`
   from a checkout and require a successful image build. Keep the source ref
@@ -350,3 +369,5 @@
   bound review follow-ups at three commits per PR. When changing the worker
   image or permission profile, build `config/agentic/Dockerfile` and run the
   credential-free sandbox smoke check described in the operating guide.
+  Keep the worker's ASTRA and anywidget pins aligned with the viewer metadata
+  and run the full checkout suite in the rebuilt worker.

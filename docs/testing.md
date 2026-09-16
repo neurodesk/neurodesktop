@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-09-14"
+last-reviewed: "2026-09-16"
 ---
 
 # Testing
@@ -80,13 +80,15 @@ non-obvious tiers protect.
 
 | Area | On a checkout | In the built image |
 | --- | --- | --- |
+| Jupyter isolated build dependencies | `pytest tests/unit/test_jupyter_build_constraints.py tests/unit/test_jupyterlab_slurm_build.py` | Fresh isolated wheel builds for Slurm and launcher |
+| CVMFS inventory health | `pytest tests/unit/test_cvmfs_inventory_check.py` | Live mirror workflow |
 | Lmod extension listing default | `pytest tests/unit/test_lmod_extensions.py` | — |
 | Apptainer NVIDIA auto-configuration | `pytest tests/unit/test_apptainer_nv.py` | — |
 | Access-URL banner (`print_access_url.sh`) | `pytest tests/unit/test_print_access_url.py` | — |
 | Sherlock launcher (`scripts/connectSherlock.sh`) | `pytest tests/unit/test_connect_sherlock.py` | — |
-| T3 Code server, lifecycle, and packaging | `pytest tests/unit/test_t3_code_server.py` | `pytest /opt/tests/test_t3_code_server_image.py` |
+| T3 Code server, web UI, lifecycle, and packaging | `pytest tests/unit/test_t3_code_server.py tests/unit/test_t3_code_web.py` | `pytest /opt/tests/test_t3_code_server_image.py /opt/tests/test_t3_code_web_image.py` |
 | Tailscale binary packaging | `pytest tests/unit/test_tailscale_packaging.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_tailscale_image.py` |
-| Guided T3/Tailscale setup | `pytest tests/unit/test_t3_tailscale_setup.py tests/unit/test_t3_code_server.py` | `pytest /opt/tests/test_tailscale_image.py /opt/tests/test_t3_code_server_image.py` |
+| Guided T3/Tailscale setup | `pytest tests/unit/test_t3_neurodesk_setup.py tests/unit/test_t3_code_server.py` | `pytest /opt/tests/test_tailscale_image.py /opt/tests/test_t3_code_server_image.py` |
 | Jupyter Server Proxy response limits | `pytest tests/unit/test_jupyter_server_proxy_limits.py` | `pytest /opt/tests/test_jupyter_server_proxy_limits.py`, then real large-response proxy check |
 | ASTRA viewer core (adapter, graph, widget, previews) | `pytest tests/unit/test_astra_view_graph.py tests/unit/test_astra_view_packaging.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py` | `pytest /opt/tests/test_astra_view_image.py` |
@@ -121,11 +123,21 @@ unit tests simulate CLI responses and terminal input to cover login, reuse,
 conflicting Serve configurations, desktop confirmation, identity mismatches,
 and token-free diagnostics. The image test also starts and reuses a real
 daemon through the installed wizard and checks that it has its own session.
-For manual acceptance, run `neurodesktop-t3-setup` in a JupyterLab terminal,
+For manual acceptance, run `t3_neurodesk_setup` in a JupyterLab terminal,
 follow its desktop connectivity check, complete pairing in T3, and verify
-the remote providers. Then rerun `neurodesktop-t3-setup --check`.
+the remote providers. Then rerun `t3_neurodesk_setup --check`.
 
 ### T3 Code server
+
+The web unit tests require `jupyter-server-proxy` and Node.js. CI installs the
+local T3 extension to supply the proxy dependency. They cover the URL-prefix
+adapter, upstream drift, credential stripping, and fetch/WebSocket behavior.
+The browser image test opens the installed T3 application with the JupyterLab
+launcher, pairs it and requires a live WebSocket, reloads it using the scoped
+session cookie, and checks launcher reuse. It rejects unauthenticated HTTP
+and WebSocket requests and cookie-authenticated POSTs without Jupyter XSRF.
+It runs at both `/` and a JupyterHub-style `/user/t3-test/` prefix.
+
 
 The real-server image test also waits for the Codex provider probe to report
 its CLI version. This exercises T3's login-shell PATH reload and catches

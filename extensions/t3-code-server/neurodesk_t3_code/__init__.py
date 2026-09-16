@@ -1,4 +1,4 @@
-"""Jupyter Server extension that owns the optional T3 Code sidecar."""
+"""Jupyter Server extension that owns the T3 Code sidecar."""
 
 
 def _jupyter_server_extension_points():

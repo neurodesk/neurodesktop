@@ -25,8 +25,8 @@ def proxy_config(target=TARGET):
 @pytest.fixture
 def wizard():
     return load_source_module(
-        "t3_setup", "/opt/neurodesktop/t3_tailscale_setup.py",
-        "scripts/t3_tailscale_setup.py",
+        "t3_setup", "/opt/neurodesktop/t3_neurodesk_setup.py",
+        "scripts/t3_neurodesk_setup.py",
     )
 
 
@@ -179,7 +179,7 @@ def test_missing_local_t3_explains_startup_requirement(wizard, monkeypatch):
     def failed_open(*args, **kwargs):
         raise OSError("connection refused")
     monkeypatch.setattr(wizard.urllib.request, "build_opener", lambda handler: SimpleNamespace(open=failed_open))
-    with pytest.raises(wizard.SetupError, match="NEURODESKTOP_T3_CODE_ENABLE=1"):
+    with pytest.raises(wizard.SetupError, match="starts automatically with Jupyter"):
         wizard.t3_environment(3773)
 
 
@@ -216,6 +216,6 @@ def test_daemon_start_retries_api_race_and_detaches(wizard, monkeypatch, tmp_pat
 
 def test_image_installs_user_invoked_command():
     dockerfile = repo_path("Dockerfile").read_text()
-    assert "source=scripts/t3_tailscale_setup.py,target=/tmp/t3_tailscale_setup.py,ro" in dockerfile
-    assert "install -m 0755 -o root -g users /tmp/t3_tailscale_setup.py /opt/neurodesktop/t3_tailscale_setup.py" in dockerfile
-    assert "ln -s /opt/neurodesktop/t3_tailscale_setup.py /usr/local/bin/neurodesktop-t3-setup" in dockerfile
+    assert "source=scripts/t3_neurodesk_setup.py,target=/tmp/t3_neurodesk_setup.py,ro" in dockerfile
+    assert "install -m 0755 -o root -g users /tmp/t3_neurodesk_setup.py /opt/neurodesktop/t3_neurodesk_setup.py" in dockerfile
+    assert "ln -s /opt/neurodesktop/t3_neurodesk_setup.py /usr/local/bin/t3_neurodesk_setup" in dockerfile

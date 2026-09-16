@@ -45,7 +45,7 @@ jobs:
           # Install the local viewer project so its package metadata remains
           # the single source for the exact ASTRA/anywidget dependency pins.
           python -m pip install pytest httpx traitlets \
-            jupyter-server ./extensions/astra-viewer
+            jupyter-server ./extensions/t3-code-server ./extensions/astra-viewer
           # ssh-keygen, for the ensure_ssh_keys.sh tests
           sudo apt-get update -qq
           sudo apt-get install -y -qq openssh-client

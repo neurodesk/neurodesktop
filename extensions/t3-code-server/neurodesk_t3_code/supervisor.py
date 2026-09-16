@@ -1,4 +1,4 @@
-"""Policy and process ownership for the optional T3 Code server.
+"""Policy and process ownership for the T3 Code server.
 
 This module has no Jupyter dependency. The thin server extension owns one
 ``T3Supervisor`` for the lifetime of Jupyter Server, while checkout tests drive
@@ -22,21 +22,14 @@ from typing import Mapping
 DEFAULT_EXECUTABLE = Path("/opt/t3-code/node_modules/.bin/t3")
 DEFAULT_PROVIDER_BIN = Path("/opt/neurodesktop/t3-provider-bin")
 DEFAULT_PORT = 3773
-TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
-FALSE_VALUES = frozenset({"", "0", "false", "no", "off"})
 
 
 class ConfigError(ValueError):
-    """An enabled deployment supplied an unsafe or unusable configuration."""
+    """A deployment supplied an unsafe or unusable configuration."""
 
 
 @dataclass(frozen=True)
-class Disabled:
-    reason: str
-
-
-@dataclass(frozen=True)
-class Enabled:
+class Policy:
     home: Path
     base_dir: Path
     workdir: Path
@@ -50,27 +43,12 @@ class Enabled:
         return "127.0.0.1" if self.host in {"0.0.0.0", "::"} else self.host
 
 
-Policy = Disabled | Enabled
-
-
 class ServiceState(Enum):
     STOPPED = "stopped"
     STARTING = "starting"
     READY = "ready"
     BACKING_OFF = "backing-off"
     PARKED = "parked"
-
-
-def _parse_enabled(raw: str) -> bool:
-    value = raw.strip().lower()
-    if value in TRUE_VALUES:
-        return True
-    if value in FALSE_VALUES:
-        return False
-    raise ConfigError(
-        "NEURODESKTOP_T3_CODE_ENABLE must be one of 1, true, yes, on, "
-        "0, false, no, or off"
-    )
 
 
 def _absolute_directory(raw: str, name: str) -> Path:
@@ -84,9 +62,6 @@ def policy_from_environment(
     environ: Mapping[str, str], *, euid: int | None = None
 ) -> Policy:
     """Parse all external settings once, before a T3 process can start."""
-
-    if not _parse_enabled(environ.get("NEURODESKTOP_T3_CODE_ENABLE", "0")):
-        return Disabled("NEURODESKTOP_T3_CODE_ENABLE is disabled")
 
     current_uid = os.geteuid() if euid is None else euid
     if current_uid == 0:
@@ -134,7 +109,7 @@ def policy_from_environment(
         ),
         "NEURODESKTOP_T3_CODE_PROVIDER_BIN",
     )
-    return Enabled(
+    return Policy(
         home=home,
         base_dir=base_dir.resolve(),
         workdir=workdir,
@@ -145,7 +120,7 @@ def policy_from_environment(
     )
 
 
-def server_command(policy: Enabled) -> list[str]:
+def server_command(policy: Policy) -> list[str]:
     """Return the fixed, shell-free argv used for every managed server."""
 
     return [
@@ -165,7 +140,7 @@ def server_command(policy: Enabled) -> list[str]:
 
 
 def server_environment(
-    policy: Enabled, environ: Mapping[str, str]
+    policy: Policy, environ: Mapping[str, str]
 ) -> dict[str, str]:
     """Give T3 quiet, image-owned providers and private persistent state."""
 
@@ -213,7 +188,7 @@ class T3Supervisor:
 
     def __init__(
         self,
-        policy: Enabled,
+        policy: Policy,
         *,
         environ: Mapping[str, str] | None = None,
         logger: logging.Logger | None = None,
@@ -257,7 +232,7 @@ class T3Supervisor:
                 self.state = ServiceState.PARKED
                 self._ready.set()
                 self.log.warning(
-                    "T3 Code is disabled for this session because %s:%s is in use.",
+                    "T3 Code could not start because %s:%s is in use.",
                     self.policy.host,
                     self.policy.port,
                 )

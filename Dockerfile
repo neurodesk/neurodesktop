@@ -600,6 +600,7 @@ ARG JUPYTER_BUILDER_VERSION
 ARG JUPYTERLAB_SLURM_REF="c34354f0aaa1b12f6243224bed631cf07c858409"
 USER root
 RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch_ipyniivue.py,ro \
+    --mount=type=bind,source=config/jupyter/build-constraints.txt,target=/tmp/build-constraints.txt,ro \
     install -d -m 0755 -o root -g users /opt/neurodesktop \
     && apt-install-retry build-essential \
     # jupyterlab-slurm main is the current JupyterLab 4 implementation but its
@@ -615,7 +616,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
         /tmp/jupyterlab-slurm/package.json > /tmp/jupyterlab-slurm/package.json.patched \
     && mv /tmp/jupyterlab-slurm/package.json.patched /tmp/jupyterlab-slurm/package.json \
     && chown -R ${NB_UID}:${NB_GID} /tmp/jupyterlab-slurm \
-    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade \
+    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --build-constraint /tmp/build-constraints.txt --upgrade \
     datalad \
     nipype \
     niwrap \
@@ -1072,6 +1073,7 @@ USER ${NB_USER}
 
 # Build and install neurodesk-launcher JupyterLab extension
 RUN --mount=type=bind,source=extensions/neurodesk-launcher,target=/tmp/neurodesk-launcher-src,ro \
+    --mount=type=bind,source=config/jupyter/build-constraints.txt,target=/tmp/build-constraints.txt,ro \
     rm -rf /tmp/neurodesk-launcher \
     && mkdir -p /tmp/neurodesk-launcher \
     && cp -R /tmp/neurodesk-launcher-src/. /tmp/neurodesk-launcher/ \
@@ -1079,7 +1081,7 @@ RUN --mount=type=bind,source=extensions/neurodesk-launcher,target=/tmp/neurodesk
         /tmp/neurodesk-launcher/neurodesk_launcher/labextension \
         /tmp/neurodesk-launcher/tsconfig.tsbuildinfo \
     && cd /tmp/neurodesk-launcher \
-    && npm_config_cache=/tmp/neurodesk-launcher-npm-cache /opt/conda/bin/pip install . \
+    && npm_config_cache=/tmp/neurodesk-launcher-npm-cache /opt/conda/bin/pip install --build-constraint /tmp/build-constraints.txt . \
     && /opt/conda/bin/jupyter labextension disable @jupyterhub/jupyter-server-proxy \
     && rm -rf /tmp/neurodesk-launcher /tmp/neurodesk-launcher-npm-cache /home/${NB_USER}/.cache
 
@@ -1093,8 +1095,8 @@ RUN --mount=type=bind,source=extensions/astra-viewer,target=/tmp/astra-viewer-sr
     && /opt/conda/bin/pip install --no-deps /tmp/astra-viewer \
     && rm -rf /tmp/astra-viewer /home/${NB_USER}/.cache
 
-# Install the server extension that owns the optional T3 process for exactly
-# the lifetime of Jupyter Server. It has no frontend build or extra dependency.
+# Install the server extension that owns the T3 process for exactly
+# the lifetime of Jupyter Server. Its web view reuses Jupyter Server Proxy.
 RUN --mount=type=bind,source=extensions/t3-code-server,target=/tmp/t3-code-server-src,ro \
     /opt/conda/bin/pip install --no-deps /tmp/t3-code-server-src \
     && rm -rf /home/${NB_USER}/.cache
@@ -1386,7 +1388,7 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     --mount=type=bind,source=config/agents/codex_exec,target=/tmp/agents/codex_exec,ro \
     --mount=type=bind,source=config/agents/opencode_prune_sessions.py,target=/tmp/agents/opencode_prune_sessions.py,ro \
     --mount=type=bind,source=config/agents/patch_nbi.py,target=/tmp/agents/patch_nbi.py,ro \
-    --mount=type=bind,source=scripts/t3_tailscale_setup.py,target=/tmp/t3_tailscale_setup.py,ro \
+    --mount=type=bind,source=scripts/t3_neurodesk_setup.py,target=/tmp/t3_neurodesk_setup.py,ro \
     install -m 0755 -o root -g users /tmp/restore_home_defaults.sh /opt/neurodesktop/restore_home_defaults.sh \
     && install -m 0755 -o root -g users /tmp/update_page_config.py /opt/neurodesktop/update_page_config.py \
     && install -D -m 0644 /tmp/agents/AGENTS.md /opt/AGENTS.md \
@@ -1396,8 +1398,8 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     && install -m 0644 -o root -g users /tmp/agents/opencode_bash_env.sh /opt/neurodesktop/opencode_bash_env.sh \
     && install -m 0755 -o root -g root /tmp/agents/codex /usr/local/sbin/codex \
     && install -m 0755 -o root -g root /tmp/agents/codex_exec /opt/neurodesktop/codex-exec \
-    && install -m 0755 -o root -g users /tmp/t3_tailscale_setup.py /opt/neurodesktop/t3_tailscale_setup.py \
-    && ln -s /opt/neurodesktop/t3_tailscale_setup.py /usr/local/bin/neurodesktop-t3-setup \
+    && install -m 0755 -o root -g users /tmp/t3_neurodesk_setup.py /opt/neurodesktop/t3_neurodesk_setup.py \
+    && ln -s /opt/neurodesktop/t3_neurodesk_setup.py /usr/local/bin/t3_neurodesk_setup \
     # Startup cleanup: drop sessions whose working directory has been deleted.
     && install -m 0755 -o root -g users /tmp/agents/opencode_prune_sessions.py /opt/neurodesktop/opencode_prune_sessions.py \
     # Anchored Notebook Intelligence patch (see patch_nbi.py): make the

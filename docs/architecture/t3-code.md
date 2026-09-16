@@ -1,17 +1,40 @@
 ---
 title: T3 Code remote access
-description: Headless T3 Code lifecycle, provider paths, persistent state, and
-  desktop connection procedures
+description: T3 Code in JupyterLab, server lifecycle, provider paths, persistent
+  state, and desktop connection procedures
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-14"
+last-reviewed: "2026-09-16"
 ---
 
 # T3 Code remote access
 
 Part of [Architecture](../architecture.md). The image includes a pinned T3 Code
-server. A Jupyter Server extension starts it as the notebook user when
-`NEURODESKTOP_T3_CODE_ENABLE=1`.
+server. A Jupyter Server extension starts it automatically as the notebook user.
+
+## Open inside JupyterLab
+
+Choose **T3 Code** in the JupyterLab launcher's **Neurodesk** section. It opens the installed web
+application in a main-panel tab. Reopening the launcher focuses the existing
+tab. Closing the tab leaves the Jupyter-owned T3 process running.
+
+On first use, run `t3 pair` in a JupyterLab terminal and enter the pairing token
+in T3's web interface. Pairing uses T3's own session cookie; restarting with
+the same persistent home preserves T3's state. Provider authentication still
+belongs to the container, as described [below](#providers).
+
+This route requires only the Jupyter endpoint, including its existing HTTPS
+and JupyterHub user prefix. It does not require Tailscale or a separately
+published T3 port. Leave `NEURODESKTOP_T3_CODE_HOST` at its loopback default
+when using only JupyterLab. The launcher reports when the sidecar is not ready.
+
+The server extension authenticates `/neurodesk-t3/` and proxies HTTP and
+WebSockets to its supervised process. It strips Jupyter credentials before
+forwarding requests and scopes T3 session cookies to that route. The pinned
+T3 client assumes root-relative URLs, so the proxy adapts its router, asset
+loader and file URLs, with a transport adapter running only inside the T3
+frame. Upstream anchor changes fail explicitly. Adapted assets are not cached
+as immutable files. Desktop access continues to use the unmodified client.
 
 ## Connect through a published Docker port
 
@@ -21,7 +44,6 @@ the container server still listens on port 3773:
 
 ```bash
 docker run \
-  -e NEURODESKTOP_T3_CODE_ENABLE=1 \
   -e NEURODESKTOP_T3_CODE_HOST=0.0.0.0 \
   -p 127.0.0.1:8888:8888 \
   -p 127.0.0.1:3774:3773 \
@@ -63,15 +85,15 @@ services; see [Tailscale firewall requirements](https://tailscale.com/docs/refer
 Your desktop must also be connected to the tailnet and allowed to reach this
 device by its access policy.
 
-Enable T3 with `NEURODESKTOP_T3_CODE_ENABLE=1` when starting Neurodesktop.
-Its default host, `127.0.0.1`, works for this setup. In a JupyterLab terminal,
+T3 starts automatically with Jupyter. Its default host, `127.0.0.1`, works
+for this setup. In a JupyterLab terminal,
 run the guided setup as the notebook user:
 
 ```bash
-neurodesktop-t3-setup
+t3_neurodesk_setup
 ```
 
-The [setup script](../../scripts/t3_tailscale_setup.py) checks T3, starts a
+The [setup script](../../scripts/t3_neurodesk_setup.py) checks T3, starts a
 userspace daemon in the background, guides browser login, and configures
 private HTTPS access. It prints the complete device hostname and a command
 to test from your desktop. After you confirm that the desktop reaches the
@@ -89,7 +111,7 @@ started daemon keeps its original lifecycle.
 For a local check without login prompts, configuration changes, or tokens:
 
 ```bash
-neurodesktop-t3-setup --check
+t3_neurodesk_setup --check
 ```
 
 This checks local configuration, not reachability from the desktop. The
@@ -100,8 +122,8 @@ terminal does not inherit the server's settings. Tailscale state defaults to
 `/tmp/tailscale-$(id -u)/tailscaled.sock`. Use `--state-dir` and `--socket` for
 a separate instance. Keep state on persistent storage and give concurrent
 instances separate state directories. The wizard leaves T3 startup to the
-Jupyter extension; if T3 is disabled, enable it in the deployment and restart
-Neurodesktop first.
+Jupyter extension. If T3 is unavailable after Jupyter starts, check the
+Jupyter server log before rerunning setup.
 
 ### Manual setup
 
@@ -140,7 +162,7 @@ give each Neurodesktop instance its own Tailscale state directory.
 ## Connect through T3 Connect
 
 T3 Connect uses an outbound managed connection, so it does not need a
-published port. Enable the sidecar with its default loopback host. In a
+published port. Keep the sidecar on its default loopback host. In a
 Neurodesktop terminal, run:
 
 ```bash

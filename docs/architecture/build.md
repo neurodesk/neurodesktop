@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-10"
+last-reviewed: "2026-09-16"
 ---
 
 # Build-Time Behaviors
@@ -63,6 +63,15 @@ asserts the old declaration and replaces it with the current
 `@jupyter/builder` package before producing the wheel. The assertion turns an
 upstream fix or dependency change into an explicit image-build failure instead
 of silently carrying the workaround forward.
+
+Both Jupyter source builds use [build constraints](../../config/jupyter/build-constraints.txt)
+for the isolated Python build environment. Hatchling 1.32.1 cannot import
+hatch-jupyter-builder 0.9.1; the constraints retain a tested compatible pair.
+The launcher also declares that pair in its own build metadata so a checkout
+build has the same protection. Use pip's `--build-constraint`, not `-c`:
+ordinary runtime constraints do not constrain isolated build dependencies.
+Retire these pins only after fresh isolated wheel builds pass for both
+`jupyterlab-slurm` and `neurodesk-launcher`.
 
 ## Image Size Hygiene
 

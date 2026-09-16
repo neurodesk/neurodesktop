@@ -4,7 +4,7 @@ description: CVMFS server selection and mount configuration, and the
   neurocommand CLI/module system for neuroimaging tools
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-09"
+last-reviewed: "2026-09-16"
 ---
 
 # CVMFS and Neurocommand
@@ -47,8 +47,14 @@ mounts each advertised endpoint and compares it with neurocommand's desired
 container inventory. Both its single-server and fallback-list jobs use
 [`check_cvmfs_inventory.sh`](../../.github/workflows/check_cvmfs_inventory.sh),
 which fails unavailable or empty inventory downloads and reports every missing
-container in the snapshot before failing. Complete mismatch output is
-important when a publisher update affects every replica at once.
+container in the snapshot before failing. When the first comparison finds a
+mismatch, the checker synchronously asks the mounted client to remount the
+latest catalog and repeats the complete comparison once against the same
+downloaded inventory. The refresh has a 45-second timeout and a five-second
+kill grace period, uses noninteractive sudo when needed, and records catalog
+status before and after. A refresh failure or timeout still checks and reports
+all missing entries. This lets a stale mount catch up without hiding
+persistent replica omissions.
 
 ## Build-time CVMFS setup
 

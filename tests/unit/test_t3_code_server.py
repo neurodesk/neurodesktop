@@ -1,4 +1,4 @@
-"""Contracts for the optional T3 Code sidecar and its image packaging."""
+"""Contracts for the T3 Code sidecar and its image packaging."""
 
 from __future__ import annotations
 
@@ -24,17 +24,8 @@ def _supervisor_module():
     return supervisor
 
 
-def test_t3_is_disabled_until_a_deployment_opts_in(tmp_path):
-    supervisor = _supervisor_module()
-
-    policy = supervisor.policy_from_environment(
-        {"HOME": str(tmp_path)}, euid=os.geteuid()
-    )
-
-    assert isinstance(policy, supervisor.Disabled)
-
-
-def test_enabled_policy_is_user_owned_and_has_safe_defaults(tmp_path):
+@pytest.mark.parametrize("retired_flag", [None, "0", "1", "invalid"])
+def test_automatic_policy_is_user_owned_and_has_safe_defaults(tmp_path, retired_flag):
     supervisor = _supervisor_module()
     executable = tmp_path / "t3"
     executable.write_text("#!/bin/sh\n", encoding="utf-8")
@@ -45,21 +36,29 @@ def test_enabled_policy_is_user_owned_and_has_safe_defaults(tmp_path):
     policy = supervisor.policy_from_environment(
         {
             "HOME": str(tmp_path),
-            "NEURODESKTOP_T3_CODE_ENABLE": "1",
             "NEURODESKTOP_T3_CODE_EXECUTABLE": str(executable),
             "NEURODESKTOP_T3_CODE_PROVIDER_BIN": str(provider_bin),
         },
         euid=os.geteuid(),
     )
 
-    assert isinstance(policy, supervisor.Enabled)
+    if retired_flag is not None:
+        # The removed flag must not disable startup or cause parsing failures.
+        environment = {
+            "HOME": str(tmp_path),
+            "NEURODESKTOP_T3_CODE_EXECUTABLE": str(executable),
+            "NEURODESKTOP_T3_CODE_PROVIDER_BIN": str(provider_bin),
+            "NEURODESKTOP_T3_CODE_ENABLE": retired_flag,
+        }
+        assert supervisor.policy_from_environment(environment, euid=os.geteuid()) == policy
+    assert isinstance(policy, supervisor.Policy)
     assert policy.host == "127.0.0.1"
     assert policy.port == 3773
     assert policy.base_dir == tmp_path / ".t3"
     assert policy.workdir == tmp_path
 
 
-def test_enabled_policy_rejects_root_and_foreign_home(tmp_path):
+def test_policy_rejects_root_and_foreign_home(tmp_path):
     supervisor = _supervisor_module()
     executable = tmp_path / "t3"
     executable.write_text("#!/bin/sh\n", encoding="utf-8")
@@ -68,7 +67,6 @@ def test_enabled_policy_rejects_root_and_foreign_home(tmp_path):
     provider_bin.mkdir()
     environment = {
         "HOME": str(tmp_path),
-        "NEURODESKTOP_T3_CODE_ENABLE": "1",
         "NEURODESKTOP_T3_CODE_EXECUTABLE": str(executable),
         "NEURODESKTOP_T3_CODE_PROVIDER_BIN": str(provider_bin),
     }
@@ -91,7 +89,6 @@ def test_server_command_and_environment_use_protocol_safe_provider_binaries(tmp_
         {
             "HOME": str(tmp_path),
             "PATH": "/usr/local/sbin:/usr/bin",
-            "NEURODESKTOP_T3_CODE_ENABLE": "true",
             "NEURODESKTOP_T3_CODE_HOST": "0.0.0.0",
             "NEURODESKTOP_T3_CODE_PORT": "4567",
             "NEURODESKTOP_T3_CODE_EXECUTABLE": str(executable),
@@ -99,7 +96,7 @@ def test_server_command_and_environment_use_protocol_safe_provider_binaries(tmp_
         },
         euid=os.geteuid(),
     )
-    assert isinstance(policy, supervisor.Enabled)
+    assert isinstance(policy, supervisor.Policy)
 
     command = supervisor.server_command(policy)
     environment = supervisor.server_environment(
@@ -165,7 +162,6 @@ while True:
     policy = supervisor.policy_from_environment(
         {
             "HOME": str(tmp_path),
-            "NEURODESKTOP_T3_CODE_ENABLE": "1",
             "NEURODESKTOP_T3_CODE_HOST": "127.0.0.1",
             "NEURODESKTOP_T3_CODE_PORT": str(port),
             "NEURODESKTOP_T3_CODE_EXECUTABLE": str(executable),
@@ -173,7 +169,7 @@ while True:
         },
         euid=os.geteuid(),
     )
-    assert isinstance(policy, supervisor.Enabled)
+    assert isinstance(policy, supervisor.Policy)
 
     async def scenario():
         service = supervisor.T3Supervisor(policy)
@@ -199,14 +195,13 @@ def test_spawn_failure_parks_sidecar_without_escaping_into_jupyter(tmp_path):
     policy = supervisor.policy_from_environment(
         {
             "HOME": str(tmp_path),
-            "NEURODESKTOP_T3_CODE_ENABLE": "1",
             "NEURODESKTOP_T3_CODE_PORT": str(supervisor.find_free_port()),
             "NEURODESKTOP_T3_CODE_EXECUTABLE": str(executable),
             "NEURODESKTOP_T3_CODE_PROVIDER_BIN": str(provider_bin),
         },
         euid=os.geteuid(),
     )
-    assert isinstance(policy, supervisor.Enabled)
+    assert isinstance(policy, supervisor.Policy)
     executable.unlink()
 
     async def scenario():
@@ -254,7 +249,7 @@ def test_convenience_docker_run_publishes_the_direct_pairing_port():
 
     assert "-p 127.0.0.1:3774:3773" in launcher
     assert "-p 127.0.0.1:3773:3773" not in launcher
-    assert "NEURODESKTOP_T3_CODE_ENABLE=1" in launcher
+    assert "NEURODESKTOP_T3_CODE_ENABLE" not in launcher
     assert "NEURODESKTOP_T3_CODE_HOST=0.0.0.0" in launcher
 
 

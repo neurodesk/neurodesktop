@@ -62,9 +62,9 @@ def t3_environment(port):
         return data
     except (OSError, ValueError, AttributeError, urllib.error.URLError):
         raise SetupError(
-            f"T3 is not responding at {url}. Start Neurodesktop with "
-            "NEURODESKTOP_T3_CODE_ENABLE=1, wait for Jupyter to start, and rerun setup. "
-            "Exporting that variable in this terminal alone will not start T3. "
+            f"T3 is not responding at {url}. Wait for Jupyter to start and rerun setup. "
+            "T3 starts automatically with Jupyter; if it remains unavailable, "
+            "check the Jupyter server log. "
             "For a custom T3 port, use --port."
         ) from None
 
@@ -163,7 +163,7 @@ def setup(args):
     ts = [binaries["tailscale"], f"--socket={args.socket}"]
     if args.check:
         if not args.socket.exists():
-            raise SetupError("No Tailscale socket found. Run neurodesktop-t3-setup interactively to start it.")
+            raise SetupError("No Tailscale socket found. Run t3_neurodesk_setup interactively to start it.")
         host = device_host(command_json([*ts, "status", "--json"]))
         if not serve_matches(command_json([*ts, "serve", "status", "--json"]), host, f"http://127.0.0.1:{args.port}"):
             raise SetupError("Tailscale is connected but the T3 HTTPS proxy is not configured.")

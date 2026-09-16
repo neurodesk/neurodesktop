@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-09-14"
+last-reviewed: "2026-09-16"
 ---
 
 # Environment Variables
@@ -128,8 +128,8 @@ are listed at the end. The subsystems themselves are described in
 
 ### T3 Code server
 
-- `NEURODESKTOP_T3_CODE_ENABLE`: starts the T3 sidecar with Jupyter when set
-  to `1`, `true`, `yes`, or `on`; defaults to disabled
+T3 starts automatically with Jupyter as the notebook user.
+
 - `NEURODESKTOP_T3_CODE_HOST`: interface passed to T3; defaults to
   `127.0.0.1`. Use `0.0.0.0` inside Docker when publishing container port
   `3773`; the launcher maps it to host loopback port `3774`

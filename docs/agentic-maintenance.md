@@ -3,7 +3,7 @@ title: Agentic maintenance workflows
 description: Run subscription-authenticated Codex on the existing self-hosted runner and review its proposed fixes
 parent: index.md
 status: current
-last-reviewed: "2026-09-08"
+last-reviewed: "2026-09-16"
 ---
 
 # Agentic maintenance workflows
@@ -46,7 +46,12 @@ Kubernetes mounts.
 
 Each worker run builds `neurodesktop-agentic:codex-0.153.4` from the trusted
 [`config/agentic/Dockerfile`](../config/agentic/Dockerfile), reusing the runner's
-Docker cache. The image pins Codex CLI `0.153.4`. Verify Docker can build and
+Docker cache. Its ASTRA and anywidget pins must match the viewer's exact
+requirements in `extensions/astra-viewer/pyproject.toml`; the validation unit
+tests guard this agreement. After changing these dependencies, rebuild the
+worker and run the full checkout suite in its credential-free validation
+container. A stale worker can reject every repair on unrelated viewer tests.
+The image pins Codex CLI `0.153.4`. Verify Docker can build and
 run that image on the selected runner. The first build needs outbound access
 to its package and base-image sources.
 
@@ -128,11 +133,19 @@ remain explicit in the PR. Confirm the resulting branch and PR before enabling
 unattended operation. A completed agent process without a published PR is not
 proof that publication works.
 
-The final worker image passed all 568 checkout unit tests and the Docker
-sandbox probe passed locally with dummy credentials. Actionlint passed the
-changed workflows. No model request or live subscription login was made.
-The production runner's persistent mounts, account access, and complete
-issue-to-PR canary still require administrator verification.
+Validate the rebuilt worker against the complete checkout suite without
+credentials or network access:
+
+```bash
+docker run --rm --network=none --cap-drop=ALL \
+  --security-opt=no-new-privileges --user "$(id -u):$(id -g)" \
+  --env HOME=/tmp --volume "$PWD:/workspace:ro" --workdir /workspace \
+  neurodesktop-agentic:codex-0.153.4 python -m pytest tests/unit -q
+```
+
+This check and the sandbox probe make no model request. The production
+runner's persistent mounts, account access, and complete issue-to-PR canary
+still require administrator verification.
 
 Until that variable is set, failure reporting still creates issues but does
 not dispatch repair or record a dispatch marker. After activation, manually

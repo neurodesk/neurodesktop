@@ -22,7 +22,7 @@ def test_plugin_is_registered_alongside_the_launcher():
 
     assert "import workspaceLinksPlugin from './workspaceLinks';" in index
     assert (
-        "export default [plugin, workspaceLinksPlugin, astraViewerPlugin];"
+        "export default [plugin, workspaceLinksPlugin, astraViewerPlugin, t3CodePlugin];"
         in index
     )
     assert "id: 'neurodesk-launcher:workspace-links'" in SOURCE
