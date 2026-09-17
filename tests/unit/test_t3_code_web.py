@@ -135,3 +135,136 @@ def test_unavailable_or_unready_sidecar_is_not_proxied(service):
     with pytest.raises(HTTPError) as error:
         asyncio.run(handler._forward("api/status"))
     assert error.value.status_code == 503
+
+
+@pytest.mark.parametrize("paired", [False, True])
+@pytest.mark.parametrize("prefix", ["/", "/user/alice/"])
+def test_launcher_session_exchanges_credentials_privately(monkeypatch, paired, prefix):
+    import asyncio
+    from neurodesk_t3_code import web as t3web
+    from neurodesk_t3_code.supervisor import ServiceState
+
+    requests, credentials, headers = [], [], []
+
+    class Client:
+        async def fetch(self, url, **kwargs):
+            requests.append((url, kwargs))
+            if url.endswith("/session"):
+                return SimpleNamespace(code=200, body=json.dumps({"authenticated": paired}).encode())
+            assert json.loads(kwargs["body"]) == {"credential": "private-pairing-secret"}
+            return SimpleNamespace(
+                body=b'{"authenticated":true}',
+                headers=HTTPHeaders({"Set-Cookie": "t3_session_3773=session; Path=/; HttpOnly; SameSite=Lax"}),
+            )
+
+    async def issue(service):
+        credentials.append(service)
+        return "private-pairing-secret"
+
+    monkeypatch.setattr(t3web.httpclient, "AsyncHTTPClient", Client)
+    monkeypatch.setattr(t3web, "pairing_credential", issue)
+    handler = SimpleNamespace(
+        t3_app=SimpleNamespace(_supervisor=SimpleNamespace(
+            state=ServiceState.READY, policy=SimpleNamespace(readiness_host="127.0.0.1", port=3773))),
+        base_url=prefix,
+        request=SimpleNamespace(protocol="https", headers=HTTPHeaders({
+            "Cookie": "jupyter=secret; t3_session_3773=existing", "Authorization": "token private-jupyter",
+        })),
+        set_header=lambda k, v: headers.append((k, v)),
+        add_header=lambda k, v: headers.append((k, v)),
+        set_status=lambda status: headers.append(("status", status)),
+        finish=lambda: None,
+    )
+    asyncio.run(t3web.T3SessionHandler.post.__wrapped__(handler))
+    assert requests[0][1]["headers"] == {"Cookie": "t3_session_3773=existing"}
+    assert len(requests) == (1 if paired else 2)
+    assert len(credentials) == (0 if paired else 1)
+    assert ("status", 204) in headers
+    assert ("Cache-Control", "no-store") in headers
+    assert "private-pairing-secret" not in str(headers)
+    if not paired:
+        assert ("Set-Cookie", f"t3_session_3773=session; Path={prefix}neurodesk-t3/; HttpOnly; SameSite=Lax; Secure") in headers
+        assert requests[1][1]["headers"] == {"Content-Type": "application/json"}
+        assert requests[1][1]["follow_redirects"] is False
+
+
+def test_session_failure_never_includes_upstream_credential(monkeypatch):
+    import asyncio
+    from neurodesk_t3_code import web as t3web
+    from neurodesk_t3_code.supervisor import ServiceState
+    from tornado.web import HTTPError
+
+    class Client:
+        async def fetch(self, *args, **kwargs):
+            raise t3web.httpclient.HTTPClientError(500, "private-pairing-secret")
+
+    monkeypatch.setattr(t3web.httpclient, "AsyncHTTPClient", Client)
+    handler = SimpleNamespace(
+        t3_app=SimpleNamespace(_supervisor=SimpleNamespace(
+            state=ServiceState.READY, policy=SimpleNamespace(readiness_host="127.0.0.1", port=3773))),
+        request=SimpleNamespace(headers=HTTPHeaders()), set_header=lambda *args: None,
+    )
+    with pytest.raises(HTTPError) as error:
+        asyncio.run(t3web.T3SessionHandler.post.__wrapped__(handler))
+    assert error.value.status_code == 503
+    assert "private-pairing-secret" not in str(error.value)
+    assert error.value.__suppress_context__
+
+
+def test_pairing_cli_uses_supervised_state_and_keeps_output_private(tmp_path, capfd):
+    import asyncio
+    import os
+    from neurodesk_t3_code.web import pairing_credential
+
+    executable = tmp_path / "t3"
+    executable.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "assert sys.argv[1:4] == ['auth', 'pairing', 'create']\n"
+        "assert sys.argv[4:6] == ['--base-dir', os.environ['T3CODE_HOME']]\n"
+        "assert sys.argv[6:] == ['--ttl', '1m', '--label', 'JupyterLab', '--json']\n"
+        "print(json.dumps({'credential': 'private-cli-secret'}))\n"
+        "print('private-stderr-secret', file=sys.stderr)\n"
+    )
+    executable.chmod(0o755)
+    service = SimpleNamespace(
+        policy=SimpleNamespace(executable=executable, base_dir=tmp_path / ".t3",
+                               workdir=tmp_path, home=tmp_path, provider_bin=tmp_path,
+                               host="127.0.0.1", port=3773),
+        environ=os.environ.copy(),
+    )
+    assert asyncio.run(pairing_credential(service)) == "private-cli-secret"
+    captured = capfd.readouterr()
+    assert "private-cli-secret" not in captured.out + captured.err
+    assert "private-stderr-secret" not in captured.out + captured.err
+
+
+def test_timed_out_pairing_cli_is_reaped(monkeypatch):
+    import asyncio
+    from neurodesk_t3_code import web as t3web
+
+    class Process:
+        returncode = None
+        reaped = False
+
+        async def communicate(self):
+            if self.returncode is None:
+                raise asyncio.TimeoutError()
+            self.reaped = True
+            return b"", None
+
+        def kill(self):
+            self.returncode = -9
+
+    process = Process()
+
+    async def spawn(*args, **kwargs):
+        return process
+
+    monkeypatch.setattr(t3web.asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(t3web, "server_environment", lambda *args: {})
+    service = SimpleNamespace(policy=SimpleNamespace(executable="/t3", base_dir="/state", workdir="/work"), environ={})
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(t3web.pairing_credential(service))
+    assert process.returncode == -9
+    assert process.reaped

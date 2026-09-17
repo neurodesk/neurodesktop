@@ -918,7 +918,7 @@ RUN echo "Installing neurocommand ref ${NEUROCOMMAND_REF}" \
 # pinned by the codex-acp adapter (CODEX_ACP_VERSION below): the adapter is
 # installed without its bundled binary and drives this install via CODEX_PATH.
 ARG CODEX_CLI_VERSION="0.154.0"
-ARG CLAUDE_CODE_VERSION="2.1.267"
+ARG CLAUDE_CODE_VERSION="2.1.274"
 RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_CLI_VERSION}" \
     && find "$(npm root -g)/@openai" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
     && rm -rf /root/.npm /tmp/npm-root-cache /home/${NB_USER}/.npm \
@@ -965,46 +965,44 @@ RUN set -eu; \
     test "$(tailscaled --version | head -n 1)" = "${TAILSCALE_VERSION}"; \
     rm -rf /tmp/tailscale.tgz "/tmp/${tailscale_archive}"
 
-# Install the headless T3 Code server in an isolated, locked npm tree. T3 uses
-# node-pty on Linux, so its exact install script is approved in the locked
-# manifest and its compiler toolchain is installed and purged in this layer.
-# The unused msgpackr native extractor stays explicitly denied. T3's Claude
-# SDK dependency also installs a full platform-specific Claude binary; the
-# image already owns one, so remove that duplicate before the layer is
-# committed.
-ARG T3_CODE_VERSION="0.0.40"
+# Install the headless T3 Code server from its pinned, self-contained build.
+# The release publishes one executable per platform, with its web client and
+# prebuilt native modules bundled beside it, so this layer needs no compiler
+# and runs no install script. A checked-in lockfile cannot serve that shape:
+# npm records only the bundled tree of the platform it ran on, then refuses
+# `npm ci` everywhere and silently drops the optional platform package on the
+# other architecture. The exact pins determine the tree instead — this
+# manifest pins `t3`, `t3` pins each `@t3code/t3-<platform>` build, and each
+# build carries its dependencies inside its own tarball. The executable links
+# against libatomic, which the checks below prove is present.
+ARG T3_CODE_VERSION="0.0.42"
 RUN --mount=type=bind,source=config/agents/t3-code/package.json,target=/tmp/t3-code/package.json,ro \
-    --mount=type=bind,source=config/agents/t3-code/package-lock.json,target=/tmp/t3-code/package-lock.json,ro \
     --mount=type=bind,source=config/agents/t3-provider-bin,target=/tmp/t3-provider-bin,ro \
     set -eux; \
     node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 24 || (major === 24 && minor < 10)) process.exit(1)'; \
     test "$(node -p 'require("/tmp/t3-code/package.json").dependencies.t3')" = "${T3_CODE_VERSION}"; \
     apt-get update; \
-    apt-install-retry build-essential; \
+    apt-install-retry libatomic1; \
     install -d -m 0755 /opt/t3-code /opt/neurodesktop/t3-provider-bin; \
-    install -m 0644 /tmp/t3-code/package.json /tmp/t3-code/package-lock.json /opt/t3-code/; \
+    install -m 0644 /tmp/t3-code/package.json /opt/t3-code/; \
     cd /opt/t3-code; \
-    npm_config_cache=/tmp/npm-t3-cache npm ci --omit=dev --no-audit --no-fund; \
-    test "$(/opt/t3-code/node_modules/.bin/t3 --version)" = "t3 v${T3_CODE_VERSION}"; \
-    node -e 'const p=require("/opt/t3-code/node_modules/node-pty"); const x=p.spawn("/bin/sh",["-c","exit 0"]); x.onExit(({exitCode})=>process.exit(exitCode))'; \
-    rm -rf /opt/t3-code/node_modules/@anthropic-ai/claude-agent-sdk-* \
-        /opt/t3-code/node_modules/node-pty/prebuilds \
-        /opt/t3-code/node_modules/node-pty/deps/winpty; \
+    npm_config_cache=/tmp/npm-t3-cache npm install --omit=dev --ignore-scripts \
+        --no-package-lock --no-audit --no-fund; \
+    test "$(ls -d /opt/t3-code/node_modules/@t3code/* | wc -l)" -eq 1; \
+    t3_platform="$(ls -d /opt/t3-code/node_modules/@t3code/*)"; \
+    test "$(node -p "require(\"${t3_platform}/package.json\").version")" = "${T3_CODE_VERSION}"; \
+    test -x "${t3_platform}/t3"; \
+    test -f "${t3_platform}/client/index.html"; \
+    test -f "${t3_platform}/node_modules/node-pty/build/Release/pty.node"; \
     find /opt/t3-code -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete; \
-    test -z "$(find /opt/t3-code/node_modules/@anthropic-ai -maxdepth 1 -type d -name 'claude-agent-sdk-*' -print -quit)"; \
-    test ! -e /opt/t3-code/node_modules/node-pty/prebuilds; \
     test "$(/opt/t3-code/node_modules/.bin/t3 --version)" = "t3 v${T3_CODE_VERSION}"; \
-    node -e 'const p=require("/opt/t3-code/node_modules/node-pty"); const x=p.spawn("/bin/sh",["-c","exit 0"]); x.onExit(({exitCode})=>process.exit(exitCode))'; \
     install -m 0755 /tmp/t3-provider-bin/codex /tmp/t3-provider-bin/claude \
         /tmp/t3-provider-bin/opencode /opt/neurodesktop/t3-provider-bin/; \
     ln -s /opt/t3-code/node_modules/.bin/t3 /usr/local/bin/t3; \
     chown -R root:users /opt/t3-code /opt/neurodesktop/t3-provider-bin; \
     chmod -R a+rX /opt/t3-code /opt/neurodesktop/t3-provider-bin; \
-    apt-mark manual autofs cvmfs libc6-dev linux-libc-dev uuid-dev; \
-    DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove build-essential; \
     apt-get clean; \
-    rm -rf /var/lib/apt/lists/* /tmp/npm-t3-cache /root/.npm /root/.cache/node-gyp \
-        /home/${NB_USER}/.npm /home/${NB_USER}/.cache/node-gyp
+    rm -rf /var/lib/apt/lists/* /tmp/npm-t3-cache /root/.npm /home/${NB_USER}/.npm
 
 # Expose the installed agent families as Jupyter AI ACP personas. These
 # adapters are runtime-only and deliberately live after the expensive

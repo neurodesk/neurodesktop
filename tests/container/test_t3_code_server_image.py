@@ -5,26 +5,43 @@ from __future__ import annotations
 import os
 import json
 from pathlib import Path
+import re
 import shutil
 import signal
 import socket
 import subprocess
 import time
 
+from testlib import load_source_module
+
+
+def platform_package():
+    """The one self-contained build the install layer keeps for this image."""
+    builds = sorted(Path("/opt/t3-code/node_modules/@t3code").glob("t3-*"))
+    assert len(builds) == 1, builds
+    return builds[0]
+
 
 def test_t3_code_runtime_and_native_terminal_support_are_installed():
-    assert subprocess.check_output(["t3", "--version"], text=True).strip() == "t3 v0.0.40"
+    assert subprocess.check_output(["t3", "--version"], text=True).strip() == "t3 v0.0.42"
     major, minor, *_ = map(int, subprocess.check_output(["node", "--version"], text=True).strip()[1:].split("."))
     assert (major, minor) >= (24, 10)
     assert shutil.which("codex")
     assert shutil.which("claude")
     assert shutil.which("opencode")
 
+    build = platform_package()
+    machine = {"x86_64": "x64", "aarch64": "arm64"}[os.uname().machine]
+    assert build.name == f"t3-linux-{machine}"
+    # The executable, its web client and its PTY binding ship together; the
+    # server loads all three from this directory.
+    assert os.access(build / "t3", os.X_OK)
+    assert (build / "client/index.html").is_file()
     subprocess.run(
         [
             "node",
             "-e",
-            "const p=require('/opt/t3-code/node_modules/node-pty');"
+            f"const p=require('{build}/node_modules/node-pty');"
             "const x=p.spawn('/bin/sh',['-c','exit 0']);"
             "x.onExit(({exitCode})=>process.exit(exitCode));",
         ],
@@ -33,11 +50,12 @@ def test_t3_code_runtime_and_native_terminal_support_are_installed():
     )
 
 
-def test_t3_code_image_does_not_ship_duplicate_provider_or_foreign_pty_payloads():
-    node_modules = Path("/opt/t3-code/node_modules")
-    assert not list((node_modules / "@anthropic-ai").glob("claude-agent-sdk-*"))
-    assert not (node_modules / "node-pty/prebuilds").exists()
+def test_t3_code_image_ships_one_platform_build_and_no_build_leftovers():
+    build = platform_package()
+    # A prebuilt, bundled tree: nothing is compiled and no source maps ship.
     assert not Path.home().joinpath(".cache/node-gyp").exists()
+    assert not list(Path("/opt/t3-code").rglob("*.js.map"))
+    assert (build / "node_modules/node-pty/build/Release/pty.node").is_file()
     assert os.access("/opt/neurodesktop/t3-provider-bin/codex", os.X_OK)
     assert os.access("/opt/neurodesktop/t3-provider-bin/claude", os.X_OK)
     assert os.access("/opt/neurodesktop/t3-provider-bin/opencode", os.X_OK)
@@ -118,3 +136,28 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path):
             process.wait(timeout=5)
 
     assert (tmp_path / ".t3/userdata").is_dir()
+
+
+def test_guided_setup_mints_a_pairing_link_from_the_installed_cli(tmp_path):
+    """Guard the CLI contract the wizard prints its pairing link from.
+
+    The wizard has T3 build the link against the tailnet address, because
+    `t3 pair` builds one for the container's own address, which no desktop can
+    reach. A pinned-version bump that renames these flags or changes the JSON
+    would otherwise surface only during a manual desktop pairing.
+    """
+    wizard = load_source_module(
+        "t3_setup", "/opt/neurodesktop/t3_neurodesk_setup.py",
+        "scripts/t3_neurodesk_setup.py",
+    )
+    base_dir = tmp_path / ".t3"
+    endpoint = "https://neurodesktop.example-tail.ts.net"
+    link = wizard.pairing_url(shutil.which("t3"), base_dir, endpoint)
+    code = re.fullmatch(rf"{endpoint}/pair#token=([A-Z0-9]{{8,32}})", link)
+    assert code, link
+    listed = subprocess.run(
+        ["t3", "--log-level=warn", "auth", "pairing", "list",
+         "--base-dir", str(base_dir), "--json"],
+        capture_output=True, text=True, timeout=60, check=True,
+    )
+    assert any(entry["label"] == "Desktop app" for entry in json.loads(listed.stdout))

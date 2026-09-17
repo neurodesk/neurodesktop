@@ -8,7 +8,7 @@ import os
 
 from jupyter_server.extension.application import ExtensionApp
 
-from .web import T3ProxyHandler, T3StatusHandler
+from .web import T3ProxyHandler, T3SessionHandler, T3StatusHandler
 
 from .supervisor import ConfigError, T3Supervisor, policy_from_environment
 
@@ -27,6 +27,7 @@ class NeurodeskT3CodeApp(ExtensionApp):
     def initialize_handlers(self) -> None:
         self.handlers.extend([
             (r"/neurodesk-t3-status", T3StatusHandler, {"t3_app": self}),
+            (r"/neurodesk-t3/_session", T3SessionHandler, {"t3_app": self}),
             (r"/neurodesk-t3/(.*)", T3ProxyHandler, {"t3_app": self}),
         ])
 

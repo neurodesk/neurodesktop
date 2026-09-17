@@ -14,14 +14,16 @@ server. A Jupyter Server extension starts it automatically as the notebook user.
 
 ## Open inside JupyterLab
 
-Choose **T3 Code** in the JupyterLab launcher's **Neurodesk** section. It opens the installed web
+Choose **scigent.ai** in the JupyterLab launcher's **Neurodesk** section. It opens the installed web
 application in a main-panel tab. Reopening the launcher focuses the existing
 tab. Closing the tab leaves the Jupyter-owned T3 process running.
 
-On first use, run `t3 pair` in a JupyterLab terminal and enter the pairing token
-in T3's web interface. Pairing uses T3's own session cookie; restarting with
-the same persistent home preserves T3's state. Provider authentication still
-belongs to the container, as described [below](#providers).
+The launcher connects using your existing Jupyter login. It establishes T3's
+browser session automatically; no terminal command or pairing token is needed.
+The one-time credential stays on the server, and the browser receives only an
+HttpOnly session cookie scoped to the T3 route. Existing sessions are reused.
+Provider authentication still belongs to the container, as described
+[below](#providers).
 
 This route requires only the Jupyter endpoint, including its existing HTTPS
 and JupyterHub user prefix. It does not require Tailscale or a separately
@@ -53,15 +55,18 @@ docker run \
 The repository's [`build_and_run.sh`](../../build_and_run.sh) uses these T3
 settings in its normal interactive mode.
 
-After Neurodesktop starts, open a JupyterLab terminal and run:
+After Neurodesktop starts, open a JupyterLab terminal and mint a one-time
+pairing link for the address your desktop reaches:
 
 ```bash
-t3 pair
+t3 auth pairing create --ttl 5m --base-url http://127.0.0.1:3774
 ```
 
-In the T3 Code desktop app, open **Settings → Connections → Add environment**.
-Use `http://127.0.0.1:3774` as the host and enter the one-time token printed by
-`t3 pair`. Each new desktop device needs a fresh token.
+In the T3 Code desktop app, open **Settings → Connections → Add environment**
+and paste the printed `Pair URL` into the **Host** field; it fills in the host
+and the pairing code. Each new desktop device needs a fresh link. `t3 pair`
+mints the same kind of token, but builds its URL and QR code from the
+container's own address, which the desktop cannot reach.
 
 If Docker runs on another machine, forward the host's loopback port through
 SSH before pairing:
@@ -95,18 +100,40 @@ t3_neurodesk_setup
 
 The [setup script](../../scripts/t3_neurodesk_setup.py) checks T3, starts a
 userspace daemon in the background, guides browser login, and configures
-private HTTPS access. It prints the complete device hostname and a command
-to test from your desktop. After you confirm that the desktop reaches the
-same T3 environment, it generates a pairing token and shows the desktop
-connection and provider binary settings. Login links and tokens appear only
-in your interactive terminal; the script does not save them to a log.
+private HTTPS access. It prints the private `https://…ts.net` address and a
+command to test from your desktop. After you confirm that the desktop reaches
+the same T3 environment, it prints one pairing link to paste into the **Host**
+field of **Settings → Connections → Add environment**, which fills in the host
+and the pairing code. It builds that link with `t3 auth pairing create
+--base-url`, not `t3 pair`, because `t3 pair` builds its URL and QR code from
+the container's own address, which no desktop can reach. Login links and
+pairing links appear only in your interactive terminal; the script does not
+save them to a log.
 
 Rerun the command after a container restart. It reuses the saved login and
-matching Serve configuration. It refuses to overwrite a different service
-on port 443 or continue with public Funnel access enabled. If you stop before
+matching Serve configuration.
+
+The container's hostname is its container ID, so a recreated container would
+join the tailnet under a new name and every address printed by an earlier
+setup would stop resolving. Setup therefore names the device `neurodesktop`
+once, which keeps its address stable across restarts. Use
+`--tailscale-hostname` for a different name, or pass an empty value to keep
+the name Tailscale chooses. Tailscale appends a suffix when the name is
+already taken in the tailnet; that assigned name is stable too, so setup
+keeps it.
+
+Tailscale answers only on the name a device holds now, so a Serve endpoint
+left under an earlier name resolves nowhere. Setup reports such an endpoint as
+superseded and configures the current name instead of offering an address the
+desktop cannot reach. It leaves the old entry in place; clear it with
+`tailscale serve reset` when nothing else uses Serve. Setup refuses to
+overwrite a different service on port 443 or continue with public Funnel
+access enabled. If you stop before
 pairing, the daemon and completed Tailscale setup remain available. A daemon
 started by this script survives closing the terminal; a reused, manually
-started daemon keeps its original lifecycle.
+started daemon keeps its original lifecycle. To disconnect this device from
+the tailnet, run
+`tailscale --socket=/tmp/tailscale-$(id -u)/tailscaled.sock down`.
 
 For a local check without login prompts, configuration changes, or tokens:
 
@@ -141,15 +168,16 @@ Keep that terminal running. In a second terminal, authenticate and configure
 the private HTTPS proxy:
 
 ```bash
-tailscale --socket="/tmp/tailscale-$(id -u)/tailscaled.sock" up --accept-dns=false
+tailscale --socket="/tmp/tailscale-$(id -u)/tailscaled.sock" up \
+  --accept-dns=false --hostname=neurodesktop
 tailscale --socket="/tmp/tailscale-$(id -u)/tailscaled.sock" serve --bg http://127.0.0.1:3773
-t3 pair
+t3 auth pairing create --ttl 5m --base-url https://<name>.ts.net
 ```
 
 Follow the login link from `up`. If prompted by `serve`, enable HTTPS for the
-tailnet. In the desktop app, enter the `https://…ts.net` host printed by
-`serve` and the token printed by `t3 pair`. The ordinary pairing URL still
-uses the container's address, so use the separate host and token fields.
+tailnet. Use the `https://…ts.net` name that `serve` printed as `--base-url`,
+then paste the printed `Pair URL` into the **Host** field of
+**Add environment**.
 Tailscale Serve is private to the tailnet; no public ingress is required.
 See [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve).
 
@@ -194,7 +222,13 @@ is mounted.
 T3 creates a one-time owner token during server startup. The extension sets
 warning-only logging, disables trace output, and sends startup output to
 `/dev/null`, so this credential does not enter the Jupyter or container log.
-Users create pairing tokens explicitly with `t3 pair`.
+For the standalone desktop app, users create pairing tokens explicitly with
+`t3 pair`. The JupyterLab launcher uses an authenticated, XSRF-protected POST
+to `/neurodesk-t3/_session`. The server creates a one-minute credential using
+T3's CLI and immediately exchanges it for a browser session on the supervised
+server. Neither the credential nor upstream error bodies are returned to the
+frontend or written to logs. A failed exchange leaves a short-lived credential
+that expires automatically.
 
 ## Providers
 
@@ -225,9 +259,23 @@ than using T3's systemd service installer or self-update flow.
 
 ## Build and architecture limits
 
-The Dockerfile installs the lockfile under `config/agents/t3-code` into
-`/opt/t3-code`. The install layer compiles and tests `node-pty`, then removes
-foreign prebuilds and the Claude SDK's duplicate platform binary. Both amd64
-and arm64 images must pass the installed server and PTY checks. T3 0.0.40 does
-not include an arm64 resource monitor, so arm64 can omit resource telemetry;
-server, terminal, pairing, and provider behavior must still pass.
+T3 0.0.42 publishes one self-contained executable per platform, with its web
+client, its `node-pty` build and its other native modules bundled beside it.
+The Dockerfile installs the manifest under `config/agents/t3-code` into
+`/opt/t3-code`, so the layer compiles nothing, runs no install script, and
+keeps exactly one `@t3code/t3-linux-<arch>` build. The executable links
+against `libatomic1`, which the layer installs; its build-time version check
+fails if that library is missing.
+
+This packaging replaces the earlier locked npm tree. `npm ci` cannot install
+it: npm records only the bundled tree of the platform that generated the
+lockfile, then refuses the install everywhere else and silently drops the
+optional platform package on the other architecture. The exact pins carry the
+same guarantee instead — the manifest pins `t3`, `t3` pins each
+`@t3code/t3-<platform>` build, and each build carries its dependencies inside
+its own tarball.
+
+Both amd64 and arm64 images must pass the installed server and PTY checks.
+0.0.42 ships a resource monitor for both Linux architectures, so arm64 no
+longer omits resource telemetry; server, terminal, pairing, and provider
+behavior must still pass.

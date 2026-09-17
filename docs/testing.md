@@ -41,6 +41,14 @@ pytest /opt/tests/         # inside the built image
 Running `tests/unit` needs `pytest`, `httpx`, `traitlets`, and `ssh-keygen`
 (`openssh-client`); see `.github/workflows/unit-tests.yml`.
 
+Install those with the interpreter's own site packages rather than `pip install
+--user`. `tests/unit/test_agentic_validation.py` runs
+`config/agentic/validate.py`, which starts the frozen baseline with `python -I`
+so a candidate patch cannot reach it through the environment. Isolated mode
+also drops user site packages, so a `--user` install of `pytest` or of its
+`pygments` dependency leaves that subprocess unable to import pytest, and the
+test fails for a reason unrelated to the code under test.
+
 Two modules need heavier optional dependencies and skip cleanly when they are
 absent rather than failing a plain checkout; CI installs them, so they always
 run there:
@@ -121,8 +129,12 @@ over Tailscale remains a separate manual check requiring a tailnet login.
 The [guided setup](architecture/t3-code.md#connect-through-tailscale-inside-the-container)
 unit tests simulate CLI responses and terminal input to cover login, reuse,
 conflicting Serve configurations, desktop confirmation, identity mismatches,
-and token-free diagnostics. The image test also starts and reuses a real
-daemon through the installed wizard and checks that it has its own session.
+token-free diagnostics, and a single pairing link built for the tailnet
+address instead of T3's container-address URL. The image test also starts and
+reuses a real daemon through the installed wizard and checks that it has its
+own session. A separate image test mints a link through the installed `t3`
+CLI, so a pinned-version bump that changes those flags or their JSON fails in
+CI rather than during a manual desktop pairing.
 For manual acceptance, run `t3_neurodesk_setup` in a JupyterLab terminal,
 follow its desktop connectivity check, complete pairing in T3, and verify
 the remote providers. Then rerun `t3_neurodesk_setup --check`.
@@ -133,9 +145,10 @@ The web unit tests require `jupyter-server-proxy` and Node.js. CI installs the
 local T3 extension to supply the proxy dependency. They cover the URL-prefix
 adapter, upstream drift, credential stripping, and fetch/WebSocket behavior.
 The browser image test opens the installed T3 application with the JupyterLab
-launcher, pairs it and requires a live WebSocket, reloads it using the scoped
-session cookie, and checks launcher reuse. It rejects unauthenticated HTTP
-and WebSocket requests and cookie-authenticated POSTs without Jupyter XSRF.
+launcher and requires automatic pairing and a live WebSocket without entering
+a token. It reloads using the scoped session cookie and checks launcher reuse. It rejects unauthenticated HTTP
+and WebSocket requests and cookie-authenticated POSTs without Jupyter XSRF,
+including the automatic session endpoint.
 It runs at both `/` and a JupyterHub-style `/user/t3-test/` prefix.
 
 
