@@ -7,13 +7,15 @@ import json
 import os
 from pathlib import Path
 import re
-import shlex
 import shutil
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+
+
+DEVICE_NAME = r"[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+\.ts\.net"
 
 
 class SetupError(Exception):
@@ -73,6 +75,7 @@ def ensure_daemon(tailscaled, ts, socket, state_dir):
     if socket.exists():
         return command_json([*ts, "status", "--json"])
     private_directory(state_dir)
+    print("Starting a Tailscale daemon; it keeps running after this terminal closes.")
     process = subprocess.Popen(
         [tailscaled, "--tun=userspace-networking", "--port=0",
          f"--socket={socket}", f"--statedir={state_dir}",
@@ -114,25 +117,104 @@ def device_host(status):
         )
     hostname = (status.get("Self") or {}).get("DNSName") or ""
     hostname = hostname.rstrip(".")
-    if not re.fullmatch(r"[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+\.ts\.net", hostname):
+    if not re.fullmatch(DEVICE_NAME, hostname):
         raise SetupError("No complete device DNS name is available. Enable MagicDNS in your tailnet.")
     return hostname
 
 
-def serve_matches(config, hostname, target):
-    """Refuse to replace an existing handler or reuse a public Funnel."""
+def configured_serve_host(config, hostname, target):
+    """Return the reachable T3 endpoint, plus endpoints this device cannot answer."""
     if any(config.get("AllowFunnel", {}).values()):
         raise SetupError("Funnel is enabled. Disable public access before using this private setup.")
     listener = config.get("TCP", {}).get("443")
-    web = config.get("Web", {}).get(f"{hostname}:443")
-    if listener is None and web is None:
-        return False
-    if listener != {"HTTPS": True} or web != {"Handlers": {"/": {"Proxy": target}}}:
-        raise SetupError(
-            "Tailscale port 443 already has a different configuration. "
-            "Setup has left it unchanged; review it with tailscale serve status."
-        )
-    return True
+    endpoints = {
+        key[:-4]: value for key, value in config.get("Web", {}).items()
+        if key.endswith(":443")
+    }
+    if listener is None and not endpoints:
+        return None, []
+    if listener == {"HTTPS": True}:
+        matches = [
+            host for host, web in endpoints.items()
+            if re.fullmatch(DEVICE_NAME, host)
+            and web == {"Handlers": {"/": {"Proxy": target}}}
+        ]
+        if hostname in matches:
+            return hostname, []
+        if hostname not in endpoints and matches:
+            # Serve keeps one handler per device name, and Tailscale answers
+            # only on the name the device holds now. A handler under any other
+            # name resolves nowhere, so report it as stale instead of
+            # reusing it and handing the desktop an address it cannot reach.
+            return None, sorted(matches)
+    raise SetupError(
+        f"Tailscale port 443 does not have a reusable HTTPS proxy to {target}. "
+        "Setup has left it unchanged; review it with tailscale serve status."
+    )
+
+
+def stable_hostname(ts, status, desired):
+    """Hold a tailnet name across container restarts.
+
+    The container's own hostname is its container ID, so a recreated container
+    joins the tailnet under a new name and every address printed by an earlier
+    setup stops resolving. Naming the device once keeps its address stable.
+    """
+    def label(value):
+        name = ((value.get("Self") or {}).get("DNSName") or "").split(".")[0]
+        # Tailscale appends a suffix when the name is already taken; that
+        # assigned name is itself stable, so keep it rather than renaming.
+        return name if name == desired or re.fullmatch(rf"{re.escape(desired)}-\d+", name) else None
+
+    if not desired or label(status):
+        return status
+    print(f"Naming this device {desired} so its address survives a container restart.")
+    interactive([*ts, "set", f"--hostname={desired}"], timeout=30)
+    deadline = time.monotonic() + 15
+    while True:
+        status = command_json([*ts, "status", "--json"])
+        if label(status):
+            return status
+        if time.monotonic() >= deadline:
+            raise SetupError(
+                f"Tailscale did not accept the device name {desired}. "
+                "Set it in the Tailscale admin console, then rerun setup."
+            )
+        time.sleep(0.5)
+
+
+def describe_stale(stale):
+    return (f"Tailscale Serve still lists {', '.join(stale)}, "
+            "which this device no longer answers to.")
+
+
+def pairing_url(t3, base_dir, endpoint):
+    """Mint a one-time pairing link for the address the desktop can reach.
+
+    `t3 pair` builds its link and QR code from the server's own address, which
+    is the container's, so neither reaches the desktop. Ask T3 to build the
+    link against the tailnet address this setup configured instead. Pasting
+    that link into the desktop app's Host field fills the host and the pairing
+    code together. The link stays in memory and in the terminal: never in an
+    error message, a log, or a file.
+    """
+    command = [t3, "--log-level=warn", "auth", "pairing", "create",
+               "--base-dir", str(base_dir), "--ttl", "5m", "--label", "Desktop app",
+               "--base-url", endpoint, "--json"]
+    try:
+        result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        raise SetupError("T3 did not issue a pairing code. Rerun setup.") from None
+    if result.returncode:
+        raise SetupError("T3 could not issue a pairing code. Check that the T3 server is running.")
+    try:
+        url = json.loads(result.stdout)["pairUrl"]
+        if not url.startswith(endpoint + "/pair#"):
+            raise ValueError()
+        return url
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise SetupError("T3 returned an unexpected pairing response.") from None
 
 
 def check_pairing_identity(base_dir, environment_id):
@@ -159,23 +241,25 @@ def setup(args):
     print("1. Check the T3 server")
     descriptor = t3_environment(args.port)
     check_pairing_identity(args.base_dir, descriptor["environmentId"])
-    print(f"T3 is responding. Environment ID: {descriptor['environmentId']}")
+    print("T3 is responding.")
     ts = [binaries["tailscale"], f"--socket={args.socket}"]
     if args.check:
         if not args.socket.exists():
             raise SetupError("No Tailscale socket found. Run t3_neurodesk_setup interactively to start it.")
         host = device_host(command_json([*ts, "status", "--json"]))
-        if not serve_matches(command_json([*ts, "serve", "status", "--json"]), host, f"http://127.0.0.1:{args.port}"):
-            raise SetupError("Tailscale is connected but the T3 HTTPS proxy is not configured.")
+        host, stale = configured_serve_host(
+            command_json([*ts, "serve", "status", "--json"]), host, f"http://127.0.0.1:{args.port}"
+        )
+        if host is None:
+            raise SetupError(
+                describe_stale(stale) + " Rerun t3_neurodesk_setup to configure the current name."
+                if stale else
+                "Tailscale is connected but the T3 HTTPS proxy is not configured."
+            )
         print(f"Private endpoint configured: https://{host}")
         print("This local check does not verify access from your desktop.")
         return
 
-    print("\nThis connects your Neurodesktop to your Tailscale network.")
-    print("You need Tailscale on your desktop, signed into the same tailnet.")
-    print("A daemon started by setup keeps running after this terminal closes.")
-    print("If reusing a manually started daemon, keep its original terminal running. Rerun setup after a container restart.")
-    input("Press Enter to continue, or Ctrl-C to stop: ")
     private_directory(args.socket.parent)
     with (args.socket.parent / "setup.lock").open("w") as lock:
         try:
@@ -185,46 +269,51 @@ def setup(args):
         print("\n2. Connect Tailscale")
         status = ensure_daemon(binaries["tailscaled"], ts, args.socket, args.state_dir)
         if status.get("BackendState") != "Running":
-            print("Open the login link below in your browser and complete any device approval.")
-            print("Keep the login link private. You have ten minutes to complete this step.")
-            interactive([*ts, "up", "--accept-dns=false"])
+            print("Sign in to the tailnet your desktop uses, and complete any device approval.")
+            print("Keep the login link below private. You have ten minutes to complete this step.")
+            interactive([*ts, "up", "--accept-dns=false",
+                         *([f"--hostname={args.tailscale_hostname}"] if args.tailscale_hostname else [])])
             status = command_json([*ts, "status", "--json"])
+        status = stable_hostname(ts, status, args.tailscale_hostname)
         host = device_host(status)
         target = f"http://127.0.0.1:{args.port}"
         print("\n3. Configure private HTTPS access")
-        if not serve_matches(command_json([*ts, "serve", "status", "--json"]), host, target):
+        existing_host, stale = configured_serve_host(
+            command_json([*ts, "serve", "status", "--json"]), host, target
+        )
+        if existing_host is not None:
+            host = existing_host
+        else:
+            if stale:
+                print(describe_stale(stale) + f" Configuring {host} instead.")
+                print("Setup leaves the old entry in place; clear it with tailscale serve reset when nothing else uses Serve.")
             print("If Tailscale asks you to enable HTTPS, follow its link. Then rerun setup if requested.")
             interactive([*ts, "serve", "--bg", "--https=443", target])
-            if not serve_matches(command_json([*ts, "serve", "status", "--json"]), host, target):
-                raise SetupError("The HTTPS proxy was not configured. Complete HTTPS setup and rerun this command.")
-        endpoint = f"https://{host}"
-        print("\n4. Test from your desktop computer")
-        print("Connect Tailscale on your desktop, then run this in a desktop terminal:")
-        print(f"\ncurl --noproxy '*' --connect-timeout 10 --max-time 20 {endpoint}/.well-known/t3/environment\n")
-        print(f"The JSON should contain environmentId: {descriptor['environmentId']}")
-        if input("Did your desktop return that environment ID? [y/N]: ").strip().lower() not in {"y", "yes"}:
-            raise SetupError(
-                "Pairing paused. Check your desktop's Tailscale connection, tailnet access policy, "
-                "and the full device hostname above. Rerun setup when desktop access works."
+            configured_host, _ = configured_serve_host(
+                command_json([*ts, "serve", "status", "--json"]), host, target
             )
+            if configured_host is None:
+                raise SetupError("The HTTPS proxy was not configured. Complete HTTPS setup and rerun this command.")
+            host = configured_host
+        endpoint = f"https://{host}"
+        print(f"Private address: {endpoint}")
+        print("\n4. Test from your desktop computer")
+        print("With Tailscale connected on your desktop, run this in a desktop terminal:")
+        print(f"\ncurl --noproxy '*' --connect-timeout 10 --max-time 20 {endpoint}/.well-known/t3/environment\n")
+        print(f"It should report environmentId {descriptor['environmentId']}.")
+        print("If it does not, check your desktop's Tailscale connection and your tailnet")
+        print("access policy, then rerun setup.")
+        input("Press Enter once it does, or Ctrl-C to stop: ")
         # Check again before minting a credential for a potentially restarted server.
         if t3_environment(args.port)["environmentId"] != descriptor["environmentId"]:
             raise SetupError("The T3 environment changed during setup. Rerun setup before pairing.")
         check_pairing_identity(args.base_dir, descriptor["environmentId"])
+        link = pairing_url(binaries["t3"], args.base_dir, endpoint)
         print("\n5. Pair the T3 desktop app")
-        print("Open Settings > Connections > Add environment.")
-        print(f"Host: {endpoint}")
-        print("Use the Token printed below as the pairing code. Ignore the generated container-IP pairing URL.")
-        print("Keep the token private; it expires in five minutes.", flush=True)
-        interactive([binaries["t3"], "pair", "--base-dir", str(args.base_dir)], timeout=30)
-        print(f"\nDesktop host: {endpoint}")
-        print("In this remote environment's provider settings, use these Binary paths:")
-        print("  Codex:  /opt/neurodesktop/t3-provider-bin/codex")
-        print("  Claude: /opt/neurodesktop/t3-provider-bin/claude")
-        print("Authenticate providers in Neurodesktop if prompted, then refresh their status.")
-        print("Tailscale is connected. Your desktop connection completes when you submit the pairing code.")
-        print("To stop this device's Tailscale connection:")
-        print(shlex.join([*ts, "down"]))
+        print("In T3 Code, open Settings > Connections > Add environment and paste this")
+        print("into the Host field. It fills in the host and the pairing code:")
+        print(f"\n{link}\n")
+        print("Keep the link private; it expires in five minutes. Rerun setup for a new one.")
 
 
 def main(argv=None):
@@ -232,11 +321,14 @@ def main(argv=None):
     parser.add_argument("--check", action="store_true", help="Check local T3 and Tailscale configuration without changing it or generating tokens")
     parser.add_argument("--port", type=int, default=os.environ.get("NEURODESKTOP_T3_CODE_PORT", "3773"), help="T3 port, default NEURODESKTOP_T3_CODE_PORT or 3773")
     parser.add_argument("--base-dir", type=Path, default=Path(os.environ.get("NEURODESKTOP_T3_CODE_HOME", str(Path.home() / ".t3"))), help="T3 state directory, matching the Jupyter-managed server")
+    parser.add_argument("--tailscale-hostname", default="neurodesktop", help="Stable tailnet device name, so the address survives a container restart; empty keeps the name Tailscale chooses")
     parser.add_argument("--state-dir", type=Path, default=Path.home() / ".local/state/tailscale", help="Persistent Tailscale state directory; use one per instance")
     parser.add_argument("--socket", type=Path, default=Path(f"/tmp/tailscale-{os.geteuid()}/tailscaled.sock"), help="User-owned Tailscale socket; can reuse a manually started daemon")
     args = parser.parse_args(argv)
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
+    if args.tailscale_hostname and not re.fullmatch(r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?", args.tailscale_hostname):
+        parser.error("--tailscale-hostname must be a DNS label: letters, digits, and inner hyphens")
     for name in ("base_dir", "state_dir", "socket"):
         value = getattr(args, name).expanduser()
         if not value.is_absolute():

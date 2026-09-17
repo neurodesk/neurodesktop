@@ -15,8 +15,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
     let panel: MainAreaWidget<Widget> | null = null;
     const command = 'neurodesk-launcher:open-t3-code';
     app.commands.addCommand(command, {
-      label: 'T3 Code',
-      caption: 'Open T3 Code in JupyterLab',
+      label: 'scigent.ai',
+      caption: 'Open scigent.ai in JupyterLab',
       icon: codeIcon,
       execute: async () => {
         if (panel && !panel.isDisposed) {
@@ -28,28 +28,35 @@ const plugin: JupyterFrontEndPlugin<void> = {
           const response = await ServerConnection.makeRequest(
             URLExt.join(settings.baseUrl, 'neurodesk-t3-status'), {}, settings
           );
-          if (!response.ok) throw new Error('The T3 Code server extension is unavailable.');
+          if (!response.ok) throw new Error('The scigent.ai server extension is unavailable.');
           const status = await response.json();
           if (status.state !== 'ready') {
-            throw new Error('T3 Code is not ready. Wait a moment and reopen it. If this persists, check the Jupyter server log.');
+            throw new Error('scigent.ai is not ready. Wait a moment and reopen it. If this persists, check the Jupyter server log.');
+          }
+          const session = await ServerConnection.makeRequest(
+            URLExt.join(settings.baseUrl, 'neurodesk-t3', '_session'),
+            { method: 'POST' }, settings
+          );
+          if (!session.ok) {
+            throw new Error('Could not connect to scigent.ai. Wait a moment and reopen it.');
           }
           const frame = document.createElement('iframe');
-          frame.title = 'T3 Code';
+          frame.title = 'scigent.ai';
           frame.src = URLExt.join(settings.baseUrl, 'neurodesk-t3') + '/';
           frame.style.cssText = 'width:100%;height:100%;border:0;display:block';
           frame.allow = 'clipboard-read; clipboard-write';
           const content = new Widget({ node: frame });
           panel = new MainAreaWidget({ content });
           panel.id = 'neurodesk-t3-code';
-          panel.title.label = 'T3 Code';
+          panel.title.label = 'scigent.ai';
           panel.title.icon = codeIcon;
           panel.title.closable = true;
           app.shell.add(panel, 'main');
           app.shell.activateById(panel.id);
         } catch (error) {
           await showDialog({
-            title: 'T3 Code',
-            body: error instanceof Error ? error.message : 'Could not open T3 Code.',
+            title: 'scigent.ai',
+            body: error instanceof Error ? error.message : 'Could not open scigent.ai.',
             buttons: [Dialog.okButton()]
           });
         }

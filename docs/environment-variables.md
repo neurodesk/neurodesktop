@@ -223,7 +223,7 @@ reviewed; the Dockerfile itself is authoritative.
   `1.18.30`). Override to bump the pin, or set it to an empty value to
   install the latest release
 - `CLAUDE_CODE_VERSION`: exact Claude Code native release installed as the
-  image fallback; defaults to `2.1.267`. The direct-version audit compares the
+  image fallback; defaults to `2.1.274`. The direct-version audit compares the
   pin with the official `@anthropic-ai/claude-code` release stream
 - `CVMFS_VERSION`: exact Ubuntu CVMFS client package version;
   defaults to `2.14.1+ubuntu24.04`
@@ -263,7 +263,9 @@ reviewed; the Dockerfile itself is authoritative.
   pinned codex-acp adapter declares, because this is the tested fallback for
   the adapter. A user can install a newer release with `codex update`
 - `T3_CODE_VERSION`: the headless T3 Code server release installed from the
-  checked lockfile; defaults to `0.0.40`
+  checked manifest; defaults to `0.0.42`. The release ships one self-contained
+  executable per platform, so the layer installs no lockfile and compiles
+  nothing
 - `TAILSCALE_VERSION`: static Tailscale CLI and daemon release; defaults to
   `1.102.4`. Update `TAILSCALE_AMD64_SHA256` and `TAILSCALE_ARM64_SHA256`
   together with the version, using the official archive checksums. Installation

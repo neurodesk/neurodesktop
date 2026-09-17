@@ -2,7 +2,6 @@
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
 import time
 import urllib.error
@@ -26,6 +25,10 @@ def assert_jupyter_auth_required(prefix):
         with pytest.raises(urllib.error.HTTPError) as error:
             client.open(prefix + path, timeout=5)
         assert error.value.code in {302, 403}
+    request = urllib.request.Request(prefix + "neurodesk-t3/_session", data=b"", method="POST")
+    with pytest.raises(urllib.error.HTTPError) as error:
+        client.open(request, timeout=5)
+    assert error.value.code == 403
     with pytest.raises(websocket.WebSocketBadStatusException) as error:
         websocket.create_connection(prefix.replace("http:", "ws:") + "neurodesk-t3/ws", timeout=5)
     assert error.value.status_code == 403
@@ -131,37 +134,26 @@ def test_t3_web_in_jupyter(tmp_path: Path, base):
                     break
                 time.sleep(.2)
             assert context != parent_context, "T3 launcher did not open its iframe"
-            wait_text(bidi, context, "Pair")
-            # Pairing output is kept in memory only and never included in diagnostics.
-            pairing = subprocess.run(["t3", "pair", "--base-dir", str(tmp_path / ".t3")],
-                                     env=environment, capture_output=True, text=True, timeout=20)
-            assert pairing.returncode == 0, "Pairing command failed"
-            match = re.search(r"#token=([^\s\x1b]+)", pairing.stdout)
-            assert match, "Pairing command did not return a fragment token"
-            secret = match[1]
-            evaluate(bidi, context, """(() => {
-                const input = document.getElementById('pairing-token');
-                Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, """ + json.dumps(secret) + """);
-                input.dispatchEvent(new Event('input', {bubbles:true}));
-            })()""")
-            evaluate(bidi, context, "document.querySelector('form').requestSubmit()")
+            # The launcher establishes the session before loading T3. No terminal
+            # command, token, or form submission should be needed in this browser.
             wait_connected(bidi, context)
             # Reload reconstructs the app using the scoped session cookie.
             bidi.request("browsingContext.navigate", {"context": context,
                 "url": prefix + "neurodesk-t3/", "wait": "interactive"})
             wait_connected(bidi, context)
             evaluate(bidi, parent_context, "window.jupyterapp.commands.execute('neurodesk-launcher:open-t3-code')")
-            assert evaluate(bidi, parent_context, "document.querySelectorAll('iframe[title=\"T3 Code\"]').length") == 1
+            assert evaluate(bidi, parent_context, "document.querySelectorAll('iframe[title=\"scigent.ai\"]').length") == 1
             assert evaluate(bidi, parent_context,
                 "fetch(" + json.dumps(base + "neurodesk-t3/api/auth/browser-session") +
                 ",{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r => r.status)") == 403
+            assert evaluate(bidi, parent_context,
+                "fetch(" + json.dumps(base + "neurodesk-t3/_session") +
+                ",{method:'POST'}).then(r => r.status)") == 403
             assert evaluate(bidi, parent_context,
                 "fetch(" + json.dumps(base + "api/status") + ").then(r => r.status)") == 200
             evaluate(bidi, parent_context, "[...window.jupyterapp.shell.widgets('main')].find(widget => widget.id === 'neurodesk-t3-code').dispose()")
             with urllib.request.urlopen(prefix + "neurodesk-t3-status?token=" + token) as response:
                 assert json.load(response)["state"] == "ready"
-            leaked = secret in log_path.read_text()
-            assert not leaked, "Pairing credential appeared in Jupyter logs"
         finally:
             if bidi:
                 bidi.close()

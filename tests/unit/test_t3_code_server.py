@@ -229,16 +229,20 @@ def test_extension_package_and_image_install_contract():
         / "jupyter-config/jupyter_server_config.d/neurodesk_t3_code.json"
     ).read_text(encoding="utf-8")
 
-    assert 'ARG T3_CODE_VERSION="0.0.40"' in dockerfile
-    assert package["allowScripts"] == {
-        "msgpackr-extract@3.0.4": False,
-        "node-pty@1.1.0": True,
-    }
-    assert "npm ci --omit=dev" in dockerfile
+    assert 'ARG T3_CODE_VERSION="0.0.42"' in dockerfile
+    assert package["dependencies"]["t3"] == "0.0.42"
+    # The self-contained build bundles its dependencies, so nothing is
+    # compiled, no install script runs, and one platform build is installed.
+    assert "npm install --omit=dev --ignore-scripts" in dockerfile
+    assert "--no-package-lock" in dockerfile
+    assert "build-essential" not in dockerfile.split("ARG T3_CODE_VERSION")[1].split(
+        "# Expose the installed agent families"
+    )[0]
+    assert "ls -d /opt/t3-code/node_modules/@t3code/* | wc -l" in dockerfile
+    assert "/client/index.html" in dockerfile
+    assert "node-pty/build/Release/pty.node" in dockerfile
+    assert "apt-install-retry libatomic1" in dockerfile
     assert "/opt/t3-code/node_modules/.bin/t3" in dockerfile
-    assert "claude-agent-sdk-*" in dockerfile
-    assert "node-pty/prebuilds" in dockerfile
-    assert "/home/${NB_USER}/.cache/node-gyp" in dockerfile
     assert "extensions/t3-code-server" in dockerfile
     assert '"neurodesk_t3_code": true' in config
     assert "_start_jupyter_server_extension(self, _serverapp)" in server_extension
