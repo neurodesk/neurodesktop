@@ -90,6 +90,7 @@ non-obvious tiers protect.
 | --- | --- | --- |
 | Jupyter isolated build dependencies | `pytest tests/unit/test_jupyter_build_constraints.py tests/unit/test_jupyterlab_slurm_build.py` | Fresh isolated wheel builds for Slurm and launcher |
 | CVMFS inventory health | `pytest tests/unit/test_cvmfs_inventory_check.py` | Live mirror workflow |
+| Nightly JupyterHub probe (terminal creation, FSL commands) | `pytest tests/unit/test_jupyter_terminal_creation.py tests/unit/test_github_workflows.py` | Live `JupyterHub API Testing` workflow |
 | Lmod extension listing default | `pytest tests/unit/test_lmod_extensions.py` | — |
 | Apptainer NVIDIA auto-configuration | `pytest tests/unit/test_apptainer_nv.py` | — |
 | Access-URL banner (`print_access_url.sh`) | `pytest tests/unit/test_print_access_url.py` | — |
@@ -341,6 +342,21 @@ copy at `/opt/neurodesktop/examples/astra-bet`, so a broken example fails the
 build rather than reaching a user. The image tier is otherwise intentionally
 small — the installed package and pins, the real vendored frontend, and the
 file-browser server extension.
+
+### Nightly JupyterHub probe
+
+`.github/workflows/jupyter_test_main.yml` drives each live instance over the
+JupyterHub REST API: it starts the user server, opens a terminal, and runs the
+basic and FSL commands through that terminal's WebSocket. The Hub reports
+`"ready": true` before the user pod can reach the Hub API to authorize
+incoming tokens, so the first terminal request often comes back as HTTP 500
+with a `Failed to connect to Hub API` body.
+`.github/workflows/create_jupyter_terminal.sh` absorbs that window: it retries
+transport failures, HTTP 408/409/425/429 and 5xx, and success statuses that
+carry no terminal name, and it fails immediately on a rejection that will not
+change, such as HTTP 403. `TERMINAL_CREATE_ATTEMPTS` and
+`TERMINAL_CREATE_DELAY` bound the wait. The unit tier drives the helper
+against a stubbed `curl`, so it needs no network and no listening socket.
 
 ## Negative Test Convention
 

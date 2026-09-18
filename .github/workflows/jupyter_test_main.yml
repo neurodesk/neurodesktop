@@ -158,14 +158,15 @@ jobs:
         
         echo "=== Testing Terminal and FSL Functionality ==="
         
-        # Create terminal session
+        # Create terminal session. The helper retries the hub-connectivity
+        # errors a freshly spawned user server returns; see issue #932.
         echo "Creating terminal session..."
-        TERMINAL_RESPONSE=$(curl -k -s -X POST -H "Authorization: token $ADMIN_TOKEN" "$API_URL/user/$USER/api/terminals" || echo '{"error": "failed"}')
-        TERMINAL_NAME=$(echo "$TERMINAL_RESPONSE" | jq -r '.name // empty')
-        
-        if [ -z "$TERMINAL_NAME" ] || [ "$TERMINAL_NAME" = "null" ] || [ "$TERMINAL_NAME" = "empty" ]; then
+        TERMINAL_NAME=$(JUPYTER_API_TOKEN="$ADMIN_TOKEN" \
+          bash .github/workflows/create_jupyter_terminal.sh "$API_URL" "$USER")
+        TERMINAL_CREATE_STATUS=$?
+
+        if [ "$TERMINAL_CREATE_STATUS" -ne 0 ] || [ -z "$TERMINAL_NAME" ]; then
           echo "❌ Failed to create terminal session"
-          echo "Response: $TERMINAL_RESPONSE"
           exit 1
         fi
         
