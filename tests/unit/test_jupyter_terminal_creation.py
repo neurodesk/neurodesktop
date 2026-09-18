@@ -27,6 +27,7 @@ CURL_STUB = r"""#!/usr/bin/env bash
 calls=$(( $(cat "$CURL_STUB_CALLS") + 1 ))
 printf '%s\n' "$calls" > "$CURL_STUB_CALLS"
 printf '%s\n' "$*" >> "$CURL_STUB_ARGV"
+cat >> "$CURL_STUB_STDIN"
 
 output=""
 previous=""
@@ -64,6 +65,8 @@ def _run(tmp_path, plan, token="secret-token", **env_overrides):
     calls.write_text("0\n")
     argv = tmp_path / "argv"
     argv.write_text("")
+    stdin = tmp_path / "stdin"
+    stdin.write_text("")
 
     env = os.environ.copy()
     env.update(
@@ -72,6 +75,7 @@ def _run(tmp_path, plan, token="secret-token", **env_overrides):
             "CURL_STUB_PLAN": str(plan_file),
             "CURL_STUB_CALLS": str(calls),
             "CURL_STUB_ARGV": str(argv),
+            "CURL_STUB_STDIN": str(stdin),
             "JUPYTER_API_TOKEN": token,
             "TERMINAL_CREATE_DELAY": "0",
         }
@@ -85,11 +89,11 @@ def _run(tmp_path, plan, token="secret-token", **env_overrides):
         text=True,
         env=env,
     )
-    return result, int(calls.read_text()), argv.read_text()
+    return result, int(calls.read_text()), argv.read_text(), stdin.read_text()
 
 
 def test_terminal_creation_recovers_from_a_hub_connectivity_error(tmp_path):
-    result, calls, _ = _run(
+    result, calls, _, _ = _run(
         tmp_path,
         [
             f"500|0|{HUB_UNREACHABLE}",
@@ -105,7 +109,7 @@ def test_terminal_creation_recovers_from_a_hub_connectivity_error(tmp_path):
 
 
 def test_terminal_creation_posts_to_the_user_server_terminals_endpoint(tmp_path):
-    _, _, argv = _run(tmp_path, ['201|0|{"name": "4"}'])
+    _, _, argv, _ = _run(tmp_path, ['201|0|{"name": "4"}'])
 
     assert "--request POST" in argv
     assert (
@@ -114,7 +118,7 @@ def test_terminal_creation_posts_to_the_user_server_terminals_endpoint(tmp_path)
 
 
 def test_terminal_creation_stops_on_a_forbidden_response(tmp_path):
-    result, calls, _ = _run(tmp_path, ['403|0|{"status": 403}'])
+    result, calls, _, _ = _run(tmp_path, ['403|0|{"status": 403}'])
 
     assert result.returncode == 1
     assert result.stdout == ""
@@ -123,7 +127,7 @@ def test_terminal_creation_stops_on_a_forbidden_response(tmp_path):
 
 
 def test_terminal_creation_retries_a_success_status_carrying_no_name(tmp_path):
-    result, calls, _ = _run(
+    result, calls, _, _ = _run(
         tmp_path, ["200|0|not json at all", '200|0|{"name": "7"}']
     )
 
@@ -134,7 +138,7 @@ def test_terminal_creation_retries_a_success_status_carrying_no_name(tmp_path):
 
 
 def test_terminal_creation_retries_a_transport_failure(tmp_path):
-    result, calls, _ = _run(tmp_path, ["000|7|", '201|0|{"name": "2"}'])
+    result, calls, _, _ = _run(tmp_path, ["000|7|", '201|0|{"name": "2"}'])
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == "2\n"
@@ -143,7 +147,7 @@ def test_terminal_creation_retries_a_transport_failure(tmp_path):
 
 
 def test_terminal_creation_gives_up_after_the_attempt_budget(tmp_path):
-    result, calls, _ = _run(
+    result, calls, _, _ = _run(
         tmp_path,
         [f"503|0|{HUB_UNREACHABLE}"],
         TERMINAL_CREATE_ATTEMPTS="3",
@@ -155,20 +159,31 @@ def test_terminal_creation_gives_up_after_the_attempt_budget(tmp_path):
     assert "no terminal after 3 attempts" in result.stderr
 
 
-def test_terminal_creation_keeps_the_token_out_of_its_diagnostics(tmp_path):
-    token = "s3cret-play-eu-token"
-    result, _, argv = _run(
-        tmp_path, [f"500|0|{HUB_UNREACHABLE}"], token=token,
+def test_terminal_creation_sends_the_token_without_exposing_it(tmp_path):
+    token = 's3cret-"play-eu"-\\token'
+    result, _, argv, stdin = _run(
+        tmp_path,
+        [f"500|0|{HUB_UNREACHABLE}"],
+        token=token,
         TERMINAL_CREATE_ATTEMPTS="1",
     )
 
-    assert f"Authorization: token {token}" in argv
+    assert stdin == 'header = "Authorization: token s3cret-\\"play-eu\\"-\\\\token"\n'
+    # /proc/<pid>/cmdline is readable by every process on the runner.
+    assert token not in argv
     assert token not in result.stdout
     assert token not in result.stderr
 
 
+def test_terminal_creation_verifies_the_server_certificate(tmp_path):
+    _, _, argv, _ = _run(tmp_path, ['201|0|{"name": "3"}'])
+
+    assert "--insecure" not in argv
+    assert " -k " not in f" {argv} "
+
+
 def test_terminal_creation_refuses_an_empty_token(tmp_path):
-    result, calls, _ = _run(tmp_path, ['201|0|{"name": "1"}'], token="")
+    result, calls, _, _ = _run(tmp_path, ['201|0|{"name": "1"}'], token="")
 
     assert result.returncode == 2
     assert calls == 0
@@ -176,7 +191,7 @@ def test_terminal_creation_refuses_an_empty_token(tmp_path):
 
 
 def test_terminal_creation_rejects_a_non_numeric_attempt_budget(tmp_path):
-    result, calls, _ = _run(
+    result, calls, _, _ = _run(
         tmp_path, ['201|0|{"name": "1"}'], TERMINAL_CREATE_ATTEMPTS="lots"
     )
 

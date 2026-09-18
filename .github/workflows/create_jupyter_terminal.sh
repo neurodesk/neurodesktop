@@ -51,6 +51,14 @@ if [ "$attempts" -eq 0 ]; then
     exit 2
 fi
 
+# curl reads the token from a config file on stdin so it never reaches
+# /proc/<pid>/cmdline, which any process on the runner can read. curl warns
+# about whitespace in an unquoted config value, and a quoted one takes \ and "
+# as escapes, so the token has to be escaped for it.
+escaped_token=${JUPYTER_API_TOKEN//\\/\\\\}
+escaped_token=${escaped_token//\"/\\\"}
+auth_config="header = \"Authorization: token ${escaped_token}\""
+
 terminals_url="$API_URL/user/$JUPYTER_USER/api/terminals"
 response_body=$(mktemp) || {
     echo "create-terminal: could not create a temporary response file." >&2
@@ -60,12 +68,12 @@ trap 'rm -f "$response_body"' EXIT
 
 attempt=1
 while true; do
-    status=$(curl \
-        --silent --show-error --insecure \
+    status=$(printf '%s\n' "$auth_config" | curl \
+        --config - \
+        --silent --show-error \
         --connect-timeout 15 \
         --max-time 90 \
         --request POST \
-        --header "Authorization: token $JUPYTER_API_TOKEN" \
         --output "$response_body" \
         --write-out '%{http_code}' \
         "$terminals_url")
