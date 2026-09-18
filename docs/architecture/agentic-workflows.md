@@ -20,9 +20,12 @@ A completed-workflow reporter observes CI, deployment, and agent failures and
 creates or updates a linked issue. Product failures and user-created issues
 enter [`agentic-issue.yml`](../../.github/workflows/agentic-issue.yml). External
 reporters need a maintainer's `agentic-approved` label or manual dispatch before
-subscription execution; owners, members, and collaborators enter automatically. Agent
-operational failures are classified separately so they do not recursively
-launch agents to repair their own unavailable authentication or runner.
+subscription execution; owners, members, and collaborators enter automatically.
+The reporter dispatches automatic repair only when a failed run belongs to the
+default branch. It still records feature-branch failures and related pull
+requests, but the issue worker must not edit the default branch for those
+failures. Agent operational failures are classified separately so they do not
+recursively launch agents to repair their own unavailable authentication or runner.
 
 The issue workflow delegates investigation, implementation, and validation to
 [`agentic-worker.yml`](../../.github/workflows/agentic-worker.yml). There is

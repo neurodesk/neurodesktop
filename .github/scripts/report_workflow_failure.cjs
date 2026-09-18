@@ -63,9 +63,11 @@ async function reportWorkflowFailure({ github, context, core, repairEnabled = tr
 
   const operational = OPERATIONAL_WORKFLOWS.has(run.name);
   const trustedHead = run.head_repository?.full_name?.toLowerCase() === repository.toLowerCase();
+  const defaultBranchRun = run.head_branch === ref;
   let repairNote = "The completed run's failing jobs are recorded below. Automatic issue repair is dispatched explicitly because GITHUB_TOKEN-created issues do not trigger issue-opened workflows.";
   if (!repairEnabled) repairNote = "Automatic repair is not enabled. After runner setup, manually dispatch repair for this issue.";
   if (!trustedHead) repairNote = "This failure came from an untrusted or unavailable head repository. A maintainer must add agentic-approved or manually dispatch repair.";
+  if (!defaultBranchRun) repairNote = "This feature-branch failure is recorded without automatic repair because issue repair edits the default branch.";
   if (operational) repairNote = "Agent infrastructure needs attention. Automatic repair is disabled for this report to prevent recursive agent runs.";
   const issueMarker = `<!-- neurodesktop-workflow-failure: run=${run.id} -->`;
   const attemptMarker = `<!-- neurodesktop-workflow-failure-attempt: run=${run.id} attempt=${run.run_attempt} -->`;
@@ -128,7 +130,7 @@ async function reportWorkflowFailure({ github, context, core, repairEnabled = tr
     });
   }
 
-  if (operational || !repairEnabled || !trustedHead || comments.some((comment) => ownsMarker(comment, dispatchMarker))) {
+  if (operational || !repairEnabled || !trustedHead || !defaultBranchRun || comments.some((comment) => ownsMarker(comment, dispatchMarker))) {
     return { issue: issue.number, dispatched: false, operational };
   }
 
