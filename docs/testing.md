@@ -91,7 +91,7 @@ non-obvious tiers protect.
 | Jupyter isolated build dependencies | `pytest tests/unit/test_jupyter_build_constraints.py tests/unit/test_jupyterlab_slurm_build.py` | Fresh isolated wheel builds for Slurm and launcher |
 | CVMFS inventory health | `pytest tests/unit/test_cvmfs_inventory_check.py` | Live mirror workflow |
 | Nightly JupyterHub probe (terminal creation, FSL commands) | `pytest tests/unit/test_jupyter_terminal_creation.py tests/unit/test_github_workflows.py` | Live `JupyterHub API Testing` workflow |
-| Lmod extension listing default | `pytest tests/unit/test_lmod_extensions.py` | — |
+| Lmod extension listing default | `pytest tests/unit/test_lmod_extensions.py` | `pytest /opt/tests/test_lmod_avail_extensions.py` |
 | Apptainer NVIDIA auto-configuration | `pytest tests/unit/test_apptainer_nv.py` | — |
 | Access-URL banner (`print_access_url.sh`) | `pytest tests/unit/test_print_access_url.py` | — |
 | Sherlock launcher (`scripts/connectSherlock.sh`) | `pytest tests/unit/test_connect_sherlock.py` | — |
@@ -357,6 +357,16 @@ carry no terminal name, and it fails immediately on a rejection that will not
 change, such as HTTP 403. `TERMINAL_CREATE_ATTEMPTS` and
 `TERMINAL_CREATE_DELAY` bound the wait. The unit tier drives the helper
 against a stubbed `curl`, so it needs no network and no listening socket.
+
+### Lmod extension listing
+
+The unit tier asserts that `environment_variables.sh` exports
+`LMOD_AVAIL_EXTENSIONS=no` and that a user override wins. That says nothing
+about whether Lmod still honors the variable, so an Lmod upgrade that renamed
+or dropped it would leave the unit test green and `ml av` cluttered again. The
+image tier runs the real `ml av` against a synthetic module that provides an
+extension and requires the extension to be listed with the variable set to
+`yes` and absent by default.
 
 ## Negative Test Convention
 
