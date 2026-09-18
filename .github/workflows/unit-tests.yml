@@ -46,9 +46,9 @@ jobs:
           # the single source for the exact ASTRA/anywidget dependency pins.
           python -m pip install pytest httpx traitlets \
             jupyter-server ./extensions/t3-code-server ./extensions/astra-viewer
-          # ssh-keygen, for the ensure_ssh_keys.sh tests
+          # ssh-keygen for SSH key tests, jq for terminal-creation tests
           sudo apt-get update -qq
-          sudo apt-get install -y -qq openssh-client
+          sudo apt-get install -y -qq openssh-client jq
 
       - name: Run unit tests
         run: pytest tests/unit -v
