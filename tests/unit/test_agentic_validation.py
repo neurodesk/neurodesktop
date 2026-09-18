@@ -1,8 +1,11 @@
 """Regression tests for the frozen agentic validation baseline."""
 
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+
+import pytest
 
 from testlib import repo_path
 
@@ -112,3 +115,20 @@ def test_worker_pins_match_viewer_dependencies():
     for requirement in viewer["project"]["dependencies"]:
         if requirement.startswith(("astra-spec==", "astra-tools==", "anywidget==")):
             assert requirement in worker, f"Worker dependency drift: {requirement}"
+
+
+@pytest.mark.parametrize("module", ["test_jupyterlab_slurm_build.py", "test_audit_image_versions.py"])
+def test_build_checks_run_from_a_tests_only_baseline(tmp_path, module):
+    baseline = tmp_path / "baseline"
+    workspace = tmp_path / "workspace"
+    write_baseline(baseline)
+    write_candidate(workspace, "good\n")
+    shutil.copyfile(repo_path(f"tests/unit/{module}"), baseline / "tests" / "unit" / module)
+    for relative in ("Dockerfile", "scripts/audit_image_versions.py"):
+        destination = workspace / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(repo_path(relative), destination)
+
+    result = validate(baseline, workspace)
+
+    assert result.returncode == 0, result.stdout

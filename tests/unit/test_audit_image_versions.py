@@ -3,9 +3,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from testlib import repo_path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "scripts" / "audit_image_versions.py"
+
+SCRIPT = repo_path("scripts/audit_image_versions.py")
 
 
 def run_audit(dockerfile: Path, fixtures: Path):
@@ -130,7 +131,7 @@ def test_root_dockerfile_has_no_untracked_supported_declarations(tmp_path):
         json.dumps({key: ["0"] for key in _catalog_keys()}), encoding="utf-8"
     )
 
-    completed = run_audit(REPO_ROOT / "Dockerfile", fixtures)
+    completed = run_audit(repo_path("Dockerfile"), fixtures)
 
     report = json.loads(completed.stdout)
     assert not [error for error in report["errors"] if error.startswith("untracked")]

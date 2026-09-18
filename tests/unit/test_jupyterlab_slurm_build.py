@@ -1,8 +1,7 @@
-from pathlib import Path
+from testlib import repo_path
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DOCKERFILE = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+DOCKERFILE = repo_path("Dockerfile").read_text(encoding="utf-8")
 
 
 def test_jupyterlab_slurm_source_and_builder_are_reproducibly_pinned():

@@ -3,7 +3,7 @@ title: Agentic maintenance workflows
 description: Run subscription-authenticated Codex on the existing self-hosted runner and review its proposed fixes
 parent: index.md
 status: current
-last-reviewed: "2026-09-16"
+last-reviewed: "2026-09-18"
 ---
 
 # Agentic maintenance workflows
@@ -51,6 +51,13 @@ requirements in `extensions/astra-viewer/pyproject.toml`; the validation unit
 tests guard this agreement. After changing these dependencies, rebuild the
 worker and run the full checkout suite in its credential-free validation
 container. A stale worker can reject every repair on unrelated viewer tests.
+
+The worker also installs `jq` for the terminal-creation tests. Unit tests must
+resolve repository sources through `testlib.repo_path()` because the frozen
+baseline contains only tests. The validator redirects that helper to the
+patched checkout. Merge baseline test-path fixes before retrying blocked
+repairs, so their frozen snapshots include the corrected tests.
+
 The image pins Codex CLI `0.153.4`. Verify Docker can build and
 run that image on the selected runner. The first build needs outbound access
 to its package and base-image sources.

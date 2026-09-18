@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-09-16"
+last-reviewed: "2026-09-18"
 ---
 
 # Testing
@@ -38,8 +38,9 @@ pytest tests/unit          # from a checkout, no container needed
 pytest /opt/tests/         # inside the built image
 ```
 
-Running `tests/unit` needs `pytest`, `httpx`, `traitlets`, and `ssh-keygen`
-(`openssh-client`); see `.github/workflows/unit-tests.yml`.
+Running `tests/unit` needs `pytest`, `httpx`, `traitlets`, `jq`, and `ssh-keygen`
+(`openssh-client`); see `.github/workflows/unit-tests.yml`. The terminal-creation
+tests stub `curl` but use the real `jq` to parse responses.
 
 Install those with the interpreter's own site packages rather than `pip install
 --user`. `tests/unit/test_agentic_validation.py` runs
