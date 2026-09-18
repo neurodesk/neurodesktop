@@ -46,6 +46,20 @@ def _fslmaths_probe_command(workflow: str) -> str:
     raise AssertionError("FSLMaths probe command not found in JupyterHub workflow")
 
 
+def test_jupyterhub_terminal_creation_goes_through_the_retrying_helper():
+    workflow = JUPYTER_TEST_WORKFLOW.read_text()
+    terminal_step = workflow.split("- name: Test Terminal and FSL Functionality", 1)[
+        1
+    ].split("- name: Stop JupyterHub Server", 1)[0]
+
+    assert "bash .github/workflows/create_jupyter_terminal.sh" in terminal_step
+    assert 'JUPYTER_API_TOKEN="$ADMIN_TOKEN"' in terminal_step
+    # A single unchecked POST is what reported 0/5 in issue #932.
+    assert "-X POST" not in terminal_step
+    assert 'TERMINAL_CREATE_STATUS=$?' in terminal_step
+    assert '[ "$TERMINAL_CREATE_STATUS" -ne 0 ]' in terminal_step
+
+
 def test_jupyterhub_fsl_module_load_requires_fslmaths_on_path():
     workflow = JUPYTER_TEST_WORKFLOW.read_text()
 
