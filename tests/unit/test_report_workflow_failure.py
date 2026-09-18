@@ -142,12 +142,18 @@ def test_completed_run_aggregates_matrix_failures_and_dispatches_default_branch(
     assert any(call.get("attempt_number") == 1 for call in output["calls"])
 
 
-def test_feature_branch_failure_is_reported_without_default_branch_dispatch():
-    output = run_reporter(runs=[{"head_branch": "user-branch"}])
+@pytest.mark.parametrize("head_repository", ["NeuroDesk/neurodesktop", "contributor/neurodesktop"])
+def test_feature_branch_failure_is_reported_without_default_branch_dispatch(head_repository):
+    output = run_reporter(runs=[{
+        "head_branch": "user-branch",
+        "head_repository": {"full_name": head_repository},
+    }])
 
     assert len(output["issues"]) == 1
     issue_body = output["issues"][0]["body"]
     assert "feature-branch failure" in issue_body
+    assert "issue repair edits the default branch" in issue_body
+    assert "manually dispatch repair" not in issue_body
     assert "Related pull requests: #23." in issue_body
     assert calls_of(output, "comment")
     assert not calls_of(output, "dispatch")
