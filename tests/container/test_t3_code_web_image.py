@@ -12,6 +12,7 @@ import websocket
 import pytest
 
 from test_rise_slides_image import _BidiSession, _unused_port, _wait_for_server, _stop
+from testlib import reload_browsing_context
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -167,8 +168,7 @@ T3ProxyHandler.prepare = hub_prepare
             # command, token, or form submission should be needed in this browser.
             wait_connected(bidi, context)
             # Reload reconstructs the app using the scoped session cookie.
-            bidi.request("browsingContext.navigate", {"context": context,
-                "url": prefix + "neurodesk-t3/", "wait": "interactive"})
+            reload_browsing_context(bidi, context)
             wait_connected(bidi, context)
             evaluate(bidi, parent_context, "window.jupyterapp.commands.execute('neurodesk-launcher:open-t3-code')")
             assert evaluate(bidi, parent_context, "document.querySelectorAll('iframe[title=\"scigent.ai\"]').length") == 1
