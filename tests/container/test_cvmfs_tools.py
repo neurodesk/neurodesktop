@@ -7,8 +7,8 @@ import pytest
 # Preamble that mirrors the real user environment: sources environment_variables.sh
 # (sets MODULEPATH via glob, neurodesk_singularity_opts, etc.) and initialises lmod.
 _ENV_PREAMBLE = (
-    "source /opt/neurodesktop/environment_variables.sh 2>/dev/null; "
-    "source /usr/share/lmod/lmod/init/bash 2>/dev/null; "
+    "source /opt/neurodesktop/environment_variables.sh && "
+    "source /usr/share/lmod/lmod/init/bash && "
 )
 
 # A negative Lmod lookup must traverse every MODULEPATH entry. On a fresh
@@ -59,7 +59,7 @@ def _fsl_available():
     """Check if FSL module loads and fslmaths is on PATH."""
     try:
         code, _ = run_neuro_cmd(
-            "module load fsl 2>/dev/null; command -v fslmaths",
+            "module load fsl && command -v fslmaths",
             timeout=120,
         )
         return code == 0
@@ -104,8 +104,7 @@ class TestCvmfsMount:
         _skip_if_cvmfs_disabled()
 
         containers_dir = "/cvmfs/neurodesk.ardc.edu.au/containers"
-        if not os.path.isdir(containers_dir):
-            pytest.skip("CVMFS containers directory not available")
+        assert os.path.isdir(containers_dir), containers_dir
 
         fsl_containers = [
             d for d in os.listdir(containers_dir) if d.startswith("fsl_")
@@ -124,22 +123,25 @@ class TestFslMaths:
         _skip_if_cvmfs_disabled()
 
         code, output = run_neuro_cmd(
+            "type module && module load fsl && command -v fslmaths",
+            timeout=_CVMFS_COLD_CACHE_TIMEOUT,
+        )
+        assert code == 0, f"Working Lmod/FSL prerequisites required: {output}"
+        code, output = run_neuro_cmd(
             "module load funny-name-tool",
             timeout=_CVMFS_COLD_CACHE_TIMEOUT,
         )
-        assert code != 0, (
-            f"Loading non-existent module should have failed but exited 0: {output}"
-        )
+        assert code != 0, f"Bogus module unexpectedly loaded: {output}"
+        assert "funny-name-tool" in output, output
 
     def test_failed_load_doesnt_break_env(self):
         """Loading a bogus module should not prevent loading a valid one afterwards."""
         _skip_if_cvmfs_disabled()
-        if not _fsl_available():
-            pytest.skip("FSL module could not be loaded")
+        assert _fsl_available(), "CVMFS is enabled but FSL could not be loaded"
 
         code, output = run_neuro_cmd(
             "module load funny-name-tool 2>/dev/null || true; "
-            "module load fsl 2>/dev/null; "
+            "module load fsl && "
             "command -v fslmaths"
         )
         assert code == 0, (
@@ -147,43 +149,13 @@ class TestFslMaths:
             f"bogus module load: {output}"
         )
 
-    def test_fslmaths_arithmetic(self, tmp_path):
-        """fslmaths should correctly perform arithmetic operations."""
+    def test_fslmaths_arithmetic(self, tmp_path, image_math_case):
         _skip_if_cvmfs_disabled()
-        if not _fsl_available():
-            pytest.skip("FSL module could not be loaded")
-
-        multiplied = str(tmp_path / "multiplied.nii.gz")
-
+        source, check_output = image_math_case
+        multiplied = tmp_path / "multiplied.nii.gz"
         code, output = run_neuro_cmd(
-            f"module load fsl 2>/dev/null; "
-            f'FSLDIR="${{FSLDIR:-}}"; '
-            f'test_img="$FSLDIR/data/standard/MNI152_T1_2mm.nii.gz"; '
-            f'[ -f "$test_img" ] || test_img="$FSLDIR/data/standard/MNI152_T1_1mm.nii.gz"; '
-            f'[ -f "$test_img" ] || {{ echo "No FSL test image found. FSLDIR=$FSLDIR"; exit 2; }}; '
-            f'orig_mean=$(fslstats "$test_img" -m); '
-            f'fslmaths "$test_img" -mul 2 {multiplied}; '
-            f'mult_mean=$(fslstats {multiplied} -m); '
-            f'echo "orig=$orig_mean mult=$mult_mean"',
+            f'module load fsl && fslmaths "{source}" -mul 2 "{multiplied}"',
             timeout=600,
         )
-        if code == 2:
-            pytest.skip(f"No standard FSL test image found: {output}")
-        assert code == 0, f"fslmaths -mul failed: {output}"
-        assert os.path.isfile(multiplied), "Multiplied output not created"
-
-        # Parse means from output and verify the ratio
-        for line in output.splitlines():
-            if line.startswith("orig="):
-                parts = line.split()
-                try:
-                    orig = float(parts[0].split("=")[1])
-                    mult = float(parts[1].split("=")[1])
-                    if orig != 0:
-                        ratio = mult / orig
-                        assert abs(ratio - 2.0) < 0.01, (
-                            f"Expected mean to double. Original: {orig}, "
-                            f"Multiplied: {mult}, Ratio: {ratio}"
-                        )
-                except (ValueError, IndexError):
-                    pass
+        assert code == 0, output
+        check_output(multiplied)

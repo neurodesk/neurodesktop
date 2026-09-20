@@ -12,6 +12,11 @@
   image. Keep `/opt/tests` readable by the unprivileged `jovyan` test user even
   when the checkout has a restrictive umask. Resolve a test's subject through
   the helpers in `tests/testlib.py`.
+- Test behavior by executing the subject and checking its result. Use source
+  assertions for packaging contracts; use valid inputs and verified prerequisites
+  for negative tests. Required services and directories must fail when absent,
+  and skip only when the selected profile explicitly disables them. See
+  [testing](docs/testing.md) for workflow fixtures and runtime checks.
 - The docs are a hierarchical wiki rooted at [`docs/index.md`](docs/index.md):
   every page carries YAML frontmatter (`title`, `description`, `parent`,
   `status`, `last-reviewed`) and cross-references relatives with markdown
