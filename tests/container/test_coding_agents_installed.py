@@ -39,14 +39,26 @@ def test_coding_agent_wrapper_is_installed_and_on_path(command, installed_path):
     assert code == 0, f"{command} agent command missing from PATH: {output}"
 
 
-def test_codex_acp_initializes_with_image_codex(tmp_path):
+@pytest.mark.parametrize(
+    ("command", "executable_env"),
+    [
+        (("codex-acp",), {"CODEX_PATH": "/usr/bin/codex"}),
+        (("claude-agent-acp",), {
+            "CLAUDE_CODE_EXECUTABLE": "/opt/jovyan_defaults/.local/bin/claude"
+        }),
+        (("/usr/bin/opencode", "acp"), {}),
+    ],
+    ids=["codex", "claude", "opencode"],
+)
+def test_acp_initializes_with_image_agent(tmp_path, command, executable_env):
     """Exercise the real adapter against the image CLI, not its bundled version."""
     (tmp_path / "codex").mkdir(mode=0o700)
     async def probe():
         process = await asyncio.create_subprocess_exec(
-            "codex-acp", env={**os.environ, "HOME": str(tmp_path),
+            *command, env={**os.environ, "HOME": str(tmp_path),
                               "CODEX_HOME": str(tmp_path / "codex"),
-                              "CODEX_PATH": "/usr/bin/codex"},
+                              "XDG_CONFIG_HOME": str(tmp_path / "config"),
+                              **executable_env},
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
         try:

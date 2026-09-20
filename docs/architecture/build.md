@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-16"
+last-reviewed: "2026-09-20"
 ---
 
 # Build-Time Behaviors
@@ -49,7 +49,7 @@ fresh direct solves; the build does not run an unbounded post-solve pip or
 conda upgrade that could replace the base image's tested Jupyter environment.
 Where two current direct packages conflict, the user-facing tool wins: both
 the main image environment and Lightcone's isolated tool environment install
-Snakemake 9.26.1 and hold its infrastructure dependency `packaging` at the
+Snakemake 9.27.0 and hold its infrastructure dependency `packaging` at the
 newest allowed release, 25.0.
 
 The ipyniivue patch is one deliberate exception: its version-coupled source is
@@ -77,14 +77,18 @@ Retire these pins only after fresh isolated wheel builds pass for both
 
 Layers are append-only: deleting or re-owning a file in a later layer only
 adds whiteouts or duplicates while the original layer keeps shipping the
-bytes. The image therefore follows three rules, asserted by
-`pytest /opt/tests/test_image_size_hygiene.py` in the built image:
+bytes. Checkout tests in `tests/unit/test_image_packaging_layers.py` check
+that cleanup happens before each layer ends. Built-image tests in
+`tests/container/test_image_size_hygiene.py` check the remaining runtime assets.
+The image follows these rules:
 
 - **Build-only packages are purged in the layer that needs them.** The pip
   layer runs as root, installs `build-essential` (gcc for sdist-only
   packages such as `traits`, which ships no cp313 wheel), runs the pip steps
   as `${NB_USER}` via `runuser`, and purges the toolchain before the layer
-  ends. Node's unused C headers are deleted in the nodejs install layer.
+  ends. The same layer installs and purges `libgpgme-dev` and
+  `libossp-uuid-dev`. Node's unused C headers are deleted in the nodejs
+  install layer.
 - **Ownership and modes are set where a tree is created.** `/usr/local/tomcat`
   is chowned and made world-readable in its install layer and in the WAR
   extraction layer; a whole-tree `chown -R` in a later layer would duplicate
@@ -97,6 +101,13 @@ bytes. The image therefore follows three rules, asserted by
   frontend is moved from its per-model anywidget trait into JupyterLab's static
   tree in its pip install layer, so the replaced package copy does not remain
   in image history.
+
+The pip layer removes the original NBI, MyST, collaboration, and document-provider
+frontend bundles before the later source builds replace them. NBI and MyST each
+expose one rebuilt package bundle through a symlink in Jupyter's extension
+directory. Guacamole's WAR is downloaded, migrated, extracted, patched, and
+deleted in one layer. Apptainer's unused CNI plugins are removed in its builder
+before the runtime tree is copied.
 
 ## ipyniivue Frontend Packaging
 

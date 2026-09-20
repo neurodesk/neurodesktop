@@ -248,13 +248,13 @@ Connect procedures.
 
 ## Build arguments
 
-Exact pins for the image build. The default values below are the validated
+Exact pins for the image build. The default values below are the declared
 pins in the [`Dockerfile`](../Dockerfile) at the time this page was last
 reviewed; the Dockerfile itself is authoritative.
 
 - `OPENCODE_VERSION`: the OpenCode release installed into
-  the image; defaults to the validated pin in the Dockerfile (currently
-  `1.18.30`). Override to bump the pin, or set it to an empty value to
+  the image; defaults to the pin in the Dockerfile (currently
+  `1.18.31`). Override to bump the pin, or set it to an empty value to
   install the latest release
 - `CLAUDE_CODE_VERSION`: exact Claude Code native release installed as the
   image fallback; defaults to `2.1.278`. The direct-version audit compares the
@@ -271,10 +271,10 @@ reviewed; the Dockerfile itself is authoritative.
 - `UV_VERSION`, `ASTRA_TOOLS_VERSION`, `ASTRA_SPEC_VERSION`,
   `ANYWIDGET_VERSION`, `LIGHTCONE_CLI_VERSION`, `LIGHTCONE_CLI_SHA256`: exact `uv`,
   ASTRA CLI/schema, viewer runtime, and isolated Lightcone CLI releases
-  installed in the image; defaults to `0.12.12`, `0.2.17`, `0.0.14`, `0.11.0`,
+  installed in the image; defaults to `0.12.17`, `0.2.17`, `0.0.14`, `0.11.0`,
   `0.4.2`, and the verified SHA-256 of that Lightcone source archive
 - `SNAKEMAKE_VERSION`: user-facing Snakemake workflow release; defaults to
-  `9.26.1` in the main and isolated Lightcone environments. Its current
+  `9.27.0` in the main and isolated Lightcone environments. Its current
   metadata requires `packaging<26`, so the image holds that infrastructure
   library at the newest compatible release, `25.0`
 - `AGENT_SKILLS_REF`: exact commit of
@@ -288,7 +288,7 @@ reviewed; the Dockerfile itself is authoritative.
   Collaboration pinned alongside it
 - `CODEX_ACP_VERSION`, `CLAUDE_AGENT_ACP_VERSION`: pinned
   ACP adapters that expose the Codex and Claude personas in Jupyter AI;
-  defaults to `1.11.0` and `0.76.0`. They install without their vendored agent
+  defaults to `1.12.0` and `0.79.0`. They install without their vendored agent
   binaries and drive the selected user or image CLIs through `CODEX_PATH` and
   `CLAUDE_CODE_EXECUTABLE` (runtime variables exported by
   `environment_variables.sh`)
@@ -322,7 +322,7 @@ reviewed; the Dockerfile itself is authoritative.
   defaults to `1.5.3`, `1.27.1`, `1.83.2`, and `0.57.0`. The crypto override
   also updates the separately vendored gocryptfs build.
 - `BASE_IMAGE_TAG`: tag of the upstream Jupyter Docker base image; defaults to
-  the multi-architecture `2026-09-07` release
+  the multi-architecture `2026-09-18` release
 - `NPM_VERSION`: npm release installed with the runtime Node.js distribution;
   defaults to `12.0.2`
 - `JUPYTER_BUILDER_VERSION`, `JUPYTERLAB_SLURM_REF`: current Jupyter Builder
@@ -331,8 +331,8 @@ reviewed; the Dockerfile itself is authoritative.
   `c34354f0aaa1b12f6243224bed631cf07c858409`
 - `GUACAMOLE_VERSION`, `TOMCAT_REL`, `TOMCAT_VERSION`,
   `TOMCAT_MIGRATION_VERSION`: Guacamole release (`1.6.0`) and the Tomcat
-  major/exact/migration-tool versions serving it (`11`, `11.0.25`, `1.0.12`)
-- `CODE_SERVER_VERSION`: code-server release; defaults to `4.136.2`
+  major/exact/migration-tool versions serving it (`11`, `11.0.26`, `1.0.12`)
+- `CODE_SERVER_VERSION`: code-server release; defaults to `4.138.0`
 - `NEUROCOMMAND_REF`: neurocommand git ref cloned during the build; CI passes
   a resolved `main` SHA so neurocommand changes invalidate the install layer
 - `NODE_TAR_VERSION`: patched `node-tar` version applied to every bundled

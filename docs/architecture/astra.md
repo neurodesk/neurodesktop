@@ -17,6 +17,10 @@ focused tests are listed in
 
 ## ASTRA and Lightcone command-line tools
 
+The [shared-environment investigation](../designs/image-packaging-and-lightcone.md)
+records the dependency comparison and validation needed to retire Lightcone's
+isolated environment.
+
 `astra` on the image `PATH` comes from the `astra-tools` install in the conda
 environment — the same one the viewer imports. The isolated Lightcone tool
 environment receives the exact same ASTRA pin, but does not expose a second

@@ -39,8 +39,8 @@ pytest /opt/tests/         # inside the built image
 ```
 
 Running `tests/unit` needs Python 3.12, Node.js 24, `pytest`, `httpx`,
-`traitlets`, `jq`, and `ssh-keygen`
-(`openssh-client`); see `.github/workflows/unit-tests.yml`. The terminal-creation
+`traitlets`, Git, curl, `jq`, and `ssh-keygen` (`openssh-client`); see
+`.github/workflows/unit-tests.yml`. The terminal-creation
 tests stub `curl` but use the real `jq` to parse responses.
 
 Install those with the interpreter's own site packages rather than `pip install
@@ -91,6 +91,7 @@ non-obvious tiers protect.
 | Area | On a checkout | In the built image |
 | --- | --- | --- |
 | Jupyter isolated build dependencies | `pytest tests/unit/test_jupyter_build_constraints.py tests/unit/test_jupyterlab_slurm_build.py` | Fresh isolated wheel builds for Slurm and launcher |
+| Image packaging layers | `pytest tests/unit/test_image_packaging_layers.py tests/unit/test_myst_build_workaround.py` | `pytest /opt/tests/test_image_size_hygiene.py /opt/tests/test_additional_components.py` and image layer inventory |
 | CVMFS inventory health | `pytest tests/unit/test_cvmfs_inventory_check.py` | Live mirror workflow |
 | Nightly JupyterHub probe (terminal creation, FSL commands) | `pytest tests/unit/test_jupyter_terminal_creation.py tests/unit/test_github_workflows.py` | Live `JupyterHub API Testing` workflow |
 | Lmod extension listing default | `pytest tests/unit/test_lmod_extensions.py` | `pytest /opt/tests/test_lmod_avail_extensions.py` |
