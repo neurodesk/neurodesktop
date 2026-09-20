@@ -29,6 +29,7 @@ def test_t3_code_runtime_and_native_terminal_support_are_installed():
     assert shutil.which("codex")
     assert shutil.which("claude")
     assert shutil.which("opencode")
+    assert "2026.5.2" in subprocess.check_output(["cloudflared", "--version"], text=True)
 
     build = platform_package()
     machine = {"x86_64": "x64", "aarch64": "arm64"}[os.uname().machine]
@@ -66,6 +67,13 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path):
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
 
+    # An obsolete home install must not win after T3 hydrates the login PATH.
+    old_bin = tmp_path / ".local/bin"
+    old_bin.mkdir(parents=True)
+    old_codex = old_bin / "codex"
+    old_codex.write_text("#!/bin/sh\necho obsolete-home-codex >&2\nexit 1\n")
+    old_codex.chmod(0o755)
+    (tmp_path / ".bash_profile").write_text(f'export PATH="{old_bin}:$PATH"\n')
     environment = os.environ.copy()
     environment.update(
         {
@@ -77,6 +85,11 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path):
             "T3CODE_TRACE_FILE": "/dev/null",
         }
     )
+    from neurodesk_t3_code import supervisor
+    from types import SimpleNamespace
+    supervisor.seed_provider_settings(SimpleNamespace(
+        base_dir=tmp_path / ".t3", provider_bin=Path("/opt/neurodesktop/t3-provider-bin")
+    ))
     process = subprocess.Popen(
         [
             "t3",
@@ -123,6 +136,7 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path):
                     assert snapshot["installed"] is True
                     assert snapshot["version"] is not None, snapshot.get("message")
                     assert "decode-wire-message" not in (snapshot.get("message") or "")
+                    assert "decode-payload" not in (snapshot.get("message") or ""), snapshot
                     break
             time.sleep(0.1)
         else:

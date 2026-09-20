@@ -80,6 +80,8 @@ CATALOG = (
     ),
     CatalogEntry("arg:MYST_YDOC_VERSION", "npm:@jupyter/ydoc", "npm"),
     CatalogEntry("arg:CODEX_CLI_VERSION", "npm:@openai/codex", "npm"),
+    CatalogEntry("arg:T3_CLOUDFLARED_VERSION", "github:cloudflare/cloudflared", "github-releases",
+                 why="Keep the relay version and checksums aligned with the pinned T3 release."),
     CatalogEntry("arg:T3_CODE_VERSION", "npm:t3", "npm"),
     CatalogEntry("arg:TAILSCALE_VERSION", "github:tailscale/tailscale", "github-releases"),
     CatalogEntry("arg:CLAUDE_CODE_VERSION", "npm:@anthropic-ai/claude-code", "npm"),

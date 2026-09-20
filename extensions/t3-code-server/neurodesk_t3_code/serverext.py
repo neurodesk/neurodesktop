@@ -8,6 +8,7 @@ import os
 
 from jupyter_server.extension.application import ExtensionApp
 
+from .connect import ConnectManager, T3ConnectHandler
 from .web import T3ProxyHandler, T3SessionHandler, T3StatusHandler
 
 from .supervisor import ConfigError, T3Supervisor, policy_from_environment
@@ -22,12 +23,14 @@ class NeurodeskT3CodeApp(ExtensionApp):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._supervisor: T3Supervisor | None = None
+        self._connect: ConnectManager | None = None
         self._readiness_task: asyncio.Task[None] | None = None
 
     def initialize_handlers(self) -> None:
         self.handlers.extend([
             (r"/neurodesk-t3-status", T3StatusHandler, {"t3_app": self}),
             (r"/neurodesk-t3/_session", T3SessionHandler, {"t3_app": self}),
+            (r"/neurodesk-t3/_connect", T3ConnectHandler, {"t3_app": self}),
             (r"/neurodesk-t3/(.*)", T3ProxyHandler, {"t3_app": self}),
         ])
 
@@ -40,12 +43,14 @@ class NeurodeskT3CodeApp(ExtensionApp):
 
         self._supervisor = T3Supervisor(policy, logger=self.log)
         self._supervisor.start()
+        self._connect = ConnectManager(self._supervisor)
         self._readiness_task = asyncio.create_task(self._report_readiness())
 
     async def _report_readiness(self) -> None:
         assert self._supervisor is not None
         try:
             await self._supervisor.wait_ready()
+            await self._connect.restore()
         except (RuntimeError, asyncio.TimeoutError) as error:
             self.log.warning("T3 Code sidecar startup did not complete: %s", error)
 
@@ -55,6 +60,9 @@ class NeurodeskT3CodeApp(ExtensionApp):
             with suppress(asyncio.CancelledError):
                 await self._readiness_task
             self._readiness_task = None
+        if self._connect is not None:
+            await self._connect.close()
+            self._connect = None
         if self._supervisor is not None:
             await self._supervisor.close()
             self._supervisor = None

@@ -262,6 +262,8 @@ reviewed; the Dockerfile itself is authoritative.
   installed globally; defaults to `0.154.0` and must stay inside the range the
   pinned codex-acp adapter declares, because this is the tested fallback for
   the adapter. A user can install a newer release with `codex update`
+- `T3_CLOUDFLARED_VERSION`: the relay client release bundled for guided T3 Connect
+  linking; its architecture checksums must match the pinned T3 release.
 - `T3_CODE_VERSION`: the headless T3 Code server release installed from the
   checked manifest; defaults to `0.0.42`. The release ships one self-contained
   executable per platform, so the layer installs no lockfile and compiles

@@ -975,6 +975,23 @@ RUN set -eu; \
 # manifest pins `t3`, `t3` pins each `@t3code/t3-<platform>` build, and each
 # build carries its dependencies inside its own tarball. The executable links
 # against libatomic, which the checks below prove is present.
+# Match T3's supported relay client. Verify both architecture downloads before
+# installing; keeping it on PATH avoids per-user downloads and install prompts.
+ARG T3_CLOUDFLARED_VERSION="2026.5.2"
+RUN set -eu; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) relay_arch=amd64; relay_sha=5286698547f03df745adb2355f04c12dde52ef425491e81f433642d695521886 ;; \
+      arm64) relay_arch=arm64; relay_sha=5a4e8ce2701105271412059f44b6a0bf1ae4542b4d98ff3180c0c019443a5815 ;; \
+      *) exit 1 ;; \
+    esac; \
+    curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 300 \
+      "https://github.com/cloudflare/cloudflared/releases/download/${T3_CLOUDFLARED_VERSION}/cloudflared-linux-${relay_arch}" \
+      -o /tmp/t3-cloudflared; \
+    echo "${relay_sha}  /tmp/t3-cloudflared" | sha256sum -c -; \
+    install -m 0755 /tmp/t3-cloudflared /usr/local/bin/cloudflared; \
+    cloudflared --version; \
+    rm /tmp/t3-cloudflared
+
 ARG T3_CODE_VERSION="0.0.42"
 RUN --mount=type=bind,source=config/agents/t3-code/package.json,target=/tmp/t3-code/package.json,ro \
     --mount=type=bind,source=config/agents/t3-provider-bin,target=/tmp/t3-provider-bin,ro \

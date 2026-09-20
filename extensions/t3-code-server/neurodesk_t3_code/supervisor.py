@@ -11,6 +11,8 @@ import asyncio
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
+import json
+import tempfile
 import logging
 import os
 from pathlib import Path
@@ -139,6 +141,41 @@ def server_command(policy: Policy) -> list[str]:
     ]
 
 
+def seed_provider_settings(policy: Policy) -> None:
+    """Keep login-shell PATH hydration from selecting an obsolete home Codex.
+
+    Only fill an absent setting. Explicit paths and provider instances remain
+    user-owned. Write atomically before T3 starts watching its settings file.
+    """
+    directory = policy.base_dir / "userdata"
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    target = directory / "settings.json"
+    try:
+        settings = json.loads(target.read_text())
+    except FileNotFoundError:
+        settings = {}
+    except (ValueError, UnicodeError):
+        return  # Let T3 report malformed user settings without replacing them.
+    if not isinstance(settings, dict):
+        return
+    providers = settings.setdefault("providers", {})
+    if not isinstance(providers, dict):
+        return
+    codex = providers.setdefault("codex", {})
+    if not isinstance(codex, dict) or "binaryPath" in codex:
+        return
+    codex["binaryPath"] = str(policy.provider_bin / "codex")
+    descriptor, name = tempfile.mkstemp(prefix=".settings-", dir=directory)
+    try:
+        with os.fdopen(descriptor, "w") as stream:
+            json.dump(settings, stream, indent=2)
+            stream.write("\n")
+        os.replace(name, target)
+    finally:
+        with suppress(FileNotFoundError):
+            os.unlink(name)
+
+
 def server_environment(
     policy: Policy, environ: Mapping[str, str]
 ) -> dict[str, str]:
@@ -211,6 +248,7 @@ class T3Supervisor:
 
         if self._task is not None and not self._task.done():
             return
+        self._ready.clear()
         self._task = asyncio.create_task(self.run(), name="neurodesk-t3-code")
 
     async def wait_ready(self, *, timeout: float | None = None) -> None:
@@ -242,6 +280,7 @@ class T3Supervisor:
                 self.state = ServiceState.STARTING
                 self.policy.base_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
                 try:
+                    seed_provider_settings(self.policy)
                     self._process = await asyncio.create_subprocess_exec(
                         *server_command(self.policy),
                         env=server_environment(self.policy, self.environ),

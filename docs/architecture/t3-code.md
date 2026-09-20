@@ -4,7 +4,7 @@ description: T3 Code in JupyterLab, server lifecycle, provider paths, persistent
   state, and desktop connection procedures
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-19"
+last-reviewed: "2026-09-20"
 ---
 
 # T3 Code remote access
@@ -202,18 +202,41 @@ give each Neurodesktop instance its own Tailscale state directory.
 
 ## Connect through T3 Connect
 
-T3 Connect uses an outbound managed connection, so it does not need a
-published port. Keep the sidecar on its default loopback host. In a
-Neurodesktop terminal, run:
+Choose **Connect to my desktop** in the JupyterLab launcher or above the
+scigent.ai tab. Desktop linking is optional; the embedded app already uses your
+Jupyter login. The guided panel displays a short-lived device code and opens
+T3's hosted authorization page. Approve it using the account signed into your
+T3 desktop app. This grants that account remote access to the environment.
+
+The extension runs `t3 connect link --headless` as the notebook user. A pinned,
+checksum-verified relay client is installed in the image, so users do not need
+a terminal or a download prompt. The panel waits for authorization, waits for
+active chats to finish before restarting only T3, then checks that the public
+tunnel reaches T3. Routing can take several minutes. Only a successful live
+probe is shown as **Ready**. Select the displayed environment in the desktop
+app under **Settings → Connections**.
+
+The link persists in T3's private home directory and reconnects when Jupyter
+starts. **Retry** reuses saved authorization where possible; expired grants
+receive a fresh code. **Cancel setup** stops the current attempt without revoking
+an approved link. **Disconnect** invokes T3's unlink operation. Closing the
+panel leaves an in-progress setup running; reopening it restores its state.
+
+All controls use Jupyter authentication and XSRF protection. Device codes stay
+in memory and responses are not cached. OAuth credentials stay in T3's private
+store and never reach the browser or logs. The official relay is the only
+recipient of the CLI access token; the subsequent public endpoint probe sends
+no credentials. The adapter replaces the embedded cloud sign-in button because
+T3's production Clerk application rejects self-hosted Jupyter origins.
+
+For deployments without the launcher, the terminal fallback remains:
 
 ```bash
 t3 connect link --headless
 ```
 
-Complete the browser authorization and restart the Neurodesktop instance. Sign
-in to the same T3 Connect account in the desktop app, then select the linked
-environment. The restart is required because T3 reads the saved link when the
-server starts.
+Then restart T3 after active chats finish. T3 Connect uses an outbound managed
+connection and does not require a published port. Keep the default loopback host.
 
 T3 Connect is the supported route for an HPC allocation when the site permits
 its outbound traffic. Desktop-managed SSH to a cluster login node starts T3 on
@@ -244,6 +267,13 @@ frontend or written to logs. A failed exchange leaves a short-lived credential
 that expires automatically.
 
 ## Providers
+
+Before startup, the supervisor fills an absent Codex `binaryPath` in T3's
+settings with the image-owned quiet launcher. Explicit user paths are preserved.
+This avoids T3's login-shell PATH refresh selecting an old `~/.local/bin/codex`.
+An obsolete home CLI can fail the `initialize` response schema even when the
+image's Codex is compatible. Provider tests must check the actual T3 probe,
+including `decode-payload` failures, not merely the installed CLI version.
 
 T3 discovers provider commands through
 [`config/agents/t3-provider-bin`](../../config/agents/t3-provider-bin/). These

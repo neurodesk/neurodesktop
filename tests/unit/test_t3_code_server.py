@@ -291,3 +291,23 @@ def test_login_path_codex_wrapper_keeps_t3_app_server_stdout_clean(tmp_path):
     assert json.loads(result.stdout) == {"argv": args}
     assert result.stderr == ""
     assert not (home / ".codex").exists()
+
+
+def test_provider_default_survives_login_path_hydration_without_overwriting_settings(tmp_path):
+    from types import SimpleNamespace
+    from neurodesk_t3_code.supervisor import seed_provider_settings
+    policy = SimpleNamespace(base_dir=tmp_path / '.t3', provider_bin=tmp_path / 'image-providers')
+    seed_provider_settings(policy)
+    path = policy.base_dir / 'userdata/settings.json'
+    settings = json.loads(path.read_text())
+    assert settings['providers']['codex']['binaryPath'] == str(policy.provider_bin / 'codex')
+    assert path.stat().st_mode & 0o077 == 0
+    settings['providers']['codex']['binaryPath'] = '/custom/codex'
+    settings['theme'] = 'custom'
+    path.write_text(json.dumps(settings))
+    original = path.read_bytes()
+    seed_provider_settings(policy)
+    assert path.read_bytes() == original
+    path.write_text('{invalid')
+    seed_provider_settings(policy)
+    assert path.read_text() == '{invalid'
