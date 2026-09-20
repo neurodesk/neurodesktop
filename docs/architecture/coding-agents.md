@@ -4,7 +4,7 @@ description: Claude Code and Codex installation, the OpenCode terminal wrapper,
   and OpenCode session pruning
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-10"
+last-reviewed: "2026-09-20"
 ---
 
 # Coding agents
@@ -25,7 +25,18 @@ ASTRA, and file-format discovery in the active shell.
 The contract has a bounded fast path: an explicit user tool choice is not
 reopened, a conventional demonstration default is recorded in ASTRA without an
 automatic blocking question, a matching worked project is reused, and short
-same-resource universes may share one script or Slurm array. Jobs publish
+same-resource universes share an allocation when scheduling overhead would
+dominate. Arrays are used when independent scheduling, retries, or useful
+parallelism justify them. Scripts take the arguments declared by the ASTRA
+recipes before execution. Copied examples supply structure; their illustrative
+findings must be removed before recording actual observations.
+
+Agents size jobs against the selected partition, submit settled dependencies
+with `afterok` and `--kill-on-invalid-dep=yes`, and check pending reasons before
+waiting. Submission is asynchronous so this check can run promptly. Monitoring
+covers all captured job IDs and every terminal branch, with a bounded wait and
+retained IDs for recovery. Retries cancel superseded jobs and rebuild affected
+dependencies. Jobs publish
 validated temporary outputs atomically, and completion requires Slurm
 accounting (`COMPLETED`, exit code `0:0`), inspected logs, and fresh expected
 artifacts. The final report distinguishes a valid ASTRA specification, actual

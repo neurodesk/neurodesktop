@@ -43,7 +43,8 @@ Running `tests/unit` needs Python 3.12, Node.js 24, `pytest`, `httpx`,
 (`openssh-client`); see `.github/workflows/unit-tests.yml`. The terminal-creation
 tests stub `curl` but use the real `jq` to parse responses.
 
-The launcher DOM regression also requires jsdom and TypeScript. Install them
+The launcher DOM regressions, including T3 iframe file-link capture, reloads,
+and disposal, also require jsdom and TypeScript. Install them
 in a temporary directory and expose that directory when running the suite:
 
 ```bash
