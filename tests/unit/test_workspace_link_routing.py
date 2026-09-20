@@ -18,3 +18,17 @@ def test_plugin_is_registered_alongside_the_launcher():
     index = repo_path("extensions/neurodesk-launcher/src/index.ts").read_text()
     assert "import workspaceLinksPlugin from './workspaceLinks';" in index
     assert "export default [plugin, workspaceLinksPlugin, astraViewerPlugin, t3CodePlugin];" in index
+
+
+def test_t3_iframe_links_use_default_handler_and_survive_reload():
+    import os
+    import pytest
+
+    if not os.environ.get('NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES'):
+        pytest.fail('Set NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES as described in docs/testing.md')
+    result = subprocess.run(
+        ['node', str(Path(__file__).with_name('t3_file_link_cases.cjs')),
+         str(repo_path('extensions/neurodesk-launcher/src/workspaceLinks.ts'))],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

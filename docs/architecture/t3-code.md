@@ -18,6 +18,15 @@ Choose **scigent.ai** in the JupyterLab launcher's **Neurodesk** section. It ope
 application in a main-panel tab. Reopening the launcher focuses the existing
 tab. Closing the tab leaves the Jupyter-owned T3 process running.
 
+Ordinary clicks on absolute workspace file links in T3 chat open the file in
+JupyterLab with its configured default document handler. Directories open in
+the Jupyter file browser. This includes NIfTI files that T3 cannot preview.
+The launcher attaches a capture listener to the same-origin T3 iframe and
+reattaches it after reloads; closing the panel removes the listener. Paths
+must be inside Jupyter's configured server root. External links, downloads,
+and modified clicks keep their existing behavior. T3's own file explorer
+continues to use its internal preview pane.
+
 The launcher connects using your existing Jupyter login. It establishes T3's
 browser session automatically; no terminal command or pairing token is needed.
 The one-time credential stays on the server, and the browser receives only an

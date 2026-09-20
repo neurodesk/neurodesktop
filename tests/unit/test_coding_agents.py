@@ -89,10 +89,13 @@ def test_agent_guidance_prevents_stale_outputs_and_false_job_success():
     assert "Queue disappearance is not success" in compact
     assert "`sacct`" in compact
     assert "`ExitCode` `0:0`" in compact
-    # `--wait` waits out queue time too, so the recommended form must be bounded
-    # and must say the job survives the timeout.
-    assert "timeout 300 sbatch --parsable --wait" in compact
-    assert "recovered through the ID `--parsable` already printed" in compact
+    assert "Submit without `--wait`" in compact
+    assert "Bound the monitoring period" in compact
+    assert "retain the IDs of outstanding jobs for recovery" in compact
+    assert "--kill-on-invalid-dep=yes" in guidance
+    assert "DependencyNeverSatisfied" in guidance
+    assert "wait for every terminal job" in compact
+    assert "Cancel superseded jobs before retrying" in compact
 
 
 def test_agent_guidance_separates_astra_validation_execution_and_provenance():
@@ -105,6 +108,8 @@ def test_agent_guidance_separates_astra_validation_execution_and_provenance():
     assert "**Execution:**" in guidance
     assert "**Provenance:**" in guidance
     assert "`spec-only`" in compact
+    assert "remove illustrative findings before execution" in compact
+    assert "preserve the original command and script version" in compact
 
 
 def test_agent_guidance_keeps_the_environment_and_schema_lookup_facts():
