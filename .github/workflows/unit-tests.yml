@@ -32,6 +32,11 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+
       - name: Install test dependencies
         run: |
           # httpx: imported by config/jupyter/webapp_wrapper/webapp_wrapper.py

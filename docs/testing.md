@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-09-19"
+last-reviewed: "2026-09-20"
 ---
 
 # Testing
@@ -38,7 +38,8 @@ pytest tests/unit          # from a checkout, no container needed
 pytest /opt/tests/         # inside the built image
 ```
 
-Running `tests/unit` needs `pytest`, `httpx`, `traitlets`, `jq`, and `ssh-keygen`
+Running `tests/unit` needs Python 3.12, Node.js 24, `pytest`, `httpx`,
+`traitlets`, `jq`, and `ssh-keygen`
 (`openssh-client`); see `.github/workflows/unit-tests.yml`. The terminal-creation
 tests stub `curl` but use the real `jq` to parse responses.
 
@@ -99,7 +100,7 @@ non-obvious tiers protect.
 | T3 Code server, web UI, lifecycle, and packaging | `pytest tests/unit/test_t3_code_server.py tests/unit/test_t3_code_web.py` | `pytest /opt/tests/test_t3_code_server_image.py /opt/tests/test_t3_code_web_image.py` |
 | Tailscale binary packaging | `pytest tests/unit/test_tailscale_packaging.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_tailscale_image.py` |
 | Guided T3/Tailscale setup | `pytest tests/unit/test_t3_neurodesk_setup.py tests/unit/test_t3_code_server.py` | `pytest /opt/tests/test_tailscale_image.py /opt/tests/test_t3_code_server_image.py` |
-| Jupyter Server Proxy response limits | `pytest tests/unit/test_jupyter_server_proxy_limits.py` | `pytest /opt/tests/test_jupyter_server_proxy_limits.py`, then real large-response proxy check |
+| Jupyter Server Proxy response limits | `pytest tests/unit/test_jupyter_server_proxy_limits.py` | `pytest /opt/tests/test_jupyter_server_proxy_limits.py` |
 | ASTRA viewer core (adapter, graph, widget, previews) | `pytest tests/unit/test_astra_view_graph.py tests/unit/test_astra_view_packaging.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | `astra`/`lc` installs, Lightcone skills and hooks | `pytest tests/unit/test_astra_jupyter_ai_tooling.py tests/unit/test_lightcone_cli_patch.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
@@ -113,10 +114,12 @@ non-obvious tiers protect.
 The unit test executes the single-load Jupyter server configuration, simulates
 JupyterHub replacing Tornado's mutable client defaults, applies the anchored
 Jupyter Server Proxy patch to its upstream seam, and instantiates both TCP and
-Unix-socket clients to assert matching 1024 MiB buffer and body limits. A
-runtime check must proxy a response larger than Tornado's 100 MiB default
-through a fully initialized single-user server in a built image; the unit
-construction test does not prove the full installed proxy request succeeds.
+Unix-socket clients to assert matching 1024 MiB buffer and body limits. The
+image test also starts a Jupyter server under a user URL prefix and resets the
+HTTP client defaults after configuration loading. It transfers 101 MiB through
+both TCP and Unix-socket backends and checks the complete payload's size and
+SHA-256 digest. The backend data is generated locally; no external service is
+needed.
 
 ### Tailscale binaries
 
@@ -191,14 +194,13 @@ docker buildx build --target apptainer --progress=plain .
 
 ### Workspace link routing
 
-The unit tier asserts the interception guards in the TypeScript source; the
-image tier asserts the plugin survived the labextension build, that JupyterLab
-accepts it, that `jupyterlab_server` still publishes the `serverRoot` page
-config option the mapping depends on, and that the `Markdown Preview` and
-`HTML Viewer` factories a clicked report opens with are registered and not
-disabled. Those factory names are upstream strings; if a JupyterLab upgrade
-renames one, a clicked report quietly falls back to the text editor rather
-than failing, which is exactly why the image tier pins them.
+The unit tier executes the complete TypeScript module with Node.js 24's type
+stripping and VM modules. Jupyter and DOM dependencies are substituted, while
+path mapping, click handling, line references, viewer selection, directory
+routing, and error reporting execute unchanged. The image tier opens JupyterLab
+at both root and user-prefixed URLs, clicks absolute workspace links, and
+requires Markdown and HTML viewers to open in the main panel without navigation.
+Installation and shipped page-configuration checks remain in the image tier.
 
 ### ASTRA CLIs, Lightcone skills, and hooks
 
@@ -382,6 +384,31 @@ The T3 provider probe must reject both wire-message and payload-decoding errors,
 including when an old home-installed Codex would otherwise precede the image CLI.
 
 
+## Scientific workflows and writable directories
+
+The CVMFS, Nipype, Nextflow, and Snakemake arithmetic tests use the shared
+`image_math_case` fixture in `tests/conftest.py`. It creates a 3×3×3 NIfTI image
+with nonzero voxel values. Each runner executes `fslmaths -mul 2`; the assertion
+loads the output and checks every voxel and the affine. These tests skip only
+when CVMFS is explicitly disabled. A missing module or invalid output fails.
+Each execution has a 600-second timeout to allow a cold Apptainer launch.
+
+The Slurm batch test waits for successful job completion and verifies a file
+written by the job. A 180-second deadline bounds queueing and execution, and
+cleanup cancels the submitted job if needed.
+
+Both `/home/jovyan` and `/neurodesktop-storage` are required writable directories
+in the Docker and HPC simulation profiles. Each receives one complete CRUD test
+inside a unique temporary directory. A missing directory fails instead of
+removing itself from parametrization. This checks accessibility, not whether a
+particular directory is backed by a bind mount.
+
+The office association updater runs on temporary desktop files in
+`tests/unit/test_office_mimeapps.py`. Coverage includes natural version ordering,
+per-MIME selection, unrelated settings, repeat execution, and failure without
+modifying defaults when MIME declarations are missing. The image tier retains
+the checks against installed desktop associations.
+
 ## Negative Test Convention
 
 When adding tests for pipeline or module-loading workflows, always include a
@@ -399,10 +426,12 @@ tool — which is exactly how
 `test_nipype.py::test_nipype_nonexistent_module_fails` used to pass outside the
 container. Every negative test must therefore:
 
-1. assert the environment it is about is really present (e.g.
-   `/usr/share/lmod/lmod/init/bash` exists), and
-2. assert the pipeline produced **no output file**, not just that something
-   returned non-zero.
+1. execute a successful prerequisite check, such as loading FSL and importing
+   the pipeline library;
+2. use valid input so malformed data cannot cause the expected failure;
+3. check that the error identifies the deliberately missing module; and
+4. assert that the pipeline produced **no output file**. When module loading
+   gates execution, also check that the interface was never entered.
 
 `test_nextflow.py::test_nextflow_nonexistent_module_fails` is the reference
 shape.
