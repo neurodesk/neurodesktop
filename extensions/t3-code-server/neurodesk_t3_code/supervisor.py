@@ -414,6 +414,7 @@ class T3Supervisor:
         self.state = ServiceState.STOPPED
 
     async def _wait_for_listener(self) -> bool:
+        """Wait for HTTP readiness within the startup deadline, terminating on timeout."""
         deadline = asyncio.get_running_loop().time() + self.readiness_timeout
         while asyncio.get_running_loop().time() < deadline:
             if self._process is None or self._process.returncode is not None:
@@ -425,6 +426,7 @@ class T3Supervisor:
         return False
 
     async def _http_responding(self) -> bool:
+        """Probe the local environment endpoint without credentials or proxy routing."""
         writer = None
         try:
             async with asyncio.timeout(0.5):

@@ -68,6 +68,7 @@ def test_t3_code_image_ships_one_platform_build_and_no_build_leftovers():
 
 @pytest.mark.parametrize("legacy_default", [False, True])
 def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_default):
+    """Exercise the installed server and provider against fresh and legacy defaults."""
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]

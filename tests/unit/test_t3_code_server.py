@@ -137,6 +137,7 @@ def test_server_command_and_environment_use_protocol_safe_provider_binaries(tmp_
 
 
 def test_supervisor_owns_one_process_and_stops_its_process_group(tmp_path):
+    """Verify repeated starts share one child and shutdown terminates its group."""
     supervisor = _supervisor_module()
     executable = tmp_path / "fake-t3"
     executable.write_text(
@@ -398,6 +399,7 @@ def test_update_notice_policy_preserves_malformed_settings(tmp_path):
 
 
 def test_readiness_waits_for_http_after_tcp_listener_opens(tmp_path):
+    """Reproduce a bound TCP port whose first HTTP request never receives a response."""
     supervisor = _supervisor_module()
 
     async def scenario():

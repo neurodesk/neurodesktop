@@ -37,6 +37,7 @@ def test_quota_message_uses_actual_limit_without_waiting_for_routing():
 
 
 def test_real_child_stderr_quota_reaches_ui_and_resets_after_restart(tmp_path, monkeypatch):
+    """Exercise quota classification and recovery through an actual child process."""
     fake = tmp_path / 'fake-t3'
     fake.write_text('''#!/usr/bin/env python3
 import pathlib, socket, sys, time

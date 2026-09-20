@@ -12,6 +12,7 @@ from testlib import repo_path
 @pytest.mark.parametrize('cleanup_status', [0, 7])
 @pytest.mark.parametrize('hpc', [False, True])
 def test_cleanup_preserves_failure_and_removes_hpc_files(tmp_path, test_status, cleanup_status, hpc):
+    """Exercise EXIT cleanup for successful tests, failed tests, and failed cleanup."""
     calls = tmp_path / 'calls'
     docker = tmp_path / 'docker'
     docker.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\nexit "$CLEANUP_STATUS"\n')

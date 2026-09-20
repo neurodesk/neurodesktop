@@ -168,6 +168,7 @@ def test_tag_script_does_not_mutate_after_a_lookup_auth_failure(tmp_path):
 
 
 def test_release_tags_wait_for_validation_of_run_specific_candidates():
+    """Prevent publishing a different image from the candidate that passed validation."""
     for path in IMAGE_TEST_WORKFLOWS:
         workflow = yaml.safe_load(path.read_text())
         jobs = workflow['jobs']
@@ -190,6 +191,7 @@ def test_release_tags_wait_for_validation_of_run_specific_candidates():
 
 
 def test_every_image_flavor_runs_native_arm64_runtime_checks():
+    """Require runtime coverage on native runners for both published architectures."""
     for path in IMAGE_TEST_WORKFLOWS:
         job = yaml.safe_load(path.read_text())['jobs']['test-image']
         assert set(job['strategy']['matrix']['arch']) == {'amd64', 'arm64'}
@@ -198,6 +200,7 @@ def test_every_image_flavor_runs_native_arm64_runtime_checks():
 
 
 def test_image_cleanup_is_installed_before_each_runtime_profile_starts():
+    """Ensure startup failures reach cleanup, even before pytest can run."""
     for path in IMAGE_TEST_WORKFLOWS:
         job = yaml.safe_load(path.read_text())["jobs"]["test-image"]
         tests = [step["run"] for step in job["steps"]
@@ -209,6 +212,7 @@ def test_image_cleanup_is_installed_before_each_runtime_profile_starts():
 
 
 def test_image_version_and_publish_tag_share_one_build_timestamp():
+    """Keep embedded versions and release tags consistent across date boundaries."""
     for path in IMAGE_TEST_WORKFLOWS:
         jobs = yaml.safe_load(path.read_text())["jobs"]
         prepare = jobs["prepare-build"]
