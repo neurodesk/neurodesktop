@@ -4,7 +4,7 @@ description: T3 Code in JupyterLab, server lifecycle, provider paths, persistent
   state, and desktop connection procedures
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-16"
+last-reviewed: "2026-09-19"
 ---
 
 # T3 Code remote access
@@ -37,6 +37,15 @@ T3 client assumes root-relative URLs, so the proxy adapts its router, asset
 loader and file URLs, with a transport adapter running only inside the T3
 frame. Upstream anchor changes fail explicitly. Adapted assets are not cached
 as immutable files. Desktop access continues to use the unmodified client.
+
+JupyterHub 6 applies XSRF checks to CORS-mode GET requests, including native
+JavaScript module imports. These imports cannot attach the fetch adapter's
+XSRF header. The proxy accepts authenticated GET/HEAD requests for static
+JS, CSS, WASM bundles and the manifest when the browser supplies
+`Sec-Fetch-Site: same-origin`. Other origins, API requests and writes retain
+Jupyter's XSRF checks. The manifest also uses `crossorigin="use-credentials"`
+so its request carries the Jupyter login cookie. Without this handling, the
+entry module loops through Hub login redirects and T3 stays on its splash screen.
 
 ## Connect through a published Docker port
 
