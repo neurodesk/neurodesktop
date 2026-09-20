@@ -7,6 +7,7 @@ from contextlib import suppress
 import json
 import os
 from pathlib import Path
+import socket
 import stat
 import sys
 from types import SimpleNamespace
@@ -148,7 +149,7 @@ import time
 
 host = sys.argv[sys.argv.index('--host') + 1]
 port = int(sys.argv[sys.argv.index('--port') + 1])
-sock = socket.socket()
+sock = socket.socket(socket.AF_INET6 if ':' in host else socket.AF_INET)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 sock.bind((host, port))
 sock.listen()
@@ -162,9 +163,13 @@ while time.monotonic() < deadline:
     except OSError:
         pass
 sock.settimeout(None)
+requests = os.environ.get('FAKE_T3_REQUEST_LOG')
 while True:
     connection = sock.accept()[0]
-    connection.recv(4096)
+    received = connection.recv(4096)
+    if requests:
+        with open(requests, 'ab') as stream:
+            stream.write(received)
     connection.sendall(
         b'HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\nConnection: close\\r\\n\\r\\n{}'
     )
@@ -256,6 +261,43 @@ def test_readiness_waits_until_t3_answers_http(tmp_path, monkeypatch):
             await service.close()
 
     asyncio.run(scenario())
+
+
+def test_readiness_probe_addresses_an_ipv6_host_with_brackets(tmp_path, monkeypatch):
+    supervisor = _supervisor_module()
+    try:
+        with socket.socket(socket.AF_INET6) as probe:
+            probe.bind(("::1", 0))
+            port = probe.getsockname()[1]
+    except OSError:
+        pytest.skip("no IPv6 loopback")
+    executable = _install_fake_t3(tmp_path)
+    provider_bin = tmp_path / "providers"
+    provider_bin.mkdir()
+    requests = tmp_path / "requests"
+    monkeypatch.setenv("FAKE_T3_REQUEST_LOG", str(requests))
+    policy = supervisor.policy_from_environment(
+        {
+            "HOME": str(tmp_path),
+            "NEURODESKTOP_T3_CODE_HOST": "::1",
+            "NEURODESKTOP_T3_CODE_PORT": str(port),
+            "NEURODESKTOP_T3_CODE_EXECUTABLE": str(executable),
+            "NEURODESKTOP_T3_CODE_PROVIDER_BIN": str(provider_bin),
+        },
+        euid=os.geteuid(),
+    )
+    assert isinstance(policy, supervisor.Policy)
+
+    async def scenario():
+        service = supervisor.T3Supervisor(policy)
+        service.start()
+        try:
+            await service.wait_ready(timeout=20)
+        finally:
+            await service.close()
+
+    asyncio.run(scenario())
+    assert f"Host: [::1]:{port}\r\n".encode() in requests.read_bytes()
 
 
 def test_spawn_failure_parks_sidecar_without_escaping_into_jupyter(tmp_path):

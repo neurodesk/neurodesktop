@@ -437,6 +437,8 @@ class T3Supervisor:
 
         host = self.policy.readiness_host
         port = self.policy.port
+        # An IPv6 literal needs brackets to form a valid HTTP authority.
+        authority = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(host, port), timeout=0.25
@@ -445,7 +447,7 @@ class T3Supervisor:
             return False
         try:
             writer.write(
-                f"GET {READINESS_PATH} HTTP/1.1\r\nHost: {host}:{port}\r\n"
+                f"GET {READINESS_PATH} HTTP/1.1\r\nHost: {authority}\r\n"
                 "Connection: close\r\n\r\n".encode()
             )
             await asyncio.wait_for(writer.drain(), timeout=0.5)
