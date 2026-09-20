@@ -130,6 +130,15 @@ def test_strict_script_stops_on_initialization_failure(image, tmp_path):
     assert not result.stdout
 
 
+def test_failed_automatic_initialization_prevents_tool_payload(image, tmp_path):
+    paths, _ = image
+    paths["/etc/profile.d/lmod.sh"].write_text('return 7\n')
+    setup = paths["/opt/neurodesktop/agent_shell_setup.sh"]
+    result = run(f'. {setup}\nbash -c "echo unsafe"', tmp_path)
+    assert result.returncode == 7
+    assert not result.stdout
+
+
 def test_explicit_batch_initialization_does_not_repeat_user_setup(image, tmp_path):
     paths, _ = image
     previous = tmp_path / "previous.sh"

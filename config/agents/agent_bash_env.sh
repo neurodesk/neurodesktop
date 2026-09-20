@@ -37,4 +37,4 @@ neurodesk_initialize_tool_shell() {
     return "$status"
 }
 
-neurodesk_initialize_tool_shell
+neurodesk_initialize_tool_shell || exit $?

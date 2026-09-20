@@ -143,6 +143,7 @@ loads `/etc/profile.d/lmod.sh` when installed. Older layouts fall back to
 `/usr/share/module.sh`, then `/usr/share/lmod/lmod/init/bash`. Retained Slurm
 scripts source the same initializer explicitly. It restores the caller's
 nounset option after initialization, so the script baseline can use `set -u`.
+Initialization failures stop the shell before its tool command runs.
 Module loads remain local to each shell.
 
 `neurodesk-agent-preflight` reports the installed guidance revision, differences
