@@ -101,7 +101,10 @@ def test_sbatch_completes_and_writes_output(tmp_path):
     partition = os.environ.get("NEURODESKTOP_SLURM_PARTITION", "neurodesktop")
     output_file = tmp_path / "batch-result.txt"
     script = tmp_path / "job.sh"
-    script.write_text("#!/bin/sh\nset -eu\nprintf 'neurodesktop-batch-ok\\n' > "
+    script.write_text("#!/bin/bash\nset -euo pipefail\n"
+                      "source /opt/neurodesktop/agent_bash_env.sh\n"
+                      "module --version\n"
+                      "printf 'neurodesktop-batch-ok\\n' > "
                       + shlex.quote(str(output_file)) + "\n")
     process = subprocess.Popen(
         ["sbatch", "--parsable", "--wait", "--job-name=neurodesktop-test",

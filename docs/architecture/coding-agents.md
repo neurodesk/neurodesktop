@@ -126,11 +126,33 @@ OpenCode persists the `ctrl+x b` toggle under the same key, so the wrapper
 only writes it when absent and a user who re-enables the sidebar keeps that
 choice.
 
-The machine-facing `opencode acp` path also exports
-`BASH_ENV=/opt/neurodesktop/opencode_bash_env.sh`. OpenCode tools use
-non-interactive Bash shells, which do not read `.bashrc`; the initializer
-quietly refreshes Neurodesk's module paths and loads Lmod for every tool shell
-without writing into the ACP JSON-RPC stream.
+## Agent tool shells and preflight
+
+The terminal and ACP launchers for Codex and Claude, the OpenCode wrapper,
+and all T3 provider launchers export
+`BASH_ENV=/opt/neurodesktop/agent_bash_env.sh` through a shared shell setup.
+An existing `BASH_ENV` is retained in `NEURODESKTOP_PREVIOUS_BASH_ENV` and
+sourced before Neurodesk initialization. Launchers do not emit setup banners
+into agent protocol streams.
+
+Each noninteractive Bash tool shell refreshes Neurodesk's module paths and
+loads `/etc/profile.d/lmod.sh` when installed. Older layouts fall back to
+`/usr/share/module.sh`, then `/usr/share/lmod/lmod/init/bash`. Retained Slurm
+scripts source the same initializer explicitly. It restores the caller's
+nounset option after initialization, so the script baseline can use `set -u`.
+Module loads remain local to each shell.
+
+`neurodesk-agent-preflight` reports the installed guidance revision, differences
+from workspace `AGENTS.md` or `CLAUDE.md`, Lmod availability, and live Slurm
+node capacity and state. Its scheduler query has a 15-second timeout.
+Differences can represent project edits or an older seed; preflight never
+rewrites those files. Existing workspaces can run the command after an image
+upgrade to consult current environment guidance without replacing project rules.
+The command does not verify module payloads or account/QOS limits.
+
+The analysis contract requires preflight before submission and runner-supported
+waiting between job checks. Runners without a wait mechanism return outstanding
+job IDs and the next status command instead of chaining shell sleeps.
 
 ## OpenCode session pruning
 

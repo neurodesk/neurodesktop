@@ -1,6 +1,10 @@
 #!/bin/bash
 # Select a user-managed Claude Code install, with the image copy as fallback.
 
+if [ -r /opt/neurodesktop/agent_shell_setup.sh ]; then
+    . /opt/neurodesktop/agent_shell_setup.sh
+fi
+
 IMAGE_CLAUDE_BIN="/opt/jovyan_defaults/.local/bin/claude"
 USER_CLAUDE_BIN="${HOME:+${HOME}/.local/bin/claude}"
 

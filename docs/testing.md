@@ -273,13 +273,19 @@ pytest tests/unit/test_ipywidgets_control_comm_patch.py
 pytest tests/unit/test_jupyterlab_widgets_patch.py
 pytest tests/unit/test_jupyter_ai_acp_client_patch.py
 pytest tests/unit/test_jupyter_server_mcp_patch.py
-pytest tests/unit/test_coding_agents.py -k 'opencode_machine_commands or opencode_acp_exports_lmod'
+pytest tests/unit/test_coding_agents.py tests/unit/test_agent_shell_environment.py
 # In the rebuilt image:
 pytest /opt/tests/test_astra_jupyter_ai_image.py /opt/tests/test_widget_compatibility_image.py
 pip check
 jupyter server extension list
 jupyter labextension list --verbose
 ```
+
+The agent-shell unit tests execute fresh child Bash shells through the shared
+setup and provider launchers. They cover profile-path preference, legacy layout
+fallbacks, strict scripts, inherited initialization, and preflight failures.
+`pytest /opt/tests/test_agent_shell_environment.py /opt/tests/test_slurm.py`
+checks installed module loading and batch initialization in a running image.
 
 The coding-agent image test initializes all three ACP implementations and
 requests a session without credentials or a model prompt. For Codex and Claude,
