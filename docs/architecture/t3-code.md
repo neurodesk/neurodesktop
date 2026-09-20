@@ -203,7 +203,9 @@ give each Neurodesktop instance its own Tailscale state directory.
 ## Connect through T3 Connect
 
 Choose **Setup T3 connect** in the compact bar inside the scigent.ai tab.
-Desktop linking is optional; the embedded app already uses your Jupyter login. The guided panel displays a short-lived device code and opens
+Desktop linking is optional; the embedded app already uses your Jupyter login.
+The guided panel displays a short-lived device code and an underlined link to
+`https://accounts.t3.codes/device`, which opens
 T3's hosted authorization page. Approve it using the account signed into your
 T3 desktop app. This grants that account remote access to the environment.
 
@@ -214,7 +216,11 @@ to `/usr/local/bin/cloudflared` so older per-user cached clients cannot override
 the security-maintained image copy. The panel waits for authorization, waits for
 active chats to finish before restarting only T3, then checks that the public
 tunnel reaches T3. Routing can take several minutes. Only a successful live
-probe is shown as **Ready**. Select the displayed environment in the desktop
+probe is shown as **Ready**. If system DNS cannot resolve a `*.t3coderelay.com` tunnel hostname, the
+credential-free readiness probe retries through Cloudflare DNS-over-HTTPS.
+Only public IPv4 addresses are accepted, the original HTTPS hostname and
+certificate validation are retained, and the system DNS configuration is
+unchanged. OAuth and Jupyter credentials are never sent to the DNS service. Select the displayed environment in the desktop
 app under **Settings → Connections**.
 
 The link persists in T3's private home directory and reconnects when Jupyter
@@ -268,6 +274,12 @@ frontend or written to logs. A failed exchange leaves a short-lived credential
 that expires automatically.
 
 ## Providers
+
+The supervisor sets `enableProviderUpdateChecks` to `false` at startup, including
+for existing profiles, to suppress automatic provider update notices in the
+image-managed T3 environment. Upgrades are delivered through image releases.
+T3's desktop-app update controls are not rendered in its embedded web mode;
+this policy does not change a separately installed desktop app.
 
 Before startup, the supervisor seeds `providerInstances.codex` with the Codex
 driver and the image-owned quiet launcher in `config.binaryPath`. It promotes

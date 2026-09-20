@@ -8,14 +8,18 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 import json
+import ipaddress
 import os
 import re
 import signal
+import socket
 import sqlite3
 import time
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlencode
 
 from tornado import httpclient, web
+from tornado.netutil import OverrideResolver, Resolver
+from tornado.simple_httpclient import SimpleAsyncHTTPClient
 from jupyter_server.base.handlers import APIHandler
 
 from .supervisor import server_environment
@@ -32,6 +36,48 @@ class ConnectError(Exception):
 
 class RoutePending(ConnectError):
     """The approved tunnel has not finished routing yet."""
+
+
+async def fetch_tunnel_with_public_dns(url):
+    """Resolve only T3's public tunnel through DoH; preserve URL/SNI/TLS checks."""
+    parsed = urlsplit(url)
+    host = parsed.hostname or ''
+    if (parsed.scheme != 'https' or parsed.port not in (None, 443)
+            or parsed.username or parsed.password or parsed.query or parsed.fragment
+            or parsed.path != '/api/auth/session'
+            or not re.fullmatch(r'[a-z0-9-]+\.t3coderelay\.com', host)):
+        raise RoutePending('The connection hostname cannot be resolved.')
+    dns_url = 'https://cloudflare-dns.com/dns-query?' + urlencode({'name': host, 'type': 'A'})
+    # No OAuth or Jupyter credentials go to the DNS service or public tunnel.
+    client = SimpleAsyncHTTPClient(force_instance=True, max_body_size=1024 * 1024)
+    try:
+        response = await client.fetch(dns_url, headers={'Accept': 'application/dns-json'},
+                                      follow_redirects=False, request_timeout=10)
+    finally:
+        client.close()
+    data = json.loads(response.body)
+    addresses = []
+    if data.get('Status') == 0:
+        for answer in data.get('Answer', []):
+            if answer.get('type') != 1:
+                continue
+            address = ipaddress.ip_address(answer['data'])
+            if address.version == 4 and address.is_global and str(address) not in addresses:
+                addresses.append(str(address))
+    for address in addresses[:3]:
+        resolver = OverrideResolver(resolver=Resolver(), mapping={host: address})
+        client = SimpleAsyncHTTPClient(force_instance=True, resolver=resolver,
+                                       max_body_size=1024 * 1024)
+        try:
+            return await client.fetch(
+                url, headers={'Accept': 'application/json', 'User-Agent': 'Neurodesk-T3/0.1.0'},
+                follow_redirects=False, request_timeout=10, raise_error=False)
+        except (OSError, httpclient.HTTPClientError):
+            continue
+        finally:
+            client.close()
+            resolver.close()
+    raise RoutePending('The public relay hostname is not reachable yet.')
 
 
 class ConnectManager:
@@ -125,10 +171,17 @@ class ConnectManager:
             if url != RELAY + '/v1/environments':
                 raise ConnectError('Unexpected relay address.')
             headers['Authorization'] = 'Bearer ' + token
-        response = await httpclient.AsyncHTTPClient().fetch(
-            url, headers=headers, follow_redirects=False, request_timeout=10,
-            raise_error=False,
-        )
+        try:
+            response = await httpclient.AsyncHTTPClient().fetch(
+                url, headers=headers, follow_redirects=False, request_timeout=10,
+                raise_error=False,
+            )
+        except socket.gaierror:
+            # Only the credential-free T3 tunnel probe may use public DNS.
+            if token:
+                raise
+            response = await fetch_tunnel_with_public_dns(url)
+
         if token and response.code in (401, 403):
             raise ConnectError('Your T3 authorization needs refreshing. Choose Retry to sign in again.')
         if response.code not in (200, 401) or len(response.body) > 1024 * 1024:
@@ -167,15 +220,22 @@ class ConnectManager:
     async def _wait_reachable(self):
         deadline = asyncio.get_running_loop().time() + ROUTE_TIMEOUT
         self.set_state('connecting', 'Starting the connection. This can take a few minutes.')
+        dns_failed = False
         while asyncio.get_running_loop().time() < deadline:
+            dns_failed = False
             try:
                 if await self.reachable():
                     self.last_checked = time.time()
                     self.set_state('ready', 'Ready. In T3 desktop, open Settings → Connections and add this environment.')
                     return
+            except socket.gaierror:
+                dns_failed = True
+                self.set_state('connecting', 'The link is saved, but Neurodesktop cannot resolve the relay hostname. Retrying DNS…')
             except (OSError, ValueError, KeyError, TypeError, RoutePending, httpclient.HTTPClientError):
                 pass
             await asyncio.sleep(3)
+        if dns_failed:
+            raise ConnectError('The link is saved, but Neurodesktop cannot resolve the relay hostname. Ask your administrator to check cluster DNS. The connection may already work from your T3 app.')
         raise ConnectError('The link is saved, but the relay is not reachable yet. Retry checks the saved link and refreshes authorization if needed.')
 
     async def _link(self):

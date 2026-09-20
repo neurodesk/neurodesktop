@@ -176,6 +176,11 @@ def seed_provider_settings(policy: Policy) -> None:
     settings["providerInstances"] = instances
     # Promote only the exact legacy default this supervisor used to write.
     # Retain the legacy entry for backward compatibility with older images.
+    _write_settings(directory, settings)
+
+
+def _write_settings(directory: Path, settings: dict) -> None:
+    target = directory / "settings.json"
     descriptor, name = tempfile.mkstemp(prefix=".settings-", dir=directory)
     try:
         with os.fdopen(descriptor, "w") as stream:
@@ -185,6 +190,22 @@ def seed_provider_settings(policy: Policy) -> None:
     finally:
         with suppress(FileNotFoundError):
             os.unlink(name)
+
+
+def disable_update_notifications(policy: Policy) -> None:
+    """Image releases own agent updates; suppress automatic provider notices."""
+    directory = policy.base_dir / "userdata"
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        settings = json.loads((directory / "settings.json").read_text())
+    except FileNotFoundError:
+        settings = {}
+    except (ValueError, UnicodeError):
+        return
+    if not isinstance(settings, dict) or settings.get("enableProviderUpdateChecks") is False:
+        return
+    settings["enableProviderUpdateChecks"] = False
+    _write_settings(directory, settings)
 
 
 def server_environment(
@@ -293,6 +314,7 @@ class T3Supervisor:
                 self.policy.base_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
                 try:
                     seed_provider_settings(self.policy)
+                    disable_update_notifications(self.policy)
                     self._process = await asyncio.create_subprocess_exec(
                         *server_command(self.policy),
                         env=server_environment(self.policy, self.environ),

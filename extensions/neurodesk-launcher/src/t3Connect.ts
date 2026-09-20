@@ -21,7 +21,7 @@ export function createConnectPanel(app: JupyterFrontEnd): MainAreaWidget<Widget>
   const heading = document.createElement('h1');
   heading.textContent = 'Setup T3 connect';
   const intro = document.createElement('p');
-  intro.textContent = 'Optional: use this Neurodesktop environment from your T3 desktop app. You can use agents in Jupyter without linking. Approving the link gives your T3 account remote access to this environment.';
+  intro.textContent = 'Use this Neurodesktop environment from your T3 app. Approving the link gives your T3 account remote access to this environment.';
   const status = document.createElement('p');
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
@@ -32,7 +32,8 @@ export function createConnectPanel(app: JupyterFrontEnd): MainAreaWidget<Widget>
   const expiry = document.createElement('p');
   const authorize = document.createElement('a');
   authorize.hidden = true;
-  authorize.textContent = 'Authorize T3 Connect';
+  authorize.textContent = 'Open https://accounts.t3.codes/device to authorize this code';
+  authorize.style.cssText = 'color:var(--jp-content-link-color, #0066cc);text-decoration:underline;cursor:pointer';
   authorize.target = '_blank';
   authorize.rel = 'noopener noreferrer';
   const actions = document.createElement('div');

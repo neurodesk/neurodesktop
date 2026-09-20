@@ -40,3 +40,9 @@
   protection, expired authorization, and delayed relay routing. T3 provider tests
   must exercise the initialization probe with the image-owned provider path
   for both fresh modern defaults and migration of the exact legacy default.
+
+- Coding-agent CLI upgrades must pass the installed-image T3 and ACP initialization
+  probes; check adapter dependency ranges and record any deliberate exception.
+
+- T3 relay DNS fallback must remain limited to credential-free HTTPS session
+  probes on `*.t3coderelay.com`, use public addresses, and retain TLS validation.
