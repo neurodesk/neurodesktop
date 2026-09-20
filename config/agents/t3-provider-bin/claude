@@ -1,4 +1,8 @@
 #!/bin/sh
 set -eu
 
+if [ -r /opt/neurodesktop/agent_shell_setup.sh ]; then
+    . /opt/neurodesktop/agent_shell_setup.sh
+fi
+
 exec /opt/jovyan_defaults/.local/bin/claude "$@"

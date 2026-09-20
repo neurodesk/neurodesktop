@@ -1,6 +1,10 @@
 #!/bin/bash
 # Select a user-managed Codex install, with the image copy as fallback.
 
+if [ -r /opt/neurodesktop/agent_shell_setup.sh ]; then
+    . /opt/neurodesktop/agent_shell_setup.sh
+fi
+
 IMAGE_CODEX_BIN="/usr/bin/codex"
 USER_CODEX_BIN="${HOME:+${HOME}/.local/bin/codex}"
 

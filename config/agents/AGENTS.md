@@ -4,6 +4,20 @@ Use this contract for scientific analyses in Neurodesk. Keep the work
 reproducible without turning routine discovery, conventional defaults, or short
 parameter sweeps into unnecessary user prompts and scheduler jobs.
 
+Environment guidance revision: 2026-09-20.1
+
+## Session preflight
+
+Run `neurodesk-agent-preflight` once before analysis. It checks Lmod and shows
+live Slurm node capacity, state, and time limits. If it reports differing
+workspace guidance, preserve project edits and consult `/opt/AGENTS.md` for
+current environment instructions. Resolve a failed preflight before submission.
+
+Agent Bash tools initialize modules automatically. In retained Bash scripts,
+source `/opt/neurodesktop/agent_bash_env.sh` before `module load`; it refreshes
+Neurodesk's module paths and selects the installed Lmod initializer. A module
+loaded in one tool call does not persist into another shell.
+
 ## Operating contract
 
 1. **Respect choices the user already made.** If the user names FSL BET, do not
@@ -53,8 +67,8 @@ parameter sweeps into unnecessary user prompts and scheduler jobs.
    requested replacement or the old result has first been preserved. Never
    use `test -s` on a path that could have survived an earlier attempt. Remove
    or isolate failed-attempt artifacts before retrying.
-7. **Size jobs against the selected partition.** Start each session with
-   `sinfo -o "%P %c %m %l"`. CPU count and memory describe nodes, with memory in
+7. **Size jobs against the selected partition.** The preflight runs
+   `sinfo -o "%P %c %m %l %t"`. CPU count and memory describe nodes, with memory in
    MiB; they do not expose every partition or account limit. Inspect
    `scontrol show partition <partition>` and applicable account or QOS limits
    when needed. Keep CPU, memory, and time requests within those limits while
@@ -77,8 +91,12 @@ parameter sweeps into unnecessary user prompts and scheduler jobs.
    changing the request: `PartitionNodeLimit` can also mean nodes are down or
    drained. Handle `DependencyNeverSatisfied` as a failed prerequisite, not
    normal queue delay. Poll only the captured jobs, no more often than every
-   ten seconds, and re-read their state each time. Bound the monitoring period;
-   if it expires, report and retain the IDs of outstanding jobs for recovery.
+   ten seconds, and re-read their state each time. Between checks, use the
+   runner's documented wait or background-task mechanism. Use only tools
+   exposed by that runner; do not chain shell sleeps or search for an
+   undocumented monitoring tool. If no supported wait mechanism exists,
+   report the outstanding IDs and the next status command. Bound the monitoring
+   period; if it expires, report and retain the IDs of outstanding jobs for recovery.
    Queue disappearance is not success.
 10. **Use a complete success predicate.** A job is submitted only when its job
     ID was captured. It succeeds only when `sacct` reports `COMPLETED` with
@@ -206,6 +224,7 @@ script runs. Comment only commands whose purpose or contract is not obvious:
 #SBATCH --cpus-per-task=<N>
 
 set -euo pipefail
+source /opt/neurodesktop/agent_bash_env.sh
 
 # Slurm executes a spool copy; the submission directory is the project root.
 PROJECT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"

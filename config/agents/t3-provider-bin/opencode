@@ -1,4 +1,8 @@
 #!/bin/sh
 set -eu
 
+if [ -r /opt/neurodesktop/agent_shell_setup.sh ]; then
+    . /opt/neurodesktop/agent_shell_setup.sh
+fi
+
 exec /usr/bin/opencode "$@"
