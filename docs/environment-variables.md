@@ -248,7 +248,7 @@ Connect procedures.
 
 ## Build arguments
 
-Exact pins for the image build. The default values below are the validated
+Exact pins for the image build. The default values below are the declared
 pins in the [`Dockerfile`](../Dockerfile) at the time this page was last
 reviewed; the Dockerfile itself is authoritative.
 

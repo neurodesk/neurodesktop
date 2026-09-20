@@ -140,7 +140,7 @@ CATALOG = (
         "pypi:packaging",
         "pypi",
         "<26",
-        "Snakemake 9.27.0 requires packaging below 26.",
+        "The pinned Snakemake release requires packaging below 26.",
     ),
     CatalogEntry("requirement:pypi:requests", "pypi:requests", "pypi"),
     CatalogEntry("requirement:pypi:litellm", "pypi:litellm", "pypi"),

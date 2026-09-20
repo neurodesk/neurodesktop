@@ -68,6 +68,7 @@ def test_t3_code_image_ships_one_platform_build_and_no_build_leftovers():
 
 @pytest.mark.parametrize("legacy_default", [False, True])
 def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_default):
+    """Exercise the installed server and provider against fresh and legacy defaults."""
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
@@ -124,22 +125,24 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
         start_new_session=True,
     )
     try:
+        # T3 binds before its HTTP handler is ready. An early accepted request
+        # can stall, so retry with a short request timeout within one deadline.
         deadline = time.monotonic() + 20
+        client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         while time.monotonic() < deadline:
-            if process.poll() is not None:
-                raise AssertionError(f"T3 exited during startup with {process.returncode}")
+            assert process.poll() is None, "T3 exited during HTTP startup"
             try:
-                with urllib.request.urlopen(
-                    f"http://127.0.0.1:{port}/.well-known/t3/environment", timeout=1
+                with client.open(
+                    f"http://127.0.0.1:{port}/.well-known/t3/environment", timeout=0.5
                 ) as response:
-                    descriptor = json.load(response)
-            except (urllib.error.URLError, TimeoutError):
+                    info = json.load(response)
+            except (urllib.error.URLError, TimeoutError, ConnectionError):
                 time.sleep(0.1)
                 continue
-            assert descriptor["label"] == "testuser@edu.neurodesk.org"
+            assert info["label"] == "testuser@edu.neurodesk.org"
             break
         else:
-            raise AssertionError("T3 did not serve its environment descriptor within 20 seconds")
+            raise AssertionError("T3 did not answer HTTP within 20 seconds")
 
         # Server startup reloads the login-shell PATH, which can put the
         # interactive Codex wrapper ahead of the quiet provider directory.

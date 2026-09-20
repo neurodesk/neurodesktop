@@ -54,6 +54,7 @@ def test_coding_agent_acp_bootstraps_without_credentials(
     environment = {
         "PATH": os.environ["PATH"],
         "HOME": str(tmp_path),
+        "XDG_CONFIG_HOME": str(tmp_path / "config"),
         "CODEX_HOME": str(tmp_path / "codex"),
         "DISABLE_TELEMETRY": "1",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",

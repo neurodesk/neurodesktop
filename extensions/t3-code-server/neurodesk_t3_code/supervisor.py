@@ -317,7 +317,7 @@ class T3Supervisor:
         self._task = asyncio.create_task(self.run(), name="neurodesk-t3-code")
 
     async def wait_ready(self, *, timeout: float | None = None) -> None:
-        """Wait until T3 accepts TCP connections or startup parks."""
+        """Wait until T3 answers HTTP requests or startup parks."""
 
         await asyncio.wait_for(
             self._ready.wait(),
@@ -414,15 +414,43 @@ class T3Supervisor:
         self.state = ServiceState.STOPPED
 
     async def _wait_for_listener(self) -> bool:
+        """Wait for HTTP readiness within the startup deadline, terminating on timeout."""
         deadline = asyncio.get_running_loop().time() + self.readiness_timeout
         while asyncio.get_running_loop().time() < deadline:
             if self._process is None or self._process.returncode is not None:
                 return False
-            if await self._port_accepting():
+            if await self._http_responding():
                 return True
             await asyncio.sleep(0.1)
         await self._terminate_process()
         return False
+
+    async def _http_responding(self) -> bool:
+        """Probe the local environment endpoint without credentials or proxy routing."""
+        writer = None
+        try:
+            async with asyncio.timeout(0.5):
+                reader, writer = await asyncio.open_connection(
+                    self.policy.readiness_host, self.policy.port,
+                )
+                writer.write(
+                    b"GET /.well-known/t3/environment HTTP/1.1\r\n"
+                    b"Host: localhost\r\nConnection: close\r\n\r\n"
+                )
+                await writer.drain()
+                status = (await reader.readline()).split()
+                return (
+                    len(status) >= 2
+                    and status[0] in {b"HTTP/1.0", b"HTTP/1.1"}
+                    and status[1] == b"200"
+                )
+        except (OSError, TimeoutError, ValueError):
+            return False
+        finally:
+            if writer is not None:
+                writer.close()
+                with suppress(OSError):
+                    await writer.wait_closed()
 
     async def _port_accepting(self) -> bool:
         try:

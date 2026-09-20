@@ -37,6 +37,7 @@ def test_quota_message_uses_actual_limit_without_waiting_for_routing():
 
 
 def test_real_child_stderr_quota_reaches_ui_and_resets_after_restart(tmp_path, monkeypatch):
+    """Exercise quota classification and recovery through an actual child process."""
     fake = tmp_path / 'fake-t3'
     fake.write_text('''#!/usr/bin/env python3
 import pathlib, socket, sys, time
@@ -53,9 +54,14 @@ if not marker.exists():
     sys.stderr.flush()
     marker.touch()
 sock = socket.socket()
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 sock.bind(('127.0.0.1', port))
 sock.listen()
-while True: time.sleep(.1)
+while True:
+    client, _ = sock.accept()
+    with client:
+        if client.recv(4096):
+            client.sendall(b'HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\n\\r\\n{}')
 ''')
     fake.chmod(0o755)
     providers = tmp_path / 'providers'

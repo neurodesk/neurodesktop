@@ -96,6 +96,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     && make -C builddir \
     && make -C builddir install \
     && ./scripts/install-dependencies \
+    && rm -rf /opt/apptainer/libexec/apptainer/cni \
     && /opt/apptainer/bin/apptainer --version \
     && rm -rf /tmp/apptainer
 
@@ -223,6 +224,7 @@ RUN apt-install-retry \
     gpg-agent \
     apt-transport-https \
     xz-utils \
+    unzip \
     && DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade --yes \
     && usermod -a -G ssl-cert xrdp \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -271,7 +273,6 @@ COPY --from=apptainer /opt/apptainer /opt/apptainer
 # "proot: error while loading shared libraries: libtalloc.so.2 / libprotobuf-c.so.1".
 RUN ln -sf /opt/apptainer/bin/apptainer /usr/local/bin/apptainer \
     && ln -sf /opt/apptainer/bin/singularity /usr/local/bin/singularity \
-    && rm -rf /opt/apptainer/libexec/apptainer/cni \
     && sed -i 's/^allow setuid = yes/allow setuid = no/' /opt/apptainer/etc/apptainer/apptainer.conf \
     && apt-install-retry fuse-overlayfs squashfuse libtalloc2 libprotobuf-c1 \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
@@ -344,7 +345,19 @@ RUN retry curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 --connect-time
     /tmp/guacamole-${GUACAMOLE_VERSION}.war \
     /usr/local/tomcat/webapps/ROOT.war \
     && rm -f /tmp/guacamole-${GUACAMOLE_VERSION}.war \
-    /tmp/jakartaee-migration-${TOMCAT_MIGRATION_VERSION}-shaded.jar
+    /tmp/jakartaee-migration-${TOMCAT_MIGRATION_VERSION}-shaded.jar \
+    && unzip -q /usr/local/tomcat/webapps/ROOT.war -d /usr/local/tomcat/webapps/ROOT \
+    && rm /usr/local/tomcat/webapps/ROOT.war \
+    && if grep -q '<session-config>' /usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml; then \
+        sed -i '/<session-config>/,/<\/session-config>/c\    <session-config>\n        <session-timeout>30</session-timeout>\n        <cookie-config>\n            <max-age>86400</max-age>\n            <http-only>true</http-only>\n        </cookie-config>\n    </session-config>' /usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml; \
+    else \
+        sed -i 's|</web-app>|    <session-config>\n        <session-timeout>30</session-timeout>\n        <cookie-config>\n            <max-age>86400</max-age>\n            <http-only>true</http-only>\n        </cookie-config>\n    </session-config>\n</web-app>|' /usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml; \
+    fi \
+    # This layer creates the extracted ROOT tree, so it also sets the
+    # ownership and world-read modes the rest of /usr/local/tomcat received
+    # in its install layer (see the note there).
+    && chown -R ${NB_UID}:${NB_GID} /usr/local/tomcat/webapps/ROOT \
+    && chmod -R a+rX /usr/local/tomcat/webapps/ROOT
 
 # #========================================#
 # # Software (as root user)
@@ -396,8 +409,6 @@ RUN apt-install-retry \
     jq \
     less \
     libgfortran5 \
-    libgpgme-dev \
-    libossp-uuid-dev \
     libpci3 \
     lmod \
     lua-bit32 \
@@ -434,7 +445,6 @@ RUN apt-install-retry \
     tmux \
     tree \
     uidmap \
-    unzip \
     vim \
     xdg-utils \
     zip \
@@ -482,23 +492,6 @@ RUN HOME=/root /bin/bash -lc 'set -euo pipefail; \
     xcolor \
     pdfcol; \
     rm -rf /root/.cache /root/.local'
-
-# Extract Guacamole WAR and patch its web.xml to set session cookie Max-Age.
-# Guacamole's own WEB-INF/web.xml overrides Tomcat's conf/web.xml, so without
-# this patch cookies have no expiry and Safari accumulates them until headers
-# exceed the size limit ("Request header is too large").
-RUN unzip -q /usr/local/tomcat/webapps/ROOT.war -d /usr/local/tomcat/webapps/ROOT \
-    && rm /usr/local/tomcat/webapps/ROOT.war \
-    && if grep -q '<session-config>' /usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml; then \
-        sed -i '/<session-config>/,/<\/session-config>/c\    <session-config>\n        <session-timeout>30</session-timeout>\n        <cookie-config>\n            <max-age>86400</max-age>\n            <http-only>true</http-only>\n        </cookie-config>\n    </session-config>' /usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml; \
-    else \
-        sed -i 's|</web-app>|    <session-config>\n        <session-timeout>30</session-timeout>\n        <cookie-config>\n            <max-age>86400</max-age>\n            <http-only>true</http-only>\n        </cookie-config>\n    </session-config>\n</web-app>|' /usr/local/tomcat/webapps/ROOT/WEB-INF/web.xml; \
-    fi \
-    # This layer creates the extracted ROOT tree, so it also sets the
-    # ownership and world-read modes the rest of /usr/local/tomcat received
-    # in its install layer (see the note there).
-    && chown -R ${NB_UID}:${NB_GID} /usr/local/tomcat/webapps/ROOT \
-    && chmod -R a+rX /usr/local/tomcat/webapps/ROOT
 
 # Install Nextflow ecosystem tools
 ENV NF_NEURO_MODULES_DIR=/opt/nf-neuro/modules
@@ -602,7 +595,7 @@ USER root
 RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch_ipyniivue.py,ro \
     --mount=type=bind,source=config/jupyter/build-constraints.txt,target=/tmp/build-constraints.txt,ro \
     install -d -m 0755 -o root -g users /opt/neurodesktop \
-    && apt-install-retry build-essential \
+    && apt-install-retry build-essential libgpgme-dev libossp-uuid-dev \
     && retry git clone https://github.com/NERSC/jupyterlab-slurm.git /tmp/jupyterlab-slurm \
     && git -C /tmp/jupyterlab-slurm checkout --detach "${JUPYTERLAB_SLURM_REF}" \
     && test "$(git -C /tmp/jupyterlab-slurm rev-parse HEAD)" = "${JUPYTERLAB_SLURM_REF}" \
@@ -708,6 +701,15 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     # at runtime. The test-suite list is curated rather than a blanket
     # */tests sweep so an odd package that imports its tests keeps working.
     && SITE_PACKAGES="$(/opt/conda/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" \
+    # These frontends are rebuilt below. Remove the wheel assets before this
+    # layer is committed so the superseded bundles do not ship in history.
+    && for package in notebook_intelligence jupyterlab_myst jupyter_collaboration_ui jupyter_docprovider; do \
+        rm -rf "${SITE_PACKAGES}/${package}/labextension"; \
+    done \
+    && rm -rf /opt/conda/share/jupyter/labextensions/@plmbr/notebook-intelligence \
+        /opt/conda/share/jupyter/labextensions/jupyterlab-myst \
+        /opt/conda/share/jupyter/labextensions/@jupyter/collaboration-extension \
+        /opt/conda/share/jupyter/labextensions/@jupyter/docprovider-extension \
     && find "${SITE_PACKAGES}" /opt/conda/share/jupyter -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
     && for pkg in pandas scipy numpy matplotlib nibabel prov traits tornado psutil boutiques; do \
         if [ -d "${SITE_PACKAGES}/${pkg}" ]; then \
@@ -716,7 +718,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     done \
     # In-layer removal of the compiler toolchain (see the layer comment).
     && apt-mark manual autofs cvmfs libc6-dev linux-libc-dev uuid-dev \
-    && DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove build-essential \
+    && DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove build-essential libgpgme-dev libossp-uuid-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.npm /root/.cache /tmp/jupyterlab-slurm
 
@@ -733,16 +735,6 @@ USER root
 RUN test "$(command -v astra)" = "/opt/conda/bin/astra" \
     && test "$(astra --version)" = "astra, version ${ASTRA_TOOLS_VERSION}" \
     && test "$(/opt/conda/bin/python -c 'import importlib.metadata as m; print(m.version("astra-spec"))')" = "${ASTRA_SPEC_VERSION}"
-
-# Remove the -dev headers that were only needed while the pip layer compiled
-# native extensions. build-essential is installed and purged inside the pip
-# layer itself; nodejs stays — codex CLI and the ACP adapters need it at
-# runtime. Keep the libc dev chain because cvmfs and uuid-dev depend on it.
-# (Guacamole build deps are already excluded via multi-stage build.)
-RUN apt-mark manual autofs cvmfs libc6-dev linux-libc-dev uuid-dev \
-    && DEBIAN_FRONTEND=noninteractive apt-get purge --yes --auto-remove \
-    libgpgme-dev libossp-uuid-dev \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # The three from-source labextension rebuilds below are the most expensive
 # layers in the image. They live here — before neurocommand, the local
@@ -815,10 +807,10 @@ RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {
     && APP_MYST_DIR=/opt/conda/share/jupyter/labextensions/jupyterlab-myst \
     && rm -rf "${MYST_LABEXT_DIR}" \
     && cp -a /tmp/myst/jupyterlab_myst/labextension "${MYST_LABEXT_DIR}" \
-    # Strip the build's sourcemaps before the bundle is mirrored below.
+    # Strip sourcemaps before exposing the bundle through the application symlink.
     && find "${MYST_LABEXT_DIR}/static" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
     && rm -rf "${APP_MYST_DIR}" \
-    && cp -a "${MYST_LABEXT_DIR}" "${APP_MYST_DIR}" \
+    && ln -s "${MYST_LABEXT_DIR}" "${APP_MYST_DIR}" \
     && rm -rf /tmp/myst /tmp/rise /tmp/myst-corepack /tmp/myst-pnpm-store /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
 
 # Jupyter Collaboration 4.4.2 targets JupyterLab 4, but its published

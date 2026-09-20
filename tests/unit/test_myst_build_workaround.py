@@ -75,13 +75,13 @@ def test_myst_build_removes_temporary_package_manager_state(dockerfile: str) -> 
     assert "/tmp/myst-pnpm-store" in cleanup
 
 
-def test_myst_build_copies_rebuilt_labextension(dockerfile: str) -> None:
+def test_myst_build_links_rebuilt_labextension(dockerfile: str) -> None:
     """After rebuilding, the labextension artifacts must replace the pip-installed
-    copies in both the package directory and the JupyterLab app directory.
+    copies with one package directory exposed through a JupyterLab symlink.
     """
     assert "cp -a /tmp/myst/jupyterlab_myst/labextension" in dockerfile
     assert "APP_MYST_DIR=/opt/conda/share/jupyter/labextensions/jupyterlab-myst" in dockerfile
-    assert "cp -a \"${MYST_LABEXT_DIR}\" \"${APP_MYST_DIR}\"" in dockerfile
+    assert "ln -s \"${MYST_LABEXT_DIR}\" \"${APP_MYST_DIR}\"" in dockerfile
 
 
 def test_legacy_mathjax3_frontend_is_not_exposed_to_jupyterlab():

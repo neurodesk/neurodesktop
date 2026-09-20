@@ -39,8 +39,8 @@ pytest /opt/tests/         # inside the built image
 ```
 
 Running `tests/unit` needs Python 3.12, Node.js 24, `pytest`, `httpx`,
-`traitlets`, `jq`, and `ssh-keygen`
-(`openssh-client`); see `.github/workflows/unit-tests.yml`. The terminal-creation
+`traitlets`, Git, curl, `jq`, and `ssh-keygen` (`openssh-client`); see
+`.github/workflows/unit-tests.yml`. The terminal-creation
 tests stub `curl` but use the real `jq` to parse responses.
 
 The launcher DOM regressions, including T3 iframe file-link capture, reloads,
@@ -77,6 +77,35 @@ run there:
 - `tests/unit/test_astra_view_filebrowser.py` needs `jupyter-server` to drive
   the file-browser server extension.
 
+## Image release validation
+
+Production, test, and development image workflows build native amd64 and arm64
+candidates tagged `run-<run_id>-<run_attempt>-<arch>`. Runtime tests and critical
+vulnerability scans consume those candidates. Only after every required job
+passes does `merge-manifests` promote the architecture, date, and `latest` tags
+and copy them to configured registries. Failed candidates remain available for
+diagnosis under their run tags; they do not replace release tags.
+
+The preparation job chooses one UTC build timestamp for both architectures and
+publication, so date tags match the version baked into the image even across
+midnight. All checkouts use the run's source SHA. Scheduled runs build that revision even
+when today's date tag exists, using the registry build cache. Development
+builds remain manual. When retrying an image release, rerun **all jobs** so the
+new attempt builds the candidate tags its validation jobs expect.
+
+Both architectures exercise sudo-disabled, sudo-enabled, package-only sudo,
+and HPC simulation profiles. Only amd64 exercises CVMFS; arm64 CVMFS remains
+excluded until its upstream content and routing are available. WebGL2 coverage
+still depends on the runner graphics capabilities described below.
+
+The test steps source [the cleanup script](../.github/scripts/image_test_cleanup.sh)
+before startup. Its EXIT trap removes the container and HPC temporary files
+on success, startup failure, security-policy failure, or pytest failure. Cleanup
+preserves the original failure status and fails an otherwise successful job if
+cleanup fails. Checkout coverage is in
+`tests/unit/test_build_neurodesktop_workflow.py` and
+`tests/unit/test_image_test_cleanup.py`.
+
 ## Shared helpers
 
 `tests/testlib.py` resolves a test's subject in whichever layout it is running
@@ -104,6 +133,7 @@ non-obvious tiers protect.
 | Area | On a checkout | In the built image |
 | --- | --- | --- |
 | Jupyter isolated build dependencies | `pytest tests/unit/test_jupyter_build_constraints.py tests/unit/test_jupyterlab_slurm_build.py` | Fresh isolated wheel builds for Slurm and launcher |
+| Image packaging layers | `pytest tests/unit/test_image_packaging_layers.py tests/unit/test_myst_build_workaround.py` | `pytest /opt/tests/test_image_size_hygiene.py /opt/tests/test_additional_components.py` and image layer inventory |
 | CVMFS inventory health | `pytest tests/unit/test_cvmfs_inventory_check.py` | Live mirror workflow |
 | Nightly JupyterHub probe (terminal creation, FSL commands) | `pytest tests/unit/test_jupyter_terminal_creation.py tests/unit/test_github_workflows.py` | Live `JupyterHub API Testing` workflow |
 | Lmod extension listing default | `pytest tests/unit/test_lmod_extensions.py` | `pytest /opt/tests/test_lmod_avail_extensions.py` |
@@ -171,6 +201,11 @@ It runs at both `/` and a JupyterHub-style `/user/t3-test/` prefix.
 The prefixed case also runs with JupyterHub's cookie-authenticated GET XSRF
 policy, so native imports of every startup bundle must pass the proxy's
 static-asset checks, including filenames containing additional dots.
+
+The supervisor waits for HTTP 200 from the local environment endpoint before
+reporting readiness. A TCP listener alone is insufficient: T3 can accept an
+early request without answering it. The image probe retries short HTTP requests
+within a 20-second deadline and verifies the environment label.
 
 The real-server image test also waits for the Codex provider probe to report
 its CLI version. This exercises T3's login-shell PATH reload and catches

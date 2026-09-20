@@ -4,7 +4,7 @@ description: Assessments, implementation plans, and audits kept as the record
   of why the tree is shaped the way it is
 parent: ../index.md
 status: current
-last-reviewed: "2026-09-10"
+last-reviewed: "2026-09-20"
 ---
 
 # Design records
@@ -19,6 +19,7 @@ current behavior see [Architecture](../architecture.md),
 | --- | --- | --- |
 | [Image dependency audit, 20 September 2026](image-dependency-audit-2026-09-20.md) | assessment | Live release results, update candidates, dependency conflicts, and coverage limits |
 | [Image security audit](image-security-audit.md) | assessed | Identify credential, shared-host isolation, privilege, and release-gating improvements |
+| [Image packaging and Lightcone environment audit](image-packaging-and-lightcone.md) | implemented | Remove payloads before layer commits, update selected releases, and test whether Lightcone can share the main dependency set |
 | [Image dependency upgrade audit](image-dependency-upgrade.md) | implemented | Derive current image pins from the root Dockerfile, keep only authority and compatibility policy in the catalog, and report upstream and compatible releases separately |
 | [T3 Code remote desktop assessment](t3-code-remote-assessment.md) | implemented | Let Jupyter own an optional headless T3 server and connect through T3 Connect or private networking |
 | [Subscription-based agentic workflow redesign](agentic-subscription-redesign.md) | implemented | Use the existing runner and Codex subscription for issue repairs, five weekly maintenance categories, independent validation, and draft PR publication |
