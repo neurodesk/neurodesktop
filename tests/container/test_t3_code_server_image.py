@@ -11,6 +11,8 @@ import signal
 import socket
 import subprocess
 import time
+import urllib.error
+import urllib.request
 
 import pytest
 
@@ -122,9 +124,6 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
         start_new_session=True,
     )
     try:
-        import urllib.error
-        import urllib.request
-
         # T3 binds before its HTTP handler is ready. An early accepted request
         # can stall, so retry with a short request timeout within one deadline.
         deadline = time.monotonic() + 20

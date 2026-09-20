@@ -118,9 +118,11 @@ CATALOG = (
     CatalogEntry("requirement:pypi:jupyter-ai-router", "pypi:jupyter-ai-router", "pypi"),
     CatalogEntry("requirement:pypi:jupyter-ai-tools", "pypi:jupyter-ai-tools", "pypi"),
     CatalogEntry("requirement:pypi:jupyter-server-documents", "pypi:jupyter-server-documents", "pypi"),
-    CatalogEntry("requirement:pypi:jupyter-server-mcp", "pypi:jupyter-server-mcp", "pypi"),
+    CatalogEntry("requirement:pypi:jupyter-server-mcp", "pypi:jupyter-server-mcp", "pypi",
+                 ">=0.3.0,<0.4.0", "Jupyter AI 3.2 requires jupyter-server-mcp>=0.3.0,<0.4.0."),
     CatalogEntry("requirement:pypi:jupyterlab-chat", "pypi:jupyterlab-chat", "pypi"),
-    CatalogEntry("requirement:pypi:jupyterlab-commands-toolkit", "pypi:jupyterlab-commands-toolkit", "pypi"),
+    CatalogEntry("requirement:pypi:jupyterlab-commands-toolkit", "pypi:jupyterlab-commands-toolkit", "pypi",
+                 ">=0.2.0,<0.3.0", "Jupyter AI 3.2 requires jupyterlab-commands-toolkit>=0.2.0,<0.3.0."),
     CatalogEntry("requirement:pypi:jupyterlab-notebook-awareness", "pypi:jupyterlab-notebook-awareness", "pypi"),
     CatalogEntry("requirement:pypi:jupyterlab-niivue", "pypi:jupyterlab-niivue", "pypi"),
     CatalogEntry("requirement:pypi:jupyterlab-myst", "pypi:jupyterlab-myst", "pypi"),
@@ -310,6 +312,10 @@ def assess(entry: CatalogEntry, declaration: Declaration, releases: list[str]) -
             else raw_current
         )
         current_version = Version(comparable_current)
+        if not constraint.contains(current_version, prereleases=True):
+            raise ValueError(
+                f"declared version {declaration.current} violates compatibility constraint {entry.constraint}"
+            )
         if compatible_version > current_version:
             status = "compatible-update-available" if entry.constraint else "update-available"
         elif upstream_version > current_version and entry.constraint:

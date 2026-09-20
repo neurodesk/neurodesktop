@@ -5,7 +5,7 @@
 ARG BASE_IMAGE_TAG=2026-09-18
 ARG APPTAINER_VERSION=1.5.3
 ARG APPTAINER_GO_VERSION=1.27.1
-ARG APPTAINER_GRPC_VERSION=1.83.2
+ARG APPTAINER_GRPC_VERSION=1.84.0
 ARG APPTAINER_CRYPTO_VERSION=0.57.0
 ARG CVMFS_VERSION=2.14.1+ubuntu24.04
 ARG CVMFS_RELEASE_VERSION=4.9
@@ -590,24 +590,16 @@ ARG ANYWIDGET_VERSION="0.11.0"
 ARG IPYNIIVUE_VERSION="2.4.4"
 ARG SNAKEMAKE_VERSION="9.27.0"
 ARG JUPYTER_BUILDER_VERSION
-ARG JUPYTERLAB_SLURM_REF="c34354f0aaa1b12f6243224bed631cf07c858409"
+ARG JUPYTERLAB_SLURM_REF="8dccb39808f8a1b77712a9a5773a7d2601a56683"
 USER root
 RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch_ipyniivue.py,ro \
     --mount=type=bind,source=config/jupyter/build-constraints.txt,target=/tmp/build-constraints.txt,ro \
     install -d -m 0755 -o root -g users /opt/neurodesktop \
     && apt-install-retry build-essential libgpgme-dev libossp-uuid-dev \
-    # jupyterlab-slurm main is the current JupyterLab 4 implementation but its
-    # stale @jupyterlab/builder declaration selects the retired 4.0 builder.
-    # Pin the source and make the upstream-recommended package rename before
-    # building so the extension uses the current Jupyter Builder toolchain.
     && retry git clone https://github.com/NERSC/jupyterlab-slurm.git /tmp/jupyterlab-slurm \
     && git -C /tmp/jupyterlab-slurm checkout --detach "${JUPYTERLAB_SLURM_REF}" \
     && test "$(git -C /tmp/jupyterlab-slurm rev-parse HEAD)" = "${JUPYTERLAB_SLURM_REF}" \
-    && test "$(jq -r '.devDependencies["@jupyterlab/builder"]' /tmp/jupyterlab-slurm/package.json)" = "^4.0.0" \
-    && jq --arg version "^${JUPYTER_BUILDER_VERSION}" \
-        'del(.devDependencies["@jupyterlab/builder"]) | .devDependencies["@jupyter/builder"] = $version' \
-        /tmp/jupyterlab-slurm/package.json > /tmp/jupyterlab-slurm/package.json.patched \
-    && mv /tmp/jupyterlab-slurm/package.json.patched /tmp/jupyterlab-slurm/package.json \
+    && test "$(jq -r '.devDependencies["@jupyter/builder"]' /tmp/jupyterlab-slurm/package.json)" = "^${JUPYTER_BUILDER_VERSION}" \
     && chown -R ${NB_UID}:${NB_GID} /tmp/jupyterlab-slurm \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --build-constraint /tmp/build-constraints.txt --upgrade \
     datalad \
@@ -616,7 +608,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     nbdev \
     nf-core \
     snakemake==${SNAKEMAKE_VERSION} \
-    pydra==1.0a10 \
+    pydra==1.0a11 \
     nipoppy \
     matplotlib \
     datalad-container \
@@ -646,7 +638,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     # below verifies its seams against every bump and fails loudly on a fix.
     jupyter-server-documents==0.3.3 \
     jupyter-server-mcp==0.3.0 \
-    jupyterlab-chat==0.25.0 \
+    jupyterlab-chat==0.25.1 \
     jupyterlab-commands-toolkit==0.2.0 \
     jupyterlab-notebook-awareness==0.2.0 \
     # Stay on the JupyterLab 4 collaboration line. Its published frontends
@@ -683,7 +675,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     "packaging==25.0" \
     "requests>=2.34.2" \
     "chardet<8" \
-    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade "litellm>=1.100.1" \
+    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade "litellm>=1.102.0" \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/python -m bash_kernel.install --sys-prefix \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
     && rm -rf "/opt/conda/share/jupyter/labextensions/@jupyterlab/mathjax3-extension" \
@@ -798,7 +790,7 @@ RUN --mount=type=bind,source=config/jupyter/notebook-intelligence-5.3.1.yarn.loc
 # MyST 2.7.0 uses pnpm. Its published metadata requests @jupyter/ydoc 3.x,
 # while JupyterLab 4.6 provides 4.x, so compile against an exact current YDoc
 # and retain that exact version in both the manifest and lockfile.
-ARG MYST_PNPM_VERSION="11.26.0"
+ARG MYST_PNPM_VERSION="11.27.0"
 ARG MYST_YDOC_VERSION="4.1.1"
 RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
     && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \

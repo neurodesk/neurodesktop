@@ -64,21 +64,18 @@ mounted into the pip layer because that layer must replace the installed 5 MB
 bundle before it is committed. Applying the patch in the later local-file band
 would leave the unused package copy in image history.
 
-The pip layer also builds `jupyterlab-slurm` from an exact source revision.
-That source still names the retired `@jupyterlab/builder` package, so the build
-asserts the old declaration and replaces it with the current
-`@jupyter/builder` package before producing the wheel. The assertion turns an
-upstream fix or dependency change into an explicit image-build failure instead
-of silently carrying the workaround forward.
+The pip layer also builds `jupyterlab-slurm` 4.1.0 from an exact source
+revision. Upstream now uses `@jupyter/builder` directly. The build checks its
+declared builder range against the image's builder pin before producing the
+wheel; the previous package-rename workaround is no longer needed.
 
 Both Jupyter source builds use [build constraints](../../config/jupyter/build-constraints.txt)
-for the isolated Python build environment. Hatchling 1.32.1 cannot import
-hatch-jupyter-builder 0.9.1; the constraints retain a tested compatible pair.
-The launcher also declares that pair in its own build metadata so a checkout
-build has the same protection. Use pip's `--build-constraint`, not `-c`:
-ordinary runtime constraints do not constrain isolated build dependencies.
-Retire these pins only after fresh isolated wheel builds pass for both
-`jupyterlab-slurm` and `neurodesk-launcher`.
+for the isolated Python build environment. The toolchain pins Hatchling 1.32.3
+and hatch-jupyter-builder 0.10.0. The launcher also declares that pair in its
+own build metadata. Use pip's `--build-constraint`, not `-c`: ordinary runtime
+constraints do not constrain isolated build dependencies. Changes to these
+pins require fresh isolated wheel builds for both `jupyterlab-slurm` and
+`neurodesk-launcher`.
 
 ## Image Size Hygiene
 

@@ -253,7 +253,7 @@ pins in the [`Dockerfile`](../Dockerfile) at the time this page was last
 reviewed; the Dockerfile itself is authoritative.
 
 - `OPENCODE_VERSION`: the OpenCode release installed into
-  the image; defaults to the pin in the Dockerfile (currently
+  the image; defaults to the validated pin in the Dockerfile (currently
   `1.18.31`). Override to bump the pin, or set it to an empty value to
   install the latest release
 - `CLAUDE_CODE_VERSION`: exact Claude Code native release installed as the
@@ -295,7 +295,9 @@ reviewed; the Dockerfile itself is authoritative.
 - `CODEX_CLI_VERSION`: the `@openai/codex` CLI release
   installed globally; defaults to `0.155.1`. Upgrades must pass the real T3 and
   ACP initialization probes. This release exceeds the pinned ACP adapter's
-  declared dependency range, so that combination needs explicit validation.
+  declared `^0.154.0` dependency range. The image deliberately uses its
+  global CLI after removing the adapter's bundled executable; installed-image
+  ACP and T3 initialization probes must validate this exception.
   A user can install a newer release with `codex update`
 - `T3_CLOUDFLARED_VERSION`: the relay client release bundled for guided T3 Connect
   linking; defaults to `2026.9.1` and uses T3's supported executable override. Update
@@ -315,11 +317,11 @@ reviewed; the Dockerfile itself is authoritative.
   `3bf11cb7b271b554998105a11e6c9b8c3e376615`
 - `MYST_PNPM_VERSION`, `MYST_YDOC_VERSION`: pnpm and Jupyter
   YDoc releases used for the MyST/RISE compatibility rebuild; defaults to
-  `11.26.0` and `4.1.1`
+  `11.27.0` and `4.1.1`
 - `APPTAINER_VERSION`, `APPTAINER_GO_VERSION`, `APPTAINER_GRPC_VERSION`,
   `APPTAINER_CRYPTO_VERSION`: Apptainer source release and the Go
   toolchain/grpc/crypto module versions used in its dedicated build stage;
-  defaults to `1.5.3`, `1.27.1`, `1.83.2`, and `0.57.0`. The crypto override
+  defaults to `1.5.3`, `1.27.1`, `1.84.0`, and `0.57.0`. The crypto override
   also updates the separately vendored gocryptfs build.
 - `BASE_IMAGE_TAG`: tag of the upstream Jupyter Docker base image; defaults to
   the multi-architecture `2026-09-18` release
@@ -328,7 +330,7 @@ reviewed; the Dockerfile itself is authoritative.
 - `JUPYTER_BUILDER_VERSION`, `JUPYTERLAB_SLURM_REF`: current Jupyter Builder
   release and exact `jupyterlab-slurm` source revision used to build its
   JupyterLab 4 extension; defaults to `1.2.3` and
-  `c34354f0aaa1b12f6243224bed631cf07c858409`
+  `8dccb39808f8a1b77712a9a5773a7d2601a56683`
 - `GUACAMOLE_VERSION`, `TOMCAT_REL`, `TOMCAT_VERSION`,
   `TOMCAT_MIGRATION_VERSION`: Guacamole release (`1.6.0`) and the Tomcat
   major/exact/migration-tool versions serving it (`11`, `11.0.26`, `1.0.12`)

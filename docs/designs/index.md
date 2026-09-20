@@ -17,6 +17,7 @@ current behavior see [Architecture](../architecture.md),
 
 | Record | Status | What it decided |
 | --- | --- | --- |
+| [Image dependency audit, 20 September 2026](image-dependency-audit-2026-09-20.md) | assessment | Live release results, update candidates, dependency conflicts, and coverage limits |
 | [Image security audit](image-security-audit.md) | assessed | Identify credential, shared-host isolation, privilege, and release-gating improvements |
 | [Image packaging and Lightcone environment audit](image-packaging-and-lightcone.md) | implemented | Remove payloads before layer commits, update selected releases, and test whether Lightcone can share the main dependency set |
 | [Image dependency upgrade audit](image-dependency-upgrade.md) | implemented | Derive current image pins from the root Dockerfile, keep only authority and compatibility policy in the catalog, and report upstream and compatible releases separately |

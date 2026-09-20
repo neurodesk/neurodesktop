@@ -64,6 +64,8 @@
   one More webapps link to `https://webapps.neurodesk.org/` for external apps;
   do not restore individual legacy hosted-app links. Exclude dicompare and
   QSMbly from local launchers, since they are maintained externally.
+  Keep More webapps last and use its rendered icon for the Webapps heading;
+  cover launcher re-renders with DOM regression tests.
 
 - Startup changes must preserve workspace quarantine, default restoration and
   ownership repair, and interactive NBI refresh. Keep boot-time NBI setup free
