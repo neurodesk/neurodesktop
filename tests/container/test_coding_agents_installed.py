@@ -41,6 +41,7 @@ def test_coding_agent_wrapper_is_installed_and_on_path(command, installed_path):
 
 def test_codex_acp_initializes_with_image_codex(tmp_path):
     """Exercise the real adapter against the image CLI, not its bundled version."""
+    (tmp_path / "codex").mkdir(mode=0o700)
     async def probe():
         process = await asyncio.create_subprocess_exec(
             "codex-acp", env={**os.environ, "HOME": str(tmp_path),
