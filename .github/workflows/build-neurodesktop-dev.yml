@@ -32,7 +32,16 @@ env:
   DOCKERHUB_ORG: ${{ vars.DOCKERHUB_ORG }}
 
 jobs:
+  prepare-build:
+    runs-on: ubuntu-24.04
+    outputs:
+      build_date: ${{ steps.metadata.outputs.build_date }}
+    steps:
+      - name: Choose build timestamp
+        id: metadata
+        run: echo "build_date=$(date -u +%Y-%m-%d-%H%M)" >> "$GITHUB_OUTPUT"
   build-image:
+    needs: prepare-build
     runs-on: ${{ matrix.platform.runs_on }}
     strategy:
       fail-fast: false
@@ -73,7 +82,7 @@ jobs:
       - name: Set environment variables
         run: |
           IMAGENAME="neurodesktop-dev"
-          BUILDDATE=$(date +%Y-%m-%d-%H%M)
+          BUILDDATE="${{ needs.prepare-build.outputs.build_date }}"
           IMAGEID="ghcr.io/${GITHUB_REPOSITORY}/${IMAGENAME}"
           IMAGEID=$(echo "$IMAGEID" | tr '[:upper:]' '[:lower:]')
 
@@ -129,13 +138,13 @@ jobs:
           cache-from: type=registry,ref=${{ env.IMAGEID }}:latest
           cache-to: type=inline
   merge-manifests:
-    needs: [build-image, test-image, scan-image]
+    needs: [prepare-build, build-image, test-image, scan-image]
     runs-on: ubuntu-24.04
     steps:
       - name: Set environment variables
         run: |
           IMAGENAME="neurodesktop-dev"
-          BUILDDATE=$(date +%Y-%m-%d-%H%M)
+          BUILDDATE="${{ needs.prepare-build.outputs.build_date }}"
           IMAGEID="ghcr.io/${GITHUB_REPOSITORY}/${IMAGENAME}"
           IMAGEID=$(echo "$IMAGEID" | tr '[:upper:]' '[:lower:]')
 

@@ -85,7 +85,9 @@ passes does `merge-manifests` promote the architecture, date, and `latest` tags
 and copy them to configured registries. Failed candidates remain available for
 diagnosis under their run tags; they do not replace release tags.
 
-All checkouts use the run's source SHA. Scheduled runs build that revision even
+The preparation job chooses one UTC build timestamp for both architectures and
+publication, so date tags match the version baked into the image even across
+midnight. All checkouts use the run's source SHA. Scheduled runs build that revision even
 when today's date tag exists, using the registry build cache. Development
 builds remain manual. When retrying an image release, rerun **all jobs** so the
 new attempt builds the candidate tags its validation jobs expect.

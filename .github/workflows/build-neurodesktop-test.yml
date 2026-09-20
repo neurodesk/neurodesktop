@@ -35,7 +35,16 @@ env:
   # MAKEFLAGS: "-j4"
   # NINJA_STATUS: "[%f/%t] "
 jobs:
+  prepare-build:
+    runs-on: ubuntu-24.04
+    outputs:
+      build_date: ${{ steps.metadata.outputs.build_date }}
+    steps:
+      - name: Choose build timestamp
+        id: metadata
+        run: echo "build_date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
   build-image:
+    needs: prepare-build
     runs-on: ${{ matrix.platform.runs_on }}
     strategy:
       fail-fast: false
@@ -69,7 +78,7 @@ jobs:
       - name: Set environment variables
         run: |
           IMAGENAME="neurodesktop-test"
-          BUILDDATE=$(date +%Y-%m-%d)
+          BUILDDATE="${{ needs.prepare-build.outputs.build_date }}"
           # GHCR path = owner + image name (e.g. ghcr.io/neurodesk/neurodesktop-test),
           # matching the clean Quay/DockerHub style. Previously this used
           # $GITHUB_REPOSITORY (org/repo), which doubled the name to
@@ -211,13 +220,13 @@ jobs:
           cat /proc/net/dev
           echo "::endgroup::"
   merge-manifests:
-    needs: [build-image, test-image, scan-image]
+    needs: [prepare-build, build-image, test-image, scan-image]
     runs-on: neurodesk-syd-arcrunner-neurodesktop
     steps:
       - name: Set environment variables
         run: |
           IMAGENAME="neurodesktop-test"
-          BUILDDATE=$(date +%Y-%m-%d)
+          BUILDDATE="${{ needs.prepare-build.outputs.build_date }}"
           # GHCR path = owner + image name (e.g. ghcr.io/neurodesk/neurodesktop-test),
           # matching the clean Quay/DockerHub style. Previously this used
           # $GITHUB_REPOSITORY (org/repo), which doubled the name to

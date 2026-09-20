@@ -172,7 +172,7 @@ def test_release_tags_wait_for_validation_of_run_specific_candidates():
         workflow = yaml.safe_load(path.read_text())
         jobs = workflow['jobs']
         publish = jobs['merge-manifests']
-        assert set(publish['needs']) == {'build-image', 'test-image', 'scan-image'}
+        assert set(publish['needs']) == {'prepare-build', 'build-image', 'test-image', 'scan-image'}
         assert 'if' not in publish  # Default success() must reject failed or skipped checks.
         build = next(s for s in jobs['build-image']['steps']
                      if s.get('uses', '').startswith('docker/build-push-action@'))
@@ -206,3 +206,17 @@ def test_image_cleanup_is_installed_before_each_runtime_profile_starts():
         for command in tests:
             assert command.splitlines()[0] == "source .github/scripts/image_test_cleanup.sh"
             assert "test_rc=$?" not in command
+
+
+def test_image_version_and_publish_tag_share_one_build_timestamp():
+    for path in IMAGE_TEST_WORKFLOWS:
+        jobs = yaml.safe_load(path.read_text())["jobs"]
+        prepare = jobs["prepare-build"]
+        assert prepare["outputs"]["build_date"] == "${{ steps.metadata.outputs.build_date }}"
+        for job_id in ("build-image", "merge-manifests"):
+            needs = jobs[job_id]["needs"]
+            assert "prepare-build" in ([needs] if isinstance(needs, str) else needs)
+            script = next(step["run"] for step in jobs[job_id]["steps"]
+                          if step.get("name") == "Set environment variables")
+            assert 'BUILDDATE="${{ needs.prepare-build.outputs.build_date }}"' in script
+            assert "$(date" not in script
