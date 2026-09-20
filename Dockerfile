@@ -975,13 +975,13 @@ RUN set -eu; \
 # manifest pins `t3`, `t3` pins each `@t3code/t3-<platform>` build, and each
 # build carries its dependencies inside its own tarball. The executable links
 # against libatomic, which the checks below prove is present.
-# Match T3's supported relay client. Verify both architecture downloads before
+# Use a patched relay client through T3's executable override. Verify downloads before
 # installing; keeping it on PATH avoids per-user downloads and install prompts.
-ARG T3_CLOUDFLARED_VERSION="2026.5.2"
+ARG T3_CLOUDFLARED_VERSION="2026.9.1"
 RUN set -eu; \
     case "$(dpkg --print-architecture)" in \
-      amd64) relay_arch=amd64; relay_sha=5286698547f03df745adb2355f04c12dde52ef425491e81f433642d695521886 ;; \
-      arm64) relay_arch=arm64; relay_sha=5a4e8ce2701105271412059f44b6a0bf1ae4542b4d98ff3180c0c019443a5815 ;; \
+      amd64) relay_arch=amd64; relay_sha=03f1f25d1cc93b9ad6c60569d44060bc4f17ed97075760ed8cfca4b12dcd68cc ;; \
+      arm64) relay_arch=arm64; relay_sha=3d97437c71848bd8df68041e12436b484a661d95073ea1937f01a845ce88faa3 ;; \
       *) exit 1 ;; \
     esac; \
     curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 300 \

@@ -210,7 +210,9 @@ T3 desktop app. This grants that account remote access to the environment.
 
 The extension runs `t3 connect link --headless` as the notebook user. A pinned,
 checksum-verified relay client is installed in the image, so users do not need
-a terminal or a download prompt. The panel waits for authorization, waits for
+a terminal or a download prompt. The supervisor sets `T3CODE_CLOUDFLARED_PATH`
+to `/usr/local/bin/cloudflared` so older per-user cached clients cannot override
+the security-maintained image copy. The panel waits for authorization, waits for
 active chats to finish before restarting only T3, then checks that the public
 tunnel reaches T3. Routing can take several minutes. Only a successful live
 probe is shown as **Ready**. Select the displayed environment in the desktop

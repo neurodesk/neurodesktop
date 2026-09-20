@@ -29,7 +29,7 @@ def test_t3_code_runtime_and_native_terminal_support_are_installed():
     assert shutil.which("codex")
     assert shutil.which("claude")
     assert shutil.which("opencode")
-    assert "2026.5.2" in subprocess.check_output(["cloudflared", "--version"], text=True)
+    assert "2026.9.1" in subprocess.check_output(["cloudflared", "--version"], text=True)
 
     build = platform_package()
     machine = {"x86_64": "x64", "aarch64": "arm64"}[os.uname().machine]
@@ -175,3 +175,24 @@ def test_guided_setup_mints_a_pairing_link_from_the_installed_cli(tmp_path):
         capture_output=True, text=True, timeout=60, check=True,
     )
     assert any(entry["label"] == "Desktop app" for entry in json.loads(listed.stdout))
+
+
+def test_t3_connect_uses_image_relay_instead_of_cached_download(tmp_path):
+    from neurodesk_t3_code import supervisor
+    from types import SimpleNamespace
+
+    base = tmp_path / ".t3"
+    machine = {"x86_64": "x64", "aarch64": "arm64"}[os.uname().machine]
+    cached = base / "tools/cloudflared/2026.5.2" / f"linux-{machine}" / "cloudflared"
+    cached.parent.mkdir(parents=True)
+    cached.write_text("#!/bin/sh\nexit 99\n")
+    cached.chmod(0o755)
+    policy = SimpleNamespace(home=tmp_path, base_dir=base, host="127.0.0.1", port=3773,
+                             provider_bin=Path("/opt/neurodesktop/t3-provider-bin"))
+    environment = supervisor.server_environment(policy, os.environ)
+    result = subprocess.run(["t3", "connect", "status", "--json", "--base-dir", str(base)],
+                            env=environment, capture_output=True, text=True, check=True, timeout=30)
+    relay = json.loads(result.stdout)["relayClient"]
+    assert relay["source"] == "override"
+    assert relay["executablePath"] == "/usr/local/bin/cloudflared"
+    assert relay["status"] == "available"
