@@ -90,3 +90,8 @@
 - T3 startup error reporting must allowlist safe fields and discard raw child
   output. Cover quota detection through the real subprocess boundary and reset
   stale errors on restart; do not infer a quota from the environment count.
+
+- Embedded T3 chat file links must use Jupyter's default document handler for
+  paths inside the server root. Preserve iframe reload/disposal cleanup and
+  leave external links, downloads, and modified clicks alone. Cover routing
+  with DOM tests that prevent T3's own preview handler from running.
