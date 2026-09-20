@@ -1,4 +1,5 @@
 import json
+import ast
 
 from testlib import load_source_module, resolve_source
 
@@ -9,6 +10,47 @@ def _load_generate_jupyter_config_module():
         "/opt/neurodesktop/scripts/generate_jupyter_config.py",
         "scripts/generate_jupyter_config.py",
     )
+
+
+def test_startup_webapps_keep_local_launchers_and_one_catalog_link():
+    generator = _load_generate_jupyter_config_module()
+    overlay = json.loads(resolve_source(
+        "/tmp/jupyter/webapp_links.json",
+        "config/jupyter/webapp_links.json",
+    ).read_text())
+    local_apps = {
+        name: {"startup_command": f"{name} start", "port": 3000}
+        for name in ("rstudio", "ezbids", "jamovi", "openrefine", "dicompare", "qsmbly")
+    }
+    merged = generator.merge_webapp_configs({"webapps": local_apps}, overlay)
+    entries = ast.literal_eval(
+        "{" + generator.generate_server_proxy_entries(merged["webapps"]) + "}"
+    )
+
+    retained_apps = set(local_apps) - {"dicompare", "qsmbly"}
+    assert set(entries) == retained_apps | {"more-webapps"}
+    assert set(merged["webapps"]) == set(entries)
+    for name in retained_apps:
+        config = local_apps[name]
+        assert merged["webapps"][name]["startup_command"] == config["startup_command"]
+        assert entries[name]["command"] == ["/opt/neurodesktop/webapp_launcher.sh", name]
+        assert "url" not in entries[name]["launcher_entry"]
+
+    catalog = entries["more-webapps"]
+    assert catalog["launcher_entry"]["title"] == "More webapps"
+    assert catalog["launcher_entry"]["url"] == "https://webapps.neurodesk.org/"
+    assert catalog["launcher_entry"]["category"] == "Webapps"
+    assert catalog["new_browser_tab"] is True
+    assert entries["jamovi"]["timeout"] == 300
+
+
+def test_overlay_removal_handles_missing_apps_without_mutating_source():
+    generator = _load_generate_jupyter_config_module()
+    base = {"webapps": {"dicompare": {"startup_command": "dicompare start"}}}
+    overlay = {"webapps": {"dicompare": None, "qsmbly": None}}
+
+    assert generator.merge_webapp_configs(base, overlay) == {"webapps": {}}
+    assert base["webapps"]["dicompare"]["startup_command"] == "dicompare start"
 
 
 def test_generate_config_writes_merged_webapp_config_for_wrapper(tmp_path):

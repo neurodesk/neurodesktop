@@ -46,3 +46,8 @@
 
 - T3 relay DNS fallback must remain limited to credential-free HTTPS session
   probes on `*.t3coderelay.com`, use public addresses, and retain TLS validation.
+
+- Keep container-backed apps in the Jupyter startup page Webapps section. Use
+  one More webapps link to `https://webapps.neurodesk.org/` for external apps;
+  do not restore individual legacy hosted-app links. Exclude dicompare and
+  QSMbly from local launchers, since they are maintained externally.

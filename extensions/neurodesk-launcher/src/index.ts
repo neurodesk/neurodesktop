@@ -518,12 +518,13 @@ const plugin: JupyterFrontEndPlugin<void> = {
       return;
     }
 
-    // Fetch the Neurodesk icon for use as category header icon.
+    // Use the catalog tile's icon for the Webapps heading. The legacy
+    // neurodesktop entry may be hidden and absent from servers-info.
     // Construct URL directly (like infoUrl) to avoid base-path issues on JupyterHub.
     const serverProcesses = data.server_processes || [];
-    const ndProcess = serverProcesses.find(
-      sp => sp.name === 'neurodesktop'
-    );
+    const ndProcess =
+      serverProcesses.find(sp => sp.name === 'more-webapps') ||
+      serverProcesses.find(sp => sp.name === 'neurodesktop');
     const neuroIconPromise = ndProcess
       ? fetchCachedIconSvgText(
           ndProcess.name,
@@ -590,7 +591,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
       launcher.add({
         command: commandId,
         category: category,
-        rank: 0
+        // Keep the external catalog after the local application tiles.
+        rank: name === 'more-webapps' ? 1 : 0
       });
     }
 
