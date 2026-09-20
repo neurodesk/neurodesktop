@@ -1474,6 +1474,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/jupyter/start_notebook.sh /usr/local/bin/start-notebook.d/start_notebook.sh \
     && install -m 0755 /tmp/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/before_notebook.sh \
     && install -m 0755 /tmp/jupyter/jupyterlab_startup.sh /opt/neurodesktop/jupyterlab_startup.sh \
+    && install -m 0644 /tmp/jupyter/wait_for_jupyter.py /opt/neurodesktop/wait_for_jupyter.py \
     && install -m 0755 /tmp/jupyter/deferred_startup.sh /opt/neurodesktop/deferred_startup.sh \
     && install -m 0755 /tmp/jupyter/print_access_url.sh /opt/neurodesktop/print_access_url.sh \
     && install -m 0755 /tmp/jupyter/cvmfs_server_select.sh /opt/neurodesktop/cvmfs_server_select.sh \

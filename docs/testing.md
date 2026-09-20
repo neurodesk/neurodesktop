@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-09-19"
+last-reviewed: "2026-09-20"
 ---
 
 # Testing
@@ -483,3 +483,19 @@ After `hpc` or `hpctest`, tear everything down with:
 docker rm -f neurodesktop-hpc   # or neurodesktop-hpctest
 rm -rf /tmp/neurodesktop-hpc-home.* /tmp/neurodesktop-hpc-passwd.* /tmp/neurodesktop-hpc-group.*
 ```
+
+## Startup performance regressions
+
+Run the startup checks on a checkout:
+
+```bash
+pytest tests/unit/test_startup_batching.py tests/unit/test_wait_for_jupyter.py tests/unit/test_nbi_opencode_sync.py tests/unit/test_startup_performance_fixes.py
+```
+
+These tests cover workspace quarantine in a single Python invocation, default
+restoration and ownership repair, SSH permission inheritance, NBI boot setup
+without live refresh, custom Jupyter ports and base paths, and independent
+CVMFS and Slurm execution. HTTP checks use temporary localhost servers.
+See the [startup flow](architecture.md#container-initialization-flow) for
+runtime behavior. Built-image service checks remain in
+`tests/container/test_startup_modes.py`.
