@@ -92,6 +92,31 @@ class ConnectManager:
         self.last_checked = 0
         self.task = None
         self.lock = asyncio.Lock()
+        self._name_pending = False
+
+    async def configure_name(self, host):
+        from .naming import environment_label, remember_public_host
+        environ = self.service.environ
+        before = environment_label(self.service.policy, environ)
+        remember_public_host(self.service.policy, environ, host)
+        self._name_pending |= before != environment_label(self.service.policy, environ)
+        async with self.lock:
+            if self._name_pending and (not self.task or self.task.done()) and not self.active_chats():
+                await self._restart()
+
+    async def _restart(self):
+        async def restart():
+            await self.service.close()
+            self.service.start()
+            await self.service.wait_ready()
+        restarting = asyncio.create_task(restart())
+        try:
+            await asyncio.shield(restarting)
+        except asyncio.CancelledError:
+            # A cancelled browser request must not strand the sidecar stopped.
+            await restarting
+            raise
+        self._name_pending = False
 
     def snapshot(self):
         return dict(state=self.state, message=self.message, code=self.code,
@@ -222,6 +247,16 @@ class ConnectManager:
         self.set_state('connecting', 'Starting the connection. This can take a few minutes.')
         dns_failed = False
         while asyncio.get_running_loop().time() < deadline:
+            limit = getattr(self.service, 'connect_tunnel_limit', None)
+            if limit is not None:
+                raise ConnectError(
+                    f'This T3 account has reached its limit of {limit} managed tunnels. '
+                    'Disconnect an unused environment from T3 Connect, or ask T3 support '
+                    'to increase the account limit, then choose Retry. '
+                    'Your sign-in is saved; signing in again will not free a tunnel.'
+                )
+            if self._name_pending and not self.active_chats():
+                await self._restart()
             dns_failed = False
             try:
                 if await self.reachable():
@@ -248,7 +283,7 @@ class ConnectManager:
         saved = await self.saved_status()
         if not saved.get('desired') or not saved.get('authenticated'):
             raise ConnectError('Authorization did not complete. Please retry.')
-        if not saved.get('linked'):
+        if not saved.get('linked') or self._name_pending:
             self.set_state('waiting_idle', 'Authorization saved. Waiting for active chats to finish before restarting T3.')
             deadline = time.monotonic() + 1800
             while self.active_chats():
@@ -256,17 +291,7 @@ class ConnectManager:
                     raise ConnectError('T3 is still busy, or its chat status is unavailable. Finish active chats and choose Retry.')
                 await asyncio.sleep(3)
             self.set_state('restarting', 'Restarting T3 to activate your link. Jupyter stays open.')
-            async def restart():
-                await self.service.close()
-                self.service.start()
-                await self.service.wait_ready()
-            restarting = asyncio.create_task(restart())
-            try:
-                await asyncio.shield(restarting)
-            except asyncio.CancelledError:
-                # Cancelling setup must not strand the user's T3 service stopped.
-                await restarting
-                raise
+            await self._restart()
         await self._wait_reachable()
 
     async def restore(self):

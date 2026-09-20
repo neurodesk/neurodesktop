@@ -26,17 +26,8 @@ _phase_end()   { local elapsed=$(( $(date +%s%3N) - _PHASE_T0 )); echo "[TIMING]
 
 # ── Wait for Jupyter ─────────────────────────────────────────────────────────
 _phase_start "wait-for-jupyter"
-MAX_WAIT=120
-WAITED=0
-while [ $WAITED -lt $MAX_WAIT ]; do
-    if ss -tln 2>/dev/null | grep -q ':8888 '; then
-        break
-    fi
-    sleep 1
-    WAITED=$((WAITED + 1))
-done
-if [ $WAITED -ge $MAX_WAIT ]; then
-    echo "[deferred] Jupyter did not become available within ${MAX_WAIT}s. Proceeding anyway."
+if ! python3 /opt/neurodesktop/wait_for_jupyter.py; then
+    echo "[deferred] Jupyter did not become available within 120s. Proceeding anyway."
 fi
 _phase_end "wait-for-jupyter"
 
@@ -185,7 +176,11 @@ start_slurm() {
 
 # ── Run deferred components ──────────────────────────────────────────────────
 echo "[deferred] Starting deferred initialization..."
-start_cvmfs
-start_slurm
+start_cvmfs &
+cvmfs_pid=$!
+start_slurm &
+slurm_pid=$!
+wait "$cvmfs_pid"
+wait "$slurm_pid"
 echo "[deferred] Deferred initialization complete."
 touch "$DEFERRED_DONE"

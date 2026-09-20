@@ -13,6 +13,11 @@
 
 set -u
 
+case "${1:-}" in
+    ""|--no-refresh) ;;
+    *) echo "Usage: nbi_setup.sh [--no-refresh]" >&2; exit 2 ;;
+esac
+
 NBI_CONFIG_FILE="${HOME}/.jupyter/nbi/config.json"
 NBI_DEFAULT_CONFIG="/opt/jovyan_defaults/.jupyter/nbi/config.json"
 NBI_MCP_FILE="${HOME}/.jupyter/nbi/mcp.json"
@@ -447,9 +452,9 @@ fi
 # GET /notebook-intelligence/capabilities reloads the config and rebuilds the
 # model objects server-side without writing anything back, and when the
 # brain-researcher MCP entry changed, POST /notebook-intelligence/
-# reload-mcp-servers makes the MCP connections follow too. Best-effort: at
-# container boot no server is up yet and stale jpserver-*.json files from
-# earlier sessions point at dead hosts, so failures are silently ignored.
+# reload-mcp-servers makes the MCP connections follow too. Boot passes
+# --no-refresh because the new server will read the generated files itself.
+# Interactive refresh tolerates stale runtime files and unreachable servers.
 refresh_running_nbi() {
     if ! command -v python3 >/dev/null 2>&1; then
         return 0
@@ -528,4 +533,6 @@ if refreshed:
 PY
 }
 
-refresh_running_nbi
+if [ "${1:-}" != "--no-refresh" ]; then
+    refresh_running_nbi
+fi

@@ -85,33 +85,35 @@ PY
 
 sanitize_jupyterlab_workspaces() {
     local workspace_dir="${HOME}/.jupyter/lab/workspaces"
-    local workspace_file
-    local backup_file
+    [ -d "${workspace_dir}" ] || return 0
 
-    if [ ! -d "${workspace_dir}" ]; then
-        return
-    fi
-
-    while IFS= read -r -d '' workspace_file; do
-        if python3 - "${workspace_file}" <<'PY' >/dev/null 2>&1
+    python3 - "${workspace_dir}" <<'PYTHON'
 import json
+import os
+from pathlib import Path
+import stat
 import sys
+import time
 
-with open(sys.argv[1], "r", encoding="utf-8") as workspace_fp:
-    json.load(workspace_fp)
-PY
-        then
+suffix = f".invalid-{time.strftime('%Y%m%d%H%M%S')}-{os.getpid()}"
+for workspace in Path(sys.argv[1]).glob("*.jupyterlab-workspace"):
+    try:
+        if not stat.S_ISREG(workspace.lstat().st_mode):
             continue
-        fi
-
-        backup_file="${workspace_file}.invalid-$(date +%Y%m%d%H%M%S)-$$"
-        if mv "${workspace_file}" "${backup_file}" 2>/dev/null; then
-            echo "[WARN] Invalid JupyterLab workspace JSON detected. Moved ${workspace_file} to ${backup_file}."
-        else
-            rm -f "${workspace_file}" 2>/dev/null || true
-            echo "[WARN] Invalid JupyterLab workspace JSON detected. Removed ${workspace_file}."
-        fi
-    done < <(find "${workspace_dir}" -maxdepth 1 -type f -name '*.jupyterlab-workspace' -print0 2>/dev/null)
+        with workspace.open(encoding="utf-8") as stream:
+            json.load(stream)
+    except (ValueError, OSError, RecursionError):
+        backup = workspace.with_name(workspace.name + suffix)
+        try:
+            workspace.rename(backup)
+            print(f"[WARN] Invalid JupyterLab workspace JSON detected. Moved {workspace} to {backup}.")
+        except OSError:
+            try:
+                workspace.unlink(missing_ok=True)
+                print(f"[WARN] Invalid JupyterLab workspace JSON detected. Removed {workspace}.")
+            except OSError:
+                print(f"[WARN] Unable to quarantine invalid JupyterLab workspace {workspace}.")
+PYTHON
 }
 
 sanitize_jupyterlab_workspaces
@@ -137,11 +139,6 @@ ensure_jupyterlab_page_config() {
 
 ensure_jupyterlab_page_config
 
-# SSH key generation, guacamole mapping injection, and SSH/SFTP daemon startup
-# are handled on-demand by guacamole.sh when the desktop is opened.
-mkdir -p "${HOME}/.ssh"
-chmod 700 "${HOME}/.ssh"
-
 # Fix jupyter-sshd-proxy host key permissions (generated on first use without explicit chmod)
 if [ -f "${HOME}/.ssh/jupyter_sshd_hostkey" ]; then
     chmod 600 "${HOME}/.ssh/jupyter_sshd_hostkey"
@@ -149,8 +146,6 @@ fi
 if [ -f "${HOME}/.ssh/jupyter_sshd_hostkey.pub" ]; then
     chmod 644 "${HOME}/.ssh/jupyter_sshd_hostkey.pub"
 fi
-# Default ACLs ensure future keys created in .ssh get owner-only permissions
-setfacl -dRm u::rw,g::0,o::0 "${HOME}/.ssh" 2>/dev/null || true
 
 # Pre-generate the SSH keypairs guacamole.sh needs for the SFTP side-channel
 # so the first desktop open does not pay two RSA-4096 generations (~3s).
@@ -257,7 +252,7 @@ mkdir -p ${HOME}/.config/opencode
 # OpenCode (~/.config/opencode/opencode.json) and inject NEURODESK_API_KEY
 # from env or ~/.bashrc if available.
 if [ -x /opt/neurodesktop/nbi_setup.sh ]; then
-    /opt/neurodesktop/nbi_setup.sh || \
+    /opt/neurodesktop/nbi_setup.sh --no-refresh || \
         echo "[WARN] nbi_setup.sh failed; Notebook Intelligence may require manual configuration."
 fi
 
