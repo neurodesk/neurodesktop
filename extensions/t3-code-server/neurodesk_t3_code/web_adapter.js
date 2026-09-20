@@ -48,7 +48,7 @@
         const replacement = document.createElement('button');
         replacement.dataset.neurodeskConnect = 'guided';
         replacement.className = button.className;
-        replacement.textContent = 'Connect to my desktop';
+        replacement.textContent = 'Setup T3 connect';
         replacement.onclick = () => window.parent.postMessage({ type: 'neurodesk-t3-connect' }, location.origin);
         button.after(replacement);
       }

@@ -19,7 +19,7 @@ export function createConnectPanel(app: JupyterFrontEnd): MainAreaWidget<Widget>
   const node = document.createElement('div');
   node.style.cssText = 'padding:28px;max-width:640px;overflow:auto;color:var(--jp-ui-font-color1)';
   const heading = document.createElement('h1');
-  heading.textContent = 'Connect to my desktop';
+  heading.textContent = 'Setup T3 connect';
   const intro = document.createElement('p');
   intro.textContent = 'Optional: use this Neurodesktop environment from your T3 desktop app. You can use agents in Jupyter without linking. Approving the link gives your T3 account remote access to this environment.';
   const status = document.createElement('p');
@@ -41,7 +41,7 @@ export function createConnectPanel(app: JupyterFrontEnd): MainAreaWidget<Widget>
   const content = new Widget({ node });
   const panel = new MainAreaWidget({ content });
   panel.id = 'neurodesk-t3-connect';
-  panel.title.label = 'Connect to my desktop';
+  panel.title.label = 'Setup T3 connect';
   panel.title.closable = true;
   const settings = ServerConnection.makeSettings();
   const url = URLExt.join(settings.baseUrl, 'neurodesk-t3', '_connect');
@@ -49,7 +49,7 @@ export function createConnectPanel(app: JupyterFrontEnd): MainAreaWidget<Widget>
   let requestPending = false;
   let current: Status | undefined;
   const buttons = new Map<string, HTMLButtonElement>();
-  for (const [action, title] of [['link', 'Connect to my desktop'], ['retry', 'Retry'], ['cancel', 'Cancel setup'], ['disconnect', 'Disconnect']]) {
+  for (const [action, title] of [['link', 'Setup T3 connect'], ['retry', 'Retry'], ['cancel', 'Cancel setup'], ['disconnect', 'Disconnect']]) {
     const button = document.createElement('button');
     button.className = 'jp-mod-styled';
     button.textContent = title;

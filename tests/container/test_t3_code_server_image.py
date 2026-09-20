@@ -12,6 +12,8 @@ import socket
 import subprocess
 import time
 
+import pytest
+
 from testlib import load_source_module
 
 
@@ -62,7 +64,8 @@ def test_t3_code_image_ships_one_platform_build_and_no_build_leftovers():
     assert os.access("/opt/neurodesktop/t3-provider-bin/opencode", os.X_OK)
 
 
-def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path):
+@pytest.mark.parametrize("legacy_default", [False, True])
+def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_default):
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
@@ -87,9 +90,16 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path):
     )
     from neurodesk_t3_code import supervisor
     from types import SimpleNamespace
+    settings_path = tmp_path / ".t3/userdata/settings.json"
+    if legacy_default:
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"providers": {"codex": {
+            "binaryPath": "/opt/neurodesktop/t3-provider-bin/codex"}}}))
     supervisor.seed_provider_settings(SimpleNamespace(
         base_dir=tmp_path / ".t3", provider_bin=Path("/opt/neurodesktop/t3-provider-bin")
     ))
+    assert json.loads(settings_path.read_text())["providerInstances"]["codex"] == {
+        "driver": "codex", "config": {"binaryPath": "/opt/neurodesktop/t3-provider-bin/codex"}}
     process = subprocess.Popen(
         [
             "t3",

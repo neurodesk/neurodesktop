@@ -38,4 +38,5 @@
   transient and OAuth credentials out of browser responses/logs, and distinguish
   a saved link from a reachable tunnel. Cover cancellation, active-chat restart
   protection, expired authorization, and delayed relay routing. T3 provider tests
-  must exercise the initialization probe with the image-owned provider path.
+  must exercise the initialization probe with the image-owned provider path
+  for both fresh modern defaults and migration of the exact legacy default.
