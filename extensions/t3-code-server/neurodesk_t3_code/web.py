@@ -73,6 +73,9 @@ class T3SessionHandler(APIHandler):
         service = self.t3_app._supervisor
         if service is None or service.state is not ServiceState.READY:
             raise web.HTTPError(503, reason="T3 Code is starting. Wait a moment and reopen it.")
+        manager = getattr(self.t3_app, '_connect', None)
+        if manager is not None:
+            await manager.configure_name(self.request.host)
         host = service.policy.readiness_host
         authority = f"[{host}]" if ":" in host else host
         origin = f"http://{authority}:{service.policy.port}"

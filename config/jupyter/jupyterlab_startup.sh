@@ -85,33 +85,35 @@ PY
 
 sanitize_jupyterlab_workspaces() {
     local workspace_dir="${HOME}/.jupyter/lab/workspaces"
-    local workspace_file
-    local backup_file
+    [ -d "${workspace_dir}" ] || return 0
 
-    if [ ! -d "${workspace_dir}" ]; then
-        return
-    fi
-
-    while IFS= read -r -d '' workspace_file; do
-        if python3 - "${workspace_file}" <<'PY' >/dev/null 2>&1
+    python3 - "${workspace_dir}" <<'PYTHON'
 import json
+import os
+from pathlib import Path
+import stat
 import sys
+import time
 
-with open(sys.argv[1], "r", encoding="utf-8") as workspace_fp:
-    json.load(workspace_fp)
-PY
-        then
+suffix = f".invalid-{time.strftime('%Y%m%d%H%M%S')}-{os.getpid()}"
+for workspace in Path(sys.argv[1]).glob("*.jupyterlab-workspace"):
+    try:
+        if not stat.S_ISREG(workspace.lstat().st_mode):
             continue
-        fi
-
-        backup_file="${workspace_file}.invalid-$(date +%Y%m%d%H%M%S)-$$"
-        if mv "${workspace_file}" "${backup_file}" 2>/dev/null; then
-            echo "[WARN] Invalid JupyterLab workspace JSON detected. Moved ${workspace_file} to ${backup_file}."
-        else
-            rm -f "${workspace_file}" 2>/dev/null || true
-            echo "[WARN] Invalid JupyterLab workspace JSON detected. Removed ${workspace_file}."
-        fi
-    done < <(find "${workspace_dir}" -maxdepth 1 -type f -name '*.jupyterlab-workspace' -print0 2>/dev/null)
+        with workspace.open(encoding="utf-8") as stream:
+            json.load(stream)
+    except (ValueError, OSError, RecursionError):
+        backup = workspace.with_name(workspace.name + suffix)
+        try:
+            workspace.rename(backup)
+            print(f"[WARN] Invalid JupyterLab workspace JSON detected. Moved {workspace} to {backup}.")
+        except OSError:
+            try:
+                workspace.unlink(missing_ok=True)
+                print(f"[WARN] Invalid JupyterLab workspace JSON detected. Removed {workspace}.")
+            except OSError:
+                print(f"[WARN] Unable to quarantine invalid JupyterLab workspace {workspace}.")
+PYTHON
 }
 
 sanitize_jupyterlab_workspaces
@@ -137,11 +139,6 @@ ensure_jupyterlab_page_config() {
 
 ensure_jupyterlab_page_config
 
-# SSH key generation, guacamole mapping injection, and SSH/SFTP daemon startup
-# are handled on-demand by guacamole.sh when the desktop is opened.
-mkdir -p "${HOME}/.ssh"
-chmod 700 "${HOME}/.ssh"
-
 # Fix jupyter-sshd-proxy host key permissions (generated on first use without explicit chmod)
 if [ -f "${HOME}/.ssh/jupyter_sshd_hostkey" ]; then
     chmod 600 "${HOME}/.ssh/jupyter_sshd_hostkey"
@@ -149,8 +146,6 @@ fi
 if [ -f "${HOME}/.ssh/jupyter_sshd_hostkey.pub" ]; then
     chmod 644 "${HOME}/.ssh/jupyter_sshd_hostkey.pub"
 fi
-# Default ACLs ensure future keys created in .ssh get owner-only permissions
-setfacl -dRm u::rw,g::0,o::0 "${HOME}/.ssh" 2>/dev/null || true
 
 # Pre-generate the SSH keypairs guacamole.sh needs for the SFTP side-channel
 # so the first desktop open does not pay two RSA-4096 generations (~3s).
@@ -192,56 +187,13 @@ else
         mkdir -p "${NEURODESKTOP_HOME_STORAGE}/containers"
     fi
 
-    if [ ! -L "${NEURODESKTOP_ROOT_STORAGE}" ] && sudo -n true 2>/dev/null; then
-        if [ -d "${NEURODESKTOP_ROOT_STORAGE}" ]; then
-            nested_link="${NEURODESKTOP_ROOT_STORAGE}/neurodesktop-storage"
-            nested_target=$(sudo readlink "${nested_link}" 2>/dev/null || true)
+    # Root startup links /neurodesktop-storage to this home when it is unmounted.
 
-            # Repair previous broken state: /neurodesktop-storage/neurodesktop-storage -> $HOME/neurodesktop-storage
-            if [ -L "${nested_link}" ] \
-                && [ -z "$(sudo find "${NEURODESKTOP_ROOT_STORAGE}" -mindepth 1 -maxdepth 1 ! -name neurodesktop-storage -print -quit 2>/dev/null)" ] \
-                && { [ "${nested_target}" = "${NEURODESKTOP_HOME_STORAGE}/" ] || [ "${nested_target}" = "${NEURODESKTOP_HOME_STORAGE}" ]; }; then
-                sudo rm -f "${nested_link}"
-            fi
-
-            if [ -z "$(sudo find "${NEURODESKTOP_ROOT_STORAGE}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
-                sudo rmdir "${NEURODESKTOP_ROOT_STORAGE}" \
-                    && sudo ln -s "${NEURODESKTOP_HOME_STORAGE}/" "${NEURODESKTOP_ROOT_STORAGE}"
-            else
-                echo "[WARN] ${NEURODESKTOP_ROOT_STORAGE} exists as non-empty directory; leaving it unchanged."
-            fi
-        elif [ ! -e "${NEURODESKTOP_ROOT_STORAGE}" ]; then
-            sudo ln -s "${NEURODESKTOP_HOME_STORAGE}/" "${NEURODESKTOP_ROOT_STORAGE}"
-        else
-            echo "[WARN] ${NEURODESKTOP_ROOT_STORAGE} exists and is not a symlink; leaving it unchanged."
-        fi
-    fi
 fi
 
 # Create a symlink to the neurodesktop-storage directory if it doesn't exist yet:
 if [ ! -L "/neurocommand/local/containers" ]; then
   ln -s "${NEURODESKTOP_LOCAL_CONTAINERS:-/neurodesktop-storage/containers}" "/neurocommand/local/containers"
-fi
-
-# Create a cpuinfo file with a valid CPU MHz entry for ARM CPUs.
-echo "[INFO] Checking for ARM CPU and adding a CPU Mhz entry in /proc/cpuinfo to work around a bug in Matlab that expects this value to be present."
-if ! grep -iq 'cpu.*hz' /proc/cpuinfo; then
-    mkdir -p "${HOME}/.local"
-    cpuinfo_file="${HOME}/.local/cpuinfo_with_ARM_MHz_fix"
-    cp /proc/cpuinfo "${cpuinfo_file}"
-    chmod u+rw "${cpuinfo_file}"
-    sed -i '/^$/c\cpu MHz         : 2245.778\n' "${cpuinfo_file}"
-    # add vendor and model name as well:
-    sed -i '/^$/c\vendor_id       : ARM\nmodel name      : Apple-M\n' "${cpuinfo_file}"
-    if sudo -n true 2>/dev/null; then
-        if sudo mount --bind "${cpuinfo_file}" /proc/cpuinfo >/dev/null 2>&1; then
-            echo "[INFO] Added CPU Mhz entry in /proc/cpuinfo to work around a bug in Matlab that expects this value to be present."
-        else
-            echo "[WARN] Unable to bind-mount ${cpuinfo_file} over /proc/cpuinfo in this runtime. Continuing without the Matlab CPU Mhz workaround."
-        fi
-    else
-        echo "[WARN] Passwordless sudo is unavailable; skipping the Matlab CPU Mhz workaround."
-    fi
 fi
 
 # ensure overlay directory exists
@@ -257,7 +209,7 @@ mkdir -p ${HOME}/.config/opencode
 # OpenCode (~/.config/opencode/opencode.json) and inject NEURODESK_API_KEY
 # from env or ~/.bashrc if available.
 if [ -x /opt/neurodesktop/nbi_setup.sh ]; then
-    /opt/neurodesktop/nbi_setup.sh || \
+    /opt/neurodesktop/nbi_setup.sh --no-refresh || \
         echo "[WARN] nbi_setup.sh failed; Notebook Intelligence may require manual configuration."
 fi
 

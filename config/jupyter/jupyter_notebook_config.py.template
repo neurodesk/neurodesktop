@@ -99,11 +99,14 @@ c.ServerProxy.servers = {
       'none',
       '--disable-telemetry',
       '--disable-update-check',
-      '--bind-addr',
-      '127.0.0.1:{port}',
+      '--socket',
+      '{unix_socket}',
+      '--socket-mode',
+      '0600',
       home_dir
     ],
     'timeout': 60,
+    'unix_socket': True,
     'new_browser_tab': True,
     'launcher_entry': {
       'path_info': 'vscode',

@@ -12,6 +12,11 @@
   image. Keep `/opt/tests` readable by the unprivileged `jovyan` test user even
   when the checkout has a restrictive umask. Resolve a test's subject through
   the helpers in `tests/testlib.py`.
+- Test behavior by executing the subject and checking its result. Use source
+  assertions for packaging contracts; use valid inputs and verified prerequisites
+  for negative tests. Required services and directories must fail when absent,
+  and skip only when the selected profile explicitly disables them. See
+  [testing](docs/testing.md) for workflow fixtures and runtime checks.
 - The docs are a hierarchical wiki rooted at [`docs/index.md`](docs/index.md):
   every page carries YAML frontmatter (`title`, `description`, `parent`,
   `status`, `last-reviewed`) and cross-references relatives with markdown
@@ -44,6 +49,14 @@
 - Coding-agent CLI upgrades must pass the installed-image T3 and ACP initialization
   probes; check adapter dependency ranges and record any deliberate exception.
 
+- Preserve the package-only sudo default and private VS Code socket. For startup
+  privilege or desktop credential changes, follow
+  [the security contract](docs/architecture/desktop.md#credentials-and-service-access)
+  and run `tests/unit/test_startup_security.py` plus the installed-image checks
+  in `tests/container/test_security_policy.py`. Keep root initialization outside
+  the notebook user's sudo allowlist. Provider credential injection must validate
+  the exact HTTPS authority, including during endpoint changes.
+
 - T3 relay DNS fallback must remain limited to credential-free HTTPS session
   probes on `*.t3coderelay.com`, use public addresses, and retain TLS validation.
 
@@ -51,3 +64,17 @@
   one More webapps link to `https://webapps.neurodesk.org/` for external apps;
   do not restore individual legacy hosted-app links. Exclude dicompare and
   QSMbly from local launchers, since they are maintained externally.
+
+- Startup changes must preserve workspace quarantine, default restoration and
+  ownership repair, and interactive NBI refresh. Keep boot-time NBI setup free
+  of live-server probes. Deferred CVMFS and Slurm run independently after the
+  actual Jupyter endpoint answers; cover custom ports and base paths with the
+  [startup regression tests](docs/testing.md#startup-performance-regressions).
+
+- T3 environment naming must preserve environment IDs, credentials and custom
+  aliases. Learn public hostnames only from configured public URLs or an
+  authenticated, XSRF-protected request; never restart an active chat to rename.
+
+- T3 startup error reporting must allowlist safe fields and discard raw child
+  output. Cover quota detection through the real subprocess boundary and reset
+  stale errors on restart; do not infer a quota from the environment count.

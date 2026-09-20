@@ -1,12 +1,14 @@
+from pathlib import Path
 import subprocess
 import signal
 import pytest
 import os
 import tempfile
+import shutil
 
 _ENV_PREAMBLE = (
-    "source /opt/neurodesktop/environment_variables.sh 2>/dev/null; "
-    "source /usr/share/lmod/lmod/init/bash 2>/dev/null; "
+    "source /opt/neurodesktop/environment_variables.sh && "
+    "source /usr/share/lmod/lmod/init/bash && "
 )
 
 def run_cmd(cmd, timeout=180):
@@ -29,7 +31,7 @@ def _fsl_available():
     try:
         code, _ = run_cmd(
             _ENV_PREAMBLE +
-            "module load fsl 2>/dev/null; command -v fslmaths",
+            "module load fsl && command -v fslmaths",
             timeout=120,
         )
         return code == 0
@@ -43,8 +45,9 @@ def test_snakemake_version():
     assert code == 0, f"Snakemake version check failed: {output}"
     assert output and len(output.split(".")) >= 2, f"Unexpected Snakemake output: {output}"
 
-def test_snakemake_fslmaths():
+def test_snakemake_fslmaths(tmp_path, image_math_case):
     """Verify snakemake can run a workflow using fslmaths."""
+    source, check_output = image_math_case
     cvmfs_disable = os.environ.get("CVMFS_DISABLE", "false").lower()
     if cvmfs_disable in ["true", "1"]:
         pytest.skip("CVMFS is disabled (CVMFS_DISABLE=true)")
@@ -59,28 +62,32 @@ rule all:
         "output.nii.gz"
 
 rule run_fslmaths:
+    input:
+        "input.nii.gz"
     output:
         "output.nii.gz"
     shell:
         \"\"\"
-        set +euo pipefail
-        source /opt/neurodesktop/environment_variables.sh 2>/dev/null || true
-        source /usr/share/lmod/lmod/init/bash 2>/dev/null || true
-        module load fsl 2>&1 || true
+        set +u
+        set -eo pipefail
+        source /opt/neurodesktop/environment_variables.sh
+        source /usr/share/lmod/lmod/init/bash
+        module load fsl
         if ! command -v fslmaths >/dev/null 2>&1; then
             echo "fslmaths not found in PATH"
             echo "MODULEPATH=$MODULEPATH"
             exit 1
         fi
-        touch {output}
+        fslmaths {input:q} -mul 2 {output:q}
         \"\"\"
 """
+        shutil.copyfile(source, os.path.join(tmpdir, "input.nii.gz"))
         snakefile_path = os.path.join(tmpdir, "Snakefile")
         with open(snakefile_path, "w") as f:
             f.write(snakefile_content)
 
         cmd = f"cd {tmpdir} && snakemake --cores 1"
-        code, output = run_cmd(cmd)
+        code, output = run_cmd(cmd, timeout=600)
 
         assert code == 0, f"Snakemake FSLMaths workflow failed: {output}"
-        assert os.path.exists(os.path.join(tmpdir, "output.nii.gz")), "Snakemake did not produce expected output"
+        check_output(Path(tmpdir) / "output.nii.gz")

@@ -44,7 +44,7 @@ sync_file_from_defaults() {
     local dest_dir
     local action
 
-    dest_dir=$(dirname "$dest")
+    dest_dir="${dest%/*}"
 
     # Create parent directory if needed
     if [ ! -d "$dest_dir" ]; then
@@ -146,13 +146,14 @@ create_directories() {
         fi
     done
 
-    # Set specific permissions for matplotlib dir
-    chmod -R 700 "${HOME_DIR}/.config/matplotlib-mpldir" 2>/dev/null || true
+    # Restrict access at the cache root without walking its generated contents.
+    chmod 700 "${HOME_DIR}/.config/matplotlib-mpldir" 2>/dev/null || true
 }
 
 # Setup SSH directory with proper permissions and ACLs
 setup_ssh_directory() {
     local ssh_dir="${HOME_DIR}/.ssh"
+    mkdir -p "$ssh_dir"
     if [ -d "$ssh_dir" ]; then
         chmod 700 "$ssh_dir"
         # Set default ACLs for new files in .ssh directory
@@ -184,6 +185,7 @@ restore_defaults() {
     # Check if defaults directory exists
     if [ ! -d "$DEFAULTS_DIR" ]; then
         log_info "Defaults directory not found: $DEFAULTS_DIR"
+        setup_ssh_directory
         return 1
     fi
 

@@ -1006,7 +1006,7 @@ RUN --mount=type=bind,source=config/agents/t3-code/package.json,target=/tmp/t3-c
     find /opt/t3-code -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete; \
     test "$(/opt/t3-code/node_modules/.bin/t3 --version)" = "t3 v${T3_CODE_VERSION}"; \
     install -m 0755 /tmp/t3-provider-bin/codex /tmp/t3-provider-bin/claude \
-        /tmp/t3-provider-bin/opencode /opt/neurodesktop/t3-provider-bin/; \
+        /tmp/t3-provider-bin/opencode /tmp/t3-provider-bin/hostnamectl /opt/neurodesktop/t3-provider-bin/; \
     ln -s /opt/t3-code/node_modules/.bin/t3 /usr/local/bin/t3; \
     chown -R root:users /opt/t3-code /opt/neurodesktop/t3-provider-bin; \
     chmod -R a+rX /opt/t3-code /opt/neurodesktop/t3-provider-bin; \
@@ -1165,7 +1165,7 @@ RUN --mount=type=bind,source=config/guacamole,target=/tmp/guacamole,ro \
     && chmod -R a+rX /etc/guacamole
 
 # Configure NB_USER account defaults and JupyterLab settings
-RUN /usr/bin/printf '%s\n%s\n' 'password' 'password' | passwd ${NB_USER} \
+RUN passwd --lock ${NB_USER} \
     && usermod --shell /bin/bash ${NB_USER} \
     && sed -i 's/c.FileContentsManager.delete_to_trash = False/c.FileContentsManager.always_delete_dir = True/g' /etc/jupyter/jupyter_server_config.py \
     && printf '\n# Detect dead WebSocket clients quickly (tab closed/network gone)\nc.ServerApp.websocket_ping_interval = 30\nc.ServerApp.websocket_ping_timeout = 60\n' >> /etc/jupyter/jupyter_server_config.py
@@ -1274,6 +1274,7 @@ RUN --mount=type=bind,source=config/itksnap/UserPreferences.xml,target=/tmp/itks
     --mount=type=bind,source=config/agents/nbi_mcp.json,target=/tmp/agents/nbi_mcp.json,ro \
     --mount=type=bind,source=config/agents/nbi_tour_config.json,target=/tmp/agents/nbi_tour_config.json,ro \
     --mount=type=bind,source=config/agents/nbi_setup.sh,target=/tmp/agents/nbi_setup.sh,ro \
+    --mount=type=bind,source=config/agents/provider_security.py,target=/tmp/agents/provider_security.py,ro \
     --mount=type=bind,source=config/ssh/sshd_config,target=/tmp/sshd_config,ro \
     --mount=type=bind,source=config/jupyter/page_config.json,target=/tmp/page_config.json,ro \
     mkdir -p /opt/jovyan_defaults/.itksnap.org/ITK-SNAP \
@@ -1312,6 +1313,7 @@ RUN --mount=type=bind,source=config/itksnap/UserPreferences.xml,target=/tmp/itks
     && install -m 0644 /tmp/agents/nbi_mcp.json /opt/jovyan_defaults/.jupyter/nbi/mcp.json \
     && install -m 0644 /tmp/agents/nbi_tour_config.json /opt/jovyan_defaults/.jupyter/nbi/tour_config.json \
     && install -m 0755 /tmp/agents/nbi_setup.sh /opt/neurodesktop/nbi_setup.sh \
+    && install -m 0644 /tmp/agents/provider_security.py /opt/neurodesktop/provider_security.py \
     && install -m 0644 /tmp/lxde/.bashrc /opt/jovyan_defaults/.bashrc_append \
     && /usr/bin/printf '%s\n%s\n%s\n' 'password' 'password' 'n' | vncpasswd /opt/jovyan_defaults/.vnc/passwd \
     && chown root:users /opt/jovyan_defaults/.vnc/passwd \
@@ -1465,7 +1467,14 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && mkdir -p /usr/local/bin/start-notebook.d /usr/local/bin/before-notebook.d /opt/neurodesktop/scripts /opt/neurodesktop/webapp_wrapper \
     && install -m 0755 /tmp/jupyter/start_notebook.sh /usr/local/bin/start-notebook.d/start_notebook.sh \
     && install -m 0755 /tmp/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/before_notebook.sh \
+    && install -m 0755 /tmp/jupyter/startup_security.py /opt/neurodesktop/startup_security.py \
+    && install -m 0755 /tmp/jupyter/prepare_cpuinfo.sh /opt/neurodesktop/prepare_cpuinfo.sh \
+    && install -m 0755 /tmp/jupyter/neurodesktop_apt.py /usr/local/bin/apt \
+    && ln -sf apt /usr/local/bin/apt-get \
+    && install -d -m 0700 /var/lib/neurodesktop/rdp \
+    && install -d -m 0755 /run/neurodesktop/rdp \
     && install -m 0755 /tmp/jupyter/jupyterlab_startup.sh /opt/neurodesktop/jupyterlab_startup.sh \
+    && install -m 0644 /tmp/jupyter/wait_for_jupyter.py /opt/neurodesktop/wait_for_jupyter.py \
     && install -m 0755 /tmp/jupyter/deferred_startup.sh /opt/neurodesktop/deferred_startup.sh \
     && install -m 0755 /tmp/jupyter/print_access_url.sh /opt/neurodesktop/print_access_url.sh \
     && install -m 0755 /tmp/jupyter/cvmfs_server_select.sh /opt/neurodesktop/cvmfs_server_select.sh \

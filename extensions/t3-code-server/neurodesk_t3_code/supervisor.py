@@ -15,6 +15,7 @@ import json
 import tempfile
 import logging
 import os
+import re
 from pathlib import Path
 import signal
 import socket
@@ -24,6 +25,15 @@ from typing import Mapping
 DEFAULT_EXECUTABLE = Path("/opt/t3-code/node_modules/.bin/t3")
 DEFAULT_PROVIDER_BIN = Path("/opt/neurodesktop/t3-provider-bin")
 DEFAULT_PORT = 3773
+
+
+def relay_tunnel_limit(output: bytes) -> int | None:
+    """Extract only the quota from the pinned relay's public error message."""
+    match = re.search(
+        rb'Relay managed tunnel limit reached: this account allows at most ([0-9]{1,6}) tunnels',
+        output,
+    )
+    return int(match[1]) if match else None
 
 
 class ConfigError(ValueError):
@@ -242,6 +252,8 @@ def server_environment(
             "T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD": "false",
         }
     )
+    from .naming import environment_label
+    child['NEURODESKTOP_T3_CODE_LABEL'] = environment_label(policy, environ)
     return child
 
 
@@ -275,6 +287,26 @@ class T3Supervisor:
         self._process: asyncio.subprocess.Process | None = None
         self._task: asyncio.Task[None] | None = None
         self._ready = asyncio.Event()
+        self.connect_tunnel_limit: int | None = None
+        self._output_reader: asyncio.Task | None = None
+
+    async def _read_output(self, stream) -> None:
+        # Drain continuously so a noisy child cannot block. Raw output is never
+        # persisted or logged; retain only a bounded overlap for split messages.
+        overlap = b''
+        while chunk := await stream.read(4096):
+            output = overlap + chunk
+            limit = relay_tunnel_limit(output)
+            if limit is not None:
+                self.connect_tunnel_limit = limit
+            overlap = output[-256:]
+
+    async def _stop_output_reader(self) -> None:
+        if self._output_reader is not None:
+            self._output_reader.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._output_reader
+            self._output_reader = None
 
     def start(self) -> None:
         """Start ownership once; repeated calls keep the existing task."""
@@ -315,13 +347,14 @@ class T3Supervisor:
                 try:
                     seed_provider_settings(self.policy)
                     disable_update_notifications(self.policy)
+                    self.connect_tunnel_limit = None
                     self._process = await asyncio.create_subprocess_exec(
                         *server_command(self.policy),
                         env=server_environment(self.policy, self.environ),
                         cwd=self.policy.workdir,
                         stdin=asyncio.subprocess.DEVNULL,
-                        stdout=asyncio.subprocess.DEVNULL,
-                        stderr=asyncio.subprocess.DEVNULL,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.STDOUT,
                         start_new_session=True,
                     )
                 except OSError as error:
@@ -334,6 +367,7 @@ class T3Supervisor:
                         self.state = ServiceState.BACKING_OFF
                         await asyncio.sleep(min(2 ** (failures - 1), 8))
                     continue
+                self._output_reader = asyncio.create_task(self._read_output(self._process.stdout))
                 self.pid = self._process.pid
                 if await self._wait_for_listener():
                     self.state = ServiceState.READY
@@ -345,6 +379,7 @@ class T3Supervisor:
                         self.pid,
                     )
                     await self._process.wait()
+                await self._stop_output_reader()
                 failures += 1
                 self.pid = None
                 self._process = None
@@ -360,6 +395,7 @@ class T3Supervisor:
             )
         finally:
             await self._terminate_process()
+            await self._stop_output_reader()
             if self.state is not ServiceState.PARKED:
                 self.state = ServiceState.STOPPED
 

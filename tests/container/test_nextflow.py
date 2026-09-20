@@ -4,8 +4,8 @@ import os
 import pytest
 
 _ENV_PREAMBLE = (
-    "source /opt/neurodesktop/environment_variables.sh 2>/dev/null; "
-    "source /usr/share/lmod/lmod/init/bash 2>/dev/null; "
+    "source /opt/neurodesktop/environment_variables.sh && "
+    "source /usr/share/lmod/lmod/init/bash && "
 )
 
 def run_cmd(cmd, timeout=180):
@@ -28,7 +28,7 @@ def _fsl_available():
     try:
         code, _ = run_cmd(
             _ENV_PREAMBLE +
-            "module load fsl 2>/dev/null; command -v fslmaths",
+            "module load fsl && command -v fslmaths",
             timeout=120,
         )
         return code == 0
@@ -62,8 +62,9 @@ def test_nf_neuro_modules():
     assert is_valid, f"nf-neuro modules checkout not found at {modules_dir}"
 
 
-def test_nextflow_fslmaths(tmp_path):
+def test_nextflow_fslmaths(tmp_path, image_math_case):
     """Verify nextflow can run a minimal workflow using fslmaths."""
+    source, check_output = image_math_case
     cvmfs_disable = os.environ.get("CVMFS_DISABLE", "false").lower()
     if cvmfs_disable in ["true", "1"]:
         pytest.skip("CVMFS is disabled (CVMFS_DISABLE=true)")
@@ -74,35 +75,38 @@ def test_nextflow_fslmaths(tmp_path):
     workflow = """
 process RUN_FSLMATHS {
     publishDir 'results', mode: 'copy'
+    input:
+    path 'input.nii.gz'
     output:
     path 'output.nii.gz'
     script:
     '''
-    set +euo pipefail
-    source /opt/neurodesktop/environment_variables.sh 2>/dev/null || true
-    source /usr/share/lmod/lmod/init/bash 2>/dev/null || true
-    module load fsl 2>&1 || true
+    set +u
+    set -eo pipefail
+    source /opt/neurodesktop/environment_variables.sh
+    source /usr/share/lmod/lmod/init/bash
+    module load fsl
     if ! command -v fslmaths >/dev/null 2>&1; then
         echo "fslmaths not found in PATH"
         echo "MODULEPATH=$MODULEPATH"
         exit 1
     fi
-    touch output.nii.gz
+    fslmaths input.nii.gz -mul 2 output.nii.gz
     '''
 }
 
 workflow {
-    RUN_FSLMATHS()
+    RUN_FSLMATHS(file(params.input))
 }
 """
     workflow_file = tmp_path / "main.nf"
     workflow_file.write_text(workflow)
 
-    cmd = f"cd {tmp_path} && nextflow run main.nf -ansi-log false"
-    code, output = run_cmd(cmd)
+    cmd = f"cd {tmp_path} && nextflow run main.nf -ansi-log false --input '{source}'"
+    code, output = run_cmd(cmd, timeout=600)
 
     assert code == 0, f"Nextflow FSLMaths workflow failed: {output}"
-    assert (tmp_path / "results" / "output.nii.gz").exists(), "Nextflow did not produce expected output"
+    check_output(tmp_path / "results" / "output.nii.gz")
 
 
 def test_nextflow_nonexistent_module_fails(tmp_path):
@@ -113,6 +117,10 @@ def test_nextflow_nonexistent_module_fails(tmp_path):
     if not os.path.isdir("/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules"):
         pytest.fail("CVMFS is enabled but neurodesk-modules not mounted")
 
+    assert _fsl_available(), "Working Lmod/FSL prerequisites required"
+    code, output = run_cmd("nextflow -version")
+    assert code == 0, output
+
     workflow = """
 process RUN_FSLMATHS {
     publishDir 'results', mode: 'copy'
@@ -120,10 +128,16 @@ process RUN_FSLMATHS {
     path 'output.nii.gz'
     script:
     '''
-    source /opt/neurodesktop/environment_variables.sh 2>/dev/null
-    source /usr/share/lmod/lmod/init/bash 2>/dev/null
-    module load funny-name-tool
-    touch output.nii.gz
+    set +u
+    set -eo pipefail
+    source /opt/neurodesktop/environment_variables.sh
+    source /usr/share/lmod/lmod/init/bash
+    if module load funny-name-tool; then
+        touch output.nii.gz
+    else
+        echo EXPECTED_MISSING_MODULE:funny-name-tool >&2
+        exit 42
+    fi
     '''
 }
 
@@ -140,6 +154,9 @@ workflow {
     assert code != 0, (
         f"Workflow should have failed with non-existent module but succeeded: {output}"
     )
+    task_errors = list(tmp_path.glob("work/*/*/.command.err"))
+    assert len(task_errors) == 1, output
+    assert "EXPECTED_MISSING_MODULE:funny-name-tool" in task_errors[0].read_text(), output
     assert not (tmp_path / "results" / "output.nii.gz").exists(), (
         "Output should not exist when module load fails"
     )

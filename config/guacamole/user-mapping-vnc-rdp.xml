@@ -4,7 +4,7 @@
             <protocol>rdp</protocol>
             <param name="hostname">localhost</param>
             <param name="username">jovyan</param>
-            <param name="password">password</param>
+            <param name="password"></param>
             <param name="port">3389</param>
             <param name="security">rdp</param>
             <param name="ignore-cert">true</param>
