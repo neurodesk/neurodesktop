@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-09-16"
+last-reviewed: "2026-09-20"
 ---
 
 # Environment Variables
@@ -220,7 +220,7 @@ reviewed; the Dockerfile itself is authoritative.
 
 - `OPENCODE_VERSION`: the OpenCode release installed into
   the image; defaults to the validated pin in the Dockerfile (currently
-  `1.18.30`). Override to bump the pin, or set it to an empty value to
+  `1.18.31`). Override to bump the pin, or set it to an empty value to
   install the latest release
 - `CLAUDE_CODE_VERSION`: exact Claude Code native release installed as the
   image fallback; defaults to `2.1.278`. The direct-version audit compares the
@@ -237,10 +237,10 @@ reviewed; the Dockerfile itself is authoritative.
 - `UV_VERSION`, `ASTRA_TOOLS_VERSION`, `ASTRA_SPEC_VERSION`,
   `ANYWIDGET_VERSION`, `LIGHTCONE_CLI_VERSION`, `LIGHTCONE_CLI_SHA256`: exact `uv`,
   ASTRA CLI/schema, viewer runtime, and isolated Lightcone CLI releases
-  installed in the image; defaults to `0.12.12`, `0.2.17`, `0.0.14`, `0.11.0`,
+  installed in the image; defaults to `0.12.17`, `0.2.17`, `0.0.14`, `0.11.0`,
   `0.4.2`, and the verified SHA-256 of that Lightcone source archive
 - `SNAKEMAKE_VERSION`: user-facing Snakemake workflow release; defaults to
-  `9.26.1` in the main and isolated Lightcone environments. Its current
+  `9.27.0` in the main and isolated Lightcone environments. Its current
   metadata requires `packaging<26`, so the image holds that infrastructure
   library at the newest compatible release, `25.0`
 - `AGENT_SKILLS_REF`: exact commit of
@@ -254,14 +254,16 @@ reviewed; the Dockerfile itself is authoritative.
   Collaboration pinned alongside it
 - `CODEX_ACP_VERSION`, `CLAUDE_AGENT_ACP_VERSION`: pinned
   ACP adapters that expose the Codex and Claude personas in Jupyter AI;
-  defaults to `1.11.0` and `0.76.0`. They install without their vendored agent
+  defaults to `1.12.0` and `0.79.0`. They install without their vendored agent
   binaries and drive the selected user or image CLIs through `CODEX_PATH` and
   `CLAUDE_CODE_EXECUTABLE` (runtime variables exported by
   `environment_variables.sh`)
 - `CODEX_CLI_VERSION`: the `@openai/codex` CLI release
   installed globally; defaults to `0.155.1`. Upgrades must pass the real T3 and
   ACP initialization probes. This release exceeds the pinned ACP adapter's
-  declared dependency range, so that combination needs explicit validation.
+  declared `^0.154.0` dependency range. The image deliberately uses its
+  global CLI after removing the adapter's bundled executable; installed-image
+  ACP and T3 initialization probes must validate this exception.
   A user can install a newer release with `codex update`
 - `T3_CLOUDFLARED_VERSION`: the relay client release bundled for guided T3 Connect
   linking; defaults to `2026.9.1` and uses T3's supported executable override. Update
@@ -281,24 +283,24 @@ reviewed; the Dockerfile itself is authoritative.
   `3bf11cb7b271b554998105a11e6c9b8c3e376615`
 - `MYST_PNPM_VERSION`, `MYST_YDOC_VERSION`: pnpm and Jupyter
   YDoc releases used for the MyST/RISE compatibility rebuild; defaults to
-  `11.26.0` and `4.1.1`
+  `11.27.0` and `4.1.1`
 - `APPTAINER_VERSION`, `APPTAINER_GO_VERSION`, `APPTAINER_GRPC_VERSION`,
   `APPTAINER_CRYPTO_VERSION`: Apptainer source release and the Go
   toolchain/grpc/crypto module versions used in its dedicated build stage;
-  defaults to `1.5.3`, `1.27.1`, `1.83.2`, and `0.57.0`. The crypto override
+  defaults to `1.5.3`, `1.27.1`, `1.84.0`, and `0.57.0`. The crypto override
   also updates the separately vendored gocryptfs build.
 - `BASE_IMAGE_TAG`: tag of the upstream Jupyter Docker base image; defaults to
-  the multi-architecture `2026-09-07` release
+  the multi-architecture `2026-09-18` release
 - `NPM_VERSION`: npm release installed with the runtime Node.js distribution;
   defaults to `12.0.2`
 - `JUPYTER_BUILDER_VERSION`, `JUPYTERLAB_SLURM_REF`: current Jupyter Builder
   release and exact `jupyterlab-slurm` source revision used to build its
   JupyterLab 4 extension; defaults to `1.2.3` and
-  `c34354f0aaa1b12f6243224bed631cf07c858409`
+  `8dccb39808f8a1b77712a9a5773a7d2601a56683`
 - `GUACAMOLE_VERSION`, `TOMCAT_REL`, `TOMCAT_VERSION`,
   `TOMCAT_MIGRATION_VERSION`: Guacamole release (`1.6.0`) and the Tomcat
-  major/exact/migration-tool versions serving it (`11`, `11.0.25`, `1.0.12`)
-- `CODE_SERVER_VERSION`: code-server release; defaults to `4.136.2`
+  major/exact/migration-tool versions serving it (`11`, `11.0.26`, `1.0.12`)
+- `CODE_SERVER_VERSION`: code-server release; defaults to `4.138.0`
 - `NEUROCOMMAND_REF`: neurocommand git ref cloned during the build; CI passes
   a resolved `main` SHA so neurocommand changes invalidate the install layer
 - `NODE_TAR_VERSION`: patched `node-tar` version applied to every bundled

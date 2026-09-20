@@ -141,3 +141,25 @@ def _catalog_keys() -> list[str]:
     namespace = {}
     exec(SCRIPT.read_text(encoding="utf-8"), namespace)
     return sorted({entry.key for entry in namespace["CATALOG"]})
+
+
+def test_jupyter_ai_dependencies_keep_compatible_minor_lines(tmp_path):
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text(
+        "RUN pip install jupyter-server-mcp==0.3.0 "
+        "jupyterlab-commands-toolkit==0.2.0\n"
+    )
+    fixtures = tmp_path / "releases.json"
+    fixtures.write_text(json.dumps({
+        "pypi:jupyter-server-mcp": ["0.3.0", "0.4.0"],
+        "pypi:jupyterlab-commands-toolkit": ["0.2.0", "0.3.0"],
+    }))
+
+    completed = run_audit(dockerfile, fixtures)
+
+    assert completed.returncode == 0, completed.stderr
+    rows = {row["key"]: row for row in json.loads(completed.stdout)["dependencies"]}
+    assert rows["pypi:jupyter-server-mcp"]["status"] == "held"
+    assert rows["pypi:jupyter-server-mcp"]["latest_compatible"] == "0.3.0"
+    assert rows["pypi:jupyterlab-commands-toolkit"]["status"] == "held"
+    assert rows["pypi:jupyterlab-commands-toolkit"]["latest_compatible"] == "0.2.0"
