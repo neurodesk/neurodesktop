@@ -46,6 +46,10 @@ JS, CSS, WASM bundles and the manifest when the browser supplies
 Jupyter's XSRF checks. The manifest also uses `crossorigin="use-credentials"`
 so its request carries the Jupyter login cookie. Without this handling, the
 entry module loops through Hub login redirects and T3 stays on its splash screen.
+Bundle names can contain dots before the build hash, such as
+`BranchToolbar.logic-QOG-LgPV.js`; these transitive imports need the same
+handling. The image browser test also runs with Hub's GET XSRF policy to
+exercise the complete startup module graph.
 
 ## Connect through a published Docker port
 
