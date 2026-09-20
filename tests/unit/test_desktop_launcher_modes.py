@@ -135,6 +135,19 @@ def test_jupyter_launcher_exposes_separate_desktop_backends():
     assert "launcher_enabled=False" in config
 
 
+def test_vscode_uses_private_socket_in_shared_network_namespace(tmp_path, monkeypatch):
+    config = _read_first(
+        "/opt/neurodesktop/jupyter_notebook_config.py.template",
+        "config/jupyter/jupyter_notebook_config.py.template",
+    )
+    server = _execute_jupyter_config(config, tmp_path, monkeypatch, apptainer=True, euid=5000)["vscode"]
+    assert server.get("unix_socket") is True
+    command = server["command"]
+    assert command[command.index("--socket") + 1] == "{unix_socket}"
+    assert command[command.index("--socket-mode") + 1] == "0600"
+    assert "--bind-addr" not in command
+
+
 def test_jupyter_launcher_hides_rdp_for_unprivileged_apptainer(tmp_path, monkeypatch):
     config = _read_first(
         "/etc/jupyter/jupyter_notebook_config.py",

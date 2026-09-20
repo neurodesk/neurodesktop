@@ -49,6 +49,14 @@
 - Coding-agent CLI upgrades must pass the installed-image T3 and ACP initialization
   probes; check adapter dependency ranges and record any deliberate exception.
 
+- Preserve the package-only sudo default and private VS Code socket. For startup
+  privilege or desktop credential changes, follow
+  [the security contract](docs/architecture/desktop.md#credentials-and-service-access)
+  and run `tests/unit/test_startup_security.py` plus the installed-image checks
+  in `tests/container/test_security_policy.py`. Keep root initialization outside
+  the notebook user's sudo allowlist. Provider credential injection must validate
+  the exact HTTPS authority, including during endpoint changes.
+
 - T3 relay DNS fallback must remain limited to credential-free HTTPS session
   probes on `*.t3coderelay.com`, use public addresses, and retain TLS validation.
 

@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import threading
+import pytest
 
 from testlib import resolve_source
 
@@ -68,6 +69,9 @@ def make_nbi_setup_sandbox(tmp_path):
     test_script = tmp_path / "nbi_setup_test.sh"
     test_script.write_text(script_contents, encoding="utf-8")
     test_script.chmod(0o755)
+    (tmp_path / "provider_security.py").write_text(resolve_source(
+        "/opt/neurodesktop/provider_security.py", "config/agents/provider_security.py"
+    ).read_text())
 
     return test_script, home_dir
 
@@ -119,6 +123,34 @@ def get_prop(section, prop_id):
     return None
 
 
+@pytest.mark.parametrize("endpoint", [
+    "https://llm.neurodesk.org.attacker.invalid/openai",
+    "https://attacker.invalid/llm.neurodesk.org",
+    "https://llm.neurodesk.org@attacker.invalid/openai",
+    "http://llm.neurodesk.org/openai",
+    "https://llm.neurodesk.org:8443/openai",
+    "https://user@llm.neurodesk.org/openai",
+])
+def test_nbi_does_not_inject_neurodesk_key_into_untrusted_endpoint(tmp_path, endpoint):
+    script, home = make_nbi_setup_sandbox(tmp_path)
+    config_path = home / ".jupyter/nbi/config.json"
+    config_path.parent.mkdir(parents=True)
+    config = json.loads(nbi_default_config_path().read_text())
+    for name in ("chat_model", "inline_completion_model"):
+        for prop in config[name]["properties"]:
+            if prop["id"] == "base_url":
+                prop["value"] = endpoint
+            if prop["id"] == "api_key":
+                prop["value"] = "custom-key"
+    config_path.write_text(json.dumps(config))
+    write_bashrc_api_key(home, "private-neurodesk-key")
+    run_nbi_setup(script, home)
+    result = read_nbi_config(home)
+    for name in ("chat_model", "inline_completion_model"):
+        assert get_prop(result[name], "base_url") == endpoint
+        assert get_prop(result[name], "api_key") == "custom-key"
+
+
 def test_nbi_follows_opencode_jetstream_selection(tmp_path):
     """Selecting a JetStream model in OpenCode retargets both NBI models."""
     test_script, home_dir = make_nbi_setup_sandbox(tmp_path)
@@ -149,6 +181,37 @@ def test_nbi_follows_opencode_neurodesk_selection_with_key(tmp_path):
         assert get_prop(section, "model_id") == "model-alpha"
         assert get_prop(section, "api_key") == "neurodesk-test-key"
         assert get_prop(section, "context_window") == "131000"
+
+
+def test_nbi_provider_change_cannot_carry_neurodesk_key_to_other_host(tmp_path):
+    script, home = make_nbi_setup_sandbox(tmp_path)
+    write_opencode_config(home, "neurodesk/model-alpha")
+    write_bashrc_api_key(home, "private-neurodesk-key")
+    run_nbi_setup(script, home)
+    path = home / ".config/opencode/opencode.json"
+    config = json.loads(path.read_text())
+    config["provider"]["neurodesk"]["options"]["baseURL"] = "https://llm.neurodesk.org.attacker.invalid/openai"
+    path.write_text(json.dumps(config))
+    run_nbi_setup(script, home)
+    for name in ("chat_model", "inline_completion_model"):
+        assert get_prop(read_nbi_config(home)[name], "api_key") == ""
+
+
+@pytest.mark.parametrize("endpoint", ["https://llm.neurodesk.org/openai", "https://LLM.NEURODESK.ORG:443/openai"])
+def test_nbi_accepts_exact_https_authority(tmp_path, endpoint):
+    script, home = make_nbi_setup_sandbox(tmp_path)
+    path = home / ".jupyter/nbi/config.json"
+    path.parent.mkdir(parents=True)
+    config = json.loads(nbi_default_config_path().read_text())
+    for name in ("chat_model", "inline_completion_model"):
+        for prop in config[name]["properties"]:
+            if prop["id"] == "base_url":
+                prop["value"] = endpoint
+    path.write_text(json.dumps(config))
+    write_bashrc_api_key(home, "private-neurodesk-key")
+    run_nbi_setup(script, home)
+    for name in ("chat_model", "inline_completion_model"):
+        assert get_prop(read_nbi_config(home)[name], "api_key") == "private-neurodesk-key"
 
 
 def test_nbi_sync_runs_again_after_key_rotation(tmp_path):

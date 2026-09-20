@@ -350,6 +350,10 @@ jobs:
             cvmfs_disable: "true"
             grant_sudo: "yes"
             needs_cvmfs: false
+          - test_profile: "CVMFS disabled, package-only sudo"
+            cvmfs_disable: "true"
+            grant_sudo: "packages"
+            needs_cvmfs: false
           # HPC Apptainer simulation: no --privileged, no --user=root, no sudo,
           # a non-jovyan user (sciget/5000/5000) whose HOME is bind-mounted over
           # /home/jovyan, and APPTAINER_CONTAINER=1 so is_apptainer_runtime()
@@ -446,6 +450,9 @@ jobs:
             fi
             sleep 2
           done
+          if [ "${{ matrix.profile.grant_sudo }}" = "packages" ]; then
+            docker exec -u root neurodesktop-test pytest /opt/tests/test_security_policy.py -v
+          fi
           docker exec -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 \
             -u jovyan neurodesktop-test pytest /opt/tests/ -v
           docker rm -f neurodesktop-test

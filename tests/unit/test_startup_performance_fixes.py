@@ -18,6 +18,8 @@ import subprocess
 import threading
 import time
 
+import pytest
+
 from testlib import resolve_source
 
 ENSURE_SSH_KEYS = resolve_source(
@@ -27,6 +29,38 @@ BEFORE_NOTEBOOK = resolve_source(
     "/usr/local/bin/before-notebook.d/before_notebook.sh",
     "config/jupyter/before_notebook.sh",
 )
+
+
+@pytest.mark.parametrize("existing_mhz,mount_status", [(True, 0), (False, 0), (False, 1)])
+def test_cpuinfo_workaround_is_root_startup_and_best_effort(tmp_path, existing_mhz, mount_status):
+    script = resolve_source("/opt/neurodesktop/prepare_cpuinfo.sh",
+                            "config/jupyter/prepare_cpuinfo.sh").read_text()
+    cpuinfo = tmp_path / "cpuinfo"
+    contents = "processor : 0\n" + ("cpu MHz : 2000\n" if existing_mhz else "") + "\n"
+    cpuinfo.write_text(contents)
+    runtime = tmp_path / "runtime"
+    mounted = tmp_path / "mounted"
+    mount = tmp_path / "mount"
+    mount.write_text(f'#!/bin/bash\ntest "$1" = --bind || exit 99\n'
+                     f'cp "$2" "{mounted}"\nexit {mount_status}\n')
+    mount.chmod(0o755)
+    script = script.replace("cpuinfo=/proc/cpuinfo", f'cpuinfo="{cpuinfo}"')
+    script = script.replace("runtime=/run/neurodesktop/cpuinfo", f'runtime="{runtime}"')
+    script = script.replace("/usr/bin/mount", str(mount))
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert cpuinfo.read_text() == contents
+    if existing_mhz:
+        assert not runtime.exists()
+        assert not mounted.exists()
+    else:
+        assert "cpu MHz         : 2245.778" in mounted.read_text()
+        assert "processor : 0" in mounted.read_text()
+        assert runtime.stat().st_mode & 0o777 == 0o700
+        assert list(runtime.iterdir()) == []
+        assert ("[WARN]" in result.stderr) == bool(mount_status)
+    startup = BEFORE_NOTEBOOK.read_text()
+    assert 'if [ "$EUID" -eq 0 ]; then\n    /usr/bin/python3 -I /opt/neurodesktop/startup_security.py || exit 1\n    /bin/bash /opt/neurodesktop/prepare_cpuinfo.sh' in startup
 
 
 def run_cmd(cmd, env=None, timeout=180):

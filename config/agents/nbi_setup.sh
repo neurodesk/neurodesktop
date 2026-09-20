@@ -12,6 +12,8 @@
 # selected or a fresh API key is saved, so NBI never lags behind.
 
 set -u
+umask 077
+export PYTHONPATH="$(dirname "${BASH_SOURCE[0]}")${PYTHONPATH:+:${PYTHONPATH}}"
 
 case "${1:-}" in
     ""|--no-refresh) ;;
@@ -172,6 +174,7 @@ if command -v python3 >/dev/null 2>&1 && [ -f "${NBI_DEFAULT_CONFIG}" ]; then
 import json
 import os
 import sys
+from provider_security import is_neurodesk_endpoint
 
 cfg_path = os.environ["NBI_CONFIG_FILE"]
 default_path = os.environ["NBI_DEFAULT_CONFIG"]
@@ -216,7 +219,7 @@ for section in ("chat_model", "inline_completion_model"):
 
     base_url = get_prop(user_section.get("properties"), "base_url")
     # Custom OpenAI-compatible endpoint (e.g. Jetstream) -> hands off.
-    if base_url and "llm.neurodesk.org" not in base_url:
+    if base_url and not is_neurodesk_endpoint(base_url):
         continue
 
     # provider == openai-compatible AND (base_url empty OR points at
@@ -260,6 +263,7 @@ if command -v python3 >/dev/null 2>&1 && [ -f "${OPENCODE_CONFIG_FILE}" ]; then
 import json
 import os
 import sys
+from provider_security import is_neurodesk_endpoint
 
 cfg_path = os.environ["NBI_CONFIG_FILE"]
 opencode_path = os.environ["OPENCODE_CONFIG_FILE"]
@@ -306,7 +310,7 @@ def resolve_api_key(raw):
     if raw.startswith("{env:") and raw.endswith("}"):
         var_name = raw[5:-1]
         if var_name == "NEURODESK_API_KEY":
-            return neurodesk_key
+            return neurodesk_key if is_neurodesk_endpoint(base_url) else ""
         return os.environ.get(var_name, "")
     return raw
 
@@ -372,8 +376,8 @@ for section in ("chat_model", "inline_completion_model"):
         changed = True
     if set_prop(props, "model_id", model_id):
         changed = True
-    # Never wipe an existing key with an empty one (e.g. before first setup).
-    if api_key and set_prop(props, "api_key", api_key):
+    # Preserve a missing key only while staying on the same endpoint.
+    if (api_key or current_url != base_url) and set_prop(props, "api_key", api_key):
         changed = True
     if context_window and set_prop(props, "context_window", context_window):
         changed = True
@@ -399,6 +403,7 @@ python3 - <<'PY'
 import json
 import os
 import sys
+from provider_security import is_neurodesk_endpoint
 
 path = os.environ["NBI_CONFIG_FILE"]
 api_key = os.environ["NBI_API_KEY"]
@@ -427,7 +432,7 @@ for section in ("chat_model", "inline_completion_model"):
         if isinstance(prop, dict) and prop.get("id") == "base_url":
             base_url = str(prop.get("value") or "")
             break
-    if "llm.neurodesk.org" not in base_url:
+    if not is_neurodesk_endpoint(base_url):
         continue
     for prop in props:
         if not isinstance(prop, dict) or prop.get("id") != "api_key":
@@ -465,6 +470,7 @@ import glob
 import json
 import os
 import sys
+from provider_security import is_neurodesk_endpoint
 from urllib import error, request
 
 runtime_dir = os.environ.get("JUPYTER_RUNTIME_DIR") or os.path.join(

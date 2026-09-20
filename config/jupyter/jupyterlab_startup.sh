@@ -187,56 +187,13 @@ else
         mkdir -p "${NEURODESKTOP_HOME_STORAGE}/containers"
     fi
 
-    if [ ! -L "${NEURODESKTOP_ROOT_STORAGE}" ] && sudo -n true 2>/dev/null; then
-        if [ -d "${NEURODESKTOP_ROOT_STORAGE}" ]; then
-            nested_link="${NEURODESKTOP_ROOT_STORAGE}/neurodesktop-storage"
-            nested_target=$(sudo readlink "${nested_link}" 2>/dev/null || true)
+    # Root startup links /neurodesktop-storage to this home when it is unmounted.
 
-            # Repair previous broken state: /neurodesktop-storage/neurodesktop-storage -> $HOME/neurodesktop-storage
-            if [ -L "${nested_link}" ] \
-                && [ -z "$(sudo find "${NEURODESKTOP_ROOT_STORAGE}" -mindepth 1 -maxdepth 1 ! -name neurodesktop-storage -print -quit 2>/dev/null)" ] \
-                && { [ "${nested_target}" = "${NEURODESKTOP_HOME_STORAGE}/" ] || [ "${nested_target}" = "${NEURODESKTOP_HOME_STORAGE}" ]; }; then
-                sudo rm -f "${nested_link}"
-            fi
-
-            if [ -z "$(sudo find "${NEURODESKTOP_ROOT_STORAGE}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
-                sudo rmdir "${NEURODESKTOP_ROOT_STORAGE}" \
-                    && sudo ln -s "${NEURODESKTOP_HOME_STORAGE}/" "${NEURODESKTOP_ROOT_STORAGE}"
-            else
-                echo "[WARN] ${NEURODESKTOP_ROOT_STORAGE} exists as non-empty directory; leaving it unchanged."
-            fi
-        elif [ ! -e "${NEURODESKTOP_ROOT_STORAGE}" ]; then
-            sudo ln -s "${NEURODESKTOP_HOME_STORAGE}/" "${NEURODESKTOP_ROOT_STORAGE}"
-        else
-            echo "[WARN] ${NEURODESKTOP_ROOT_STORAGE} exists and is not a symlink; leaving it unchanged."
-        fi
-    fi
 fi
 
 # Create a symlink to the neurodesktop-storage directory if it doesn't exist yet:
 if [ ! -L "/neurocommand/local/containers" ]; then
   ln -s "${NEURODESKTOP_LOCAL_CONTAINERS:-/neurodesktop-storage/containers}" "/neurocommand/local/containers"
-fi
-
-# Create a cpuinfo file with a valid CPU MHz entry for ARM CPUs.
-echo "[INFO] Checking for ARM CPU and adding a CPU Mhz entry in /proc/cpuinfo to work around a bug in Matlab that expects this value to be present."
-if ! grep -iq 'cpu.*hz' /proc/cpuinfo; then
-    mkdir -p "${HOME}/.local"
-    cpuinfo_file="${HOME}/.local/cpuinfo_with_ARM_MHz_fix"
-    cp /proc/cpuinfo "${cpuinfo_file}"
-    chmod u+rw "${cpuinfo_file}"
-    sed -i '/^$/c\cpu MHz         : 2245.778\n' "${cpuinfo_file}"
-    # add vendor and model name as well:
-    sed -i '/^$/c\vendor_id       : ARM\nmodel name      : Apple-M\n' "${cpuinfo_file}"
-    if sudo -n true 2>/dev/null; then
-        if sudo mount --bind "${cpuinfo_file}" /proc/cpuinfo >/dev/null 2>&1; then
-            echo "[INFO] Added CPU Mhz entry in /proc/cpuinfo to work around a bug in Matlab that expects this value to be present."
-        else
-            echo "[WARN] Unable to bind-mount ${cpuinfo_file} over /proc/cpuinfo in this runtime. Continuing without the Matlab CPU Mhz workaround."
-        fi
-    else
-        echo "[WARN] Passwordless sudo is unavailable; skipping the Matlab CPU Mhz workaround."
-    fi
 fi
 
 # ensure overlay directory exists

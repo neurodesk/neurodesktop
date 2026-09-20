@@ -130,6 +130,41 @@ _neurodesk_init_secrets() {
     fi
     chmod 600 "${MAPPING_FILE}" 2>/dev/null || true
 
+    # Only root startup provisions the OS account. Shared-host sessions must
+    # never reuse a template password or change a host account's credentials.
+    local rdp_credentials="/run/neurodesktop/rdp/$(id -u)"
+    python3 - "${MAPPING_FILE}" "${rdp_credentials}" <<'PY' || return 1
+import os
+from pathlib import Path
+import pwd
+import sys
+from xml.etree import ElementTree
+
+mapping = Path(sys.argv[1])
+credentials = Path(sys.argv[2])
+tree = ElementTree.parse(mapping)
+try:
+    username = (credentials / "username").read_text()
+    password = (credentials / "password").read_text()
+    if username != pwd.getpwuid(os.getuid()).pw_name or not password:
+        raise ValueError("RDP credential does not match this user")
+except (OSError, ValueError):
+    password = None
+for authorize in tree.getroot().findall("authorize"):
+    for connection in list(authorize):
+        if connection.findtext("protocol") != "rdp":
+            continue
+        if password is None:
+            authorize.remove(connection)
+        else:
+            for param in connection.findall("param"):
+                if param.get("name") == "username":
+                    param.text = username
+                elif param.get("name") == "password":
+                    param.text = password
+tree.write(mapping, encoding="unicode")
+PY
+
     # Seed properties pointing at the user-writable mapping file.
     if [ ! -s "${PROPERTIES_FILE}" ]; then
         {
