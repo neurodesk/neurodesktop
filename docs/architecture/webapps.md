@@ -41,6 +41,9 @@ them into the image before Jupyter config generation. The custom Neurodesk
 launcher reads icons through the server-proxy icon endpoint and wraps raster
 images as SVGs for JupyterLab `LabIcon` support.
 The Webapps section heading uses the same icon as the More webapps tile.
+The launcher copies the rendered catalog SVG into the heading after React
+updates, retaining the heading dimensions. The catalog has the last launcher
+rank and a final CSS order so it stays after local apps when tiles refresh.
 
 Jupyter Server Proxy buffers ordinary webapp responses through Tornado's HTTP
 client. Neurodesktop initially raises Tornado's matching `max_buffer_size` and
