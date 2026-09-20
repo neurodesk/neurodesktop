@@ -10,7 +10,8 @@ from testlib import repo_path
 def test_webapps_catalog_order_and_heading_survive_rerender():
     modules = os.environ.get('NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES')
     if not modules or not shutil.which('node'):
-        pytest.skip('Set NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES to jsdom/typescript modules')
+        pytest.fail('Launcher DOM tests require Node.js and jsdom/typescript. '
+                    'Set NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES as described in docs/testing.md.')
     script = r'''
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
