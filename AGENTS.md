@@ -1,44 +1,57 @@
 # AGENTS.md
 
-## Agent Guidelines
+## Delivery workflow
 
-- Keep changes scoped to the requested work and avoid unrelated refactors.
-- When fixing a bug, test the fix before reporting that the problem is fixed.
-- When implementing a new feature, add appropriate tests under tests/ and keep the docs/ and AGENTS.md up to date.
-- Tests live in two tiers: `tests/unit/` runs on a checkout with `pytest
-  tests/unit` and is the default home for new tests; `tests/container/` runs
-  inside the built image with `pytest /opt/tests/` and is only for assertions
-  that need a running container. Only `tests/container/` is copied into the
-  image. Keep `/opt/tests` readable by the unprivileged `jovyan` test user even
-  when the checkout has a restrictive umask. Resolve a test's subject through
-  the helpers in `tests/testlib.py`.
-- Test behavior by executing the subject and checking its result. Use source
-  assertions for packaging contracts; use valid inputs and verified prerequisites
-  for negative tests. Required services and directories must fail when absent,
-  and skip only when the selected profile explicitly disables them. See
-  [testing](docs/testing.md) for workflow fixtures and runtime checks.
-- The docs are a hierarchical wiki rooted at [`docs/index.md`](docs/index.md):
-  every page carries YAML frontmatter (`title`, `description`, `parent`,
-  `status`, `last-reviewed`) and cross-references relatives with markdown
-  links. Historical assessments, plans, and audits live under
-  [`docs/designs/`](docs/designs/index.md) as records; keep current behavior
-  in the reference pages, not in the records.
+- Keep changes scoped to the requested work.
+- For every task that changes the repository, commit and push a branch and open
+  a pull request, or update the existing PR for that work. Include the change
+  summary and validation results. Opening the PR is required, not an optional
+  follow-up.
+- Stay with the PR until review and CI finish. Read all review-bot comments,
+  including inline threads and review summaries, after each push. Incorporate
+  every actionable comment, test the changes, and push the fixes. For an
+  incorrect or inapplicable comment, reply with evidence instead of silently
+  dismissing it. Resolve threads only after addressing their feedback.
+- Run the full unit suite and the checks required for the changed subsystem in
+  [testing](docs/testing.md). Before merging, verify that all applicable tests
+  and CI checks pass on the latest PR commit, bot reviews have completed, all
+  feedback is addressed, and required approvals are satisfied. Pending,
+  cancelled, or missing required checks are not passing checks.
+- Once those conditions hold and the PR is mergeable, merge it without asking
+  for another confirmation. Respect branch protection and required reviews.
+  If credentials, infrastructure, failed checks, or unresolved review feedback
+  block completion, leave the PR open and report the specific blocker.
+- End with the PR link, validation results, and whether it merged or remains
+  open. If access prevents creating a PR, report that explicitly.
+
+## Tests and documentation
+
+- Test bug fixes before reporting success. Add appropriate tests for new
+  features and update the affected docs. Update AGENTS.md only when agent
+  instructions change.
+- Before adding or changing tests, read [testing](docs/testing.md) for tier
+  selection, subject resolution, runtime prerequisites, and negative-test rules.
+  Default to `tests/unit/`; use `tests/container/` when a running image is needed.
+  Test behavior by executing the subject; reserve source assertions for
+  packaging contracts.
+- When editing docs, follow the [wiki conventions](docs/index.md#conventions).
+  Keep current behavior in reference pages and historical records under
+  [docs/designs/](docs/designs/index.md).
+- For startup flow, directory layout, or subsystem changes, read
+  [architecture](docs/architecture.md) and its relevant subsystem page.
+  For runtime or build variables, read
+  [environment variables](docs/environment-variables.md).
+- Preserve the paths `docs/architecture.md`, `docs/testing.md`, and
+  `docs/environment-variables.md`; tests and agent workflows reference them.
+
+## Subsystem safeguards
+
 - When changing the root image's base tag or direct package pins, run
   `python scripts/audit_image_versions.py` for the live release report and
   `pytest tests/unit/test_audit_image_versions.py`. The Dockerfile owns current
   versions; keep only package authority and compatibility policy in the audit
   catalog. A complete upgrade still requires a built-image inventory and the
   subsystem checks selected by the changed packages.
-- Use [`docs/architecture.md`](docs/architecture.md) for project architecture,
-  startup flow, and directory layout; it links to one page per subsystem
-  under [`docs/architecture/`](docs/architecture/), including
-  [build-time behavior](docs/architecture/build.md).
-- Use [`docs/environment-variables.md`](docs/environment-variables.md) for
-  supported runtime and build environment variables.
-- `docs/architecture.md`, `docs/testing.md`, and
-  `docs/environment-variables.md` are referenced by path from tests and the
-  agent workflows; do not move or rename them.
-
 - T3 Connect changes must preserve Jupyter authentication/XSRF, keep device codes
   transient and OAuth credentials out of browser responses/logs, and distinguish
   a saved link from a reachable tunnel. Cover cancellation, active-chat restart
@@ -60,12 +73,9 @@
 - T3 relay DNS fallback must remain limited to credential-free HTTPS session
   probes on `*.t3coderelay.com`, use public addresses, and retain TLS validation.
 
-- Keep container-backed apps in the Jupyter startup page Webapps section. Use
-  one More webapps link to `https://webapps.neurodesk.org/` for external apps;
-  do not restore individual legacy hosted-app links. Exclude dicompare and
-  QSMbly from local launchers, since they are maintained externally.
-  Keep More webapps last and use its rendered icon for the Webapps heading;
-  cover launcher re-renders with DOM regression tests.
+- For webapp or startup-page launcher changes, follow the catalog, exclusions,
+  ordering, and heading-icon rules in [Webapp system](docs/architecture/webapps.md).
+  Cover launcher re-renders with DOM regression tests.
 
 - Startup changes must preserve workspace quarantine, default restoration and
   ownership repair, and interactive NBI refresh. Keep boot-time NBI setup free
