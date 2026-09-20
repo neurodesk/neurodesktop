@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import json
 import os
 from pathlib import Path
@@ -136,11 +137,10 @@ def test_server_command_and_environment_use_protocol_safe_provider_binaries(tmp_
     assert environment["T3CODE_PORT"] == "4567"
 
 
-def test_supervisor_owns_one_process_and_stops_its_process_group(tmp_path):
-    supervisor = _supervisor_module()
-    executable = tmp_path / "fake-t3"
-    executable.write_text(
-        """#!/usr/bin/env python3
+# The real T3 listens before it answers HTTP and never replies on a connection
+# it accepted during that window, so the fake strands early connections too.
+FAKE_T3 = """#!/usr/bin/env python3
+import os
 import signal
 import socket
 import sys
@@ -153,12 +153,50 @@ sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 sock.bind((host, port))
 sock.listen()
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+stranded = []
+sock.settimeout(0.05)
+deadline = time.monotonic() + float(os.environ.get('FAKE_T3_WARMUP', '0'))
+while time.monotonic() < deadline:
+    try:
+        stranded.append(sock.accept()[0])
+    except OSError:
+        pass
+sock.settimeout(None)
 while True:
-    time.sleep(0.1)
-""",
-        encoding="utf-8",
+    connection = sock.accept()[0]
+    connection.recv(4096)
+    connection.sendall(
+        b'HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\nConnection: close\\r\\n\\r\\n{}'
     )
+    connection.close()
+"""
+
+
+def _install_fake_t3(tmp_path):
+    executable = tmp_path / "fake-t3"
+    executable.write_text(FAKE_T3, encoding="utf-8")
     executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+    return executable
+
+
+async def _http_status(host, port):
+    reader, writer = await asyncio.open_connection(host, port)
+    try:
+        writer.write(
+            f"GET /.well-known/t3/environment HTTP/1.1\r\nHost: {host}:{port}\r\n"
+            "Connection: close\r\n\r\n".encode()
+        )
+        await writer.drain()
+        return await asyncio.wait_for(reader.readline(), timeout=2)
+    finally:
+        writer.close()
+        with suppress(OSError):
+            await writer.wait_closed()
+
+
+def test_supervisor_owns_one_process_and_stops_its_process_group(tmp_path):
+    supervisor = _supervisor_module()
+    executable = _install_fake_t3(tmp_path)
     provider_bin = tmp_path / "providers"
     provider_bin.mkdir()
     port = supervisor.find_free_port()
@@ -184,6 +222,38 @@ while True:
         await service.close()
         assert service.pid is None
         assert service.state == supervisor.ServiceState.STOPPED
+
+    asyncio.run(scenario())
+
+
+def test_readiness_waits_until_t3_answers_http(tmp_path, monkeypatch):
+    supervisor = _supervisor_module()
+    executable = _install_fake_t3(tmp_path)
+    provider_bin = tmp_path / "providers"
+    provider_bin.mkdir()
+    port = supervisor.find_free_port()
+    monkeypatch.setenv("FAKE_T3_WARMUP", "1.5")
+    policy = supervisor.policy_from_environment(
+        {
+            "HOME": str(tmp_path),
+            "NEURODESKTOP_T3_CODE_HOST": "127.0.0.1",
+            "NEURODESKTOP_T3_CODE_PORT": str(port),
+            "NEURODESKTOP_T3_CODE_EXECUTABLE": str(executable),
+            "NEURODESKTOP_T3_CODE_PROVIDER_BIN": str(provider_bin),
+        },
+        euid=os.geteuid(),
+    )
+    assert isinstance(policy, supervisor.Policy)
+
+    async def scenario():
+        service = supervisor.T3Supervisor(policy)
+        service.start()
+        try:
+            await service.wait_ready(timeout=20)
+            status = await _http_status(policy.readiness_host, port)
+            assert status == b"HTTP/1.1 200 OK\r\n", status
+        finally:
+            await service.close()
 
     asyncio.run(scenario())
 
