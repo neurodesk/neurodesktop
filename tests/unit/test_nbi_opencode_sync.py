@@ -72,7 +72,7 @@ def make_nbi_setup_sandbox(tmp_path):
     return test_script, home_dir
 
 
-def run_nbi_setup(test_script, home_dir):
+def run_nbi_setup(test_script, home_dir, *args):
     env = {**os.environ, "HOME": str(home_dir)}
     env.pop("NEURODESK_API_KEY", None)
     env.pop("BR_MCP_TOKEN", None)
@@ -80,7 +80,7 @@ def run_nbi_setup(test_script, home_dir):
     # into the sandbox home by a test may be contacted.
     env.pop("JUPYTER_RUNTIME_DIR", None)
     process = subprocess.run(
-        ["bash", str(test_script)],
+        ["bash", str(test_script), *args],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -367,3 +367,20 @@ def test_nbi_defaults_kept_without_opencode_config(tmp_path):
         assert get_prop(section, "base_url") == "https://llm.neurodesk.org/openai"
         assert get_prop(section, "model_id") == default_model_id
         assert get_prop(section, "api_key") == "neurodesk-test-key"
+
+
+def test_boot_sync_writes_config_without_contacting_running_server(tmp_path):
+    test_script, home_dir = make_nbi_setup_sandbox(tmp_path)
+    write_opencode_config(home_dir, "jetstream/gpt-oss-120b")
+    server = start_fake_jupyter_server()
+    try:
+        write_jpserver_runtime_file(
+            home_dir, f"http://127.0.0.1:{server.server_address[1]}/", "secret-token"
+        )
+        run_nbi_setup(test_script, home_dir, "--no-refresh")
+        assert server.recorded_requests == []
+        assert "gpt-oss-120b" in json.dumps(read_nbi_config(home_dir))
+        assert (home_dir / ".jupyter/nbi/mcp.json").is_file()
+    finally:
+        server.shutdown()
+        server.server_close()
