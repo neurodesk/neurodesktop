@@ -144,7 +144,7 @@ def server_command(policy: Policy) -> list[str]:
 def seed_provider_settings(policy: Policy) -> None:
     """Keep login-shell PATH hydration from selecting an obsolete home Codex.
 
-    Only fill an absent setting. Explicit paths and provider instances remain
+    Seed the modern instance map. Explicit paths and provider instances remain
     user-owned. Write atomically before T3 starts watching its settings file.
     """
     directory = policy.base_dir / "userdata"
@@ -158,13 +158,24 @@ def seed_provider_settings(policy: Policy) -> None:
         return  # Let T3 report malformed user settings without replacing them.
     if not isinstance(settings, dict):
         return
-    providers = settings.setdefault("providers", {})
-    if not isinstance(providers, dict):
+    instances = settings.get("providerInstances", {})
+    providers = settings.get("providers", {})
+    if not isinstance(instances, dict) or not isinstance(providers, dict):
         return
-    codex = providers.setdefault("codex", {})
-    if not isinstance(codex, dict) or "binaryPath" in codex:
+    # An explicit instance, including a disabled or custom-named Codex, is
+    # user-owned. Do not add another instance or override its configuration.
+    if "codex" in instances or any(
+        not isinstance(instance, dict) or instance.get("driver") == "codex"
+        for instance in instances.values()
+    ):
         return
-    codex["binaryPath"] = str(policy.provider_bin / "codex")
+    default_config = {"binaryPath": str(policy.provider_bin / "codex")}
+    if "codex" in providers and providers["codex"] != default_config:
+        return
+    instances["codex"] = {"driver": "codex", "config": default_config}
+    settings["providerInstances"] = instances
+    # Promote only the exact legacy default this supervisor used to write.
+    # Retain the legacy entry for backward compatibility with older images.
     descriptor, name = tempfile.mkstemp(prefix=".settings-", dir=directory)
     try:
         with os.fdopen(descriptor, "w") as stream:

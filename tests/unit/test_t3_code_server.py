@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import stat
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -302,9 +303,9 @@ def test_provider_default_survives_login_path_hydration_without_overwriting_sett
     seed_provider_settings(policy)
     path = policy.base_dir / 'userdata/settings.json'
     settings = json.loads(path.read_text())
-    assert settings['providers']['codex']['binaryPath'] == str(policy.provider_bin / 'codex')
+    assert settings['providerInstances']['codex']['config']['binaryPath'] == str(policy.provider_bin / 'codex')
     assert path.stat().st_mode & 0o077 == 0
-    settings['providers']['codex']['binaryPath'] = '/custom/codex'
+    settings['providerInstances']['codex']['config']['binaryPath'] = '/custom/codex'
     settings['theme'] = 'custom'
     path.write_text(json.dumps(settings))
     original = path.read_bytes()
@@ -313,3 +314,52 @@ def test_provider_default_survives_login_path_hydration_without_overwriting_sett
     path.write_text('{invalid')
     seed_provider_settings(policy)
     assert path.read_text() == '{invalid'
+
+
+@pytest.mark.parametrize("existing", [
+    {"providerInstances": {"codex": {"driver": "codex", "enabled": False}}},
+    {"providerInstances": {"work": {"driver": "codex", "config": {"binaryPath": "/custom"}}}},
+    {"providerInstances": {"codex": {"driver": "other"}}},
+    {"providers": {"codex": {"binaryPath": "/custom"}}},
+    {"providers": {"codex": {"enabled": False}}},
+    {"providers": {"codex": {}}},
+    {"providers": []},
+    {"providerInstances": []},
+    {"providerInstances": {"broken": None}},
+    [],
+])
+def test_provider_seed_preserves_user_configuration(tmp_path, existing):
+    from neurodesk_t3_code.supervisor import seed_provider_settings
+    policy = SimpleNamespace(base_dir=tmp_path, provider_bin=tmp_path / "providers")
+    path = tmp_path / "userdata/settings.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps(existing))
+    before = path.read_bytes()
+    seed_provider_settings(policy)
+    assert path.read_bytes() == before
+
+
+def test_provider_seed_promotes_only_exact_previous_default(tmp_path):
+    from neurodesk_t3_code.supervisor import seed_provider_settings
+    policy = SimpleNamespace(base_dir=tmp_path, provider_bin=tmp_path / "providers")
+    default = {"binaryPath": str(policy.provider_bin / "codex")}
+    other = {"driver": "claudeAgent", "enabled": False}
+    settings = {"providers": {"codex": default},
+                "providerInstances": {"claudeAgent": other}, "theme": "dark"}
+    path = tmp_path / "userdata/settings.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps(settings))
+    seed_provider_settings(policy)
+    actual = json.loads(path.read_text())
+    assert actual == {**settings, "providerInstances": {
+        "claudeAgent": other, "codex": {"driver": "codex", "config": default}}}
+    assert path.stat().st_mode & 0o077 == 0
+    before = path.read_bytes()
+    seed_provider_settings(policy)
+    assert path.read_bytes() == before
+
+    settings["providers"]["codex"]["enabled"] = False
+    path.write_text(json.dumps(settings))
+    before = path.read_bytes()
+    seed_provider_settings(policy)
+    assert path.read_bytes() == before

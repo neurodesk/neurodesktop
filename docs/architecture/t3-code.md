@@ -202,9 +202,8 @@ give each Neurodesktop instance its own Tailscale state directory.
 
 ## Connect through T3 Connect
 
-Choose **Connect to my desktop** in the JupyterLab launcher or above the
-scigent.ai tab. Desktop linking is optional; the embedded app already uses your
-Jupyter login. The guided panel displays a short-lived device code and opens
+Choose **Setup T3 connect** in the compact bar inside the scigent.ai tab.
+Desktop linking is optional; the embedded app already uses your Jupyter login. The guided panel displays a short-lived device code and opens
 T3's hosted authorization page. Approve it using the account signed into your
 T3 desktop app. This grants that account remote access to the environment.
 
@@ -270,8 +269,11 @@ that expires automatically.
 
 ## Providers
 
-Before startup, the supervisor fills an absent Codex `binaryPath` in T3's
-settings with the image-owned quiet launcher. Explicit user paths are preserved.
+Before startup, the supervisor seeds `providerInstances.codex` with the Codex
+driver and the image-owned quiet launcher in `config.binaryPath`. It promotes
+the exact legacy `providers.codex` default written by earlier images, retaining
+that entry for backward compatibility. Existing modern instances, custom-named
+Codex instances, and user-authored legacy settings are preserved unchanged.
 This avoids T3's login-shell PATH refresh selecting an old `~/.local/bin/codex`.
 An obsolete home CLI can fail the `initialize` response schema even when the
 image's Codex is compatible. Provider tests must check the actual T3 probe,

@@ -20,9 +20,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
       else connectPanel = createConnectPanel(app);
     };
     app.commands.addCommand('neurodesk-launcher:t3-connect', {
-      label: 'Connect to my desktop', icon: codeIcon, execute: openConnect
+      label: 'Setup T3 connect', icon: codeIcon, execute: openConnect
     });
-    launcher.add({ command: 'neurodesk-launcher:t3-connect', category: 'Neurodesk', rank: 6 });
     const command = 'neurodesk-launcher:open-t3-code';
     app.commands.addCommand(command, {
       label: 'scigent.ai',
@@ -59,8 +58,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
           container.style.cssText = 'display:flex;flex-direction:column;height:100%';
           const connect = document.createElement('button');
           connect.className = 'jp-mod-styled';
-          connect.textContent = 'Connect to my desktop';
-          connect.style.cssText = 'align-self:flex-end;margin:6px';
+          connect.textContent = 'Setup T3 connect';
+          connect.style.cssText = 'align-self:flex-end;flex-shrink:0;height:22px;min-height:0;margin:2px 6px;padding:0 8px;font-size:11px;line-height:20px';
           connect.onclick = openConnect;
           frame.style.flex = '1';
           frame.style.minHeight = '0';
