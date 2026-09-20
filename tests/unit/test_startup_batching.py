@@ -35,7 +35,9 @@ def test_workspace_batch_preserves_valid_files_and_quarantines_invalid(tmp_path)
     malformed = workspaces / "malformed.jupyterlab-workspace"
     malformed.write_text('{')
     deep = workspaces / "deep.jupyterlab-workspace"
-    deep.write_text("[" * 2000 + "]" * 2000)
+    # Unclosed nesting is invalid even on Python versions that can parse
+    # 2,000 balanced levels without reaching their recursion limit.
+    deep.write_text("[" * 2000)
     nested = workspaces / "nested"
     nested.mkdir()
     (nested / "untouched.jupyterlab-workspace").write_text('{')
@@ -55,7 +57,7 @@ def test_workspace_batch_preserves_valid_files_and_quarantines_invalid(tmp_path)
     assert not invalid.exists()
     assert not malformed.exists()
     assert not deep.exists()
-    assert next(workspaces.glob("deep*.invalid-*")).read_text() == "[" * 2000 + "]" * 2000
+    assert next(workspaces.glob("deep*.invalid-*")).read_text() == "[" * 2000
     assert next(workspaces.glob("bad*.invalid-*")).read_bytes() == b'\xff'
     assert next(workspaces.glob("malformed*.invalid-*")).read_text() == '{'
     assert link.is_symlink()
