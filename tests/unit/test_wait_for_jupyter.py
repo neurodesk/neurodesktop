@@ -15,6 +15,32 @@ def readiness(tmp_path, monkeypatch):
     return module
 
 
+class Clock:
+    """Advance the helper's deadline only when the helper sleeps.
+
+    A budget of a few milliseconds measured against the real clock can expire
+    while the process is descheduled, before the first probe is even sent. The
+    helper then reports its answer without asking the server, so any assertion
+    on what it probed depends on machine load.
+    """
+
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+@pytest.fixture
+def clock(readiness, monkeypatch):
+    replacement = Clock()
+    monkeypatch.setattr(readiness, "time", replacement)
+    return replacement
+
+
 def runtime_file(tmp_path, **values):
     path = tmp_path / f"jpserver-{os.getpid()}.json"
     path.write_text(json.dumps({"port": 9999, "base_url": "/user/alice/", "token": "secret", **values}))
@@ -39,7 +65,7 @@ def test_ignores_mcp_partial_and_dead_process_records(readiness, tmp_path, monke
 
 
 @pytest.mark.parametrize("status,expected", [(200, True), (302, True), (403, True), (503, False)])
-def test_wait_checks_http_readiness(readiness, tmp_path, monkeypatch, status, expected):
+def test_wait_checks_http_readiness(readiness, clock, tmp_path, monkeypatch, status, expected):
     runtime_file(tmp_path)
     calls = []
     class Opener:
@@ -55,14 +81,17 @@ def test_wait_checks_http_readiness(readiness, tmp_path, monkeypatch, status, ex
     assert calls == ["http://127.0.0.1:9999/user/alice/"]
 
 
-def test_timeout_is_bounded_when_server_never_answers(readiness, tmp_path, monkeypatch):
+def test_timeout_is_bounded_when_server_never_answers(readiness, clock, tmp_path, monkeypatch):
     runtime_file(tmp_path)
+    attempts = []
     class Opener:
         def open(self, url, timeout):
-            assert 0 < timeout <= 0.01
+            attempts.append(timeout)
             raise URLError("not listening")
     monkeypatch.setattr(readiness.request, "build_opener", lambda *args: Opener())
     assert not readiness.wait_for_jupyter(timeout=0.01)
+    # An empty list would mean the budget expired before the helper asked.
+    assert attempts == [0.01]
 
 
 def test_image_installs_readiness_helper():

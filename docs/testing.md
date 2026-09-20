@@ -581,6 +581,8 @@ These tests cover workspace quarantine in a single Python invocation, default
 restoration and ownership repair, SSH permission inheritance, NBI boot setup
 without live refresh, custom Jupyter ports and base paths, and independent
 CVMFS and Slurm execution. HTTP checks use temporary localhost servers.
+Readiness deadlines run on a controlled clock instead of real elapsed
+time, so scheduling delay cannot decide whether the helper probes at all.
 See the [startup flow](architecture.md#container-initialization-flow) for
 runtime behavior. Built-image service checks remain in
 `tests/container/test_startup_modes.py`.
