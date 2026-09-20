@@ -2,6 +2,8 @@
 import { JupyterFrontEnd, JupyterFrontEndPlugin } from '@jupyterlab/application';
 import { MainAreaWidget, showDialog, Dialog } from '@jupyterlab/apputils';
 import { URLExt } from '@jupyterlab/coreutils';
+import { IDocumentManager } from '@jupyterlab/docmanager';
+import { bindWorkspaceLinkFrame } from './workspaceLinks';
 import { ILauncher } from '@jupyterlab/launcher';
 import { ServerConnection } from '@jupyterlab/services';
 import { codeIcon } from '@jupyterlab/ui-components';
@@ -11,8 +13,8 @@ import { createConnectPanel } from './t3Connect';
 const plugin: JupyterFrontEndPlugin<void> = {
   id: 'neurodesk-launcher:t3-code',
   autoStart: true,
-  requires: [ILauncher],
-  activate: (app: JupyterFrontEnd, launcher: ILauncher) => {
+  requires: [ILauncher, IDocumentManager],
+  activate: (app: JupyterFrontEnd, launcher: ILauncher, docManager: IDocumentManager) => {
     let panel: MainAreaWidget<Widget> | null = null;
     let connectPanel: MainAreaWidget<Widget> | null = null;
     const openConnect = () => {
@@ -50,6 +52,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
             throw new Error('Could not connect to scigent.ai. Wait a moment and reopen it.');
           }
           const frame = document.createElement('iframe');
+          const disposeFileLinks = bindWorkspaceLinkFrame(frame, app, docManager);
           frame.title = 'scigent.ai';
           frame.src = URLExt.join(settings.baseUrl, 'neurodesk-t3') + '/';
           frame.style.cssText = 'width:100%;height:100%;border:0;display:block';
@@ -70,7 +73,10 @@ const plugin: JupyterFrontEndPlugin<void> = {
                 event.data?.type === 'neurodesk-t3-connect') openConnect();
           };
           window.addEventListener('message', onMessage);
-          content.disposed.connect(() => window.removeEventListener('message', onMessage));
+          content.disposed.connect(() => {
+            window.removeEventListener('message', onMessage);
+            disposeFileLinks();
+          });
           panel = new MainAreaWidget({ content });
           panel.id = 'neurodesk-t3-code';
           panel.title.label = 'scigent.ai';

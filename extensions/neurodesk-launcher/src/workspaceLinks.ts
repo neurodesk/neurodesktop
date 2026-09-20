@@ -137,109 +137,135 @@ export function shouldClaimClick(event: MouseEvent): boolean {
   );
 }
 
+/** Install capture handling in a document; return its lifecycle cleanup. */
+export function installWorkspaceLinks(
+  document: Document,
+  app: JupyterFrontEnd,
+  docManager: IDocumentManager,
+  preferRendered = true
+): () => void {
+  const stat = (candidate: string) =>
+    docManager.services.contents.get(candidate, { content: false });
+
+  /**
+   * Locate what the link actually refers to.
+   *
+   * The literal path is tried first, so a filename that really does contain
+   * a colon keeps working; only a path the server does not have is
+   * reinterpreted as a `file:line` reference.
+   */
+  const resolveTarget = async (path: string) => {
+    try {
+      return { path, model: await stat(path) };
+    } catch (reason) {
+      const withoutReference = stripLineReference(path);
+      if (!withoutReference) {
+        throw reason;
+      }
+      return { path: withoutReference, model: await stat(withoutReference) };
+    }
+  };
+
+  const openWorkspacePath = async (requested: string): Promise<void> => {
+    try {
+      const { path, model } = await resolveTarget(requested);
+
+      // A directory cannot be opened as a document; reveal it instead.
+      if (model.type === 'directory') {
+        await app.commands.execute('filebrowser:go-to-path', { path });
+        return;
+      }
+
+      // Fall back to the default factory when the viewer is not registered,
+      // so a disabled or missing extension degrades to the editor instead of
+      // opening nothing at all.
+      const factory = preferRendered ? renderedFactoryFor(path) : null;
+      const widgetName =
+        factory && docManager.registry.getWidgetFactory(factory)
+          ? factory
+          : 'default';
+      await docManager.openOrReveal(path, widgetName);
+    } catch (reason) {
+      // Report what was clicked, not the rewritten candidate.
+      void showErrorMessage(
+        'Cannot open file',
+        `${requested} could not be opened: ${reason}`
+      );
+    }
+  };
+
+  const onClick = (event: MouseEvent) => {
+    if (!shouldClaimClick(event)) {
+      return;
+    }
+
+    const target = event.target as HTMLElement | null;
+    const anchor = target?.closest?.('a[href]') as HTMLAnchorElement | null;
+    if (!anchor || anchor.hasAttribute('download')) {
+      return;
+    }
+
+    let url: URL;
+    try {
+      url = new URL(anchor.href, document.baseURI);
+    } catch {
+      return;
+    }
+    if (url.origin !== window.location.origin) {
+      return;
+    }
+
+    let pathname: string;
+    try {
+      pathname = decodeURIComponent(url.pathname);
+    } catch {
+      return;
+    }
+
+    const path = toWorkspaceRelativePath(
+      pathname,
+      PageConfig.getOption('serverRoot')
+    );
+    if (path === null) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    void openWorkspacePath(path);
+  };
+  document.addEventListener('click', onClick, true);
+  return () => document.removeEventListener('click', onClick, true);
+}
+
+/** Bind only this iframe, including replacement documents after reload. */
+export function bindWorkspaceLinkFrame(
+  frame: HTMLIFrameElement,
+  app: JupyterFrontEnd,
+  docManager: IDocumentManager
+): () => void {
+  let cleanup: (() => void) | undefined;
+  const onLoad = () => {
+    cleanup?.();
+    cleanup = undefined;
+    // Cross-origin documents have no accessible contentDocument.
+    const document = frame.contentDocument;
+    if (document) cleanup = installWorkspaceLinks(document, app, docManager, false);
+  };
+  frame.addEventListener('load', onLoad);
+  return () => {
+    frame.removeEventListener('load', onLoad);
+    cleanup?.();
+  };
+}
+
 const plugin: JupyterFrontEndPlugin<void> = {
   id: 'neurodesk-launcher:workspace-links',
-  description:
-    'Open agent-authored absolute file paths in the JupyterLab main panel',
+  description: 'Open agent-authored absolute file paths in the JupyterLab main panel',
   autoStart: true,
   requires: [IDocumentManager],
   activate: (app: JupyterFrontEnd, docManager: IDocumentManager) => {
-    const stat = (candidate: string) =>
-      docManager.services.contents.get(candidate, { content: false });
-
-    /**
-     * Locate what the link actually refers to.
-     *
-     * The literal path is tried first, so a filename that really does contain
-     * a colon keeps working; only a path the server does not have is
-     * reinterpreted as a `file:line` reference.
-     */
-    const resolveTarget = async (path: string) => {
-      try {
-        return { path, model: await stat(path) };
-      } catch (reason) {
-        const withoutReference = stripLineReference(path);
-        if (!withoutReference) {
-          throw reason;
-        }
-        return { path: withoutReference, model: await stat(withoutReference) };
-      }
-    };
-
-    const openWorkspacePath = async (requested: string): Promise<void> => {
-      try {
-        const { path, model } = await resolveTarget(requested);
-
-        // A directory cannot be opened as a document; reveal it instead.
-        if (model.type === 'directory') {
-          await app.commands.execute('filebrowser:go-to-path', { path });
-          return;
-        }
-
-        // Fall back to the default factory when the viewer is not registered,
-        // so a disabled or missing extension degrades to the editor instead of
-        // opening nothing at all.
-        const factory = renderedFactoryFor(path);
-        const widgetName =
-          factory && docManager.registry.getWidgetFactory(factory)
-            ? factory
-            : 'default';
-        await docManager.openOrReveal(path, widgetName);
-      } catch (reason) {
-        // Report what was clicked, not the rewritten candidate.
-        void showErrorMessage(
-          'Cannot open file',
-          `${requested} could not be opened: ${reason}`
-        );
-      }
-    };
-
-    document.addEventListener(
-      'click',
-      (event: MouseEvent) => {
-        if (!shouldClaimClick(event)) {
-          return;
-        }
-
-        const target = event.target as HTMLElement | null;
-        const anchor = target?.closest?.('a[href]') as HTMLAnchorElement | null;
-        if (!anchor || anchor.hasAttribute('download')) {
-          return;
-        }
-
-        let url: URL;
-        try {
-          url = new URL(anchor.href, document.baseURI);
-        } catch {
-          return;
-        }
-        if (url.origin !== window.location.origin) {
-          return;
-        }
-
-        let pathname: string;
-        try {
-          pathname = decodeURIComponent(url.pathname);
-        } catch {
-          return;
-        }
-
-        const path = toWorkspaceRelativePath(
-          pathname,
-          PageConfig.getOption('serverRoot')
-        );
-        if (path === null) {
-          return;
-        }
-
-        event.preventDefault();
-        event.stopPropagation();
-        void openWorkspacePath(path);
-      },
-      // Capture, so the link is claimed before a chat widget's own handler
-      // navigates or the anchor's default action fires.
-      true
-    );
+    installWorkspaceLinks(document, app, docManager);
   }
 };
 
