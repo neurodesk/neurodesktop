@@ -43,6 +43,18 @@ Running `tests/unit` needs Python 3.12, Node.js 24, `pytest`, `httpx`,
 (`openssh-client`); see `.github/workflows/unit-tests.yml`. The terminal-creation
 tests stub `curl` but use the real `jq` to parse responses.
 
+The launcher DOM regression also requires jsdom and TypeScript. Install them
+in a temporary directory and expose that directory when running the suite:
+
+```bash
+npm install --prefix /tmp/neurodesk-launcher-tests --no-audit --no-fund jsdom@26.1.0 typescript@5.2.2
+export NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES=/tmp/neurodesk-launcher-tests/node_modules
+pytest tests/unit
+```
+
+Missing launcher test dependencies fail with setup guidance instead of skipping.
+The unit-test workflow installs these same pinned dependencies automatically.
+
 Install those with the interpreter's own site packages rather than `pip install
 --user`. `tests/unit/test_agentic_validation.py` runs
 `config/agentic/validate.py`, which starts the frozen baseline with `python -I`
@@ -232,6 +244,14 @@ pip check
 jupyter server extension list
 jupyter labextension list --verbose
 ```
+
+The coding-agent image test initializes all three ACP implementations and
+requests a session without credentials or a model prompt. For Codex and Claude,
+an executable shim records the arguments before running the image CLI. A
+successful session or the protocol's authentication-required response is
+accepted only after the expected CLI invocation is observed. Other errors,
+process exits, and timeouts fail the test. This check covers adapter upgrades
+that use an image CLI outside the adapter's declared dependency range.
 
 The Jupyter AI image test also imports Notebook Intelligence and the MCP v1
 ``mcp.server.fastmcp`` API. ``jupyter server extension list`` returns success

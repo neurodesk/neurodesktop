@@ -2,10 +2,10 @@
 
 # Pin to a specific jupyter/base-notebook date for reproducibility.
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
-ARG BASE_IMAGE_TAG=2026-09-07
+ARG BASE_IMAGE_TAG=2026-09-18
 ARG APPTAINER_VERSION=1.5.3
 ARG APPTAINER_GO_VERSION=1.27.1
-ARG APPTAINER_GRPC_VERSION=1.83.2
+ARG APPTAINER_GRPC_VERSION=1.84.0
 ARG APPTAINER_CRYPTO_VERSION=0.57.0
 ARG CVMFS_VERSION=2.14.1+ubuntu24.04
 ARG CVMFS_RELEASE_VERSION=4.9
@@ -108,7 +108,7 @@ USER root
 
 ARG BUILD_ONLY_APT_PACKAGES="build-essential libcairo2-dev libjpeg-turbo8-dev libpng-dev libtool-bin freerdp2-dev libvncserver-dev libssl-dev libwebp-dev libssh2-1-dev libpango1.0-dev"
 ARG GUACAMOLE_VERSION="1.6.0"
-ARG CODE_SERVER_VERSION="4.136.2"
+ARG CODE_SERVER_VERSION="4.138.0"
 
 COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
 
@@ -252,7 +252,7 @@ RUN mkdir -p /opt/strace \
     && chmod +x /opt/strace
 
 ARG TOMCAT_REL="11"
-ARG TOMCAT_VERSION="11.0.25"
+ARG TOMCAT_VERSION="11.0.26"
 ARG TOMCAT_MIGRATION_VERSION="1.0.12"
 ARG GUACAMOLE_VERSION="1.6.0"
 ENV LANG=""
@@ -587,7 +587,7 @@ RUN retry conda install -c conda-forge nb_conda_kernels \
 # `env PATH=` restores the conda-first PATH that runuser resets (the
 # jupyterlab-slurm source build needs jlpm and node on PATH).
 ARG BUST_CACHE_PIP=4
-ARG UV_VERSION="0.12.12"
+ARG UV_VERSION="0.12.17"
 ARG JUPYTER_AI_VERSION="3.2.0"
 ARG JUPYTER_COLLABORATION_VERSION="4.4.2"
 ARG JUPYTER_COLLABORATION_REF="3bf11cb7b271b554998105a11e6c9b8c3e376615"
@@ -595,26 +595,18 @@ ARG ASTRA_SPEC_VERSION="0.0.14"
 ARG ASTRA_TOOLS_VERSION="0.2.17"
 ARG ANYWIDGET_VERSION="0.11.0"
 ARG IPYNIIVUE_VERSION="2.4.4"
-ARG SNAKEMAKE_VERSION="9.26.1"
+ARG SNAKEMAKE_VERSION="9.27.0"
 ARG JUPYTER_BUILDER_VERSION
-ARG JUPYTERLAB_SLURM_REF="c34354f0aaa1b12f6243224bed631cf07c858409"
+ARG JUPYTERLAB_SLURM_REF="8dccb39808f8a1b77712a9a5773a7d2601a56683"
 USER root
 RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch_ipyniivue.py,ro \
     --mount=type=bind,source=config/jupyter/build-constraints.txt,target=/tmp/build-constraints.txt,ro \
     install -d -m 0755 -o root -g users /opt/neurodesktop \
     && apt-install-retry build-essential \
-    # jupyterlab-slurm main is the current JupyterLab 4 implementation but its
-    # stale @jupyterlab/builder declaration selects the retired 4.0 builder.
-    # Pin the source and make the upstream-recommended package rename before
-    # building so the extension uses the current Jupyter Builder toolchain.
     && retry git clone https://github.com/NERSC/jupyterlab-slurm.git /tmp/jupyterlab-slurm \
     && git -C /tmp/jupyterlab-slurm checkout --detach "${JUPYTERLAB_SLURM_REF}" \
     && test "$(git -C /tmp/jupyterlab-slurm rev-parse HEAD)" = "${JUPYTERLAB_SLURM_REF}" \
-    && test "$(jq -r '.devDependencies["@jupyterlab/builder"]' /tmp/jupyterlab-slurm/package.json)" = "^4.0.0" \
-    && jq --arg version "^${JUPYTER_BUILDER_VERSION}" \
-        'del(.devDependencies["@jupyterlab/builder"]) | .devDependencies["@jupyter/builder"] = $version' \
-        /tmp/jupyterlab-slurm/package.json > /tmp/jupyterlab-slurm/package.json.patched \
-    && mv /tmp/jupyterlab-slurm/package.json.patched /tmp/jupyterlab-slurm/package.json \
+    && test "$(jq -r '.devDependencies["@jupyter/builder"]' /tmp/jupyterlab-slurm/package.json)" = "^${JUPYTER_BUILDER_VERSION}" \
     && chown -R ${NB_UID}:${NB_GID} /tmp/jupyterlab-slurm \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --build-constraint /tmp/build-constraints.txt --upgrade \
     datalad \
@@ -623,7 +615,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     nbdev \
     nf-core \
     snakemake==${SNAKEMAKE_VERSION} \
-    pydra==1.0a10 \
+    pydra==1.0a11 \
     nipoppy \
     matplotlib \
     datalad-container \
@@ -653,7 +645,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     # below verifies its seams against every bump and fails loudly on a fix.
     jupyter-server-documents==0.3.3 \
     jupyter-server-mcp==0.3.0 \
-    jupyterlab-chat==0.25.0 \
+    jupyterlab-chat==0.25.1 \
     jupyterlab-commands-toolkit==0.2.0 \
     jupyterlab-notebook-awareness==0.2.0 \
     # Stay on the JupyterLab 4 collaboration line. Its published frontends
@@ -685,12 +677,12 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     xnat \
     pytest \
     bash_kernel \
-    # Snakemake 9.26.1 declares packaging<26. Keep its newest compatible
+    # Snakemake 9.27.0 declares packaging<26. Keep its newest compatible
     # release rather than silently backtracking the user-facing workflow CLI.
     "packaging==25.0" \
     "requests>=2.34.2" \
     "chardet<8" \
-    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade "litellm>=1.100.1" \
+    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade "litellm>=1.102.0" \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/python -m bash_kernel.install --sys-prefix \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
     && rm -rf "/opt/conda/share/jupyter/labextensions/@jupyterlab/mathjax3-extension" \
@@ -806,7 +798,7 @@ RUN --mount=type=bind,source=config/jupyter/notebook-intelligence-5.3.1.yarn.loc
 # MyST 2.7.0 uses pnpm. Its published metadata requests @jupyter/ydoc 3.x,
 # while JupyterLab 4.6 provides 4.x, so compile against an exact current YDoc
 # and retain that exact version in both the manifest and lockfile.
-ARG MYST_PNPM_VERSION="11.26.0"
+ARG MYST_PNPM_VERSION="11.27.0"
 ARG MYST_YDOC_VERSION="4.1.1"
 RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
     && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
@@ -937,7 +929,7 @@ RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_C
 # the release so the terminal wrapper and the default config are tested as a
 # set; override at build time to bump it, or set it to an empty value to
 # install the latest release.
-ARG OPENCODE_VERSION="1.18.30"
+ARG OPENCODE_VERSION="1.18.31"
 RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash -s -- ${OPENCODE_VERSION:+--version "${OPENCODE_VERSION}"}' \
     && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
@@ -1034,8 +1026,8 @@ RUN --mount=type=bind,source=config/agents/t3-code/package.json,target=/tmp/t3-c
 # CODEX_CLI_VERSION rather than its bundled dependency. The
 # size assertion fails the build if a future adapter release relocates its
 # vendored binary and reintroduces the duplicate.
-ARG CODEX_ACP_VERSION="1.11.0"
-ARG CLAUDE_AGENT_ACP_VERSION="0.76.0"
+ARG CODEX_ACP_VERSION="1.12.0"
+ARG CLAUDE_AGENT_ACP_VERSION="0.79.0"
 RUN npm_config_cache=/tmp/npm-acp-cache retry npm install -g \
     "@agentclientprotocol/codex-acp@${CODEX_ACP_VERSION}" \
     "@agentclientprotocol/claude-agent-acp@${CLAUDE_AGENT_ACP_VERSION}" \

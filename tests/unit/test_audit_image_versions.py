@@ -1,6 +1,8 @@
 import json
 import subprocess
 import sys
+
+import pytest
 from pathlib import Path
 
 from testlib import repo_path
@@ -141,3 +143,48 @@ def _catalog_keys() -> list[str]:
     namespace = {}
     exec(SCRIPT.read_text(encoding="utf-8"), namespace)
     return sorted({entry.key for entry in namespace["CATALOG"]})
+
+
+def test_jupyter_ai_dependencies_keep_compatible_minor_lines(tmp_path):
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text(
+        "RUN pip install jupyter-server-mcp==0.3.0 "
+        "jupyterlab-commands-toolkit==0.2.0\n"
+    )
+    fixtures = tmp_path / "releases.json"
+    fixtures.write_text(json.dumps({
+        "pypi:jupyter-server-mcp": ["0.3.0", "0.4.0"],
+        "pypi:jupyterlab-commands-toolkit": ["0.2.0", "0.3.0"],
+    }))
+
+    completed = run_audit(dockerfile, fixtures)
+
+    assert completed.returncode == 0, completed.stderr
+    rows = {row["key"]: row for row in json.loads(completed.stdout)["dependencies"]}
+    assert rows["pypi:jupyter-server-mcp"]["status"] == "held"
+    assert rows["pypi:jupyter-server-mcp"]["latest_compatible"] == "0.3.0"
+    assert rows["pypi:jupyterlab-commands-toolkit"]["status"] == "held"
+    assert rows["pypi:jupyterlab-commands-toolkit"]["latest_compatible"] == "0.2.0"
+
+
+@pytest.mark.parametrize("name,current,releases", [
+    ("jupyter-server-mcp", "0.2.1", ["0.2.1", "0.3.0", "0.4.0"]),
+    ("jupyter-server-mcp", "0.4.0", ["0.3.0", "0.4.0"]),
+    ("jupyterlab-commands-toolkit", "0.1.0", ["0.1.0", "0.2.0", "0.3.0"]),
+    ("jupyterlab-commands-toolkit", "0.3.0", ["0.2.0", "0.3.0"]),
+])
+def test_audit_rejects_pins_outside_jupyter_ai_dependency_ranges(
+    tmp_path, name, current, releases
+):
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text(f"RUN pip install {name}=={current}\n")
+    fixtures = tmp_path / "releases.json"
+    fixtures.write_text(json.dumps({f"pypi:{name}": releases}))
+
+    completed = run_audit(dockerfile, fixtures)
+
+    assert completed.returncode == 2, completed.stdout
+    report = json.loads(completed.stdout)
+    assert report["dependencies"] == []
+    assert len(report["errors"]) == 1
+    assert f"declared version =={current} violates compatibility constraint" in report["errors"][0]
