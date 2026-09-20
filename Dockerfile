@@ -1014,7 +1014,7 @@ RUN --mount=type=bind,source=config/agents/t3-code/package.json,target=/tmp/t3-c
     find /opt/t3-code -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete; \
     test "$(/opt/t3-code/node_modules/.bin/t3 --version)" = "t3 v${T3_CODE_VERSION}"; \
     install -m 0755 /tmp/t3-provider-bin/codex /tmp/t3-provider-bin/claude \
-        /tmp/t3-provider-bin/opencode /opt/neurodesktop/t3-provider-bin/; \
+        /tmp/t3-provider-bin/opencode /tmp/t3-provider-bin/hostnamectl /opt/neurodesktop/t3-provider-bin/; \
     ln -s /opt/t3-code/node_modules/.bin/t3 /usr/local/bin/t3; \
     chown -R root:users /opt/t3-code /opt/neurodesktop/t3-provider-bin; \
     chmod -R a+rX /opt/t3-code /opt/neurodesktop/t3-provider-bin; \

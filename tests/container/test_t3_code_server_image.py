@@ -86,6 +86,7 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
             "T3CODE_LOG_LEVEL": "Warn",
             "T3CODE_TRACE_MIN_LEVEL": "Warn",
             "T3CODE_TRACE_FILE": "/dev/null",
+            "NEURODESKTOP_T3_CODE_LABEL": "testuser@edu.neurodesk.org",
         }
     )
     from neurodesk_t3_code import supervisor
@@ -132,6 +133,12 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
             time.sleep(0.1)
         else:
             raise AssertionError("T3 did not listen within 20 seconds")
+
+        import urllib.request
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/.well-known/t3/environment", timeout=10
+        ) as response:
+            assert json.load(response)["label"] == "testuser@edu.neurodesk.org"
 
         # Server startup reloads the login-shell PATH, which can put the
         # interactive Codex wrapper ahead of the quiet provider directory.
