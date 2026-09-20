@@ -33,3 +33,9 @@
 - `docs/architecture.md`, `docs/testing.md`, and
   `docs/environment-variables.md` are referenced by path from tests and the
   agent workflows; do not move or rename them.
+
+- T3 Connect changes must preserve Jupyter authentication/XSRF, keep device codes
+  transient and OAuth credentials out of browser responses/logs, and distinguish
+  a saved link from a reachable tunnel. Cover cancellation, active-chat restart
+  protection, expired authorization, and delayed relay routing. T3 provider tests
+  must exercise the initialization probe with the image-owned provider path.

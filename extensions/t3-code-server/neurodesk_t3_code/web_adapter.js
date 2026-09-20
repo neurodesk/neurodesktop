@@ -37,6 +37,27 @@
       keepalive: request.keepalive, signal: request.signal
     });
   };
+  // The bundled Clerk production key rejects non-t3.codes origins. Route the
+  // embedded Connect control to Jupyter's device flow instead of a dead spinner.
+  if (window.parent && window.parent !== window) {
+    const replaceConnect = () => {
+      for (const button of document.querySelectorAll('button')) {
+        if (button.dataset.neurodeskConnect || !button.textContent.includes('T3 Connect')) continue;
+        button.dataset.neurodeskConnect = 'upstream';
+        button.hidden = true;
+        const replacement = document.createElement('button');
+        replacement.dataset.neurodeskConnect = 'guided';
+        replacement.className = button.className;
+        replacement.textContent = 'Connect to my desktop';
+        replacement.onclick = () => window.parent.postMessage({ type: 'neurodesk-t3-connect' }, location.origin);
+        button.after(replacement);
+      }
+    };
+    document.addEventListener('DOMContentLoaded', () => {
+      new MutationObserver(replaceConnect).observe(document.body, { childList: true, subtree: true });
+      replaceConnect();
+    });
+  }
   const OriginalWebSocket = window.WebSocket;
   window.WebSocket = class extends OriginalWebSocket {
     constructor(url, protocols) {

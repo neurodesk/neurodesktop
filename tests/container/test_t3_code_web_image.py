@@ -22,7 +22,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def assert_jupyter_auth_required(prefix):
     client = urllib.request.build_opener(NoRedirect)
-    for path in ("neurodesk-t3/", "neurodesk-t3/_adapter.js", "neurodesk-t3-status"):
+    for path in ("neurodesk-t3/", "neurodesk-t3/_adapter.js", "neurodesk-t3-status", "neurodesk-t3/_connect"):
         with pytest.raises(urllib.error.HTTPError) as error:
             client.open(prefix + path, timeout=5)
         assert error.value.code in {302, 403}
@@ -167,6 +167,25 @@ T3ProxyHandler.prepare = hub_prepare
             # The launcher establishes the session before loading T3. No terminal
             # command, token, or form submission should be needed in this browser.
             wait_connected(bidi, context)
+            connect_status = evaluate(bidi, context,
+                "fetch(" + json.dumps(base + "neurodesk-t3/_connect") + ").then(r => r.json())")
+            assert connect_status["state"] in {"idle", "starting"}, connect_status
+            assert connect_status["code"] is None
+            assert evaluate(bidi, context,
+                "fetch(" + json.dumps(base + "neurodesk-t3/_connect") +
+                ",{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'invalid'})}).then(r => r.status)") == 400
+
+            evaluate(bidi, parent_context,
+                "window.jupyterapp.commands.execute('neurodesk-launcher:t3-connect')")
+            wait_text(bidi, parent_context, "Use T3 here without linking")
+            assert evaluate(bidi, parent_context,
+                "document.querySelector('#neurodesk-t3-connect [role=status]').textContent.includes('without linking')")
+            evaluate(bidi, parent_context,
+                "[...window.jupyterapp.shell.widgets('main')].find(widget => widget.id === 'neurodesk-t3-connect').dispose()")
+            assert evaluate(bidi, parent_context,
+                "fetch(" + json.dumps(base + "neurodesk-t3/_connect") +
+                ",{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'link'})}).then(r => r.status)") == 403
+
             # Reload reconstructs the app using the scoped session cookie.
             reload_browsing_context(bidi, context)
             wait_connected(bidi, context)

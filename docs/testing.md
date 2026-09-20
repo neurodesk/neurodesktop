@@ -156,7 +156,6 @@ The prefixed case also runs with JupyterHub's cookie-authenticated GET XSRF
 policy, so native imports of every startup bundle must pass the proxy's
 static-asset checks, including filenames containing additional dots.
 
-
 The real-server image test also waits for the Codex provider probe to report
 its CLI version. This exercises T3's login-shell PATH reload and catches
 interactive wrapper banners that corrupt the app-server JSON stream. An
@@ -371,6 +370,17 @@ or dropped it would leave the unit test green and `ml av` cluttered again. The
 image tier runs the real `ml av` against a synthetic module that provides an
 extension and requires the extension to be listed with the variable set to
 `yes` and absent by default.
+
+### T3 desktop linking
+
+`tests/unit/test_t3_connect.py` covers device-code parsing, cancellation and expiry,
+restart protection, persisted-link recovery, relay delay, and credential isolation.
+Container browser tests cover the authenticated Connect endpoint under root and
+JupyterHub prefixes. Real account authorization and external tunnel readiness
+require an approved test account; CI must not approve a live device grant.
+The T3 provider probe must reject both wire-message and payload-decoding errors,
+including when an old home-installed Codex would otherwise precede the image CLI.
+
 
 ## Negative Test Convention
 
