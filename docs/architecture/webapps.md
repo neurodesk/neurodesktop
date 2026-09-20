@@ -15,7 +15,8 @@ listed in
 
 Container-backed webapps are defined in `webapps.json`, which is fetched from
 the neurocommand repository. The startup page keeps these local app launchers,
-including RStudio and ezBIDS, and provides one **More webapps** tile linking to
+including RStudio and ezBIDS, and places one **More webapps** tile after the
+local apps, linking to
 [webapps.neurodesk.org](https://webapps.neurodesk.org/). Individual legacy hosted
 app links are no longer shown. dicompare and QSMbly are maintained externally
 and are available through More webapps, with no local launchers. The catalog
@@ -39,6 +40,7 @@ SVG or PNG files in
 them into the image before Jupyter config generation. The custom Neurodesk
 launcher reads icons through the server-proxy icon endpoint and wraps raster
 images as SVGs for JupyterLab `LabIcon` support.
+The Webapps section heading uses the same icon as the More webapps tile.
 
 Jupyter Server Proxy buffers ordinary webapp responses through Tornado's HTTP
 client. Neurodesktop initially raises Tornado's matching `max_buffer_size` and
