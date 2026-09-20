@@ -202,6 +202,22 @@ give each Neurodesktop instance its own Tailscale state directory.
 
 ## Connect through T3 Connect
 
+On JupyterHub, the default T3 environment name is `user@hub-host`, for example
+`stebo85@edu.neurodesk.org`. Named servers use `user/server@hub-host`.
+The extension prefers JupyterHub's public URL settings. When these are empty,
+the authenticated, XSRF-protected T3 session exchange remembers the request
+hostname in `$NEURODESKTOP_T3_CODE_HOME/neurodesktop-public-host` with mode 0600.
+It never uses the internal Hub API address or changes DNS.
+
+The image supplies T3's `hostnamectl --pretty` naming probe through its private
+provider PATH. Other hostnamectl commands delegate to the system executable.
+T3 still honors an explicit `/etc/machine-info` pretty hostname first; desktop
+connection aliases remain user-owned. `NEURODESKTOP_T3_CODE_LABEL` overrides
+the generated label. Local installations keep T3's normal hostname fallback.
+Existing links retain their environment ID and credentials. An idle T3 sidecar
+restarts once when it learns the public hostname; active or unknown chat state
+defers this until an idle session open, connection check, or normal server restart.
+
 Choose **Setup T3 connect** in the compact bar inside the scigent.ai tab.
 Desktop linking is optional; the embedded app already uses your Jupyter login.
 The guided panel displays a short-lived device code and an underlined link to
@@ -228,6 +244,14 @@ starts. **Retry** reuses saved authorization where possible; expired grants
 receive a fresh code. **Cancel setup** stops the current attempt without revoking
 an approved link. **Disconnect** invokes T3's unlink operation. Closing the
 panel leaves an in-progress setup running; reopening it restores its state.
+
+If the relay rejects registration because the account has reached its managed
+tunnel limit, setup immediately shows the limit reported by T3 and directs the
+user to disconnect an unused environment or request a higher limit from T3
+support, then Retry. Signing in again does not free a tunnel. The supervisor
+drains T3 output without saving or forwarding raw logs, recognizes only the
+pinned quota error wording, and retains only its numeric limit. This error is
+cleared on the next T3 process start so Retry can recover after capacity is freed.
 
 All controls use Jupyter authentication and XSRF protection. Device codes stay
 in memory and responses are not cached. OAuth credentials stay in T3's private

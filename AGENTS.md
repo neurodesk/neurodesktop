@@ -57,3 +57,11 @@
   of live-server probes. Deferred CVMFS and Slurm run independently after the
   actual Jupyter endpoint answers; cover custom ports and base paths with the
   [startup regression tests](docs/testing.md#startup-performance-regressions).
+
+- T3 environment naming must preserve environment IDs, credentials and custom
+  aliases. Learn public hostnames only from configured public URLs or an
+  authenticated, XSRF-protected request; never restart an active chat to rename.
+
+- T3 startup error reporting must allowlist safe fields and discard raw child
+  output. Cover quota detection through the real subprocess boundary and reset
+  stale errors on restart; do not infer a quota from the environment count.

@@ -1,0 +1,8 @@
+#!/bin/sh
+# T3 0.0.42 asks hostnamectl --pretty for its environment display name.
+# /etc/machine-info remains T3's first choice, preserving explicit host names.
+if [ "$#" -eq 1 ] && [ "$1" = "--pretty" ] && [ -n "${NEURODESKTOP_T3_CODE_LABEL:-}" ]; then
+    printf '%s\n' "$NEURODESKTOP_T3_CODE_LABEL"
+    exit 0
+fi
+exec /usr/bin/hostnamectl "$@"
