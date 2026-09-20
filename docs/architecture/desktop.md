@@ -4,7 +4,7 @@ description: LXDE desktop over VNC/RDP through Guacamole, clipboard sync,
   per-display Firefox profiles, and office file associations
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-14"
+last-reviewed: "2026-09-20"
 ---
 
 # Desktop Environment
@@ -16,7 +16,8 @@ listed in
 The desktop environment uses LXDE with TigerVNC for VNC access and xrdp for RDP
 access. Apache Guacamole provides browser-based remote desktop access. JupyterLab
 exposes separate `Neurodesktop RDP` and `Neurodesktop VNC` launcher entries so
-opening one backend does not start the other. In unprivileged Apptainer or
+opening VNC does not create an RDP desktop session. Root startup initializes
+the xrdp listener before Jupyter drops privileges. In unprivileged Apptainer or
 Singularity sessions, the RDP launcher entry is hidden because starting or
 reconfiguring xrdp requires root/sudo permissions; the VNC launcher remains
 available. Configuration lives in
@@ -36,6 +37,32 @@ The image puts a small `Xtigervnc` launcher beside a link to the distribution's
 server child to Mesa's EGL vendor so NVIDIA Container Toolkit driver injection
 cannot make it load an incompatible host NVIDIA EGL library. The parent launcher
 and LXDE applications retain the deployment's normal EGL vendor selection.
+
+## Credentials and service access
+
+The image locks the notebook account's password at build time. Root startup
+generates a random RDP password and stores it under
+`/var/lib/neurodesktop/rdp/`, readable only by root. It reuses that password on
+container restart and supplies a mode-0600 copy to the notebook UID under
+`/run/neurodesktop/rdp/`. Recreating the container generates a new credential.
+The RDP mapping reads that credential rather than a shared default. Startup
+reapplies the managed password, so manual OS password changes are not persistent.
+An unprivileged startup does not modify the host account and does not advertise
+an RDP connection without provisioned credentials.
+
+xrdp listens on `127.0.0.1`, at port 3389 unless the operator specifies another
+port. Its root service starts during initialization so the notebook user does
+not need sudo access to service management. Guacamole and the desktop session
+still start when their launcher opens. Local Slurm and CVMFS retain their root
+startup worker. Guacamole web and VNC credentials remain separate per-user
+secrets. See [startup privileges](../environment-variables.md#startup-privileges)
+for the package-only sudo policy.
+
+VS Code uses a mode-0600 Unix socket in a private temporary directory allocated
+by Jupyter Server Proxy. It does not open an unauthenticated TCP listener on the
+shared host. Jupyter authenticates browser requests before forwarding them.
+The proxy's [Unix-socket option](https://jupyter-server-proxy.readthedocs.io/en/latest/server-process.html#unix-socket)
+provides the private directory and WebSocket transport.
 
 ## Clipboard sync
 

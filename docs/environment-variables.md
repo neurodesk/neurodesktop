@@ -39,6 +39,29 @@ are listed at the end. The subsystems themselves are described in
 - `OFFLINE_MODULES`: local Lmod module path derived from
   `NEURODESKTOP_LOCAL_CONTAINERS`
 
+## Startup privileges
+
+- `GRANT_SUDO`: defaults to `packages` when the container starts as root.
+  The notebook user can run `apt update` and `apt install PACKAGE...`, with or
+  without `sudo`. The root-owned `/usr/local/bin/apt` and `apt-get` helpers accept
+  repository package names, optional architecture qualifiers, `-y`, `--yes`,
+  `--assume-yes`, and `--no-install-recommends`. Installs are noninteractive,
+  retain existing configuration files, and reject package removals. Other apt
+  commands, local `.deb` files, version or release selectors, and caller-supplied
+  apt configuration are rejected. Read-only queries remain available through
+  `/usr/bin/apt`, without sudo. `no` removes managed sudo grants. An explicit
+  `yes` restores unrestricted passwordless sudo for deployments that require it.
+  Root startup removes legacy grants from both Neurodesktop and the base image.
+
+The package-only policy reduces accidental privileged operations. Installed
+packages still execute maintainer scripts as root, so it is not a boundary
+against a determined user or a compromised repository. Container capabilities,
+mounts, and host isolation still determine the consequences of root access.
+Unprivileged Apptainer startup cannot grant sudo rights or change host passwords.
+
+See [desktop credentials and service access](architecture/desktop.md#credentials-and-service-access)
+for RDP initialization and VS Code isolation.
+
 ## Apptainer
 
 - `APPTAINER_HOME`: home directory passed to Apptainer. When this variable is
@@ -94,8 +117,11 @@ are listed at the end. The subsystems themselves are described in
 - `NEURODESKTOP_DESKTOP_BACKEND`: desktop backend started by `guacamole.sh`;
   supported values are `rdp`, `vnc`, and `both`. The Jupyter launcher sets this
   automatically for the separate RDP and VNC desktop entries
+- `NEURODESKTOP_RDP_PORT`: root-startup xrdp listener port, default `3389`.
+  It binds only loopback and must be between 1024 and 65535. Changing it requires
+  a container restart; notebook sessions reuse the root-provisioned port
 - `NEURODESKTOP_TOMCAT_PORT`, `NEURODESKTOP_GUACD_PORT`,
-  `NEURODESKTOP_RDP_PORT`, `NEURODESKTOP_VNC_PORT`, `NEURODESKTOP_SFTP_PORT`:
+  `NEURODESKTOP_VNC_PORT`, `NEURODESKTOP_SFTP_PORT`:
   port overrides for the desktop stack; by default each is allocated
   automatically starting from its conventional port
 - `NEURODESKTOP_RUNTIME_DIR`: base directory for per-backend Guacamole,
@@ -161,7 +187,10 @@ Connect procedures.
   config so the change applies without a JupyterLab restart. An NBI
   Settings tab that was already open in the browser still shows the old
   values until the page is reloaded, and saving from such a stale tab
-  writes the old values back
+  writes the old values back. Automatic key injection requires HTTPS, exactly
+  `llm.neurodesk.org`, and the default HTTPS port. URLs with user-info or
+  fragments are rejected. Changing the model endpoint does not carry the old
+  provider's key to the new endpoint
 - `NEURODESK_BASE_URL`, `JETSTREAM_BASE_URL`: provider endpoints probed by the
   OpenCode wrapper; default to `https://llm.neurodesk.org/openai` and
   `https://llm.jetstream-cloud.org/v1`
