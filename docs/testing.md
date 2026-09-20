@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-09-18"
+last-reviewed: "2026-09-19"
 ---
 
 # Testing
@@ -152,6 +152,9 @@ a token. It reloads using the scoped session cookie and checks launcher reuse. I
 and WebSocket requests and cookie-authenticated POSTs without Jupyter XSRF,
 including the automatic session endpoint.
 It runs at both `/` and a JupyterHub-style `/user/t3-test/` prefix.
+The prefixed case also runs with JupyterHub's cookie-authenticated GET XSRF
+policy, so native imports of every startup bundle must pass the proxy's
+static-asset checks, including filenames containing additional dots.
 
 
 The real-server image test also waits for the Codex provider probe to report

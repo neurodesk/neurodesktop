@@ -15,6 +15,8 @@ from tornado.httputil import HTTPHeaders
 
 @pytest.mark.parametrize("method,site,path,allowed", [
     ("GET", "same-origin", "assets/index-a.js", True),
+    ("GET", "same-origin", "assets/pullRequestDetail.logic-BVaUUc1S.js", True),
+    ("GET", "same-origin", "assets/BranchToolbar.logic-QOG-LgPV.js", True),
     ("HEAD", "same-origin", "assets/main-a.js", True),
     ("GET", "same-origin", "assets/style-a.css", True),
     ("GET", "same-origin", "assets/worker-a.wasm", True),

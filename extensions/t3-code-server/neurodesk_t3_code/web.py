@@ -196,7 +196,7 @@ class T3ProxyHandler(ProxyHandler):
             and self.request.headers.get("Sec-Fetch-Site") == "same-origin"
             and self.request.path.startswith(self.prefix)
             and (path == "manifest.webmanifest"
-                 or re.fullmatch(r"assets/[\w-]+\.(?:js|css|wasm)", path))
+                 or re.fullmatch(r"assets/[\w-]+(?:\.[\w-]+)*\.(?:js|css|wasm)", path))
         ):
             return
         # Unlike the generic proxy, this app's fetch adapter supplies Jupyter XSRF.

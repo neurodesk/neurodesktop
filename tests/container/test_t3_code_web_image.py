@@ -56,6 +56,9 @@ def wait_text(bidi, context, text):
 def wait_connected(bidi, context):
     deadline = time.monotonic() + 35
     while time.monotonic() < deadline:
+        if not evaluate(bidi, context, "typeof window.__neurodeskT3Target === 'function'"):
+            time.sleep(.25)
+            continue
         connected = evaluate(bidi, context, """(async () => {
             const session = await (await fetch('/api/auth/session')).json();
             return session.authenticated === true &&
@@ -71,8 +74,8 @@ def wait_connected(bidi, context):
 
 
 
-@pytest.mark.parametrize("base", ["/", "/user/t3-test/"])
-def test_t3_web_in_jupyter(tmp_path: Path, base):
+@pytest.mark.parametrize("base,hub_xsrf", [("/", False), ("/user/t3-test/", False), ("/user/t3-test/", True)])
+def test_t3_web_in_jupyter(tmp_path: Path, base, hub_xsrf):
     server_port, t3_port, browser_port = _unused_port(), _unused_port(), _unused_port()
     origin = f"http://127.0.0.1:{server_port}"
     prefix = origin + base
@@ -82,10 +85,36 @@ def test_t3_web_in_jupyter(tmp_path: Path, base):
     log_path = tmp_path / "jupyter.log"
     profile = tmp_path / "firefox-profile"
     profile.mkdir()
+    config = tmp_path / "jupyter_server_config.py"
+    config.write_text("""
+from jupyterhub._xsrf_utils import _needs_check_xsrf
+from jupyter_server.base.handlers import JupyterHandler
+from neurodesk_t3_code.web import T3ProxyHandler
+from tornado.web import RequestHandler
+
+# Exercise Hub's cookie-authenticated GET policy with the actual browser module
+# graph. Standalone Jupyter otherwise skips this check for all GET requests.
+_check_xsrf = JupyterHandler.check_xsrf_cookie
+def hub_check_xsrf(self):
+    if self.request.method in {"GET", "HEAD"}:
+        if _needs_check_xsrf(self):
+            # Keep standalone Jupyter's token format; only borrow Hub's GET policy.
+            RequestHandler.check_xsrf_cookie(self)
+    else:
+        _check_xsrf(self)
+JupyterHandler.check_xsrf_cookie = hub_check_xsrf
+_prepare = T3ProxyHandler.prepare
+async def hub_prepare(self, *args, **kwargs):
+    await _prepare(self, *args, **kwargs)
+    if self.current_user and not self.token_authenticated:
+        self.check_xsrf_cookie()
+T3ProxyHandler.prepare = hub_prepare
+""" if hub_xsrf else "")
     with log_path.open("w") as log, (tmp_path / "firefox.log").open("w") as browser_log:
         server = subprocess.Popen([
             "jupyter", "lab", "--no-browser", "--LabApp.expose_app_in_browser=True", f"--ServerApp.port={server_port}",
             "--ServerApp.port_retries=0", f"--ServerApp.base_url={base}",
+            f"--config={config}",
             f"--ServerApp.root_dir={tmp_path}", f"--FileContentsManager.preferred_dir={tmp_path}", f"--IdentityProvider.token={token}",
             '--ServerApp.jpserver_extensions={"jupyterlab":True,"neurodesk_t3_code":True}',
         ], env=environment, stdout=log, stderr=subprocess.STDOUT)
