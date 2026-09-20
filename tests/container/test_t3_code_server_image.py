@@ -11,6 +11,8 @@ import signal
 import socket
 import subprocess
 import time
+import urllib.error
+import urllib.request
 
 import pytest
 
@@ -126,19 +128,18 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 raise AssertionError(f"T3 exited during startup with {process.returncode}")
-            with socket.socket() as client:
-                client.settimeout(0.2)
-                if client.connect_ex(("127.0.0.1", port)) == 0:
-                    break
-            time.sleep(0.1)
+            try:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/.well-known/t3/environment", timeout=1
+                ) as response:
+                    descriptor = json.load(response)
+            except (urllib.error.URLError, TimeoutError):
+                time.sleep(0.1)
+                continue
+            assert descriptor["label"] == "testuser@edu.neurodesk.org"
+            break
         else:
-            raise AssertionError("T3 did not listen within 20 seconds")
-
-        import urllib.request
-        with urllib.request.urlopen(
-            f"http://127.0.0.1:{port}/.well-known/t3/environment", timeout=10
-        ) as response:
-            assert json.load(response)["label"] == "testuser@edu.neurodesk.org"
+            raise AssertionError("T3 did not serve its environment descriptor within 20 seconds")
 
         # Server startup reloads the login-shell PATH, which can put the
         # interactive Codex wrapper ahead of the quiet provider directory.

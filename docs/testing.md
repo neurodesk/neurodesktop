@@ -245,6 +245,14 @@ jupyter server extension list
 jupyter labextension list --verbose
 ```
 
+The coding-agent image test initializes all three ACP implementations and
+requests a session without credentials or a model prompt. For Codex and Claude,
+an executable shim records the arguments before running the image CLI. A
+successful session or the protocol's authentication-required response is
+accepted only after the expected CLI invocation is observed. Other errors,
+process exits, and timeouts fail the test. This check covers adapter upgrades
+that use an image CLI outside the adapter's declared dependency range.
+
 The Jupyter AI image test also imports Notebook Intelligence and the MCP v1
 ``mcp.server.fastmcp`` API. ``jupyter server extension list`` returns success
 even when an individual extension reports an import error, so its process exit

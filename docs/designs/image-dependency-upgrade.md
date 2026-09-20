@@ -14,6 +14,9 @@ extracts current versions from that file and joins them to a small catalog of
 package identities, authoritative release sources, and compatibility holds.
 The catalog never repeats a current version.
 
+Exact declarations outside a catalog compatibility range are errors, including
+versions below a supported minimum.
+
 The auditor reports the latest upstream release and the latest release allowed
 by a compatibility constraint separately. This distinction keeps an MCP 2.x
 hold from hiding an available MCP 1.x update. Offline fixtures exercise the
