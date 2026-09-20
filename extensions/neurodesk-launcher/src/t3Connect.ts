@@ -27,9 +27,11 @@ export function createConnectPanel(app: JupyterFrontEnd): MainAreaWidget<Widget>
   status.setAttribute('aria-live', 'polite');
   const label = document.createElement('p');
   const code = document.createElement('strong');
+  code.setAttribute('aria-live', 'polite');
   code.style.cssText = 'display:block;font-size:28px;letter-spacing:3px;margin:16px 0';
   const expiry = document.createElement('p');
   const authorize = document.createElement('a');
+  authorize.hidden = true;
   authorize.textContent = 'Authorize T3 Connect';
   authorize.target = '_blank';
   authorize.rel = 'noopener noreferrer';
@@ -51,6 +53,8 @@ export function createConnectPanel(app: JupyterFrontEnd): MainAreaWidget<Widget>
     const button = document.createElement('button');
     button.className = 'jp-mod-styled';
     button.textContent = title;
+    button.hidden = true;
+    button.disabled = true;
     button.onclick = () => { void request(action); };
     buttons.set(action, button);
     actions.append(button);
@@ -68,6 +72,7 @@ export function createConnectPanel(app: JupyterFrontEnd): MainAreaWidget<Widget>
     buttons.get('link')!.hidden = value.state !== 'idle';
     buttons.get('retry')!.hidden = !['error', 'expired'].includes(value.state);
     buttons.get('cancel')!.hidden = !busy;
+    // Allow revocation after errors or expiry: approval may have completed late.
     buttons.get('disconnect')!.hidden = busy || (!value.linked && value.state === 'idle');
     for (const button of buttons.values()) button.disabled = requestPending;
   }
