@@ -914,11 +914,11 @@ RUN echo "Installing neurocommand ref ${NEUROCOMMAND_REF}" \
 
 # Install AI coding assistants. The Jupyter AI ACP adapters are installed in
 # their own runtime-only layer below so adapter updates do not rebuild
-# frontend assets. CODEX_CLI_VERSION must stay inside the @openai/codex range
-# pinned by the codex-acp adapter (CODEX_ACP_VERSION below): the adapter is
-# installed without its bundled binary and drives this install via CODEX_PATH.
-ARG CODEX_CLI_VERSION="0.154.0"
-ARG CLAUDE_CODE_VERSION="2.1.274"
+# frontend assets. The adapter is installed without its bundled binary and
+# drives this install via CODEX_PATH. Validate CLI upgrades with the actual T3
+# and ACP initialization probes, especially outside the adapter dependency range.
+ARG CODEX_CLI_VERSION="0.155.1"
+ARG CLAUDE_CODE_VERSION="2.1.278"
 RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_CLI_VERSION}" \
     && find "$(npm root -g)/@openai" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
     && rm -rf /root/.npm /tmp/npm-root-cache /home/${NB_USER}/.npm \
@@ -1030,8 +1030,8 @@ RUN --mount=type=bind,source=config/agents/t3-code/package.json,target=/tmp/t3-c
 # global installs, so the platform packages are deleted explicitly instead.
 # The adapters drive home-first selectors via CODEX_PATH and
 # CLAUDE_CODE_EXECUTABLE, exported in environment_variables.sh. Those selectors
-# fall back to the image binaries; codex-acp's supported range for that fallback
-# is what pins CODEX_CLI_VERSION above. The
+# fall back to the image binaries; container tests exercise the adapter against
+# CODEX_CLI_VERSION rather than its bundled dependency. The
 # size assertion fails the build if a future adapter release relocates its
 # vendored binary and reintroduces the duplicate.
 ARG CODEX_ACP_VERSION="1.11.0"

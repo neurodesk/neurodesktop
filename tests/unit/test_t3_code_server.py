@@ -363,3 +363,32 @@ def test_provider_seed_promotes_only_exact_previous_default(tmp_path):
     before = path.read_bytes()
     seed_provider_settings(policy)
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("original", [{}, {"enableProviderUpdateChecks": True},
+                                     {"enableProviderUpdateChecks": False}])
+def test_update_notices_disabled_without_changing_provider_settings(tmp_path, original):
+    from neurodesk_t3_code.supervisor import disable_update_notifications
+    policy = SimpleNamespace(base_dir=tmp_path)
+    path = tmp_path / "userdata/settings.json"
+    path.parent.mkdir()
+    original["providerInstances"] = {"custom": {"driver": "codex", "enabled": False}}
+    path.write_text(json.dumps(original))
+    disable_update_notifications(policy)
+    assert json.loads(path.read_text()) == {**original, "enableProviderUpdateChecks": False}
+    before = path.read_bytes()
+    disable_update_notifications(policy)
+    assert path.read_bytes() == before
+
+
+def test_update_notice_policy_preserves_malformed_settings(tmp_path):
+    from neurodesk_t3_code.supervisor import disable_update_notifications
+    policy = SimpleNamespace(base_dir=tmp_path)
+    disable_update_notifications(policy)
+    path = tmp_path / "userdata/settings.json"
+    assert json.loads(path.read_text()) == {"enableProviderUpdateChecks": False}
+    assert path.stat().st_mode & 0o077 == 0
+    for content in ("{invalid", "[]"):
+        path.write_text(content)
+        disable_update_notifications(policy)
+        assert path.read_text() == content

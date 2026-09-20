@@ -11,7 +11,7 @@ import pytest
 from testlib import repo_path
 
 sys.path.insert(0, str(repo_path('extensions/t3-code-server')))
-from neurodesk_t3_code.connect import ConnectManager, ConnectError
+from neurodesk_t3_code.connect import ConnectManager, ConnectError, RoutePending
 from tornado.web import HTTPError
 
 
@@ -217,3 +217,75 @@ def test_cancel_during_restart_finishes_restart(manager):
         await cancelling
         manager.service.wait_ready.assert_awaited_once()
     run(scenario())
+
+
+def test_dns_failure_reports_cluster_resolution_problem(manager, monkeypatch):
+    import socket
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr('neurodesk_t3_code.connect.ROUTE_TIMEOUT', 0.1)
+    async def sleep(_):
+        await real_sleep(0.15)
+    monkeypatch.setattr('neurodesk_t3_code.connect.asyncio.sleep', sleep)
+    manager.reachable = AsyncMock(side_effect=socket.gaierror(-2, 'private-hostname'))
+    with pytest.raises(ConnectError, match='check cluster DNS') as error:
+        run(manager._wait_reachable())
+    assert 'private-hostname' not in str(error.value)
+    manager.service.close.assert_not_awaited()
+
+
+@pytest.mark.parametrize('url', [
+    'https://example.com/api/auth/session',
+    'http://prod-a.t3coderelay.com/api/auth/session',
+    'https://prod-a.t3coderelay.com.evil.test/api/auth/session',
+    'https://prod-a.t3coderelay.com:8443/api/auth/session',
+    'https://user@prod-a.t3coderelay.com/api/auth/session',
+    'https://prod-a.t3coderelay.com/other',
+])
+def test_public_dns_fallback_rejects_unrelated_destinations(url):
+    from neurodesk_t3_code.connect import fetch_tunnel_with_public_dns
+    with pytest.raises(RoutePending):
+        run(fetch_tunnel_with_public_dns(url))
+
+
+def test_public_dns_preserves_hostname_and_omits_credentials(monkeypatch):
+    from neurodesk_t3_code import connect
+    host = 'prod-test.t3coderelay.com'
+    calls = []
+    clients = []
+    class Client:
+        def __init__(self, **kwargs):
+            self.options = kwargs
+            self.closed = False
+            clients.append(self)
+        async def fetch(self, url, **kwargs):
+            calls.append((url, kwargs))
+            if 'dns-query' in url:
+                return SimpleNamespace(body=json.dumps({'Status': 0, 'Answer': [
+                    {'type': 1, 'data': '127.0.0.1'}, {'type': 1, 'data': '10.0.0.1'},
+                    {'type': 1, 'data': '104.26.2.228'}]}).encode())
+            return SimpleNamespace(code=200, body=b'{"authenticated":false}')
+        def close(self):
+            self.closed = True
+    monkeypatch.setattr(connect, 'SimpleAsyncHTTPClient', Client)
+    result = run(connect.fetch_tunnel_with_public_dns('https://' + host + '/api/auth/session'))
+    assert result.code == 200
+    assert clients[1].options['resolver'].mapping == {host: '104.26.2.228'}
+    assert calls[1][0] == 'https://' + host + '/api/auth/session'
+    assert all(c.closed for c in clients)
+    for _, options in calls:
+        assert options['follow_redirects'] is False
+        assert 'Authorization' not in options['headers']
+        assert 'Cookie' not in options['headers']
+        assert options.get('validate_cert', True) is True
+
+
+def test_relay_credentials_never_use_public_dns_fallback(manager, monkeypatch):
+    import socket
+    from neurodesk_t3_code import connect
+    client = SimpleNamespace(fetch=AsyncMock(side_effect=socket.gaierror()))
+    fallback = AsyncMock()
+    monkeypatch.setattr(connect.httpclient, 'AsyncHTTPClient', lambda: client)
+    monkeypatch.setattr(connect, 'fetch_tunnel_with_public_dns', fallback)
+    with pytest.raises(socket.gaierror):
+        run(manager._json(connect.RELAY + '/v1/environments', token='private'))
+    fallback.assert_not_awaited()

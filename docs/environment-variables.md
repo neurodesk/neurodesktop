@@ -223,7 +223,7 @@ reviewed; the Dockerfile itself is authoritative.
   `1.18.30`). Override to bump the pin, or set it to an empty value to
   install the latest release
 - `CLAUDE_CODE_VERSION`: exact Claude Code native release installed as the
-  image fallback; defaults to `2.1.274`. The direct-version audit compares the
+  image fallback; defaults to `2.1.278`. The direct-version audit compares the
   pin with the official `@anthropic-ai/claude-code` release stream
 - `CVMFS_VERSION`: exact Ubuntu CVMFS client package version;
   defaults to `2.14.1+ubuntu24.04`
@@ -259,9 +259,10 @@ reviewed; the Dockerfile itself is authoritative.
   `CLAUDE_CODE_EXECUTABLE` (runtime variables exported by
   `environment_variables.sh`)
 - `CODEX_CLI_VERSION`: the `@openai/codex` CLI release
-  installed globally; defaults to `0.154.0` and must stay inside the range the
-  pinned codex-acp adapter declares, because this is the tested fallback for
-  the adapter. A user can install a newer release with `codex update`
+  installed globally; defaults to `0.155.1`. Upgrades must pass the real T3 and
+  ACP initialization probes. This release exceeds the pinned ACP adapter's
+  declared dependency range, so that combination needs explicit validation.
+  A user can install a newer release with `codex update`
 - `T3_CLOUDFLARED_VERSION`: the relay client release bundled for guided T3 Connect
   linking; defaults to `2026.9.1` and uses T3's supported executable override. Update
   both architecture SHA-256 values in `Dockerfile` whenever this version changes.

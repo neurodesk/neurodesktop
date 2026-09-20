@@ -7,6 +7,9 @@ they were installed and are reachable as commands.
 """
 
 import os
+import asyncio
+import json
+import signal
 from pathlib import Path
 
 import pytest
@@ -34,3 +37,37 @@ def test_coding_agent_wrapper_is_installed_and_on_path(command, installed_path):
 
     code, output = run_cmd(f"command -v {command}")
     assert code == 0, f"{command} agent command missing from PATH: {output}"
+
+
+def test_codex_acp_initializes_with_image_codex(tmp_path):
+    """Exercise the real adapter against the image CLI, not its bundled version."""
+    async def probe():
+        process = await asyncio.create_subprocess_exec(
+            "codex-acp", env={**os.environ, "HOME": str(tmp_path),
+                              "CODEX_HOME": str(tmp_path / "codex"),
+                              "CODEX_PATH": "/usr/bin/codex"},
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
+        try:
+            request = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                       "params": {"protocolVersion": 1, "clientCapabilities": {}}}
+            process.stdin.write((json.dumps(request) + "\n").encode())
+            await process.stdin.drain()
+            async def response():
+                while line := await process.stdout.readline():
+                    message = json.loads(line)
+                    if message.get("id") == 1:
+                        return message
+                raise AssertionError("ACP exited before initialization")
+            message = await asyncio.wait_for(response(), timeout=30)
+            assert "error" not in message, message
+            assert message["result"]["protocolVersion"] == 1
+        finally:
+            if process.returncode is None:
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    await process.wait()
+    asyncio.run(probe())
