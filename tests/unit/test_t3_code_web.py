@@ -5,12 +5,29 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-from testlib import repo_path
+from testlib import reload_browsing_context, repo_path
 
 sys.path.insert(0, str(repo_path("extensions/t3-code-server")))
 pytest.importorskip("jupyter_server_proxy")
 from neurodesk_t3_code.web import rewrite_client, T3ProxyHandler
 from tornado.httputil import HTTPHeaders
+
+
+def test_browser_reload_commits_without_waiting_for_page_readiness():
+    """The T3 readiness poll, rather than BiDi, owns reload completion."""
+    requests = []
+
+    class Bidi:
+        def request(self, method, params):
+            requests.append((method, params))
+            return {"navigation": "reload", "url": "http://localhost/neurodesk-t3/"}
+
+    reload_browsing_context(Bidi(), "t3-frame")
+
+    assert requests == [(
+        "browsingContext.reload",
+        {"context": "t3-frame", "wait": "none"},
+    )]
 
 
 @pytest.mark.parametrize("method,site,path,allowed", [
