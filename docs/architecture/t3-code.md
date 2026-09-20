@@ -30,6 +30,13 @@ and JupyterHub user prefix. It does not require Tailscale or a separately
 published T3 port. Leave `NEURODESKTOP_T3_CODE_HOST` at its loopback default
 when using only JupyterLab. The launcher reports when the sidecar is not ready.
 
+The supervisor calls the sidecar ready only after T3 answers an HTTP request on
+`/.well-known/t3/environment`. T3 accepts connections about a second before it
+serves, and it never replies on a connection it accepted inside that window. A
+readiness check that only opens a socket therefore hands the first real request
+to a connection that never answers. Code that starts T3 itself, including the
+installed-image tests, polls the same endpoint instead of the bare port.
+
 The server extension authenticates `/neurodesk-t3/` and proxies HTTP and
 WebSockets to its supervised process. It strips Jupyter credentials before
 forwarding requests and scopes T3 session cookies to that route. The pinned

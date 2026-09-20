@@ -25,6 +25,8 @@ from typing import Mapping
 DEFAULT_EXECUTABLE = Path("/opt/t3-code/node_modules/.bin/t3")
 DEFAULT_PROVIDER_BIN = Path("/opt/neurodesktop/t3-provider-bin")
 DEFAULT_PORT = 3773
+# T3 serves its unauthenticated environment identity here.
+READINESS_PATH = "/.well-known/t3/environment"
 
 
 def relay_tunnel_limit(output: bytes) -> int | None:
@@ -317,7 +319,7 @@ class T3Supervisor:
         self._task = asyncio.create_task(self.run(), name="neurodesk-t3-code")
 
     async def wait_ready(self, *, timeout: float | None = None) -> None:
-        """Wait until T3 accepts TCP connections or startup parks."""
+        """Wait until T3 answers HTTP or startup parks."""
 
         await asyncio.wait_for(
             self._ready.wait(),
@@ -369,11 +371,11 @@ class T3Supervisor:
                     continue
                 self._output_reader = asyncio.create_task(self._read_output(self._process.stdout))
                 self.pid = self._process.pid
-                if await self._wait_for_listener():
+                if await self._wait_until_serving():
                     self.state = ServiceState.READY
                     self._ready.set()
                     self.log.info(
-                        "T3 Code is listening on %s:%s as pid %s.",
+                        "T3 Code is answering on %s:%s as pid %s.",
                         self.policy.host,
                         self.policy.port,
                         self.pid,
@@ -413,18 +415,56 @@ class T3Supervisor:
         self.pid = None
         self.state = ServiceState.STOPPED
 
-    async def _wait_for_listener(self) -> bool:
+    async def _wait_until_serving(self) -> bool:
         deadline = asyncio.get_running_loop().time() + self.readiness_timeout
         while asyncio.get_running_loop().time() < deadline:
             if self._process is None or self._process.returncode is not None:
                 return False
-            if await self._port_accepting():
+            if await self._server_answering():
                 return True
             await asyncio.sleep(0.1)
         await self._terminate_process()
         return False
 
+    async def _server_answering(self) -> bool:
+        """Report readiness only once T3 completes an HTTP exchange.
+
+        T3 listens about a second before it serves and never replies on a
+        connection it accepted in that window, so an accepted connection does
+        not mean the next request gets an answer. The status line alone proves
+        the HTTP layer is live, so the status code is not read.
+        """
+
+        host = self.policy.readiness_host
+        port = self.policy.port
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=0.25
+            )
+        except (OSError, asyncio.TimeoutError):
+            return False
+        try:
+            writer.write(
+                f"GET {READINESS_PATH} HTTP/1.1\r\nHost: {host}:{port}\r\n"
+                "Connection: close\r\n\r\n".encode()
+            )
+            await asyncio.wait_for(writer.drain(), timeout=0.5)
+            version = await asyncio.wait_for(reader.readexactly(7), timeout=0.5)
+        except (OSError, EOFError, asyncio.TimeoutError):
+            return False
+        finally:
+            writer.close()
+            with suppress(OSError):
+                await writer.wait_closed()
+        return version == b"HTTP/1."
+
     async def _port_accepting(self) -> bool:
+        """Answer whether the port is taken, which parks a duplicate start.
+
+        A foreign owner must park this supervisor even when it never speaks
+        HTTP, so this deliberately stays weaker than ``_server_answering``.
+        """
+
         try:
             _reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(self.policy.readiness_host, self.policy.port),

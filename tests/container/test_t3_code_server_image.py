@@ -11,6 +11,7 @@ import signal
 import socket
 import subprocess
 import time
+import urllib.request
 
 import pytest
 
@@ -122,23 +123,24 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
         start_new_session=True,
     )
     try:
-        deadline = time.monotonic() + 20
+        # T3 accepts connections before it serves and strands whatever it
+        # accepted early, so a listening port is not a usable server. Poll the
+        # environment endpoint until it answers, as the supervisor does.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        environment_url = f"http://127.0.0.1:{port}/.well-known/t3/environment"
+        deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 raise AssertionError(f"T3 exited during startup with {process.returncode}")
-            with socket.socket() as client:
-                client.settimeout(0.2)
-                if client.connect_ex(("127.0.0.1", port)) == 0:
-                    break
-            time.sleep(0.1)
+            try:
+                with opener.open(environment_url, timeout=2) as response:
+                    environment = json.load(response)
+                break
+            except (OSError, ValueError):
+                time.sleep(0.1)
         else:
-            raise AssertionError("T3 did not listen within 20 seconds")
-
-        import urllib.request
-        with urllib.request.urlopen(
-            f"http://127.0.0.1:{port}/.well-known/t3/environment", timeout=10
-        ) as response:
-            assert json.load(response)["label"] == "testuser@edu.neurodesk.org"
+            raise AssertionError("T3 did not answer its environment endpoint within 60 seconds")
+        assert environment["label"] == "testuser@edu.neurodesk.org"
 
         # Server startup reloads the login-shell PATH, which can put the
         # interactive Codex wrapper ahead of the quiet provider directory.
