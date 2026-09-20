@@ -7,6 +7,7 @@ import workspaceLinksPlugin from './workspaceLinks';
 
 import astraViewerPlugin from './astraViewer';
 import t3CodePlugin from './t3Code';
+import { applyWebappsAppearance } from './webappsAppearance';
 
 import { Notification } from '@jupyterlab/apputils';
 
@@ -369,12 +370,6 @@ const DEFAULT_ORDER = 100;
 /** Categories to hide from the launcher. */
 const HIDDEN_CATEGORIES = new Set(['HPC Tools']);
 
-/** Categories whose section-header icon should be replaced with the Neurodesk icon. */
-const ICON_OVERRIDE_CATEGORIES = new Set(['Webapps']);
-
-/** Neurodesk icon SVG, fetched once during activation. */
-let neuroIconSvg: string | null = null;
-
 /**
  * Apply CSS order to launcher category sections, hide unwanted categories,
  * and override section-header icons where configured.
@@ -399,33 +394,8 @@ function applyLauncherOrder(): void {
 
       section.style.order = String(CATEGORY_ORDER[name] ?? DEFAULT_ORDER);
 
-      // Replace the section-header icon with the Neurodesk icon
-      if (ICON_OVERRIDE_CATEGORIES.has(name) && neuroIconSvg) {
-        const sectionHeader = section.querySelector('.jp-Launcher-sectionHeader');
-        if (!sectionHeader) {
-          return;
-        }
-        const existingSvg = sectionHeader.querySelector('svg');
-        if (existingSvg && existingSvg.dataset.neurodesk) {
-          return; // already replaced
-        }
-        if (existingSvg) {
-          const temp = document.createElement('div');
-          temp.innerHTML = neuroIconSvg;
-          const newSvg = temp.querySelector('svg');
-          if (newSvg) {
-            // Preserve the existing classes and dimensions
-            newSvg.setAttribute('class', existingSvg.getAttribute('class') || '');
-            if (existingSvg.hasAttribute('width')) {
-              newSvg.setAttribute('width', existingSvg.getAttribute('width')!);
-            }
-            if (existingSvg.hasAttribute('height')) {
-              newSvg.setAttribute('height', existingSvg.getAttribute('height')!);
-            }
-            newSvg.dataset.neurodesk = 'true';
-            existingSvg.replaceWith(newSvg);
-          }
-        }
+      if (name === 'Webapps') {
+        applyWebappsAppearance(section);
       }
     });
   });
@@ -518,25 +488,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
       return;
     }
 
-    // Use the catalog tile's icon for the Webapps heading. The legacy
-    // neurodesktop entry may be hidden and absent from servers-info.
-    // Construct URL directly (like infoUrl) to avoid base-path issues on JupyterHub.
     const serverProcesses = data.server_processes || [];
-    const ndProcess =
-      serverProcesses.find(sp => sp.name === 'more-webapps') ||
-      serverProcesses.find(sp => sp.name === 'neurodesktop');
-    const neuroIconPromise = ndProcess
-      ? fetchCachedIconSvgText(
-          ndProcess.name,
-          URLExt.join(
-            settings.baseUrl,
-            'server-proxy',
-            'icon',
-            ndProcess.name
-          ),
-          settings
-        )
-      : Promise.resolve(null);
 
     const enabledServerProcesses = serverProcesses.filter(
       sp => sp.launcher_entry.enabled
@@ -551,10 +503,6 @@ const plugin: JupyterFrontEndPlugin<void> = {
         )
       ])
     );
-
-    if (ndProcess) {
-      neuroIconSvg = await neuroIconPromise;
-    }
 
     const launcherProcesses = await Promise.all(
       enabledServerProcesses.map(async sp => ({
@@ -592,7 +540,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
         command: commandId,
         category: category,
         // Keep the external catalog after the local application tiles.
-        rank: name === 'more-webapps' ? 1 : 0
+        rank: name === 'more-webapps' ? Infinity : 0
       });
     }
 
