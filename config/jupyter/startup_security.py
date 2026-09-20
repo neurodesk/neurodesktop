@@ -8,6 +8,7 @@ import pwd
 import re
 import secrets
 import subprocess
+import sys
 import tempfile
 
 
@@ -15,6 +16,7 @@ SUDOERS = Path("/etc/sudoers.d")
 STATE = Path("/var/lib/neurodesktop/rdp")
 RUNTIME = Path("/run/neurodesktop/rdp")
 XRDP_CONFIG = Path("/etc/xrdp/xrdp.ini")
+ROOT_STORAGE = Path("/neurodesktop-storage")
 ROOT_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "HOME": "/root", "LC_ALL": "C"}
 
 
@@ -83,16 +85,41 @@ def configure_rdp(account, port):
     # traversal to its own private files, without write access to the directory.
     for directory in (RUNTIME.parent, RUNTIME, runtime):
         directory.chmod(0o711)
-    for name, value in {**state, "port": port}.items():
+    # Publish the port only after startup succeeds. Remove any stale readiness
+    # marker before retrying; credentials alone do not mean RDP is available.
+    (runtime / "port").unlink(missing_ok=True)
+    for name, value in state.items():
         write_private(runtime / name, value, account.pw_uid, account.pw_gid)
-    config = XRDP_CONFIG.read_text()
-    config, replacements = re.subn(
-        r"(?m)^port=.*$", f"port=tcp://127.0.0.1:{port}", config, count=1,
-    )
-    if replacements != 1:
-        raise ValueError("xrdp configuration has no listener port")
-    XRDP_CONFIG.write_text(config)
-    subprocess.run(["/usr/sbin/service", "xrdp", "start"], env=ROOT_ENV, check=True)
+    try:
+        config = XRDP_CONFIG.read_text()
+        config, replacements = re.subn(
+            r"(?m)^port=.*$", f"port=tcp://127.0.0.1:{port}", config, count=1,
+        )
+        if replacements != 1:
+            raise ValueError("xrdp configuration has no listener port")
+        XRDP_CONFIG.write_text(config)
+        subprocess.run(["/usr/sbin/service", "xrdp", "start"], env=ROOT_ENV, check=True)
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        print("[WARN] RDP service unavailable; Jupyter and the VNC desktop remain available.", file=sys.stderr)
+        return
+    write_private(runtime / "port", port, account.pw_uid, account.pw_gid)
+
+
+def prepare_storage(home):
+    """Preserve home-backed storage without granting notebook users root access."""
+    if ROOT_STORAGE.is_symlink() or ROOT_STORAGE.is_mount():
+        return
+    target = Path(home) / "neurodesktop-storage"
+    try:
+        if ROOT_STORAGE.is_dir():
+            entries = list(ROOT_STORAGE.iterdir())
+            legacy = ROOT_STORAGE / "neurodesktop-storage"
+            if entries == [legacy] and legacy.is_symlink() and legacy.readlink() == target:
+                legacy.unlink()
+            ROOT_STORAGE.rmdir()  # Refuse to replace a directory containing user data.
+        ROOT_STORAGE.symlink_to(target, target_is_directory=True)
+    except OSError:
+        print("[WARN] Existing root storage was preserved; it could not be linked to the home directory.", file=sys.stderr)
 
 
 def main():
@@ -100,6 +127,7 @@ def main():
         raise PermissionError("Security initialization requires root")
     account = pwd.getpwnam(os.environ.get("NB_USER", "jovyan"))
     configure_sudo(account, os.environ.get("GRANT_SUDO", "packages"))
+    prepare_storage(account.pw_dir)
     Path("/run/sshd").mkdir(mode=0o755, exist_ok=True)
     configure_rdp(account, os.environ.get("NEURODESKTOP_RDP_PORT", "3389"))
 

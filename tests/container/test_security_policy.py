@@ -21,6 +21,10 @@ def notebook_command(*arguments):
 
 
 def test_restricted_sudo_rejects_shells_and_apt_overrides():
+    if any(os.environ.get(name) for name in (
+        "APPTAINER_CONTAINER", "SINGULARITY_CONTAINER", "APPTAINER_NAME", "SINGULARITY_NAME",
+    )) or Path("/.apptainer.d").exists() or Path("/.singularity.d").exists():
+        pytest.skip("Unprivileged HPC startup cannot grant container sudo permissions")
     if os.environ.get("GRANT_SUDO", "packages") != "packages":
         pytest.skip("Requires the package-only sudo profile")
     allowed = subprocess.run(notebook_command("sudo", "-n", "-l", "/usr/local/bin/apt", "install", "curl"),

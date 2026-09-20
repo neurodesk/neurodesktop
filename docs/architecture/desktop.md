@@ -58,6 +58,12 @@ startup worker. Guacamole web and VNC credentials remain separate per-user
 secrets. See [startup privileges](../environment-variables.md#startup-privileges)
 for the package-only sudo policy.
 
+Failure to start the optional xrdp service leaves Jupyter and VNC available.
+Failure to provision credentials or validate sudo policy stops startup.
+Root startup also prepares the ARM CPU-information workaround used by MATLAB,
+without granting the notebook user mount privileges. The workaround remains
+best-effort on runtimes that deny bind mounts.
+
 VS Code uses a mode-0600 Unix socket in a private temporary directory allocated
 by Jupyter Server Proxy. It does not open an unauthenticated TCP listener on the
 shared host. Jupyter authenticates browser requests before forwarding them.

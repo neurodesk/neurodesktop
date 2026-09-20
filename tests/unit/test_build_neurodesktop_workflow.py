@@ -110,6 +110,20 @@ def test_image_tests_use_cvmfs_action_without_stale_apt_package_lists():
         assert "github-action-cvmfs@v3" not in workflow
 
 
+def test_image_workflows_exercise_package_policy_and_second_uid_isolation():
+    for path in IMAGE_TEST_WORKFLOWS:
+        workflow = yaml.safe_load(path.read_text())
+        job = workflow["jobs"]["test-image"]
+        matrix = job["strategy"]["matrix"]
+        profiles = matrix.get("include", matrix.get("profile"))
+        assert any(profile["grant_sudo"] == "packages" for profile in profiles)
+        assert any(profile["grant_sudo"] == "yes" for profile in profiles)
+        commands = "\n".join(step.get("run", "") for step in job["steps"])
+        grant = "matrix.profile.grant_sudo" if "profile" in matrix else "matrix.grant_sudo"
+        assert 'if [ "${{ ' + grant + ' }}" = "packages" ]; then' in commands
+        assert "docker exec -u root neurodesktop-test pytest /opt/tests/test_security_policy.py -v" in commands
+
+
 def test_production_build_updates_the_date_tag_without_deleting_it():
     tag_step = _tag_step(WORKFLOW.read_text())
 

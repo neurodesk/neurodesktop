@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-09-16"
+last-reviewed: "2026-09-20"
 ---
 
 # Environment Variables

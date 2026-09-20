@@ -1476,6 +1476,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/jupyter/start_notebook.sh /usr/local/bin/start-notebook.d/start_notebook.sh \
     && install -m 0755 /tmp/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/before_notebook.sh \
     && install -m 0755 /tmp/jupyter/startup_security.py /opt/neurodesktop/startup_security.py \
+    && install -m 0755 /tmp/jupyter/prepare_cpuinfo.sh /opt/neurodesktop/prepare_cpuinfo.sh \
     && install -m 0755 /tmp/jupyter/neurodesktop_apt.py /usr/local/bin/apt \
     && ln -sf apt /usr/local/bin/apt-get \
     && install -d -m 0700 /var/lib/neurodesktop/rdp \

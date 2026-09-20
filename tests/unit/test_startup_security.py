@@ -1,6 +1,7 @@
 import json
 import os
 import pwd
+from pathlib import Path
 import subprocess
 from types import SimpleNamespace
 from xml.etree import ElementTree
@@ -70,6 +71,18 @@ def test_failed_password_update_does_not_start_rdp(security, monkeypatch):
     assert not (module.RUNTIME / "1000/password").exists()
 
 
+def test_failed_optional_rdp_service_keeps_notebook_startup_available(security, monkeypatch, capsys):
+    module, _ = security
+    module.configure_rdp(account(), "3389")
+    def fail_service(args, **kwargs):
+        if args[:2] == ["/usr/sbin/service", "xrdp"]:
+            raise subprocess.CalledProcessError(1, args)
+    monkeypatch.setattr(module.subprocess, "run", fail_service)
+    module.configure_rdp(account(), "3389")
+    assert not (module.RUNTIME / "1000/port").exists()
+    assert "VNC desktop remain available" in capsys.readouterr().err
+
+
 def test_restrictive_umask_still_allows_runtime_directory_traversal(security):
     module, _ = security
     previous = os.umask(0o077)
@@ -124,6 +137,31 @@ def test_package_policy_removes_both_legacy_full_sudo_rules(security):
     assert (module.SUDOERS / "notebook").stat().st_mode & 0o777 == 0o440
     module.configure_sudo(account(), "no")
     assert not (module.SUDOERS / "notebook").exists()
+
+
+@pytest.mark.parametrize("existing", ["missing", "empty", "legacy", "data", "mounted"])
+def test_root_storage_setup_preserves_data_and_home_persistence(security, tmp_path, monkeypatch, existing):
+    module, _ = security
+    root = tmp_path / "root-storage"
+    home = tmp_path / "home"
+    target = home / "neurodesktop-storage"
+    monkeypatch.setattr(module, "ROOT_STORAGE", root)
+    if existing != "missing":
+        root.mkdir()
+    if existing == "legacy":
+        (root / "neurodesktop-storage").symlink_to(target)
+    elif existing == "data":
+        (root / "data").write_text("preserve")
+    elif existing == "mounted":
+        monkeypatch.setattr(Path, "is_mount", lambda path: path == root)
+    module.prepare_storage(home)
+    module.prepare_storage(home)
+    if existing in {"missing", "empty", "legacy"}:
+        assert root.is_symlink() and root.readlink() == target
+    else:
+        assert root.is_dir() and not root.is_symlink()
+        if existing == "data":
+            assert (root / "data").read_text() == "preserve"
 
 
 def test_image_does_not_seed_or_restore_fixed_os_password():

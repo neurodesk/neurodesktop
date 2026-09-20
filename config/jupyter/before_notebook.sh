@@ -282,6 +282,7 @@ link_data_dir_if_present
 
 if [ "$EUID" -eq 0 ]; then
     /usr/bin/python3 -I /opt/neurodesktop/startup_security.py || exit 1
+    /bin/bash /opt/neurodesktop/prepare_cpuinfo.sh
     if [ "$(getent passwd "${NB_USER}" | cut -d: -f7)" != "/bin/bash" ]; then
         usermod --shell /bin/bash "${NB_USER}"
     fi
