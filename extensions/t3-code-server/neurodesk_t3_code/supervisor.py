@@ -197,6 +197,7 @@ def server_environment(
             "PATH": str(policy.provider_bin)
             + (os.pathsep + current_path if current_path else ""),
             "CODEX_PATH": "/usr/bin/codex",
+            "T3CODE_CLOUDFLARED_PATH": "/usr/local/bin/cloudflared",
             "CLAUDE_CODE_EXECUTABLE": "/opt/jovyan_defaults/.local/bin/claude",
             "T3CODE_HOME": str(policy.base_dir),
             "T3CODE_HOST": policy.host,

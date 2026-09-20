@@ -167,8 +167,8 @@ T3ProxyHandler.prepare = hub_prepare
             # The launcher establishes the session before loading T3. No terminal
             # command, token, or form submission should be needed in this browser.
             wait_connected(bidi, context)
-            connect_status = evaluate(bidi, context,
-                "fetch(" + json.dumps(base + "neurodesk-t3/_connect") + ").then(r => r.json())")
+            connect_status = json.loads(evaluate(bidi, context,
+                "fetch(" + json.dumps(base + "neurodesk-t3/_connect") + ").then(r => r.text())"))
             assert connect_status["state"] in {"idle", "starting"}, connect_status
             assert connect_status["code"] is None
             assert evaluate(bidi, context,

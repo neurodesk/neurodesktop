@@ -106,6 +106,7 @@ def test_server_command_and_environment_use_protocol_safe_provider_binaries(tmp_
             "T3_SERVICE_LAUNCHER_CONTEXT": "desktop-owned",
             "T3_MCP_BEARER_TOKEN": "must-not-cross-boundary",
             "T3CODE_PORT": "9999",
+            "T3CODE_CLOUDFLARED_PATH": "/old/cached/cloudflared",
         },
     )
 
@@ -125,6 +126,7 @@ def test_server_command_and_environment_use_protocol_safe_provider_binaries(tmp_
     ]
     assert environment["PATH"].split(os.pathsep)[0] == str(provider_bin)
     assert environment["CODEX_PATH"] == "/usr/bin/codex"
+    assert environment["T3CODE_CLOUDFLARED_PATH"] == "/usr/local/bin/cloudflared"
     assert environment["T3CODE_LOG_LEVEL"] == "Warn"
     assert environment["T3CODE_TRACE_MIN_LEVEL"] == "Warn"
     assert environment["T3CODE_TRACE_FILE"] == "/dev/null"
