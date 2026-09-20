@@ -155,6 +155,20 @@ def test_failed_module_load_stops_a_strict_batch_script(image, tmp_path):
     assert not result.stdout
 
 
+@pytest.mark.parametrize("agent_shell", [False, True])
+def test_login_profile_restores_only_agent_shell_initialization(image, tmp_path, agent_shell):
+    paths, install = image
+    profile = install("config/agents/agent_profile.sh", tmp_path / "profile.sh")
+    setup = paths["/opt/neurodesktop/agent_shell_setup.sh"]
+    result = run(
+        (f'. {setup}\n' if agent_shell else '')
+        + f'BASH_ENV=/distribution/lmod\n. {profile}\nprintf "%s\\n" "$BASH_ENV"', tmp_path,
+    )
+    assert result.returncode == 0, result.stderr
+    expected = str(paths["/opt/neurodesktop/agent_bash_env.sh"]) if agent_shell else "/distribution/lmod"
+    assert result.stdout == expected + "\n"
+
+
 @pytest.mark.parametrize("scheduler_status", [0, 1, 124])
 def test_preflight_reports_live_capacity_and_preserves_project_guidance(image, tmp_path, scheduler_status):
     paths, install = image
@@ -182,7 +196,12 @@ def test_preflight_reports_live_capacity_and_preserves_project_guidance(image, t
 
 def test_shared_shell_assets_ship_in_image():
     dockerfile = repo_path("Dockerfile").read_text()
-    for name in ("agent_shell_setup.sh", "agent_bash_env.sh", "neurodesk-agent-preflight"):
+    assets = {
+        "agent_shell_setup.sh": "/opt/neurodesktop/agent_shell_setup.sh",
+        "agent_bash_env.sh": "/opt/neurodesktop/agent_bash_env.sh",
+        "agent_profile.sh": "/etc/profile.d/zz-neurodesk-agent.sh",
+        "neurodesk-agent-preflight": "/usr/local/bin/neurodesk-agent-preflight",
+    }
+    for name, target in assets.items():
         assert f"source=config/agents/{name}," in dockerfile
-        target = f"/usr/local/bin/{name}" if name == "neurodesk-agent-preflight" else f"/opt/neurodesktop/{name}"
         assert f"/tmp/agents/{name} {target}" in dockerfile

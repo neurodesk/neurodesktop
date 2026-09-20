@@ -134,6 +134,9 @@ and all T3 provider launchers export
 An existing `BASH_ENV` is retained in `NEURODESKTOP_PREVIOUS_BASH_ENV` and
 sourced before Neurodesk initialization. Launchers do not emit setup banners
 into agent protocol streams.
+For login tool shells, `/etc/profile.d/zz-neurodesk-agent.sh` restores the
+shared `BASH_ENV` after Lmod's system profile. It applies only to descendants
+of agent launchers.
 
 Each noninteractive Bash tool shell refreshes Neurodesk's module paths and
 loads `/etc/profile.d/lmod.sh` when installed. Older layouts fall back to

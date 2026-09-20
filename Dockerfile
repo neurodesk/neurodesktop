@@ -1386,6 +1386,7 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     --mount=type=bind,source=config/agents/opencode,target=/tmp/agents/opencode,ro \
     --mount=type=bind,source=config/agents/agent_bash_env.sh,target=/tmp/agents/agent_bash_env.sh,ro \
     --mount=type=bind,source=config/agents/agent_shell_setup.sh,target=/tmp/agents/agent_shell_setup.sh,ro \
+    --mount=type=bind,source=config/agents/agent_profile.sh,target=/tmp/agents/agent_profile.sh,ro \
     --mount=type=bind,source=config/agents/neurodesk-agent-preflight,target=/tmp/agents/neurodesk-agent-preflight,ro \
     --mount=type=bind,source=config/agents/codex,target=/tmp/agents/codex,ro \
     --mount=type=bind,source=config/agents/codex_exec,target=/tmp/agents/codex_exec,ro \
@@ -1400,6 +1401,7 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     && install -m 0755 -o root -g root /tmp/agents/opencode /usr/local/sbin/opencode \
     && install -m 0644 -o root -g users /tmp/agents/agent_bash_env.sh /opt/neurodesktop/agent_bash_env.sh \
     && install -m 0644 -o root -g users /tmp/agents/agent_shell_setup.sh /opt/neurodesktop/agent_shell_setup.sh \
+    && install -m 0644 -o root -g users /tmp/agents/agent_profile.sh /etc/profile.d/zz-neurodesk-agent.sh \
     && install -m 0755 -o root -g users /tmp/agents/neurodesk-agent-preflight /usr/local/bin/neurodesk-agent-preflight \
     && install -m 0755 -o root -g root /tmp/agents/codex /usr/local/sbin/codex \
     && install -m 0755 -o root -g root /tmp/agents/codex_exec /opt/neurodesktop/codex-exec \
