@@ -4,7 +4,7 @@ description: Container-backed and hosted webapps, launcher tiles and icons,
   and the build-time Jupyter config generation that wires them up
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-07"
+last-reviewed: "2026-09-20"
 ---
 
 # Webapp System
@@ -14,7 +14,12 @@ listed in
 [Environment variables](../environment-variables.md#container-backed-webapps).
 
 Container-backed webapps are defined in `webapps.json`, which is fetched from
-the neurocommand repository. Hosted webapp links and local overrides are defined
+the neurocommand repository. The startup page keeps these local app launchers,
+including RStudio and ezBIDS, and provides one **More webapps** tile linking to
+[webapps.neurodesk.org](https://webapps.neurodesk.org/). Individual legacy hosted
+app links are no longer shown. dicompare and QSMbly are maintained externally
+and are available through More webapps, with no local launchers. The catalog
+link and local overrides are defined
 in [`config/jupyter/webapp_links.json`](../../config/jupyter/webapp_links.json) and
 applied by [`scripts/generate_jupyter_config.py`](../../scripts/generate_jupyter_config.py)
 when generating Jupyter Server Proxy entries. The same merged webapp config is
@@ -59,8 +64,11 @@ The Dockerfile clones neurocommand, copies its `neurodesk/webapps.json`, applies
 generates `jupyter_notebook_config.py` using a template system. It also writes
 the merged webapp configuration back to `/opt/neurodesktop/webapps.json`, which
 is what the webapp wrapper reads at launch time. To add new container-backed
-webapps, update the source `webapps.json`. To add hosted links or make an
-existing launcher tile open a hosted app directly, update `webapp_links.json`.
+webapps, update the source `webapps.json`. To change the catalog link or local
+launcher overrides, update `webapp_links.json`. Keep external webapp discovery
+in the single More webapps tile. A `null` app entry in the overlay removes that
+app from the generated proxies and runtime webapp config, even when it is
+present in neurocommand's source config.
 This config generation runs after the neurocommand install layer so local
 launcher-link edits do not invalidate the earlier runtime setup layers.
 Cached CI builds pass `NEUROCOMMAND_REF` as a resolved neurocommand `main` SHA

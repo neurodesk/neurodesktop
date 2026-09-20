@@ -138,15 +138,19 @@ def merge_webapp_configs(base_config: Dict[str, Any], overlay_config: Dict[str, 
     Merge a local webapp overlay into the fetched webapps config.
 
     Existing webapp entries are updated key-by-key. New overlay entries are
-    appended. This lets Neurodesktop override launcher-only behavior without
+    appended. A null overlay entry removes an app from the merged config.
+    This lets Neurodesktop override launcher-only behavior without
     replacing the neurocommand-owned container app definitions.
     """
     merged = deepcopy(base_config)
     merged_webapps = merged.setdefault("webapps", {})
 
     for name, overlay_webapp in overlay_config.get("webapps", {}).items():
+        if overlay_webapp is None:
+            merged_webapps.pop(name, None)
+            continue
         if not isinstance(overlay_webapp, dict):
-            raise ValueError(f"Overlay webapp {name} must be an object")
+            raise ValueError(f"Overlay webapp {name} must be an object or null")
 
         existing_webapp = merged_webapps.get(name, {})
         if existing_webapp and not isinstance(existing_webapp, dict):
