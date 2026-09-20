@@ -122,23 +122,27 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
         start_new_session=True,
     )
     try:
-        deadline = time.monotonic() + 20
-        while time.monotonic() < deadline:
-            if process.poll() is not None:
-                raise AssertionError(f"T3 exited during startup with {process.returncode}")
-            with socket.socket() as client:
-                client.settimeout(0.2)
-                if client.connect_ex(("127.0.0.1", port)) == 0:
-                    break
-            time.sleep(0.1)
-        else:
-            raise AssertionError("T3 did not listen within 20 seconds")
-
+        import urllib.error
         import urllib.request
-        with urllib.request.urlopen(
-            f"http://127.0.0.1:{port}/.well-known/t3/environment", timeout=10
-        ) as response:
-            assert json.load(response)["label"] == "testuser@edu.neurodesk.org"
+
+        # T3 binds before its HTTP handler is ready. An early accepted request
+        # can stall, so retry with a short request timeout within one deadline.
+        deadline = time.monotonic() + 20
+        client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        while time.monotonic() < deadline:
+            assert process.poll() is None, "T3 exited during HTTP startup"
+            try:
+                with client.open(
+                    f"http://127.0.0.1:{port}/.well-known/t3/environment", timeout=0.5
+                ) as response:
+                    info = json.load(response)
+            except (urllib.error.URLError, TimeoutError, ConnectionError):
+                time.sleep(0.1)
+                continue
+            assert info["label"] == "testuser@edu.neurodesk.org"
+            break
+        else:
+            raise AssertionError("T3 did not answer HTTP within 20 seconds")
 
         # Server startup reloads the login-shell PATH, which can put the
         # interactive Codex wrapper ahead of the quiet provider directory.

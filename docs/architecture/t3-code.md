@@ -28,7 +28,9 @@ Provider authentication still belongs to the container, as described
 This route requires only the Jupyter endpoint, including its existing HTTPS
 and JupyterHub user prefix. It does not require Tailscale or a separately
 published T3 port. Leave `NEURODESKTOP_T3_CODE_HOST` at its loopback default
-when using only JupyterLab. The launcher reports when the sidecar is not ready.
+when using only JupyterLab. The launcher reports when the sidecar is not ready. The supervisor requires
+an HTTP response from T3's local environment endpoint before reporting readiness;
+a listening TCP port alone does not mean startup has finished.
 
 The server extension authenticates `/neurodesk-t3/` and proxies HTTP and
 WebSockets to its supervised process. It strips Jupyter credentials before

@@ -78,3 +78,8 @@
 - T3 startup error reporting must allowlist safe fields and discard raw child
   output. Cover quota detection through the real subprocess boundary and reset
   stale errors on restart; do not infer a quota from the environment count.
+
+- Image workflows must test and scan run-specific candidates before promoting
+  architecture, date, or latest tags. Preserve native arm64 runtime coverage,
+  pin all checkouts to the run SHA, and install test cleanup before startup.
+  See [image release validation](docs/testing.md#image-release-validation).

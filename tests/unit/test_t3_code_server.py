@@ -154,7 +154,10 @@ sock.bind((host, port))
 sock.listen()
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 while True:
-    time.sleep(0.1)
+    client, _ = sock.accept()
+    with client:
+        if client.recv(4096):
+            client.sendall(b'HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\n\\r\\n{}')
 """,
         encoding="utf-8",
     )
@@ -392,3 +395,50 @@ def test_update_notice_policy_preserves_malformed_settings(tmp_path):
         path.write_text(content)
         disable_update_notifications(policy)
         assert path.read_text() == content
+
+
+def test_readiness_waits_for_http_after_tcp_listener_opens(tmp_path):
+    supervisor = _supervisor_module()
+
+    async def scenario():
+        requests = []
+        ready = asyncio.Event()
+
+        async def handle(reader, writer):
+            try:
+                request = await reader.readuntil(b'\r\n\r\n')
+                requests.append(request)
+                if len(requests) == 1:
+                    # T3 can accept an early request that never gets a response.
+                    await reader.read()
+                else:
+                    await ready.wait()
+                    writer.write(b'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}')
+                    await writer.drain()
+            except (asyncio.IncompleteReadError, ConnectionError):
+                pass
+            finally:
+                writer.close()
+                await writer.wait_closed()
+
+        server = await asyncio.start_server(handle, '127.0.0.1', 0)
+        async with server:
+            policy = SimpleNamespace(readiness_host='127.0.0.1',
+                                     port=server.sockets[0].getsockname()[1])
+            service = supervisor.T3Supervisor(policy, readiness_timeout=3)
+            service._process = SimpleNamespace(returncode=None)
+            pending = asyncio.create_task(service._wait_for_listener())
+            try:
+                await asyncio.sleep(0.1)
+                assert not pending.done(), 'TCP alone must not mark the server ready'
+                ready.set()
+                assert await pending is True
+                assert len(requests) >= 2
+                assert all(r.startswith(b'GET /.well-known/t3/environment HTTP/1.1\r\n')
+                           for r in requests)
+                assert all(b'Authorization:' not in r for r in requests)
+            finally:
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+
+    asyncio.run(scenario())

@@ -53,9 +53,14 @@ if not marker.exists():
     sys.stderr.flush()
     marker.touch()
 sock = socket.socket()
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 sock.bind(('127.0.0.1', port))
 sock.listen()
-while True: time.sleep(.1)
+while True:
+    client, _ = sock.accept()
+    with client:
+        if client.recv(4096):
+            client.sendall(b'HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\n\\r\\n{}')
 ''')
     fake.chmod(0o755)
     providers = tmp_path / 'providers'

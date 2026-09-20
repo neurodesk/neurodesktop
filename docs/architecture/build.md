@@ -16,6 +16,13 @@ further build-time behaviors live with their subsystems:
 [config generation](webapps.md#build-time-config-generation) and
 [CVMFS setup](cvmfs.md#build-time-cvmfs-setup).
 
+## Publication
+
+The [image release workflows](../testing.md#image-release-validation) build
+candidates for a specific run and attempt, test and scan them, and then promote
+the same candidates to release tags. Native runtime checks cover both image
+architectures. A date tag never substitutes for building the run's source SHA.
+
 ## Layer Ordering and Cache
 
 The runtime stage is ordered by how often each layer's inputs change, because

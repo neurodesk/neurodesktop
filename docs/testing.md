@@ -64,6 +64,33 @@ run there:
 - `tests/unit/test_astra_view_filebrowser.py` needs `jupyter-server` to drive
   the file-browser server extension.
 
+## Image release validation
+
+Production, test, and development image workflows build native amd64 and arm64
+candidates tagged `run-<run_id>-<run_attempt>-<arch>`. Runtime tests and critical
+vulnerability scans consume those candidates. Only after every required job
+passes does `merge-manifests` promote the architecture, date, and `latest` tags
+and copy them to configured registries. Failed candidates remain available for
+diagnosis under their run tags; they do not replace release tags.
+
+All checkouts use the run's source SHA. Scheduled runs build that revision even
+when today's date tag exists, using the registry build cache. Development
+builds remain manual. When retrying an image release, rerun **all jobs** so the
+new attempt builds the candidate tags its validation jobs expect.
+
+Both architectures exercise sudo-disabled, sudo-enabled, package-only sudo,
+and HPC simulation profiles. Only amd64 exercises CVMFS; arm64 CVMFS remains
+excluded until its upstream content and routing are available. WebGL2 coverage
+still depends on the runner graphics capabilities described below.
+
+The test steps source [the cleanup script](../.github/scripts/image_test_cleanup.sh)
+before startup. Its EXIT trap removes the container and HPC temporary files
+on success, startup failure, security-policy failure, or pytest failure. Cleanup
+preserves the original failure status and fails an otherwise successful job if
+cleanup fails. Checkout coverage is in
+`tests/unit/test_build_neurodesktop_workflow.py` and
+`tests/unit/test_image_test_cleanup.py`.
+
 ## Shared helpers
 
 `tests/testlib.py` resolves a test's subject in whichever layout it is running
@@ -159,6 +186,11 @@ It runs at both `/` and a JupyterHub-style `/user/t3-test/` prefix.
 The prefixed case also runs with JupyterHub's cookie-authenticated GET XSRF
 policy, so native imports of every startup bundle must pass the proxy's
 static-asset checks, including filenames containing additional dots.
+
+The supervisor waits for HTTP 200 from the local environment endpoint before
+reporting readiness. A TCP listener alone is insufficient: T3 can accept an
+early request without answering it. The image probe retries short HTTP requests
+within a 20-second deadline and verifies the environment label.
 
 The real-server image test also waits for the Codex provider probe to report
 its CLI version. This exercises T3's login-shell PATH reload and catches

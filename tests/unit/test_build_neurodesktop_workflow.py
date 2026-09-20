@@ -165,3 +165,44 @@ def test_tag_script_does_not_mutate_after_a_lookup_auth_failure(tmp_path):
     assert "--method PATCH" not in calls
     assert "--method POST" not in calls
     assert "--method DELETE" not in calls
+
+
+def test_release_tags_wait_for_validation_of_run_specific_candidates():
+    for path in IMAGE_TEST_WORKFLOWS:
+        workflow = yaml.safe_load(path.read_text())
+        jobs = workflow['jobs']
+        publish = jobs['merge-manifests']
+        assert set(publish['needs']) == {'build-image', 'test-image', 'scan-image'}
+        assert 'if' not in publish  # Default success() must reject failed or skipped checks.
+        build = next(s for s in jobs['build-image']['steps']
+                     if s.get('uses', '').startswith('docker/build-push-action@'))
+        assert build['with']['tags'] == '${{ env.IMAGEID }}:run-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform.arch }}'
+        for job_id in ('test-image', 'scan-image', 'merge-manifests'):
+            steps = jobs[job_id]['steps']
+            commands = '\n'.join(s.get('run', '') for s in steps)
+            assert 'run-${{ github.run_id }}-${{ github.run_attempt }}-' in commands
+        for job in jobs.values():
+            for step in job['steps']:
+                if step.get('uses', '').startswith('actions/checkout@'):
+                    assert step['with']['ref'] == '${{ github.sha }}'
+        assert not any(s.get('name') == 'Check if image exists'
+                       for s in jobs['build-image']['steps'])
+
+
+def test_every_image_flavor_runs_native_arm64_runtime_checks():
+    for path in IMAGE_TEST_WORKFLOWS:
+        job = yaml.safe_load(path.read_text())['jobs']['test-image']
+        assert set(job['strategy']['matrix']['arch']) == {'amd64', 'arm64'}
+        assert 'arm64' in job['runs-on']
+        assert 'blacksmith' in job['runs-on']
+
+
+def test_image_cleanup_is_installed_before_each_runtime_profile_starts():
+    for path in IMAGE_TEST_WORKFLOWS:
+        job = yaml.safe_load(path.read_text())["jobs"]["test-image"]
+        tests = [step["run"] for step in job["steps"]
+                 if step.get("name", "").startswith("Test container (")]
+        assert len(tests) == 2
+        for command in tests:
+            assert command.splitlines()[0] == "source .github/scripts/image_test_cleanup.sh"
+            assert "test_rc=$?" not in command
