@@ -134,6 +134,11 @@ T3 starts automatically with Jupyter as the notebook user.
   `127.0.0.1`. Use `0.0.0.0` inside Docker when publishing container port
   `3773`; the launcher maps it to host loopback port `3774`
 - `NEURODESKTOP_T3_CODE_PORT`: fixed server port; defaults to `3773`
+- `NEURODESKTOP_T3_CODE_LABEL`: optional T3 environment display name. Defaults
+  to `user@hub-host` on JupyterHub, including `/server` for named servers.
+  Public Hub URLs take precedence over the remembered authenticated request
+  hostname. Outside JupyterHub, T3 keeps its normal hostname fallback. An
+  explicit `/etc/machine-info` pretty hostname remains T3's first choice.
 - `NEURODESKTOP_T3_CODE_HOME`: persistent T3 data directory; defaults to
   `~/.t3`
 - `NEURODESKTOP_T3_CODE_WORKDIR`: initial project directory; defaults to the
