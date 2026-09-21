@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-20"
+last-reviewed: "2026-09-21"
 ---
 
 # Build-Time Behaviors
@@ -24,6 +24,17 @@ the same candidates to release tags. Native runtime checks cover both image
 architectures. A date tag never substitutes for building the run's source SHA.
 
 ## Layer Ordering and Cache
+
+The pip install layer runs
+[`sanitize_ghapi_examples.py`](../../scripts/sanitize_ghapi_examples.py) to replace
+five public credential-revocation examples in `ghapi/gh_spec.py` with descriptive
+placeholders. These are the sample values published in
+[GitHub's API documentation](https://docs.github.com/en/rest/credentials/revoke),
+which otherwise trigger Trivy secret findings in the source and its compiled
+cache. The cleanup matches only those exact examples, preserves API metadata,
+and removes only `gh_spec.*.pyc` cache files before the install layer is committed.
+Unexpected example changes fail the build for reassessment. Secret-scanning
+rules and release gates remain unchanged.
 
 The runtime stage is ordered by how often each layer's inputs change, because
 invalidating a layer re-runs every layer after it. Three bands, in order:

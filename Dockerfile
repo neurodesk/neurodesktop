@@ -594,6 +594,7 @@ ARG JUPYTERLAB_SLURM_REF="8dccb39808f8a1b77712a9a5773a7d2601a56683"
 USER root
 RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch_ipyniivue.py,ro \
     --mount=type=bind,source=config/jupyter/patch_jupyterlab_slurm.py,target=/tmp/patch_jupyterlab_slurm.py,ro \
+    --mount=type=bind,source=scripts/sanitize_ghapi_examples.py,target=/tmp/sanitize_ghapi_examples.py,ro \
     --mount=type=bind,source=config/jupyter/build-constraints.txt,target=/tmp/build-constraints.txt,ro \
     install -d -m 0755 -o root -g users /opt/neurodesktop \
     && apt-install-retry build-essential libgpgme-dev libossp-uuid-dev \
@@ -678,6 +679,8 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     "requests>=2.34.2" \
     "chardet<8" \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade "litellm>=1.102.0" \
+    # Replace public API sample tokens before committing source or bytecode to a layer.
+    && /opt/conda/bin/python /tmp/sanitize_ghapi_examples.py \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/python -m bash_kernel.install --sys-prefix \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/jupyter labextension disable @jupyterlab/apputils-extension:announcements \
     && rm -rf "/opt/conda/share/jupyter/labextensions/@jupyterlab/mathjax3-extension" \

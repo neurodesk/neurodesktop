@@ -53,6 +53,8 @@ def test_wheel_frontends_are_removed_in_the_pip_install_layer():
     """Remove superseded wheel bundles before their replacement source builds."""
     layer = instruction_containing("apt-install-retry build-essential libgpgme-dev")
     assert "pip install --build-constraint" in layer
+    assert "source=scripts/sanitize_ghapi_examples.py,target=/tmp/sanitize_ghapi_examples.py,ro" in layer
+    assert "/opt/conda/bin/python /tmp/sanitize_ghapi_examples.py" in layer
     assert 'rm -rf "${SITE_PACKAGES}/${package}/labextension"' in layer
     for package in (
         "notebook_intelligence", "jupyterlab_myst",
