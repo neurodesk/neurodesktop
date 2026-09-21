@@ -8,7 +8,7 @@ last-reviewed: 2026-09-21
 
 # Publishing the Kasm workspace
 
-The [Kasm image](kasm.md) has a manual release workflow and a reproducible submission bundle. Publication to GHCR and acceptance into the official Kasm catalog are separate steps. Neither has happened as part of this preparation.
+The [Kasm image](kasm.md) has a manual release workflow and a reproducible submission bundle. Publication to GHCR and acceptance into the official Kasm catalog are separate steps. The first GHCR release passed runtime checks and vulnerability scanning on 2026-09-21. Official catalog acceptance remains pending.
 
 ## Release files
 

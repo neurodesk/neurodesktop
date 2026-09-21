@@ -3,7 +3,7 @@ title: Kasm image
 description: Build and run the Neurodesktop image variant for Kasm Workspaces
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-19"
+last-reviewed: "2026-09-21"
 ---
 
 # Kasm image
@@ -135,6 +135,12 @@ the expected value. The repeatable `--science` smoke test passed all five
 tests and verified home persistence across container recreation.
 ITK-SNAP 4.4.0 also opened FSL's bundled MNI152 reference brain through a
 browser KasmVNC session, using Mesa software OpenGL rendering.
+
+On 2026-09-21, the [GitHub release run](https://github.com/neurodesk/neurodesktop/actions/runs/35630163360)
+built on the public Neurodesktop digest, passed both runtime test modes and
+persistent-home recreation, generated an SBOM, passed the critical vulnerability
+scan with the repository exception policy, and published to GHCR with anonymous
+manifest access verified.
 
 Kasm Workspaces control-plane integration, GPU support, and arm64 remain
 unverified. The standalone smoke test does not establish those capabilities.
