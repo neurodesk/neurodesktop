@@ -151,11 +151,68 @@ def server_command(policy: Policy) -> list[str]:
     ]
 
 
-def seed_provider_settings(policy: Policy) -> None:
-    """Keep login-shell PATH hydration from selecting an obsolete home Codex.
+@dataclass(frozen=True)
+class ProviderSeed:
+    """A provider instance the image seeds into T3's settings.
 
-    Seed the modern instance map. Explicit paths and provider instances remain
-    user-owned. Write atomically before T3 starts watching its settings file.
+    The driver name doubles as the instance id and as the quiet launcher's
+    file name inside the image's provider directory.
+    """
+
+    driver: str
+    # T3 ships some drivers disabled, so their instances need an explicit flag.
+    disabled_by_default: bool = False
+    # Legacy ``providers.<driver>`` blobs that hold no user configuration.
+    # T3 writes ``{"enabled": false}`` for its own default-off drivers.
+    inert_legacy: tuple[dict, ...] = ()
+    # Earlier images wrote this driver's default into ``providers.<driver>``.
+    # Only such a driver can own an entry matching the config seeded below;
+    # for every other driver an identical entry was authored by the user.
+    promotes_image_default: bool = False
+
+    def config(self, provider_bin: Path) -> dict:
+        return {"binaryPath": str(provider_bin / self.driver)}
+
+    def instance(self, provider_bin: Path) -> dict:
+        instance = {"driver": self.driver}
+        if self.disabled_by_default:
+            instance["enabled"] = True
+        instance["config"] = self.config(provider_bin)
+        return instance
+
+    def is_user_owned(
+        self, instances: dict, providers: dict, provider_bin: Path
+    ) -> bool:
+        if self.driver in instances:
+            return True
+        if any(
+            instance.get("driver") == self.driver for instance in instances.values()
+        ):
+            return True
+        if self.driver not in providers:
+            return False
+        legacy = providers[self.driver]
+        if self.promotes_image_default and legacy == self.config(provider_bin):
+            return False
+        return legacy not in self.inert_legacy
+
+
+PROVIDER_SEEDS = (
+    ProviderSeed("codex", promotes_image_default=True),
+    ProviderSeed(
+        "opencode", disabled_by_default=True, inert_legacy=({}, {"enabled": False})
+    ),
+)
+
+
+def seed_provider_settings(policy: Policy) -> None:
+    """Give T3 the image's own agent launchers on a profile that lacks them.
+
+    Codex would otherwise follow a login-shell PATH refresh to an obsolete
+    ``~/.local/bin/codex``, and T3 ships the OpenCode driver disabled, so its
+    instance carries an explicit flag. Explicit paths and provider instances
+    remain user-owned. Write atomically before T3 starts watching its settings
+    file.
     """
     directory = policy.base_dir / "userdata"
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -172,20 +229,17 @@ def seed_provider_settings(policy: Policy) -> None:
     providers = settings.get("providers", {})
     if not isinstance(instances, dict) or not isinstance(providers, dict):
         return
-    # An explicit instance, including a disabled or custom-named Codex, is
-    # user-owned. Do not add another instance or override its configuration.
-    if "codex" in instances or any(
-        not isinstance(instance, dict) or instance.get("driver") == "codex"
-        for instance in instances.values()
-    ):
+    # A driver is unreadable from a malformed instance, so seed nothing.
+    if any(not isinstance(instance, dict) for instance in instances.values()):
         return
-    default_config = {"binaryPath": str(policy.provider_bin / "codex")}
-    if "codex" in providers and providers["codex"] != default_config:
+    seeded = {
+        seed.driver: seed.instance(policy.provider_bin)
+        for seed in PROVIDER_SEEDS
+        if not seed.is_user_owned(instances, providers, policy.provider_bin)
+    }
+    if not seeded:
         return
-    instances["codex"] = {"driver": "codex", "config": default_config}
-    settings["providerInstances"] = instances
-    # Promote only the exact legacy default this supervisor used to write.
-    # Retain the legacy entry for backward compatibility with older images.
+    settings["providerInstances"] = {**instances, **seeded}
     _write_settings(directory, settings)
 
 

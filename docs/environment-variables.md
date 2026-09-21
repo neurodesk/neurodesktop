@@ -180,7 +180,9 @@ Connect procedures.
 
 - `NEURODESK_API_KEY`: API key for `https://llm.neurodesk.org`. Shared by
   OpenCode and by the Notebook Intelligence JupyterLab plugin. OpenCode
-  persists it to `~/.bashrc` on first setup, and `nbi_setup.sh` injects it
+  persists it to `~/.bashrc` on first setup. T3 Code's quiet OpenCode
+  launcher reads it back from there when the environment lacks it, because
+  T3 execs that launcher without a login shell. `nbi_setup.sh` injects it
   into `~/.jupyter/nbi/config.json` on each JupyterLab startup and after
   each OpenCode run. `nbi_setup.sh` also mirrors the model selected in
   OpenCode (the top-level `model` in `~/.config/opencode/opencode.json`)
