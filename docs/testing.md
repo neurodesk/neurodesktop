@@ -261,7 +261,8 @@ at both root and user-prefixed URLs, clicks absolute workspace links, and
 requires Markdown and HTML viewers to open in the main panel without navigation.
 It also opens the Slurm dashboard through its Neurodesk launcher tile, checking
 its label and icon on two launcher renders against the installed Slurm extension.
-This browser test overrides `squeue_path` with `/usr/bin/true` for an empty queue,
+This browser test configures `SlurmCommandPaths.squeue_path` as `/usr/bin/true`
+and verifies the HTTP endpoint returns an empty queue using that command,
 so it does not depend on a host Slurm controller in the HPC simulation. The
 separate `test_slurm.py` suite exercises the real scheduler and batch commands.
 Installation and shipped page-configuration checks remain in the image tier.
