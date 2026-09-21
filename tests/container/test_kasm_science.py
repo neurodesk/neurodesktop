@@ -43,9 +43,10 @@ def test_cvmfs_fsl_doubles_every_voxel(tmp_path):
             'fslmaths "$2" -mul 2 "$3"',
             "kasm-science", str(environment), str(input_path), str(output_path),
         ],
-        check=True, capture_output=True, text=True, timeout=600,
+        check=False, capture_output=True, text=True, timeout=600,
     )
     print(result.stdout, result.stderr)
+    assert result.returncode == 0, "FSL execution failed; see captured output above"
     actual = nib.load(output_path).get_fdata()
     np.testing.assert_array_equal(actual, original * 2)
     print(f"Verified all {original.size} voxels: FSL output equals input multiplied by 2.")
