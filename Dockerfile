@@ -1393,6 +1393,7 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     --mount=type=bind,source=config/agents/agent_shell_setup.sh,target=/tmp/agents/agent_shell_setup.sh,ro \
     --mount=type=bind,source=config/agents/agent_profile.sh,target=/tmp/agents/agent_profile.sh,ro \
     --mount=type=bind,source=config/agents/neurodesk-agent-preflight,target=/tmp/agents/neurodesk-agent-preflight,ro \
+    --mount=type=bind,source=config/agents/neurodesk-astra-provenance,target=/tmp/agents/neurodesk-astra-provenance,ro \
     --mount=type=bind,source=config/agents/codex,target=/tmp/agents/codex,ro \
     --mount=type=bind,source=config/agents/codex_exec,target=/tmp/agents/codex_exec,ro \
     --mount=type=bind,source=config/agents/opencode_prune_sessions.py,target=/tmp/agents/opencode_prune_sessions.py,ro \
@@ -1408,6 +1409,10 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     && install -m 0644 -o root -g users /tmp/agents/agent_shell_setup.sh /opt/neurodesktop/agent_shell_setup.sh \
     && install -m 0644 -o root -g users /tmp/agents/agent_profile.sh /etc/profile.d/zz-neurodesk-agent.sh \
     && install -m 0755 -o root -g users /tmp/agents/neurodesk-agent-preflight /usr/local/bin/neurodesk-agent-preflight \
+    # Execution-side half of the ASTRA record: `astra validate` never
+    # compares a spec's container: with anything that ran, so publishing
+    # through this helper is what makes the declaration checkable.
+    && install -m 0755 -o root -g users /tmp/agents/neurodesk-astra-provenance /usr/local/bin/neurodesk-astra-provenance \
     && install -m 0755 -o root -g root /tmp/agents/codex /usr/local/sbin/codex \
     && install -m 0755 -o root -g root /tmp/agents/codex_exec /opt/neurodesktop/codex-exec \
     && install -m 0755 -o root -g users /tmp/t3_neurodesk_setup.py /opt/neurodesktop/t3_neurodesk_setup.py \

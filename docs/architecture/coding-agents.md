@@ -4,7 +4,7 @@ description: Claude Code and Codex installation, the OpenCode terminal wrapper,
   and OpenCode session pruning
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-20"
+last-reviewed: "2026-09-21"
 ---
 
 # Coding agents
@@ -22,6 +22,11 @@ substantive data retrieval and neuroimaging computation in retained Slurm
 scripts while allowing lightweight module, command-interface, dataset-metadata,
 ASTRA, and file-format discovery in the active shell.
 
+NBI setup writes a short pointer to `/opt/AGENTS.md` in the managed
+`$HOME/CLAUDE.md`. Existing managed notebook-rule copies migrate on the next
+setup; user-authored home files are preserved. Notebook-specific rules remain
+in NBI's rules directory rather than loading in every Claude project session.
+
 The contract has a bounded fast path: an explicit user tool choice is not
 reopened, a conventional demonstration default is recorded in ASTRA without an
 automatic blocking question, a matching worked project is reused, and short
@@ -34,6 +39,8 @@ findings must be removed before recording actual observations.
 Agents size jobs against the selected partition, submit settled dependencies
 with `afterok` and `--kill-on-invalid-dep=yes`, and check pending reasons before
 waiting. Submission is asynchronous so this check can run promptly. Monitoring
+may begin after one Bash call submits several jobs and captures each ID;
+validation and linting must finish in an earlier call. Monitoring
 covers all captured job IDs and every terminal branch, with a bounded wait and
 retained IDs for recovery. Retries cancel superseded jobs and rebuild affected
 dependencies. Jobs publish
@@ -145,6 +152,17 @@ scripts source the same initializer explicitly. It restores the caller's
 nounset option after initialization, so the script baseline can use `set -u`.
 Initialization failures stop the shell before its tool command runs.
 Module loads remain local to each shell.
+
+The analysis contract requires explicit sourcing before `module` in every
+Bash call, including interactive calls. Automatic initialization depends on
+the runner preserving `BASH_ENV`; interactive Bash does not read that variable.
+Agents must not assume that a fresh tool shell has initialized Lmod.
+
+`neurodesk-astra-provenance` is the other agent-facing command on `PATH`. The
+contract routes every published output through its `publish` subcommand and
+ends every analysis with its `check` subcommand, which is the only mechanism
+that compares a specification's declared software with what really ran. See
+[ASTRA integration](astra.md#recording-what-ran).
 
 `neurodesk-agent-preflight` reports the installed guidance revision, differences
 from workspace `AGENTS.md` or `CLAUDE.md`, Lmod availability, and live Slurm

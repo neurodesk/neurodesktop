@@ -104,6 +104,31 @@ def write_opencode_config(home_dir, model):
     )
 
 
+@pytest.mark.parametrize("existing", [None, "managed", "user"])
+def test_home_claude_guidance_points_to_shared_contract(tmp_path, existing):
+    script, home = make_nbi_setup_sandbox(tmp_path)
+    target = home / "CLAUDE.md"
+    marker = "<!-- neurodesktop:nbi-rules (managed - do not edit) -->"
+    original = "# My instructions\nKeep my project conventions.\n"
+    if existing == "managed":
+        target.write_text(marker + "\nAlways use !fslmaths and ask for a decision.\n")
+    elif existing == "user":
+        target.write_text(original)
+
+    run_nbi_setup(script, home, "--no-refresh")
+    result = target.read_text()
+    if existing == "user":
+        assert result == original
+    else:
+        assert result.startswith(marker + "\n")
+        assert "/opt/AGENTS.md" in result
+        assert "workspace AGENTS.md or CLAUDE.md" in result
+        assert "!fslmaths" not in result
+        assert "ask for a decision" not in result
+    run_nbi_setup(script, home, "--no-refresh")
+    assert target.read_text() == result
+
+
 def write_bashrc_api_key(home_dir, key):
     (home_dir / ".bashrc").write_text(
         f"export NEURODESK_API_KEY='{key}'\n", encoding="utf-8"

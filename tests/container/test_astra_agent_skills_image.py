@@ -356,3 +356,52 @@ def test_activate_on_read_hook_nudges_once_per_session(tmp_path):
     code, second = run_hook("activate-on-read.sh", payload, env=env)
     assert code == 0, second
     assert second == "", "the nudge must fire once per session, not per read"
+
+
+def test_provenance_helper_runs_from_its_own_shebang(tmp_path):
+    """The unit tier invokes it through the test interpreter, not `#!`.
+
+    So only the image can prove that `/opt/conda/bin/python` exists, that the
+    command is on PATH and executable, and that `check` finds the PyYAML it
+    needs to read a specification.
+    """
+    code, output = run_cmd("command -v neurodesk-astra-provenance")
+    assert code == 0, output
+    assert output == "/usr/local/bin/neurodesk-astra-provenance"
+
+    project = tmp_path / "project"
+    shutil.copytree(BET_PROJECT, project)
+    spec = project / "astra.yaml"
+    spec.write_text(
+        spec.read_text(encoding="utf-8").replace(
+            '      resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}',
+            '      container: "neurodesk fsl/6.0.7.22"\n'
+            '      resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}',
+        ),
+        encoding="utf-8",
+    )
+
+    # Nothing has run, so every declared output is unrecorded.
+    code, output = run_cmd(f"neurodesk-astra-provenance check {project}")
+    assert code == 1, output
+    assert "nothing recorded what ran" in output
+
+    attempt = project / "bet_brain.nii.gz.tmp"
+    attempt.write_text("artifact bytes", encoding="utf-8")
+    code, output = run_cmd(
+        f"neurodesk-astra-provenance publish {attempt} "
+        f"{project / 'bet_brain.nii.gz'} --output-id bet_brain --tool python",
+    )
+    assert code == 0, output
+    record = json.loads(
+        (project / "bet_brain.nii.gz.prov.json").read_text(encoding="utf-8")
+    )
+    assert record["tool"]["versions"], record
+
+    # The recorded Python version is not the FSL release the spec declares.
+    # The other three outputs are still unrecorded, so assert on the wording
+    # that only a disagreement produces.
+    code, output = run_cmd(f"neurodesk-astra-provenance check {project}")
+    assert code == 1, output
+    assert "bet_brain: declared 'neurodesk fsl/6.0.7.22' but" in output
+    assert "recorded versions" in output
