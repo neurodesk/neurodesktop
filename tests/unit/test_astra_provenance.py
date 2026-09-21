@@ -189,6 +189,28 @@ def test_publish_refuses_a_tool_it_cannot_question(tmp_path):
     assert temporary.exists(), "a refused publish must leave the attempt intact"
 
 
+def test_publish_names_a_missing_output_directory(tmp_path):
+    project = make_project(tmp_path, ONE_OUTPUT)
+    make_tool(tmp_path / "bin", "faketool", "faketool v6.0.7.22")
+    temporary = project / "derivatives" / "brain.nii.gz.tmp"
+    temporary.write_text("artifact bytes", encoding="utf-8")
+
+    result = run_provenance(
+        "publish",
+        str(temporary),
+        str(project / "missing" / "brain.nii.gz"),
+        "--output-id",
+        "brain",
+        "--tool",
+        "faketool",
+        path_prefix=str(tmp_path / "bin"),
+    )
+
+    assert result.returncode != 0
+    assert "No directory" in result.stderr
+    assert temporary.exists()
+
+
 def test_publish_refuses_to_overwrite_a_final_artifact(tmp_path):
     project = make_project(tmp_path, ONE_OUTPUT)
     final = project / "derivatives" / "brain.nii.gz"

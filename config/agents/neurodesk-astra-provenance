@@ -186,8 +186,16 @@ def publish(args):
             "The sidecar would claim provenance it did not observe."
         )
 
+    if not final.parent.is_dir():
+        sys.exit(f"No directory {final.parent} to publish into")
+
     _write_json(final.with_name(final.name + SIDECAR_SUFFIX), record)
-    os.replace(temporary, final)
+    try:
+        os.replace(temporary, final)
+    except OSError as error:
+        # Rule 6 requires the attempt on the same filesystem as its final
+        # path, which is also what makes the rename atomic.
+        sys.exit(f"Could not rename {temporary} to {final}: {error}")
     print(f"published {final} with {final.name}{SIDECAR_SUFFIX}")
     return 0
 
