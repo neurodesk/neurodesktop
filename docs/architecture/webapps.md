@@ -4,7 +4,7 @@ description: Container-backed and hosted webapps, launcher tiles and icons,
   and the build-time Jupyter config generation that wires them up
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-20"
+last-reviewed: "2026-09-21"
 ---
 
 # Webapp System
@@ -44,6 +44,17 @@ The Webapps section heading uses the same icon as the More webapps tile.
 The launcher copies the rendered catalog SVG into the heading after React
 updates, retaining the heading dimensions. The catalog has the last launcher
 rank and a final CSS order so it stays after local apps when tiles refresh.
+
+The Neurodesk Slurm tile invokes `jupyterlab-slurm:open`, the command supplied
+by the pinned NERSC extension. Its label and icon come from that command;
+the former `slurm:open` name has no compatibility alias. The upstream HPC Tools
+section is hidden because Neurodesk includes the dashboard in its own section.
+At image build time, `config/jupyter/patch_jupyterlab_slurm.py` patches the
+authenticated user endpoint to resolve the Jupyter process's effective UID
+through the OS account database. Slurm commands run as that account, which can
+differ from the JupyterHub login or token-generated identity. This keeps both
+My jobs only and Job History filters aligned with local or host Slurm job owners.
+The anchored patch fails the build if the upstream identity code changes.
 
 Jupyter Server Proxy buffers ordinary webapp responses through Tornado's HTTP
 client. Neurodesktop initially raises Tornado's matching `max_buffer_size` and

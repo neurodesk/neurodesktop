@@ -7,6 +7,64 @@ import pytest
 from testlib import repo_path
 
 
+def test_slurm_tile_uses_the_upstream_command():
+    modules = os.environ.get('NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES')
+    if not modules or not shutil.which('node'):
+        pytest.fail('Set NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES as described in docs/testing.md.')
+    script = r'''
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const ts = require(process.env.NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES + '/typescript');
+const { JSDOM } = require(process.env.NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES + '/jsdom');
+const dom = new JSDOM('');
+const modules = {
+  './workspaceLinks': {}, './astraViewer': {}, './t3Code': {},
+  './webappsAppearance': {},
+  '@jupyterlab/apputils': {}, '@jupyterlab/launcher': { ILauncher: {} },
+  '@jupyterlab/ui-components': {},
+  '@jupyterlab/coreutils': {
+    PageConfig: { getOption: () => 'true' },
+    URLExt: { join: (...parts) => parts.join('/') }
+  },
+  '@jupyterlab/services': { ServerConnection: {
+    makeSettings: () => ({ baseUrl: '/user/test/' }),
+    makeRequest: async () => ({ ok: true, json: async () => ({ server_processes: [] }) })
+  } }
+};
+const compiled = ts.transpileModule(fs.readFileSync(process.argv[1], 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 }
+}).outputText;
+const exported = {};
+new Function('exports', 'require', 'window', 'document', 'MutationObserver',
+  'requestAnimationFrame', compiled)(exported, name => {
+    assert.ok(Object.hasOwn(modules, name), name);
+    return modules[name];
+  }, dom.window, dom.window.document, dom.window.MutationObserver, () => 1);
+// Contract from the pinned NERSC extension: it registers no slurm:open alias.
+let opened = 0;
+const commands = new Map([['jupyterlab-slurm:open', {
+  label: 'Slurm Dashboard', iconClass: 'jp-SlurmWidget-NerscLaunchIcon',
+  execute: () => opened++
+}]]);
+(async () => {
+  const entries = [];
+  await exported.default.find(p => p.id === 'neurodesk-launcher:plugin')
+    .activate({}, { add: entry => entries.push(entry) });
+  const tile = entries.find(entry => entry.category === 'Neurodesk' && entry.rank === 4);
+  assert.ok(tile, 'Slurm tile must remain in the Neurodesk category');
+  const command = commands.get(tile.command);
+  assert.ok(command, `Command '${tile.command}' not registered`);
+  assert.equal(command.label, 'Slurm Dashboard');
+  assert.equal(command.iconClass, 'jp-SlurmWidget-NerscLaunchIcon');
+  command.execute();
+  assert.equal(opened, 1);
+  dom.window.close();
+})().catch(error => { console.error(error); process.exitCode = 1; });
+'''
+    subprocess.run(['node', '-e', script, str(repo_path(
+        'extensions/neurodesk-launcher/src/index.ts'))], check=True, timeout=30)
+
+
 def test_webapps_catalog_order_and_heading_survive_rerender():
     modules = os.environ.get('NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES')
     if not modules or not shutil.which('node'):

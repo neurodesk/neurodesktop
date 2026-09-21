@@ -556,7 +556,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
       rank: 3
     });
     launcher.add({
-      command: 'slurm:open',
+      command: 'jupyterlab-slurm:open',
       category: 'Neurodesk',
       rank: 4
     });

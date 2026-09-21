@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-09-20"
+last-reviewed: "2026-09-21"
 ---
 
 # Testing
@@ -150,6 +150,7 @@ non-obvious tiers protect.
 | Jupyter AI, ACP personas, collaboration/widget compatibility and server patches | see [below](#jupyter-ai-and-acp-personas) | `pytest /opt/tests/test_astra_jupyter_ai_image.py /opt/tests/test_widget_compatibility_image.py` |
 | Notebook Intelligence / MyST and standalone RISE | `pytest tests/unit/test_nbi_settings_patch.py tests/unit/test_myst_build_workaround.py tests/unit/test_jupyterlab_rise_patch.py` | `pytest /opt/tests/test_nbi_labextension_patch.py /opt/tests/test_rise_slides_image.py` |
 | Launcher extension, workspace link routing | `pytest tests/unit/test_workspace_link_routing.py` | `pytest /opt/tests/test_workspace_link_routing_image.py` |
+| Slurm dashboard launcher and user identity | `pytest tests/unit/test_launcher_webapps.py tests/unit/test_slurm_user_identity.py tests/unit/test_jupyterlab_slurm_build.py` | `pytest /opt/tests/test_slurm.py /opt/tests/test_workspace_link_routing_image.py` |
 | Subscription agent workflows and failure reporting | `pytest tests/unit/test_agentic_*.py tests/unit/test_report_workflow_failure.py` | Worker Docker sandbox probe |
 
 ### Jupyter Server Proxy response limits
@@ -257,6 +258,8 @@ path mapping, click handling, line references, viewer selection, directory
 routing, and error reporting execute unchanged. The image tier opens JupyterLab
 at both root and user-prefixed URLs, clicks absolute workspace links, and
 requires Markdown and HTML viewers to open in the main panel without navigation.
+It also opens the Slurm dashboard through its Neurodesk launcher tile, checking
+its label and icon on two launcher renders against the installed Slurm extension.
 Installation and shipped page-configuration checks remain in the image tier.
 
 ### ASTRA CLIs, Lightcone skills, and hooks

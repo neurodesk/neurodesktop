@@ -74,6 +74,35 @@ def evaluate(bidi, context, expression):
     return result.get("result", {}).get("value")
 
 
+def check_slurm_launcher(bidi, context):
+    """Use the installed command metadata and click the tile after re-rendering."""
+    evaluate(bidi, context, """Promise.all([
+        window.jupyterapp.activatePlugin('neurodesk-launcher:plugin'),
+        window.jupyterapp.activatePlugin('jupyterlab-slurm:plugin')
+    ]).then(() => true)""")
+    tile = """Array.from(document.querySelectorAll('.jp-Launcher-section'))
+        .find(section => section.querySelector('.jp-Launcher-sectionTitle')?.textContent.trim() === 'Neurodesk')
+        ?.querySelector('.jp-SlurmWidget-NerscLaunchIcon')
+        ?.closest('.jp-LauncherCard')"""
+    for _ in range(2):
+        evaluate(bidi, context,
+                 "window.jupyterapp.commands.execute('launcher:create').then(() => true)")
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            if evaluate(bidi, context, f"Boolean({tile})"):
+                break
+            time.sleep(.2)
+        assert evaluate(bidi, context, f"Boolean({tile})"), "Slurm launcher icon missing"
+        assert evaluate(bidi, context, f"({tile}).textContent.includes('Slurm Dashboard')")
+        evaluate(bidi, context, f"(() => {{ ({tile}).click(); return true; }})()")
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            if evaluate(bidi, context, "window.jupyterapp.shell.currentWidget?.title.label === 'Slurm Dashboard'"):
+                break
+            time.sleep(.2)
+        assert evaluate(bidi, context, "window.jupyterapp.shell.currentWidget?.title.label === 'Slurm Dashboard'"), "Slurm tile did not open dashboard"
+
+
 @pytest.mark.parametrize("base", ["/", "/user/workspace-test/"])
 def test_clicking_workspace_links_opens_rendered_documents(tmp_path, base):
     (tmp_path / "a report.md").write_text("# Workspace link opened\n")
@@ -118,6 +147,7 @@ def test_clicking_workspace_links_opens_rendered_documents(tmp_path, base):
             # Explicit activation waits for this auto-start plugin's dependencies.
             evaluate(bidi, context,
                      "window.jupyterapp.activatePlugin('neurodesk-launcher:workspace-links').then(() => true)")
+            check_slurm_launcher(bidi, context)
             original_url = evaluate(bidi, context, "location.href")
             for name, reference, rendered in [
                 ("a report.md", ":12", "Boolean(window.jupyterapp.shell.currentWidget?.node.querySelector('h1')?.textContent.includes('Workspace link opened'))"),
