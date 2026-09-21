@@ -208,6 +208,15 @@ def test_t3_opencode_provider_initializes_through_the_image_launcher(tmp_path):
     """
     launcher = "/opt/neurodesktop/t3-provider-bin/opencode"
     environment = {**os.environ, "HOME": str(tmp_path)}
+    # Startup restores this config into the home before any agent runs, so lay
+    # the home out that way before the CLI can create its own directory here.
+    destination = tmp_path / ".config/opencode"
+    destination.mkdir(parents=True)
+    shutil.copy(
+        "/opt/jovyan_defaults/.config/opencode/opencode.json",
+        destination / "opencode.json",
+    )
+
     reported = subprocess.run(
         [launcher, "--version"], env=environment,
         capture_output=True, text=True, timeout=120, check=True,
@@ -216,10 +225,6 @@ def test_t3_opencode_provider_initializes_through_the_image_launcher(tmp_path):
     assert found, reported
     assert tuple(int(part) for part in found[1].split(".")) >= (1, 14, 19), reported
 
-    defaults = Path("/opt/jovyan_defaults/.config/opencode/opencode.json")
-    destination = tmp_path / ".config/opencode"
-    destination.mkdir(parents=True)
-    shutil.copy(defaults, destination / "opencode.json")
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
