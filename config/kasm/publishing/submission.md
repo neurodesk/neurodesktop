@@ -12,7 +12,7 @@ The image derives from Neurodesktop on Ubuntu 24.04. It copies Kasm startup comp
 
 The source bundle contains the actual Dockerfile, startup scripts, license, and runtime tests. Run `source/build.sh` to build its candidate. This differs from workspaces-images' usual Kasm-core final base. Maintainer feedback is requested on accepting an externally maintained image or adapting this source into the upstream build pipeline. No generated upstream CI entry is included because its base assumptions would be incorrect for this derivative.
 
-CVMFS and nested Apptainer execution currently require `privileged: true`. The desktop account has passwordless sudo inherited from Neurodesktop's operating model. The workspace requests four CPU cores, 8 GiB memory, and 1 GiB shared memory. Those are initial resource defaults, not performance guarantees. Slurm is disabled. GPU and arm64 support are outside the proposed initial scope.
+CVMFS and nested Apptainer execution currently require `privileged: true`. This derivative explicitly enables passwordless sudo for its privileged scientific runtime; it does not change the root Neurodesktop image's package-only sudo policy. The workspace requests four CPU cores, 8 GiB memory, and 1 GiB shared memory. Those are initial resource defaults, not performance guarantees. Slurm is disabled. GPU and arm64 support are outside the proposed initial scope.
 
 ## Evidence available from the development image
 

@@ -101,7 +101,12 @@ jobs:
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             -f config/kasm/Dockerfile -t "$IMAGE" . 2>&1 | tee evidence/build.log
           bash scripts/verify_kasm_image.sh "$IMAGE" 2>&1 | tee evidence/desktop-tests.log
+          userns_policy=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)
+          trap 'sudo sysctl -w "kernel.apparmor_restrict_unprivileged_userns=$userns_policy" >/dev/null' EXIT
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           bash scripts/verify_kasm_image.sh "$IMAGE" --science 2>&1 | tee evidence/science-tests.log
+          sudo sysctl -w "kernel.apparmor_restrict_unprivileged_userns=$userns_policy"
+          trap - EXIT
           docker image inspect "$IMAGE" > evidence/image-inspect.json
           cid=$(docker create "$IMAGE")
           trap 'docker rm "$cid" >/dev/null' EXIT

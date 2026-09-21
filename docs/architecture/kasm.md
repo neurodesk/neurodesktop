@@ -87,6 +87,16 @@ the base Neurodesktop image; desktop streaming does not provide those
 capabilities. Validate the chosen device, mount, and privilege settings with
 a real tool before offering the workspace to users.
 
+On Ubuntu 24.04 agents, AppArmor's restriction on unprivileged user namespaces
+can block nested Apptainer with `Could not write info to setgroups: Permission denied`,
+even when Docker uses privileged mode. Follow Apptainer's
+[host requirements](https://apptainer.org/docs/admin/main/installation.html#running-inside-docker).
+On a dedicated agent, the documented host setting is
+`sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`.
+This changes host policy for all processes, so account for it when selecting
+agents for this workspace. The release workflow applies it temporarily on its
+disposable runner and restores the original value after scientific testing.
+
 The initial variant includes desktop streaming, clipboard, uploads, downloads,
 and audio services. Printer, smartcard, gamepad, webcam, and recording services
 are disabled by default. GPU use and platform-managed profile synchronization
@@ -97,8 +107,9 @@ need deployment-specific verification.
 The final user is `jovyan`, UID 1000. Its home is `/home/kasm-user`, and
 `/home/jovyan` links there for existing Neurodesktop paths. Kasm initializes a
 fresh home from `/home/kasm-default-profile`. The entrypoint runs Neurodesktop's
-existing bootstrap through sudo, then starts KasmVNC. This image retains
-Neurodesktop's passwordless sudo behavior.
+existing bootstrap through sudo, then starts KasmVNC. This derivative explicitly enables
+passwordless sudo for its privileged scientific runtime. The root Neurodesktop
+image's package-only sudo policy remains unchanged.
 
 Kasm's custom startup hook launches LXDE and JupyterLab. Jupyter listens only
 on container loopback port 8888 and retains token authentication. The desktop's
