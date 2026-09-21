@@ -97,11 +97,41 @@ def test_publish_renames_the_artifact_and_records_the_run(tmp_path):
         )
     )
     assert record["output_id"] == "brain"
+    assert record["artifact_kind"] == "file"
+    assert record["artifact_sha256"]
     assert record["tool"]["versions"] == ["6.0.7.22"]
     assert record["tool"]["path"] == str(tmp_path / "bin" / "faketool")
     assert record["tool"]["version_command"] == "faketool --version"
     assert record["hostname"]
     assert record["recorded_at"].endswith("Z")
+
+
+def test_publish_handles_an_output_directory(tmp_path):
+    """Rule 6 allows a job-specific temporary directory, which has no digest."""
+    project = make_project(tmp_path, ONE_OUTPUT)
+    make_tool(tmp_path / "bin", "faketool", "faketool v6.0.7.22")
+    temporary = project / "derivatives" / "surfaces.tmp"
+    temporary.mkdir()
+    (temporary / "lh.pial").write_text("mesh", encoding="utf-8")
+
+    result = run_provenance(
+        "publish",
+        str(temporary),
+        str(project / "derivatives" / "surfaces"),
+        "--output-id",
+        "brain",
+        "--tool",
+        "faketool",
+        path_prefix=str(tmp_path / "bin"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (project / "derivatives" / "surfaces" / "lh.pial").is_file()
+    record = json.loads(
+        (project / "derivatives" / "surfaces.prov.json").read_text(encoding="utf-8")
+    )
+    assert record["artifact_kind"] == "directory"
+    assert record["artifact_sha256"] is None
 
 
 def test_publish_records_the_script_that_ran(tmp_path):

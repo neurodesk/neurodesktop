@@ -150,7 +150,10 @@ def _build_record(output_id, artifact, temporary, tool, version_flag, script):
         "schema": SCHEMA,
         "output_id": output_id,
         "artifact": artifact.name,
-        "artifact_sha256": _sha256(temporary),
+        # Rule 6 allows a job-specific temporary directory as well as a file,
+        # and a directory has no single digest to record.
+        "artifact_kind": "directory" if temporary.is_dir() else "file",
+        "artifact_sha256": None if temporary.is_dir() else _sha256(temporary),
         "recorded_at": _utc_now(),
         "hostname": socket.gethostname(),
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
