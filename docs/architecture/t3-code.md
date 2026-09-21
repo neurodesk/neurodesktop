@@ -4,7 +4,7 @@ description: T3 Code in JupyterLab, server lifecycle, provider paths, persistent
   state, and desktop connection procedures
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-20"
+last-reviewed: "2026-09-21"
 ---
 
 # T3 Code remote access
@@ -316,21 +316,37 @@ image-managed T3 environment. Upgrades are delivered through image releases.
 T3's desktop-app update controls are not rendered in its embedded web mode;
 this policy does not change a separately installed desktop app.
 
-Before startup, the supervisor seeds `providerInstances.codex` with the Codex
-driver and the image-owned quiet launcher in `config.binaryPath`. It promotes
-the exact legacy `providers.codex` default written by earlier images, retaining
-that entry for backward compatibility. Existing modern instances, custom-named
-Codex instances, and user-authored legacy settings are preserved unchanged.
-This avoids T3's login-shell PATH refresh selecting an old `~/.local/bin/codex`.
-An obsolete home CLI can fail the `initialize` response schema even when the
-image's Codex is compatible. Provider tests must check the actual T3 probe,
-including `decode-payload` failures, not merely the installed CLI version.
+Before startup, the supervisor seeds one provider instance per agent it owns,
+each naming the image's quiet launcher in `config.binaryPath`. T3 enables the
+Codex and Claude drivers by default and ships the Cursor, Grok, OpenCode, and
+Antigravity drivers disabled, so the OpenCode instance carries an explicit
+`enabled` flag. That flag belongs on the instance envelope, because T3 folds an
+in-config flag into the envelope on every load.
+
+Seeding never overwrites a user's choice. An instance under the seed's own id,
+or any instance that declares the same driver, leaves the settings alone, and
+so does a `providers.<driver>` entry that configures the driver. The supervisor
+still promotes the exact legacy `providers.codex` default written by earlier
+images and retains that entry for backward compatibility. T3 writes
+`providers.opencode.enabled` false into every fresh environment as its own
+bookkeeping, so that entry and an empty one carry no user intent and do not
+block the OpenCode seed.
+
+Seeding Codex avoids T3's login-shell PATH refresh selecting an old
+`~/.local/bin/codex`. An obsolete home CLI can fail the `initialize` response
+schema even when the image's Codex is compatible. Provider tests must check the
+actual T3 probe, including `decode-payload` failures, not merely the installed
+CLI version.
 
 T3 discovers provider commands through
 [`config/agents/t3-provider-bin`](../../config/agents/t3-provider-bin/). These
 quiet launchers call the image-owned Codex, Claude, and OpenCode binaries
 without the interactive Neurodesktop wrapper output. The Codex launcher still
-copies `/opt/AGENTS.md` into a project when `AGENTS.md` is absent.
+copies `/opt/AGENTS.md` into a project when `AGENTS.md` is absent. The OpenCode
+launcher exports `NEURODESK_API_KEY` from `~/.bashrc` when the environment
+lacks it. The interactive wrapper stores that key there, T3 execs the launcher
+without a login shell, and the image's default OpenCode provider authenticates
+with it.
 
 T3 reloads the login-shell `PATH` at startup, which can put the interactive
 Codex wrapper before the quiet directory. When `T3CODE_HOME` is set, that

@@ -74,6 +74,12 @@
   must exercise the initialization probe with the image-owned provider path
   for both fresh modern defaults and migration of the exact legacy default.
 
+- Seeded T3 provider instances must keep the user's own instances and configured
+  `providers.<driver>` entries intact, and must carry an explicit envelope
+  `enabled` flag for any driver T3 ships disabled. Read that default from the
+  pinned T3 version rather than assuming it. Keep T3's own default-off
+  bookkeeping distinct from a user decision.
+
 - T3 relay DNS fallback must remain limited to credential-free HTTPS session
   probes on `*.t3coderelay.com`, use public addresses, and retain TLS validation.
 
