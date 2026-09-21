@@ -76,9 +76,13 @@
 
 - Seeded T3 provider instances must keep the user's own instances and configured
   `providers.<driver>` entries intact, and must carry an explicit envelope
-  `enabled` flag for any driver T3 ships disabled. Read that default from the
-  pinned T3 version rather than assuming it. Keep T3's own default-off
-  bookkeeping distinct from a user decision.
+  `enabled` flag for any driver T3 ships disabled. Confirm that default against
+  the pinned T3 release whenever the seed table changes; the flag is static
+  data, not a runtime lookup. Keep T3's own default-off bookkeeping distinct
+  from a user decision, and promote a legacy `providers.<driver>` entry only
+  for a driver an earlier image actually wrote one for. Cover T3's OpenCode
+  start contract, which is a semantic `--version` and the `serve` announcement
+  line, not the ACP probe the other agents use.
 
 - T3 relay DNS fallback must remain limited to credential-free HTTPS session
   probes on `*.t3coderelay.com`, use public addresses, and retain TLS validation.

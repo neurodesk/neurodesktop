@@ -212,6 +212,15 @@ its CLI version. This exercises T3's login-shell PATH reload and catches
 interactive wrapper banners that corrupt the app-server JSON stream. An
 unauthenticated Codex account is acceptable; a protocol decoding error is not.
 
+The same test checks that the seeded OpenCode instance reports enabled, which
+is the state T3 withholds from a driver it ships disabled. T3 probes OpenCode
+lazily, so that record can still be the unchecked placeholder; a separate image
+test covers the start contract instead. T3 reads a semantic version from
+`--version`, refuses releases below its floor, then runs `serve` and waits for
+the `opencode server listening` line carrying the server URL. OpenCode's ACP
+probe does not cover this path, because T3's driver speaks the OpenCode SDK
+rather than ACP.
+
 The checkout test drives the process supervisor with a real temporary child
 process. It also checks the pinned package, image cleanup, server extension,
 provider launchers, and direct Docker port settings. The image test starts the

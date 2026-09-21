@@ -435,12 +435,18 @@ def test_opencode_seed_ignores_t3s_own_default_off_bookkeeping(tmp_path, bookkee
     {"providerInstances": {"opencode": {"driver": "opencode", "enabled": False}}},
     {"providerInstances": {"work": {"driver": "opencode"}}},
     {"providers": {"opencode": None}},
+    {"providers": {"opencode": {"binaryPath": "PROVIDER_BIN/opencode"}}},
 ])
 def test_opencode_seed_leaves_a_configured_opencode_alone(tmp_path, existing):
     from neurodesk_t3_code.supervisor import seed_provider_settings
     policy = SimpleNamespace(base_dir=tmp_path, provider_bin=tmp_path / "providers")
     path = tmp_path / "userdata/settings.json"
     path.parent.mkdir()
+    # Only earlier images wrote a legacy Codex default, so an OpenCode entry
+    # naming the image launcher is the user's, not ours to promote.
+    existing = json.loads(
+        json.dumps(existing).replace("PROVIDER_BIN", str(policy.provider_bin))
+    )
     path.write_text(json.dumps(existing))
     seed_provider_settings(policy)
     settings = json.loads(path.read_text())

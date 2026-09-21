@@ -167,17 +167,21 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
         else:
             raise AssertionError("T3 did not finish its Codex provider probe within 30 seconds")
 
-        # T3 ships the OpenCode driver disabled, so without the seeded instance
-        # this snapshot reads `"status": "disabled"` and no OpenCode reaches
-        # the chat model picker.
+        # T3 ships the OpenCode driver disabled. Without the seeded instance
+        # this snapshot reads `"enabled": false` with the message below, and no
+        # OpenCode reaches the chat model picker. T3 probes this driver lazily,
+        # so the record can still be the unchecked placeholder here; assert what
+        # the seed decides and let the launcher test cover initialization.
         opencode = tmp_path / ".t3/caches/opencode.json"
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             assert process.poll() is None, "T3 exited before its OpenCode status check"
             if opencode.exists():
                 snapshot = json.loads(opencode.read_text())
-                assert snapshot["enabled"] is True, snapshot
                 assert snapshot["driver"] == "opencode"
+                assert snapshot["enabled"] is True, snapshot
+                assert snapshot["status"] != "error", snapshot
+                assert "disabled in T3 Code settings" not in snapshot["message"], snapshot
                 break
             time.sleep(0.1)
         else:
@@ -192,6 +196,64 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
 
     assert (tmp_path / ".t3/userdata").is_dir()
 
+
+def test_t3_opencode_provider_initializes_through_the_image_launcher(tmp_path):
+    """Cover the OpenCode contract T3's own driver depends on.
+
+    T3 does not reach OpenCode over ACP. It reads a semantic version from
+    `--version`, refuses releases below its floor, then starts `serve` and waits
+    for the announcement line carrying the server URL. An OpenCode upgrade that
+    renames that line or drops below the floor breaks every OpenCode thread
+    while the CLI itself still looks healthy.
+    """
+    launcher = "/opt/neurodesktop/t3-provider-bin/opencode"
+    environment = {**os.environ, "HOME": str(tmp_path)}
+    reported = subprocess.run(
+        [launcher, "--version"], env=environment,
+        capture_output=True, text=True, timeout=120, check=True,
+    ).stdout
+    found = re.search(r"\bv?(\d+\.\d+\.\d+)\b", reported)
+    assert found, reported
+    assert tuple(int(part) for part in found[1].split(".")) >= (1, 14, 19), reported
+
+    defaults = Path("/opt/jovyan_defaults/.config/opencode/opencode.json")
+    destination = tmp_path / ".config/opencode"
+    destination.mkdir(parents=True)
+    shutil.copy(defaults, destination / "opencode.json")
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    log = tmp_path / "opencode-serve.log"
+    with log.open("wb") as stream:
+        server = subprocess.Popen(
+            [launcher, "serve", "--hostname=127.0.0.1", f"--port={port}"],
+            env=environment, stdout=stream, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    try:
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            output = log.read_text(errors="replace")
+            assert server.poll() is None, f"OpenCode server exited:\n{output}"
+            announced = [
+                line for line in output.splitlines()
+                if line.startswith("opencode server listening")
+            ]
+            if announced:
+                assert re.search(r"on\s+https?://\S+", announced[0]), announced[0]
+                break
+            time.sleep(0.2)
+        else:
+            raise AssertionError(
+                f"OpenCode server never announced its URL:\n{log.read_text()}"
+            )
+    finally:
+        os.killpg(server.pid, signal.SIGTERM)
+        try:
+            server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.killpg(server.pid, signal.SIGKILL)
+            server.wait(timeout=5)
 
 def test_guided_setup_mints_a_pairing_link_from_the_installed_cli(tmp_path):
     """Guard the CLI contract the wizard prints its pairing link from.

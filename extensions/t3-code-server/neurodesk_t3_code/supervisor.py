@@ -165,6 +165,10 @@ class ProviderSeed:
     # Legacy ``providers.<driver>`` blobs that hold no user configuration.
     # T3 writes ``{"enabled": false}`` for its own default-off drivers.
     inert_legacy: tuple[dict, ...] = ()
+    # Earlier images wrote this driver's default into ``providers.<driver>``.
+    # Only such a driver can own an entry matching the config seeded below;
+    # for every other driver an identical entry was authored by the user.
+    promotes_image_default: bool = False
 
     def config(self, provider_bin: Path) -> dict:
         return {"binaryPath": str(provider_bin / self.driver)}
@@ -188,14 +192,13 @@ class ProviderSeed:
         if self.driver not in providers:
             return False
         legacy = providers[self.driver]
-        return (
-            legacy != self.config(provider_bin)
-            and legacy not in self.inert_legacy
-        )
+        if self.promotes_image_default and legacy == self.config(provider_bin):
+            return False
+        return legacy not in self.inert_legacy
 
 
 PROVIDER_SEEDS = (
-    ProviderSeed("codex"),
+    ProviderSeed("codex", promotes_image_default=True),
     ProviderSeed(
         "opencode", disabled_by_default=True, inert_legacy=({}, {"enabled": False})
     ),
