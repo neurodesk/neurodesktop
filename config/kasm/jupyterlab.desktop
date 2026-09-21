@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=JupyterLab
+Comment=Open this session's JupyterLab
+Exec=/opt/neurodesktop/kasm-open-jupyter
+Icon=applications-development
+Terminal=false
+Categories=Development;Science;
