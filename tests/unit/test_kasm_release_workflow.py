@@ -60,3 +60,10 @@ def test_release_git_tag_becomes_container_tag(tmp_path):
     result = run_inputs(tmp_path, BASE, "kasm-1.19.0-20260921.1", registry_ok=False)
     assert result.returncode == 0, result.stderr
     assert "tag=1.19.0-20260921.1\n" in (tmp_path / "output").read_text()
+
+
+def test_submission_upload_preserves_hidden_source_without_uploading_checkout():
+    workflow = yaml.safe_load(repo_path(".github/workflows/release-kasm.yml").read_text())
+    upload = next(s for s in workflow["jobs"]["release"]["steps"] if s.get("name") == "Upload submission and evidence")
+    assert upload["with"]["include-hidden-files"] is True
+    assert upload["with"]["path"].split() == ["submission/", "evidence/"]

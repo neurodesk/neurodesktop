@@ -161,3 +161,4 @@ jobs:
             submission/
             evidence/
           if-no-files-found: error
+          include-hidden-files: true
