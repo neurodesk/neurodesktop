@@ -134,6 +134,7 @@ non-obvious tiers protect.
 | --- | --- | --- |
 | Jupyter isolated build dependencies | `pytest tests/unit/test_jupyter_build_constraints.py tests/unit/test_jupyterlab_slurm_build.py` | Fresh isolated wheel builds for Slurm and launcher |
 | Image packaging layers | `pytest tests/unit/test_image_packaging_layers.py tests/unit/test_myst_build_workaround.py` | `pytest /opt/tests/test_image_size_hygiene.py /opt/tests/test_additional_components.py` and image layer inventory |
+| ghapi public credential examples | `pytest tests/unit/test_ghapi_examples.py tests/unit/test_image_packaging_layers.py` | `pytest /opt/tests/test_image_size_hygiene.py` and unchanged image secret scan |
 | CVMFS inventory health | `pytest tests/unit/test_cvmfs_inventory_check.py` | Live mirror workflow |
 | Nightly JupyterHub probe (terminal creation, FSL commands) | `pytest tests/unit/test_jupyter_terminal_creation.py tests/unit/test_github_workflows.py` | Live `JupyterHub API Testing` workflow |
 | Lmod extension listing default | `pytest tests/unit/test_lmod_extensions.py` | `pytest /opt/tests/test_lmod_avail_extensions.py` |
@@ -260,6 +261,10 @@ at both root and user-prefixed URLs, clicks absolute workspace links, and
 requires Markdown and HTML viewers to open in the main panel without navigation.
 It also opens the Slurm dashboard through its Neurodesk launcher tile, checking
 its label and icon on two launcher renders against the installed Slurm extension.
+This browser test configures `SlurmCommandPaths.squeue_path` as `/usr/bin/true`
+and verifies the HTTP endpoint returns an empty queue using that command,
+so it does not depend on a host Slurm controller in the HPC simulation. The
+separate `test_slurm.py` suite exercises the real scheduler and batch commands.
 Installation and shipped page-configuration checks remain in the image tier.
 
 ### ASTRA CLIs, Lightcone skills, and hooks

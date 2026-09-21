@@ -19,6 +19,19 @@ import pytest
 from testlib import first_existing_path
 
 
+def test_ghapi_public_credential_samples_are_placeholders():
+    """Import the shipped spec without token-shaped documentation examples."""
+    from ghapi.gh_spec import spec
+
+    operation = next(op for op in spec["ops"] if op["path"] == "/credentials/revoke")
+    assert operation["verb"] == "POST"
+    assert operation["body_params"] == ["credentials"]
+    assert operation["body_examples"]["default"]["value"]["credentials"] == [
+        "<example-personal-access-token>", "<example-fine-grained-token>",
+        "<example-oauth-token>", "<example-github-app-token>", "<example-refresh-token>",
+    ]
+
+
 def test_claude_agent_sdk_bundled_cli_removed():
     """claude-agent-sdk vendors a ~260 MB Claude Code CLI the image never
     uses: NBI resolves `claude` from PATH and passes it as cli_path, and the

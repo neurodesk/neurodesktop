@@ -6,6 +6,7 @@ from pathlib import Path
 import os
 import subprocess
 import time
+import urllib.request
 
 import pytest
 
@@ -132,12 +133,17 @@ def test_clicking_workspace_links_opens_rendered_documents(tmp_path, base):
     prefix = f"http://127.0.0.1:{server_port}{base}"
     token = "workspace-links-test"
     environment = {**os.environ, "HOME": str(tmp_path)}
+    # Slurm initialization overwrites flat Tornado settings from this traitlet.
+    # Keep this browser test independent of a host controller in HPC mode.
+    server_config = tmp_path / "jupyter_server_config.py"
+    server_config.write_text('c = get_config()\nc.SlurmCommandPaths.squeue_path = "/usr/bin/true"\n')
     profile = tmp_path / "firefox-profile"
     profile.mkdir()
     log_path = tmp_path / "jupyter.log"
     with log_path.open("w") as log, (tmp_path / "firefox.log").open("w") as browser_log:
         server = subprocess.Popen([
             "jupyter", "lab", "--no-browser", "--ServerApp.allow_root=True",
+            f"--config={server_config}",
             "--LabApp.expose_app_in_browser=True", f"--ServerApp.port={server_port}",
             "--ServerApp.port_retries=0", f"--ServerApp.base_url={base}",
             f"--ServerApp.root_dir={tmp_path}", f"--FileContentsManager.preferred_dir={tmp_path}",
@@ -152,6 +158,12 @@ def test_clicking_workspace_links_opens_rendered_documents(tmp_path, base):
                 f"--remote-debugging-port={browser_port}", "about:blank",
             ], env=environment, stdout=browser_log, stderr=subprocess.STDOUT)
             _wait_for_server(prefix + "api/status?token=" + token, server, log_path)
+            with urllib.request.urlopen(
+                prefix + "jupyterlab_slurm/squeue?token=" + token, timeout=10
+            ) as response:
+                queue = json.load(response)
+            assert queue["success"] and queue["data"]["rows"] == [], queue
+            assert queue["responseMessage"].startswith("Success: /usr/bin/true "), queue
             bidi = _BidiSession(f"ws://127.0.0.1:{browser_port}/session", browser)
             bidi.request("session.new", {"capabilities": {}})
             context = bidi.request("browsingContext.create", {"type": "tab"})["context"]
