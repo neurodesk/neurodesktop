@@ -1,0 +1,154 @@
+name: Build and publish Kasm image
+
+on:
+  push:
+    tags:
+      - 'kasm-1.19.0-*'
+  workflow_dispatch:
+    inputs:
+      base_image:
+        description: Optional public Neurodesktop digest; blank resolves the current amd64 image
+        required: false
+        type: string
+      release_tag:
+        description: Optional tag, 1.19.0-YYYYMMDD.N; blank uses the UTC date and run number
+        required: false
+        type: string
+      publish:
+        description: Push the tested image to GHCR
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: kasm-release-publish
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      BASE_IMAGE: ${{ inputs.base_image }}
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+      IMAGE_OWNER: ${{ github.repository_owner }}
+      RUN_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Test release tooling
+        run: |
+          python3 -m pip install pytest pyyaml
+          python3 -m pytest tests/unit/test_kasm_submission.py tests/unit/test_kasm_workspace.py tests/unit/test_kasm_release_workflow.py -q
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - name: Validate release inputs
+        id: inputs
+        run: |
+          python3 - <<'PY'
+          import datetime, importlib.util, json, os, subprocess
+          spec = importlib.util.spec_from_file_location('release', 'scripts/prepare_kasm_submission.py')
+          release = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(release)
+          tag = os.environ['RELEASE_TAG'].removeprefix('kasm-') or f"1.19.0-{datetime.datetime.now(datetime.timezone.utc):%Y%m%d}.{os.environ['RUN_NUMBER']}"
+          image = release.release_image(f"ghcr.io/{os.environ['IMAGE_OWNER'].lower()}/neurodesktop-kasm:{tag}")
+          base = os.environ['BASE_IMAGE']
+          if not base:
+              manifest = json.loads(subprocess.check_output([
+                  'docker', 'buildx', 'imagetools', 'inspect',
+                  'ghcr.io/neurodesk/neurodesktop:amd64', '--format', '{{json .Manifest}}',
+              ], text=True))
+              base = f"ghcr.io/neurodesk/neurodesktop@{manifest['digest']}"
+          release.pinned_base(base)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'image={image}\ntag={tag}\n')
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write(f'BASE_IMAGE={base}\n')
+          PY
+      - name: Login for optional publication
+        if: github.event_name == 'push' || inputs.publish
+        uses: ./.github/actions/docker-login-retry
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check release tag
+        if: github.event_name == 'push' || inputs.publish
+        id: existing
+        uses: ./.github/actions/check-registry-manifest
+        with:
+          image: ${{ steps.inputs.outputs.image }}
+      - name: Refuse tag overwrite
+        if: (github.event_name == 'push' || inputs.publish) && steps.existing.outputs.exists == 'true'
+        run: |
+          echo 'Release tag already exists. Choose a new release number.' >&2
+          exit 1
+      - name: Build and test candidate
+        env:
+          IMAGE: ${{ steps.inputs.outputs.image }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          public_config=$(mktemp -d)
+          DOCKER_CONFIG="$public_config" docker manifest inspect "$BASE_IMAGE" > evidence/base-manifest.json
+          rm -rf "$public_config"
+          docker buildx build --load --platform linux/amd64 \
+            --build-arg "NEURODESKTOP_IMAGE=$BASE_IMAGE" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -f config/kasm/Dockerfile -t "$IMAGE" . 2>&1 | tee evidence/build.log
+          bash scripts/verify_kasm_image.sh "$IMAGE" 2>&1 | tee evidence/desktop-tests.log
+          bash scripts/verify_kasm_image.sh "$IMAGE" --science 2>&1 | tee evidence/science-tests.log
+          docker image inspect "$IMAGE" > evidence/image-inspect.json
+          cid=$(docker create "$IMAGE")
+          trap 'docker rm "$cid" >/dev/null' EXIT
+          docker export "$cid" | wc -c > evidence/rootfs-bytes.txt
+      - name: Generate SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.inputs.outputs.image }}
+          format: spdx-json
+          output: evidence/sbom.spdx.json
+      - name: Scan release candidate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.inputs.outputs.image }}
+          format: json
+          output: evidence/vulnerabilities.json
+          severity: CRITICAL
+          exit-code: '1'
+          trivyignores: .trivyignore.yaml
+      - name: Assemble submission materials
+        env:
+          IMAGE: ${{ steps.inputs.outputs.image }}
+        run: |
+          size_mb=$(( ($(cat evidence/rootfs-bytes.txt) + 999999) / 1000000 ))
+          python3 scripts/prepare_kasm_submission.py --image "$IMAGE" \
+            --base-image "$BASE_IMAGE" --uncompressed-size-mb "$size_mb" \
+            --output submission
+      - name: Publish tested image
+        if: github.event_name == 'push' || inputs.publish
+        env:
+          IMAGE: ${{ steps.inputs.outputs.image }}
+        run: |
+          set -euo pipefail
+          docker push "$IMAGE" 2>&1 | tee evidence/push.log
+          public_config=$(mktemp -d)
+          DOCKER_CONFIG="$public_config" docker manifest inspect "$IMAGE" > evidence/published-manifest.json
+          rm -rf "$public_config"
+          docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest}}' > evidence/published-digest.json
+          {
+            echo "Published image: \`$IMAGE\`"
+            echo "Pull with: \`docker pull $IMAGE\`"
+            echo 'Kasm official listing still requires maintainer acceptance.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload submission and evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: neurodesktop-kasm-${{ steps.inputs.outputs.tag || github.run_id }}
+          path: |
+            submission/
+            evidence/
+          if-no-files-found: error

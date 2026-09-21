@@ -9,6 +9,21 @@ last-reviewed: "2026-09-18"
 
 # Testing
 
+The optional [Kasm image](architecture/kasm.md) has a separate runtime smoke
+test: `bash scripts/verify_kasm_image.sh IMAGE`. It starts a desktop, runs
+`tests/container/test_kasm_workspace.py`, and recreates the container to check
+home persistence. Its checkout tests run with
+`pytest tests/unit/test_kasm_workspace.py`. The ordinary smoke test disables
+CVMFS. The explicit `--science` option launches a privileged container and
+also runs `tests/container/test_kasm_science.py`, which checks CVMFS-backed FSL
+arithmetic through nested Apptainer. Kasm platform lifecycle checks still
+require an actual Kasm Workspaces deployment.
+
+Kasm submission packaging is covered by `pytest tests/unit/test_kasm_submission.py`.
+Workflow input resolution is covered by `pytest tests/unit/test_kasm_release_workflow.py`.
+The [publishing guide](architecture/kasm-publishing.md) describes the release
+workflow's runtime tests, SBOM, vulnerability gate, and remaining platform checks.
+
 The suite has two tiers, and which one a new test belongs in is decided by a
 single question: **does it need a running container to answer?**
 

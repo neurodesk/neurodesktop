@@ -30,6 +30,17 @@
   [build-time behavior](docs/architecture/build.md).
 - Use [`docs/environment-variables.md`](docs/environment-variables.md) for
   supported runtime and build environment variables.
+- The optional Kasm image lives in `config/kasm/`. Build it on an existing
+  Neurodesktop image and run `bash scripts/verify_kasm_image.sh IMAGE` after
+  runtime changes; see [`docs/architecture/kasm.md`](docs/architecture/kasm.md).
+- Kasm release preparation uses `scripts/prepare_kasm_submission.py` and
+  `.github/workflows/release-kasm.yml`. Run `pytest
+  tests/unit/test_kasm_submission.py tests/unit/test_kasm_release_workflow.py` after
+  packaging or release workflow changes. The manual release workflow publishes to
+  GHCR by default; clear its `publish` input for a dry run. See
+  [`docs/architecture/kasm-publishing.md`](docs/architecture/kasm-publishing.md)
+  for publication gates; generated metadata does not establish official-store
+  acceptance or full Kasm platform compatibility.
 - `docs/architecture.md`, `docs/testing.md`, and
   `docs/environment-variables.md` are referenced by path from tests and the
   agent workflows; do not move or rename them.

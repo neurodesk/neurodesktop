@@ -1,0 +1,21 @@
+{
+  "friendly_name": "Neurodesktop",
+  "description": "A reproducible neuroimaging desktop with JupyterLab and scientific applications delivered through Neurodesk's CVMFS software catalog.",
+  "image_src": "neurodesktop.svg",
+  "docker_registry": "https://ghcr.io",
+  "architecture": ["amd64"],
+  "categories": ["Desktop", "Development"],
+  "cores": 4,
+  "memory": 8589934592,
+  "gpu_count": 0,
+  "run_config": {
+    "privileged": true,
+    "shm_size": 1073741824,
+    "environment": {
+      "CVMFS_DISABLE": "false",
+      "NEURODESKTOP_SLURM_ENABLE": "false"
+    }
+  },
+  "notes": "Requires privileged containers for CVMFS and nested Apptainer execution. The desktop user has passwordless sudo. Deploy on agents designated for trusted scientific workloads. Enable persistent profiles at /home/kasm-user to retain user files. Software downloads require outbound network access. Proposed scope: Kasm 1.19.x on amd64; full Kasm platform validation is pending. GPU support is not validated.",
+  "compatibility": []
+}

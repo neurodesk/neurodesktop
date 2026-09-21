@@ -20,6 +20,7 @@ under [`docs/architecture/`](architecture/). The wiki entry point is
 | --- | --- |
 | [CVMFS and Neurocommand](architecture/cvmfs.md) | CVMFS server selection, mount configuration, and the neuroimaging tool/module system |
 | [Desktop environment](architecture/desktop.md) | LXDE over VNC/RDP through Guacamole, clipboard sync, Firefox profiles, office file associations |
+| [Kasm image](architecture/kasm.md) | Separate Kasm Workspaces image, build and run commands, desktop startup, and home persistence |
 | [Webapp system](architecture/webapps.md) | Container-backed and hosted webapp tiles, and the build-time Jupyter config generation |
 | [Workspace link routing](architecture/workspace-link-routing.md) | Opening agent-authored absolute file links inside JupyterLab |
 | [ASTRA integration](architecture/astra.md) | `astra`/`lc` CLIs, the shared agent skill, and the provenance viewer |

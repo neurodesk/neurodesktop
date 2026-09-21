@@ -13,6 +13,24 @@ Runtime variables are grouped by subsystem; [build arguments](#build-arguments)
 are listed at the end. The subsystems themselves are described in
 [Architecture](architecture.md).
 
+## Kasm image
+
+These settings apply to the separate [Kasm image](architecture/kasm.md):
+
+- `NEURODESKTOP_IMAGE`: build argument selecting the existing Neurodesktop
+  base image. Pass a release tag or digest explicitly for reproducible builds.
+- `KASM_IMAGE`: build argument selecting the Kasm runtime donor. The Kasm
+  Dockerfile pins the tested Ubuntu Noble 1.19.0 image by digest.
+- `VNC_PW`: required session password, supplied by Kasm Workspaces or by the
+  user when running standalone. There is no image default password.
+- `VNC_RESOLUTION`: initial desktop size, default `1280x800`.
+- `NO_VNC_PORT`: KasmVNC HTTPS port, default `6901`.
+- `KASM_SVC_*`: upstream Kasm service switches. Printer, smartcard, gamepad,
+  webcam, and recording default to disabled in this variant.
+
+The session home is `/home/kasm-user`; persist that path instead of overriding
+`HOME`. The underlying Neurodesktop CVMFS and Apptainer settings still apply.
+
 ## CVMFS and modules
 
 - `LMOD_AVAIL_EXTENSIONS`: defaults to `no`, hiding the extension inventory
