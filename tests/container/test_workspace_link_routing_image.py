@@ -80,7 +80,7 @@ def check_slurm_launcher(bidi, context):
         window.jupyterapp.activatePlugin('neurodesk-launcher:plugin'),
         window.jupyterapp.activatePlugin('jupyterlab-slurm:plugin')
     ]).then(() => true)""")
-    tile = """Array.from(document.querySelectorAll('.jp-Launcher-section'))
+    tile = """Array.from(window.jupyterapp.shell.currentWidget.node.querySelectorAll('.jp-Launcher-section'))
         .find(section => section.querySelector('.jp-Launcher-sectionTitle')?.textContent.trim() === 'Neurodesk')
         ?.querySelector('.jp-SlurmWidget-NerscLaunchIcon')
         ?.closest('.jp-LauncherCard')"""
