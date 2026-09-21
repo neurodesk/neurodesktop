@@ -102,8 +102,12 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
     supervisor.seed_provider_settings(SimpleNamespace(
         base_dir=tmp_path / ".t3", provider_bin=Path("/opt/neurodesktop/t3-provider-bin")
     ))
-    assert json.loads(settings_path.read_text())["providerInstances"]["codex"] == {
+    seeded = json.loads(settings_path.read_text())["providerInstances"]
+    assert seeded["codex"] == {
         "driver": "codex", "config": {"binaryPath": "/opt/neurodesktop/t3-provider-bin/codex"}}
+    assert seeded["opencode"] == {
+        "driver": "opencode", "enabled": True,
+        "config": {"binaryPath": "/opt/neurodesktop/t3-provider-bin/opencode"}}
     process = subprocess.Popen(
         [
             "t3",
@@ -162,6 +166,22 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
             time.sleep(0.1)
         else:
             raise AssertionError("T3 did not finish its Codex provider probe within 30 seconds")
+
+        # T3 ships the OpenCode driver disabled, so without the seeded instance
+        # this snapshot reads `"status": "disabled"` and no OpenCode reaches
+        # the chat model picker.
+        opencode = tmp_path / ".t3/caches/opencode.json"
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            assert process.poll() is None, "T3 exited before its OpenCode status check"
+            if opencode.exists():
+                snapshot = json.loads(opencode.read_text())
+                assert snapshot["enabled"] is True, snapshot
+                assert snapshot["driver"] == "opencode"
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError("T3 did not report OpenCode provider status within 30 seconds")
     finally:
         os.killpg(process.pid, signal.SIGTERM)
         try:
