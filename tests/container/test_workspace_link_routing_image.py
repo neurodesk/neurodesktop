@@ -84,6 +84,8 @@ def check_slurm_launcher(bidi, context):
         .find(section => section.querySelector('.jp-Launcher-sectionTitle')?.textContent.trim() === 'Neurodesk')
         ?.querySelector('.jp-SlurmWidget-NerscLaunchIcon')
         ?.closest('.jp-LauncherCard')"""
+    visible = """Array.from(document.querySelectorAll('.jp-SlurmWidget'))
+        .some(node => node.checkVisibility())"""
     for _ in range(2):
         evaluate(bidi, context,
                  "window.jupyterapp.commands.execute('launcher:create').then(() => true)")
@@ -94,13 +96,32 @@ def check_slurm_launcher(bidi, context):
             time.sleep(.2)
         assert evaluate(bidi, context, f"Boolean({tile})"), "Slurm launcher icon missing"
         assert evaluate(bidi, context, f"({tile}).textContent.includes('Slurm Dashboard')")
-        evaluate(bidi, context, f"(() => {{ ({tile}).click(); return true; }})()")
+        assert not evaluate(bidi, context, visible), "New launcher should hide the previous dashboard"
+        point = json.loads(evaluate(bidi, context, f"""JSON.stringify((() => {{
+            const node = {tile};
+            node.scrollIntoView({{block: 'center'}});
+            const rect = node.getBoundingClientRect();
+            return {{x: Math.round(rect.left + rect.width / 2),
+                     y: Math.round(rect.top + rect.height / 2)}};
+        }})())"""))
+        bidi.request("input.performActions", {
+            "context": context,
+            "actions": [{"type": "pointer", "id": "slurm-mouse",
+                         "parameters": {"pointerType": "mouse"}, "actions": [
+                {"type": "pointerMove", "duration": 0, "origin": "viewport", **point},
+                {"type": "pointerDown", "button": 0},
+                {"type": "pointerUp", "button": 0},
+            ]}],
+        })
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
-            if evaluate(bidi, context, "window.jupyterapp.shell.currentWidget?.title.label === 'Slurm Dashboard'"):
+            if evaluate(bidi, context, visible):
                 break
             time.sleep(.2)
-        assert evaluate(bidi, context, "window.jupyterapp.shell.currentWidget?.title.label === 'Slurm Dashboard'"), "Slurm tile did not open dashboard"
+        assert evaluate(bidi, context, visible), (
+            "Slurm tile did not show dashboard: "
+            + str(evaluate(bidi, context, "document.body.innerText"))[-2000:]
+        )
 
 
 @pytest.mark.parametrize("base", ["/", "/user/workspace-test/"])
