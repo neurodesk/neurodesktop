@@ -153,6 +153,7 @@ non-obvious tiers protect.
 | CVMFS inventory health | `pytest tests/unit/test_cvmfs_inventory_check.py` | Live mirror workflow |
 | Nightly JupyterHub probe (terminal creation, FSL commands) | `pytest tests/unit/test_jupyter_terminal_creation.py tests/unit/test_github_workflows.py` | Live `JupyterHub API Testing` workflow |
 | Lmod extension listing default | `pytest tests/unit/test_lmod_extensions.py` | `pytest /opt/tests/test_lmod_avail_extensions.py` |
+| Interactive module banner | `pytest tests/unit/test_module_banner.py` | — |
 | Apptainer NVIDIA auto-configuration | `pytest tests/unit/test_apptainer_nv.py` | — |
 | Access-URL banner (`print_access_url.sh`) | `pytest tests/unit/test_print_access_url.py` | — |
 | Sherlock launcher (`scripts/connectSherlock.sh`) | `pytest tests/unit/test_connect_sherlock.py` | — |
