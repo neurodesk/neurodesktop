@@ -3,7 +3,7 @@ ARG NEURODESKTOP_IMAGE=ghcr.io/neurodesk/neurodesktop:amd64
 ARG KASM_IMAGE=kasmweb/core-ubuntu-noble:1.19.0@sha256:d1d9eccccbbd1995b4eda7ec891e14112860098d85d8c47d78b359db798fcd2c
 FROM ${KASM_IMAGE} AS kasm
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends dpkg-repack \
+RUN /usr/bin/apt-get update && /usr/bin/apt-get install -y --no-install-recommends dpkg-repack \
     && mkdir /kasm-packages && cd /kasm-packages && dpkg-repack kasmvncserver \
     && cp -L /usr/bin/kasm-profile-sync /kasm-packages/kasm-profile-sync \
     && cp -L /usr/bin/kasm-profile-sync-2 /kasm-packages/kasm-profile-sync-2
@@ -15,8 +15,8 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=from=kasm,source=/kasm-packages,target=/tmp/kasm-packages,ro \
     . /etc/os-release && test "$VERSION_CODENAME" = noble \
     && test "$(id -u jovyan)" = 1000 \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends /tmp/kasm-packages/*.deb \
+    && /usr/bin/apt-get update \
+    && /usr/bin/apt-get install -y --no-install-recommends /tmp/kasm-packages/*.deb \
        ffmpeg pulseaudio pulseaudio-utils libarchive13t64 libdatetime-perl \
        libhash-merge-simple-perl liblist-moreutils-perl libtry-tiny-perl \
        libyaml-tiny-perl gettext ssl-cert x11-utils \
