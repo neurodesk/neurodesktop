@@ -280,7 +280,12 @@ FINAL="${3:?usage: $0 <algorithm> <input> <output>}"
 
 module load <tool>/<version>
 
-TMP="$(mktemp "${FINAL}.XXXXXX")"
+# Keep the output's own name: FSL and others read the format off the suffix,
+# and several refuse a path that already exists.
+TMP_DIR="$(mktemp -d "${FINAL}.attempt.XXXXXX")"
+trap 'rm -rf "${TMP_DIR}"' EXIT
+TMP="${TMP_DIR}/$(basename "${FINAL}")"
+
 <commands writing "${TMP}">
 <checks on "${TMP}">
 

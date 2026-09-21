@@ -316,6 +316,37 @@ def test_publish_replaces_only_when_asked(tmp_path):
     assert final.read_text(encoding="utf-8") == "artifact bytes"
 
 
+def test_a_failed_rename_leaves_the_previous_result_and_its_record_alone(tmp_path):
+    """Under --replace, a lost rename must not relabel the standing result."""
+    project = make_project(tmp_path, ONE_OUTPUT)
+    final = project / "derivatives" / "brain.nii.gz"
+    final.write_text("an earlier result", encoding="utf-8")
+    sidecar = project / "derivatives" / "brain.nii.gz.prov.json"
+    sidecar.write_text('{"schema": "earlier"}', encoding="utf-8")
+    make_tool(tmp_path / "bin", "faketool", "faketool v6.0.7.22")
+    # A directory cannot be renamed over an existing regular file.
+    temporary = project / "derivatives" / "brain.nii.gz.tmp"
+    temporary.mkdir()
+
+    result = run_provenance(
+        "publish",
+        str(temporary),
+        str(final),
+        "--output-id",
+        "brain",
+        "--tool",
+        "faketool",
+        "--replace",
+        path_prefix=str(tmp_path / "bin"),
+    )
+
+    assert result.returncode != 0
+    assert "Could not rename" in result.stderr
+    assert final.read_text(encoding="utf-8") == "an earlier result"
+    assert sidecar.read_text(encoding="utf-8") == '{"schema": "earlier"}'
+    assert not list((project / "derivatives").glob("*.staged.*"))
+
+
 def test_check_passes_when_the_spec_names_what_ran(tmp_path):
     pytest.importorskip("yaml")
     project = make_project(tmp_path, ONE_OUTPUT)
@@ -325,6 +356,65 @@ def test_check_passes_when_the_spec_names_what_ran(tmp_path):
 
     assert result.returncode == 0, result.stderr + result.stdout
     assert "brain" in result.stdout
+
+
+def test_check_rejects_an_image_basename_standing_in_for_the_version(tmp_path):
+    """Naming the image is not evidence that the image's tool ran."""
+    pytest.importorskip("yaml")
+    project = make_project(
+        tmp_path,
+        ONE_OUTPUT.replace(
+            "neurodesk fsl/6.0.7.22", "/cvmfs/neurodesk/fsl_6.0.7.22_20240101.simg"
+        ),
+    )
+    assert publish_brain(
+        tmp_path, project, version_line="faketool v9.21.1"
+    ).returncode == 0
+
+    result = run_provenance("check", str(project))
+
+    assert result.returncode == 1
+    assert "9.21.1" in result.stderr
+
+
+def test_check_accepts_a_declaration_that_is_only_the_image_path(tmp_path):
+    """The version lives in the basename, so the declaration still carries it."""
+    pytest.importorskip("yaml")
+    project = make_project(
+        tmp_path,
+        ONE_OUTPUT.replace(
+            "neurodesk fsl/6.0.7.22", "/cvmfs/neurodesk/fsl_6.0.7.22_20240101.simg"
+        ),
+    )
+    assert publish_brain(tmp_path, project).returncode == 0
+
+    result = run_provenance("check", str(project))
+
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_check_rejects_a_sidecar_whose_artifact_is_gone(tmp_path):
+    pytest.importorskip("yaml")
+    project = make_project(tmp_path, ONE_OUTPUT)
+    assert publish_brain(tmp_path, project).returncode == 0
+    (project / "derivatives" / "brain.nii.gz").unlink()
+
+    result = run_provenance("check", str(project))
+
+    assert result.returncode == 1
+    assert "no longer there" in result.stderr
+
+
+def test_check_rejects_a_sidecar_whose_artifact_was_replaced_by_hand(tmp_path):
+    pytest.importorskip("yaml")
+    project = make_project(tmp_path, ONE_OUTPUT)
+    assert publish_brain(tmp_path, project).returncode == 0
+    (project / "derivatives" / "brain.nii.gz").write_text("other", encoding="utf-8")
+
+    result = run_provenance("check", str(project))
+
+    assert result.returncode == 1
+    assert "different brain.nii.gz" in result.stderr
 
 
 def test_check_catches_a_version_the_tool_never_reported(tmp_path):
