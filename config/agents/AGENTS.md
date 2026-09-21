@@ -4,7 +4,7 @@ Use this contract for scientific analyses in Neurodesk. Keep the work
 reproducible without turning routine discovery, conventional defaults, or short
 parameter sweeps into unnecessary user prompts and scheduler jobs.
 
-Environment guidance revision: 2026-09-21.1
+Environment guidance revision: 2026-09-21.2
 
 ## Session preflight
 
@@ -54,20 +54,38 @@ initializer. Do not rely on the tool shell loading an rc file or inheriting
    inputs, and output paths before execution, and invoke the same commands as
    the resolved ASTRA recipes. Have existing validation steps write metric
    artifacts instead of adding jobs to recompute the same numbers.
-5. **Pin execution environments.** Every neuroimaging script loads an explicit
-   module version (`module load <tool>/<version>`). DataLad, Git, rclone, and
-   osfclient are already in the main environment and data-only scripts do not
-   load a neuroimaging module. Submit from the project root and resolve it in
-   every job with `PROJECT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"`; Slurm executes a
-   spool copy, so `BASH_SOURCE[0]` points at `/var/spool/slurmd`, not the
-   workspace.
+5. **Pin execution environments in the scripts and in the specification.**
+   Every neuroimaging script loads an explicit module version
+   (`module load <tool>/<version>`). DataLad, Git, rclone, and osfclient are
+   already in the main environment and data-only scripts do not load a
+   neuroimaging module. The specification carries the same pin: every recipe
+   with a `command` names the software producing that output in `container:`,
+   on the recipe or on the enclosing analysis. `astra validate` never asks for
+   it, so nothing but this rule and the completion check below will. Read the
+   version from the tool itself, not from the module name; a module label and
+   the binary it exposes can disagree. Submit from the project root and
+   resolve it in every job with `PROJECT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"`;
+   Slurm executes a spool copy, so `BASH_SOURCE[0]` points at
+   `/var/spool/slurmd`, not the workspace.
 6. **Never publish partial or stale outputs.** Write each attempt to a
    job-specific temporary file or directory on the same filesystem, validate
    that temporary artifact, and atomically rename it into its final path only
    after success. Refuse to overwrite an existing final result unless the user
    requested replacement or the old result has first been preserved. Never
    use `test -s` on a path that could have survived an earlier attempt. Remove
-   or isolate failed-attempt artifacts before retrying.
+   or isolate failed-attempt artifacts before retrying. Perform that rename
+   with `neurodesk-astra-provenance publish`, which also writes the
+   `<output>.prov.json` sidecar the completion check reads:
+
+   ```bash
+   neurodesk-astra-provenance publish "${TMP}" "${FINAL}" \
+       --output-id <astra_output_id> --tool <command> --script "$0"
+   ```
+
+   It records the resolved binary, the version that binary reported, the
+   loaded modules, the container image behind them, the script digest, the
+   host, and the job ID. It refuses to publish a tool whose version it could
+   not read, and refuses an existing final path unless you pass `--replace`.
 7. **Size jobs against the selected partition.** The preflight runs
    `sinfo -o "%P %c %m %l %t"`. CPU count and memory describe nodes, with memory in
    MiB; they do not expose every partition or account limit. Inspect
@@ -137,6 +155,11 @@ initializer. Do not rely on the tool shell loading an rc file or inheriting
 - `astra validate` with no argument validates the whole project, including universes.
 - There is no `--universe` option. Use `astra validate universes/<name>.yaml -a astra.yaml`; `-a` supplies the parent analysis.
 - Give every locally produced output an explicit `format:` field, including QC images and metric artifacts. Re-exported `from:` outputs inherit it and forbid redeclaring it.
+- Give every recipe with a `command` an explicit `container:`. Load the module
+  first, then read the version out of the tool (`bet --version`,
+  `antsRegistration --version`, `dcm2niix -v`) and record what you observed.
+  A spec whose recipes shell out to pinned tools while naming no software
+  validates clean, so validation will not catch the omission.
 
 **Start from the closest worked project** rather than rebuilding a familiar
 analysis from prose. For FSL BET, the canonical project is installed at
@@ -199,11 +222,18 @@ get` paths are relative to the cloned dataset, so use:
 datalad -C data/<accession> get <path-below-the-dataset>
 ```
 
+**Create and edit `astra.yaml` and `universes/*.yaml` with the runner's Write
+or structured edit tool.** The save hook reads the edited path out of that
+tool call, so a specification written through a Bash heredoc is never
+validated and the hook stays silent, which looks exactly like a pass. This is
+an exception to any general instruction to edit files through Bash.
+
 **Do not re-validate what the save hook already validated.** The hook normally
 reports ASTRA validation after an edit. Run explicit validation once after a
 coherent edit batch, and once after adding final findings; validate every
-universe when a decision or universe changed. If the hook did not run or
-reported an error, use the CLI immediately.
+universe when a decision or universe changed. If the hook did not run,
+reported an error, or the file reached disk any other way, use the CLI
+immediately.
 
 **Treat an existing `astra.yaml` as an accumulated scientific record.** A
 follow-up request to try another defensible method normally adds an option and
@@ -247,9 +277,14 @@ FINAL="${3:?usage: $0 <algorithm> <input> <output>}"
 
 module load <tool>/<version>
 
-# Write and validate job-specific temporary outputs. Publish them to their
-# final paths only after every command and check succeeds.
-<commands>
+TMP="$(mktemp "${FINAL}.XXXXXX")"
+<commands writing "${TMP}">
+<checks on "${TMP}">
+
+# Publishes atomically and records the tool version, modules, image, and
+# script digest in "${FINAL}.prov.json" for the completion check.
+neurodesk-astra-provenance publish "${TMP}" "${FINAL}" \
+    --output-id <astra_output_id> --tool <command> --script "$0"
 ```
 
 Before a Git-only check such as `git diff --check`, first run
@@ -266,7 +301,10 @@ and unexpected leftovers. A bounded final check should establish all of:
   task;
 - fresh expected artifacts with the intended file types and dimensions;
 - no partial or stale files from failed attempts mixed into final results;
-- visual QC that supports no stronger claim than it displays; and
+- visual QC that supports no stronger claim than it displays;
+- a passing `neurodesk-astra-provenance check`, which fails when a recipe
+  names no software or its `container:` disagrees with the version the tool
+  reported at execution time; and
 - a final `astra validate` pass after evidence-backed findings were recorded.
 
 In the final response, link key artifacts with absolute workspace paths so
@@ -274,12 +312,16 @@ JupyterLab opens them in the main panel. State separately:
 
 - **Specification:** whether `astra.yaml` and affected universes validate.
 - **Execution:** which Slurm jobs completed and which outputs were inspected.
-- **Provenance:** whether a recognised run manifest exists. Plain `sbatch`
-  execution remains honestly `spec-only` in the viewer even when the scripts
-  succeeded.
+- **Provenance:** the `neurodesk-astra-provenance check` result, and whether a
+  recognised run manifest exists. Plain `sbatch` execution remains honestly
+  `spec-only` in the viewer even when the scripts succeeded; the sidecars are
+  the record of what ran, not a badge.
 
-If the user explicitly asks for an ASTRA execution badge and the analysis has
-no `container:`, ask before adapting the project to the optional `lc` path:
+The optional `lc` path refuses a spec that declares `container:`, because
+Neurodesk has no container runtime `lc` supports and the declared image would
+be recorded as used without ever running. The two are mutually exclusive. If
+the user explicitly asks for an ASTRA execution badge, say that it costs the
+software declaration and ask before adapting the project:
 
 ```bash
 cd /home/jovyan/my-analysis

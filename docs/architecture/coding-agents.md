@@ -158,6 +158,12 @@ Bash call, including interactive calls. Automatic initialization depends on
 the runner preserving `BASH_ENV`; interactive Bash does not read that variable.
 Agents must not assume that a fresh tool shell has initialized Lmod.
 
+`neurodesk-astra-provenance` is the other agent-facing command on `PATH`. The
+contract routes every published output through its `publish` subcommand and
+ends every analysis with its `check` subcommand, which is the only mechanism
+that compares a specification's declared software with what really ran. See
+[ASTRA integration](astra.md#recording-what-ran).
+
 `neurodesk-agent-preflight` reports the installed guidance revision, differences
 from workspace `AGENTS.md` or `CLAUDE.md`, Lmod availability, and live Slurm
 node capacity and state. Its scheduler query has a 15-second timeout.

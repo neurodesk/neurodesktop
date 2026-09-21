@@ -39,6 +39,11 @@ validates and renders without shipping data or an FSL environment:
   example does not ship. Write it (or replace the commands outright) before
   you execute anything; `astra validate` checks the specification, not the
   existence of the commands it names.
+- no recipe declares `container:`, because this example is also the fixture
+  for the optional `lc` path, which refuses a declared image. Your copy runs
+  real software, so add one to every recipe naming the version you read out
+  of the tool. `astra validate` will not ask for it;
+  `neurodesk-astra-provenance check` will.
 
 Before running your copy, remove the illustrative `findings:` entry. It
 demonstrates the schema and is not an observation from your data. Add findings

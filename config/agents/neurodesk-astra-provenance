@@ -1,0 +1,327 @@
+#!/opt/conda/bin/python
+"""Record what really ran beside every published ASTRA output.
+
+A `container:` line in a specification is a typed assertion: an agent can
+write the wrong version and `astra validate` will not notice, because the
+schema never compares it with anything. These two subcommands close that gap
+from the execution side.
+
+`publish` performs the atomic temporary-to-final rename the analysis contract
+already requires and writes a `<output>.prov.json` sidecar naming the software
+that produced the artifact, read from the tool rather than from the module
+name. `check` reads those sidecars back and compares them with what the
+specification claims, so an undeclared or drifted version fails a command
+instead of depending on a reviewer noticing.
+
+The sidecar is written before the artifact is renamed into place, so a
+published artifact never exists without its provenance record.
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+SCHEMA = "neurodesk-astra-provenance/1"
+SIDECAR_SUFFIX = ".prov.json"
+
+#: Tried in order until one prints something version-shaped. Neuroimaging CLIs
+#: disagree about the flag and several print their banner while exiting
+#: non-zero, so the exit status is recorded rather than used as the filter.
+VERSION_FLAGS = ("--version", "-version", "-V")
+
+VERSION_TOKEN = re.compile(r"\d+(?:\.\d+)+")
+
+#: Neurodesk tools reach their software through a transparent-singularity
+#: wrapper that names the image it executes. The wrapper is a shell script, so
+#: the path can be read out of it without running anything.
+IMAGE_PATH = re.compile(r"[\w./+-]+\.(?:simg|sif)")
+
+
+def _utc_now():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _loaded_modules():
+    return [spec for spec in os.environ.get("LOADEDMODULES", "").split(":") if spec]
+
+
+def _text_of(path):
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _resolve_image(command_path):
+    """The container image behind *command_path*, or ``None``.
+
+    Reads the wrapper script, then the modulefiles Lmod recorded in
+    ``_LMFILES_``. Both are plain text and neither needs the image mounted.
+    """
+    for candidate in [command_path] + os.environ.get("_LMFILES_", "").split(":"):
+        if not candidate:
+            continue
+        match = IMAGE_PATH.search(_text_of(candidate))
+        if match:
+            return match.group(0)
+    return None
+
+
+def _probe_version(command):
+    """Ask *command* for its own version, trying each conventional flag."""
+    attempt = {"flag": None, "exit_code": None, "output": None, "versions": []}
+    for flag in VERSION_FLAGS:
+        try:
+            completed = subprocess.run(
+                [command, flag],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                stdin=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            attempt = {
+                "flag": flag,
+                "exit_code": None,
+                "output": f"{type(error).__name__}: {error}",
+                "versions": [],
+            }
+            continue
+        output = (completed.stdout + completed.stderr).strip()
+        attempt = {
+            "flag": flag,
+            "exit_code": completed.returncode,
+            "output": output[:2000],
+            "versions": VERSION_TOKEN.findall(output),
+        }
+        if attempt["versions"]:
+            break
+    return attempt
+
+
+def _describe_tool(command):
+    resolved = shutil.which(command)
+    if resolved is None:
+        return {
+            "command": command,
+            "path": None,
+            "error": f"{command} is not on PATH; load its module first",
+            "versions": [],
+            "image": None,
+        }
+    probe = _probe_version(resolved)
+    return {
+        "command": command,
+        "path": resolved,
+        "version_command": f"{command} {probe['flag']}" if probe["flag"] else None,
+        "version_exit_code": probe["exit_code"],
+        "version_output": probe["output"],
+        "versions": probe["versions"],
+        "image": _resolve_image(resolved),
+    }
+
+
+def _build_record(output_id, artifact, temporary, tool, script):
+    record = {
+        "schema": SCHEMA,
+        "output_id": output_id,
+        "artifact": artifact.name,
+        "artifact_sha256": _sha256(temporary),
+        "recorded_at": _utc_now(),
+        "hostname": socket.gethostname(),
+        "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
+        "modules": _loaded_modules(),
+        "tool": _describe_tool(tool),
+        "script": None,
+    }
+    if script:
+        script_path = Path(script)
+        record["script"] = {
+            "path": str(script_path),
+            "sha256": _sha256(script_path) if script_path.is_file() else None,
+        }
+    return record
+
+
+def _write_json(path, payload):
+    temporary = path.with_name(path.name + f".tmp.{os.getpid()}")
+    temporary.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    os.replace(temporary, path)
+
+
+def publish(args):
+    temporary = Path(args.temporary)
+    final = Path(args.final)
+    if not temporary.exists():
+        sys.exit(f"No temporary artifact at {temporary}")
+    if final.exists() and not args.replace:
+        sys.exit(
+            f"Refusing to overwrite {final}. Preserve or remove the existing "
+            "result first, or pass --replace when the user asked for it."
+        )
+
+    record = _build_record(args.output_id, final, temporary, args.tool, args.script)
+    if not record["tool"]["versions"]:
+        detail = record["tool"].get("error") or record["tool"].get("version_output")
+        sys.exit(
+            f"Could not read a version from '{args.tool}': {detail}\n"
+            "The sidecar would claim provenance it did not observe."
+        )
+
+    _write_json(final.with_name(final.name + SIDECAR_SUFFIX), record)
+    os.replace(temporary, final)
+    print(f"published {final} with {final.name}{SIDECAR_SUFFIX}")
+    return 0
+
+
+def _effective_containers(analysis, inherited=None):
+    """Map every output id in *analysis* to the `container:` that governs it."""
+    container = analysis.get("container") or inherited
+    containers = {}
+    for output in analysis.get("outputs") or []:
+        if not isinstance(output, dict) or not output.get("id"):
+            continue
+        recipe = output.get("recipe") or {}
+        if not recipe.get("command"):
+            # A `from:` re-export runs nothing of its own.
+            continue
+        containers[str(output["id"])] = recipe.get("container") or container
+    for child in (analysis.get("analyses") or {}).values():
+        containers.update(_effective_containers(child, container))
+    return containers
+
+
+def _collect_sidecars(project):
+    sidecars = {}
+    for path in sorted(project.rglob("*" + SIDECAR_SUFFIX)):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if record.get("schema") != SCHEMA:
+            continue
+        sidecars.setdefault(str(record.get("output_id")), []).append((path, record))
+    return sidecars
+
+
+def _agrees(declared, record):
+    """Whether *declared* names something the run actually recorded.
+
+    Version tokens are compared whole. A substring test would accept
+    ``2.5.1`` against a declared ``12.5.10``.
+    """
+    tool = record.get("tool") or {}
+    image = tool.get("image")
+    if image and Path(image).name in declared:
+        return True
+    claimed = set(VERSION_TOKEN.findall(declared))
+    return bool(claimed & set(tool.get("versions") or []))
+
+
+def check(args):
+    try:
+        import yaml
+    except ImportError:
+        sys.exit("PyYAML is required to read astra.yaml")
+
+    project = Path(args.project)
+    spec_path = project / "astra.yaml"
+    if not spec_path.is_file():
+        sys.exit(f"No astra.yaml in {project}")
+    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
+
+    containers = _effective_containers(spec)
+    sidecars = _collect_sidecars(project)
+    problems = []
+    for output_id, declared in sorted(containers.items()):
+        records = sidecars.get(output_id) or []
+        if not declared:
+            problems.append(
+                f"{output_id}: the specification names no software. Declare "
+                "container: on the recipe or the analysis."
+            )
+            continue
+        if not records:
+            problems.append(
+                f"{output_id}: declared '{declared}' but nothing recorded what "
+                f"ran. Publish it with `neurodesk-astra-provenance publish`."
+            )
+            continue
+        for path, record in records:
+            if _agrees(declared, record):
+                print(f"{output_id}: {declared} agrees with {path}")
+                continue
+            tool = record.get("tool") or {}
+            problems.append(
+                f"{output_id}: declared '{declared}' but {path} recorded "
+                f"versions {tool.get('versions') or []} from "
+                f"{tool.get('path') or 'an unnamed tool'}"
+                + (f" image {tool['image']}" if tool.get("image") else "")
+            )
+
+    for problem in problems:
+        print(problem, file=sys.stderr)
+    if problems:
+        print(f"\n{len(problems)} provenance problem(s)", file=sys.stderr)
+        return 1
+    print(f"{len(containers)} output(s) agree with their recorded provenance")
+    return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="neurodesk-astra-provenance", description=__doc__.splitlines()[0]
+    )
+    subcommands = parser.add_subparsers(dest="subcommand", required=True)
+
+    publisher = subcommands.add_parser(
+        "publish", help="rename a validated temporary artifact and record its run"
+    )
+    publisher.add_argument("temporary")
+    publisher.add_argument("final")
+    publisher.add_argument(
+        "--output-id", required=True, help="the ASTRA output id this artifact is"
+    )
+    publisher.add_argument(
+        "--tool",
+        required=True,
+        help="the command that produced it, asked for its own version",
+    )
+    publisher.add_argument("--script", help="the script that ran it")
+    publisher.add_argument(
+        "--replace",
+        action="store_true",
+        help="overwrite an existing final artifact the user asked to replace",
+    )
+    publisher.set_defaults(handler=publish)
+
+    checker = subcommands.add_parser(
+        "check", help="compare spec container: declarations with recorded runs"
+    )
+    checker.add_argument("project", nargs="?", default=".")
+    checker.set_defaults(handler=check)
+
+    args = parser.parse_args(argv)
+    return args.handler(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
