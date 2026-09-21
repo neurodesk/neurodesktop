@@ -17,5 +17,5 @@ module --version
 printf '\nConfigured node capacity, not free resources; memory is MiB:\n'
 timeout 15s sinfo -o '%P %c %m %l %t'
 printf '\nCheck selected partition/account/QOS limits before submission.\n'
-printf 'Initialize each retained Bash job with: source /opt/neurodesktop/agent_bash_env.sh\n'
+printf 'Before module in every Bash call or retained job: source /opt/neurodesktop/agent_bash_env.sh\n'
 printf 'Wait using the runner-provided wait/background mechanism; inspect pending reasons before waiting.\n'

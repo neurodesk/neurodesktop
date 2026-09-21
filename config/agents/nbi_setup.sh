@@ -63,20 +63,11 @@ if [ -z "${BR_MCP_TOKEN_VALUE}" ]; then
 fi
 
 sync_claude_md() {
-    # NBI's Claude provider has its own system-prompt code path and does not
-    # consult ~/.jupyter/nbi/rules/, so the neurodesk rules are ignored in
-    # Claude mode. Mirror them as $HOME/CLAUDE.md so Claude Code (which NBI's
-    # Claude mode drives) picks them up via its own loader.
+    # Home guidance also loads in project sessions. Point at the shared analysis
+    # contract instead of injecting NBI's notebook-only rules into every agent.
+    # Retain the marker so existing managed copies migrate on the next setup.
     local marker='<!-- neurodesktop:nbi-rules (managed - do not edit) -->'
-    local source_file="/opt/jovyan_defaults/.jupyter/nbi/rules/neurodesk.md"
     local target_file="${HOME}/CLAUDE.md"
-
-    if [ ! -f "${source_file}" ]; then
-        source_file="/opt/AGENTS.md"
-    fi
-    if [ ! -f "${source_file}" ]; then
-        return 0
-    fi
 
     if [ -e "${target_file}" ] && ! head -n 1 "${target_file}" 2>/dev/null | grep -qF "${marker}"; then
         echo "nbi_setup.sh: leaving user-authored ${target_file} untouched (no neurodesktop marker)" >&2
@@ -86,7 +77,8 @@ sync_claude_md() {
     local tmp="${target_file}.tmp.$$"
     {
         printf '%s\n' "${marker}"
-        cat "${source_file}"
+        printf '%s\n' 'For scientific analyses, read and follow /opt/AGENTS.md.'
+        printf '%s\n' 'Preserve project-specific instructions in the workspace AGENTS.md or CLAUDE.md.'
     } > "${tmp}" 2>/dev/null || { rm -f "${tmp}"; return 0; }
     mv -f "${tmp}" "${target_file}" 2>/dev/null || rm -f "${tmp}"
 }

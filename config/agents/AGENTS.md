@@ -4,7 +4,7 @@ Use this contract for scientific analyses in Neurodesk. Keep the work
 reproducible without turning routine discovery, conventional defaults, or short
 parameter sweeps into unnecessary user prompts and scheduler jobs.
 
-Environment guidance revision: 2026-09-20.1
+Environment guidance revision: 2026-09-21.1
 
 ## Session preflight
 
@@ -13,10 +13,11 @@ live Slurm node capacity, state, and time limits. If it reports differing
 workspace guidance, preserve project edits and consult `/opt/AGENTS.md` for
 current environment instructions. Resolve a failed preflight before submission.
 
-Agent Bash tools initialize modules automatically. In retained Bash scripts,
-source `/opt/neurodesktop/agent_bash_env.sh` before `module load`; it refreshes
-Neurodesk's module paths and selects the installed Lmod initializer. A module
-loaded in one tool call does not persist into another shell.
+Every Bash call that uses `module`, including interactive calls, must first
+source `/opt/neurodesktop/agent_bash_env.sh`. Do the same in retained Bash
+scripts. It refreshes Neurodesk's module paths and selects the installed Lmod
+initializer. Do not rely on the tool shell loading an rc file or inheriting
+`BASH_ENV`. A module loaded in one call does not persist into another shell.
 
 ## Operating contract
 
@@ -76,7 +77,8 @@ loaded in one tool call does not persist into another shell.
    limit. If a job cannot fit, choose a suitable partition or revise the work;
    do not reduce resources below what it needs.
 8. **Submit settled dependencies together.** Run validation and create `logs/`
-   before submission, then run `sbatch --parsable` as its own command. Do not
+   before submission. One Bash call may issue several `sbatch --parsable`
+   commands, capturing each job ID and stopping on submission failure. Do not
    chain submission behind linting, Git, or validation commands. Capture each
    job ID and submit known downstream steps with `--dependency=afterok:<id>`
    and `--kill-on-invalid-dep=yes`. Stop the chain at any scientific choice
@@ -131,6 +133,10 @@ loaded in one tool call does not persist into another shell.
   installation unless the module genuinely does not exist.
 
 ## Fast path for ASTRA authoring
+
+- `astra validate` with no argument validates the whole project, including universes.
+- There is no `--universe` option. Use `astra validate universes/<name>.yaml -a astra.yaml`; `-a` supplies the parent analysis.
+- Give every locally produced output an explicit `format:` field, including QC images and metric artifacts. Re-exported `from:` outputs inherit it and forbid redeclaring it.
 
 **Start from the closest worked project** rather than rebuilding a familiar
 analysis from prose. For FSL BET, the canonical project is installed at
@@ -209,6 +215,11 @@ Findings describe completed observations, never planned or pending work, and
 cite the artifact that supports the claim.
 
 ## Slurm script baseline
+
+When a file contains heredocs, use the runner's Write tool to create or replace
+it, or its structured edit/patch tool for targeted changes. This is an exception
+to any general instruction to edit files through Bash heredocs. Do not wrap
+such files in another Bash heredoc.
 
 Check the selected partition's resources as described above. From the project
 root, run `mkdir -p logs` before submission; Slurm opens the logs before the
