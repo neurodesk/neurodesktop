@@ -71,9 +71,8 @@ def assemble(output, image, base, size):
     (source / "build.sh").chmod(0o755)
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     dirty = bool(subprocess.check_output([
-        "git", "status", "--porcelain", "--", "config/kasm", "scripts/prepare_kasm_submission.py",
-        "scripts/verify_kasm_image.sh", "tests", "docs/architecture/kasm.md",
-        "docs/architecture/kasm-publishing.md", ".github/workflows/release-kasm.yml",
+        "git", "status", "--porcelain", "--", *paths, "config/kasm/publishing",
+        ".github/actions/docker-login-retry", ".github/actions/check-registry-manifest",
     ], cwd=ROOT, text=True).strip())
     provenance = {
         "image": image, "base_image": base, "source_revision": revision,

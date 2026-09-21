@@ -55,3 +55,24 @@ def test_bundle_is_self_contained_and_does_not_claim_publication(tmp_path):
 def test_rejects_missing_image_size(size):
     with pytest.raises(argparse.ArgumentTypeError):
         release.positive_size(size)
+
+
+def test_dirty_metadata_covers_copied_license(tmp_path, monkeypatch):
+    seed = tmp_path / "seed"
+    release.assemble(seed, IMAGE, BASE, 11330)
+    checkout = seed / "source"
+    subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+    subprocess.run(["git", "add", "."], cwd=checkout, check=True)
+    subprocess.run([
+        "git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+        "commit", "-qm", "Fixture",
+    ], cwd=checkout, check=True)
+    monkeypatch.setattr(release, "ROOT", checkout)
+    clean = tmp_path / "clean"
+    release.assemble(clean, IMAGE, BASE, 11330)
+    assert not json.loads((clean / "release.json").read_text())["source_has_uncommitted_changes"]
+    with (checkout / "LICENSE").open("a") as license_file:
+        license_file.write("\nFixture edit\n")
+    dirty = tmp_path / "dirty"
+    release.assemble(dirty, IMAGE, BASE, 11330)
+    assert json.loads((dirty / "release.json").read_text())["source_has_uncommitted_changes"]
