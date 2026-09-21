@@ -7,6 +7,7 @@ const OPERATIONAL_WORKFLOWS = new Set([
 
 const WORKFLOWS = new Set([
   "Build neurodesktop",
+  "Build and publish Kasm image",
   "Build neurodesktop-test",
   "Build neurodesktop-dev",
   "Backfill neurodesktop history",
