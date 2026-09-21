@@ -142,6 +142,10 @@ def test_clicking_workspace_links_opens_rendered_documents(tmp_path, base):
             "--ServerApp.port_retries=0", f"--ServerApp.base_url={base}",
             f"--ServerApp.root_dir={tmp_path}", f"--FileContentsManager.preferred_dir={tmp_path}",
             f"--IdentityProvider.token={token}",
+            # This tests launcher routing, not scheduler availability. The HPC
+            # simulation has no host controller; use an empty successful queue
+            # so repeated connection-error notifications cannot cover the tile.
+            '--ServerApp.tornado_settings={"squeue_path":"/usr/bin/true"}',
             '--ServerApp.jpserver_extensions={"jupyterlab":True,"neurodesk_t3_code":False}',
         ], env=environment, stdout=log, stderr=subprocess.STDOUT)
         browser = None
