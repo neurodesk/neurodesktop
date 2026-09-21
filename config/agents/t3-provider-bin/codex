@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 
+if [ -r /opt/neurodesktop/agent_shell_setup.sh ]; then
+    . /opt/neurodesktop/agent_shell_setup.sh
+fi
+
 if [ ! -e ./AGENTS.md ] && [ -r /opt/AGENTS.md ]; then
     cp /opt/AGENTS.md ./AGENTS.md
 fi

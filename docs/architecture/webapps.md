@@ -4,7 +4,7 @@ description: Container-backed and hosted webapps, launcher tiles and icons,
   and the build-time Jupyter config generation that wires them up
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-08-07"
+last-reviewed: "2026-09-21"
 ---
 
 # Webapp System
@@ -14,7 +14,13 @@ listed in
 [Environment variables](../environment-variables.md#container-backed-webapps).
 
 Container-backed webapps are defined in `webapps.json`, which is fetched from
-the neurocommand repository. Hosted webapp links and local overrides are defined
+the neurocommand repository. The startup page keeps these local app launchers,
+including RStudio and ezBIDS, and places one **More webapps** tile after the
+local apps, linking to
+[webapps.neurodesk.org](https://webapps.neurodesk.org/). Individual legacy hosted
+app links are no longer shown. dicompare and QSMbly are maintained externally
+and are available through More webapps, with no local launchers. The catalog
+link and local overrides are defined
 in [`config/jupyter/webapp_links.json`](../../config/jupyter/webapp_links.json) and
 applied by [`scripts/generate_jupyter_config.py`](../../scripts/generate_jupyter_config.py)
 when generating Jupyter Server Proxy entries. The same merged webapp config is
@@ -34,6 +40,21 @@ SVG or PNG files in
 them into the image before Jupyter config generation. The custom Neurodesk
 launcher reads icons through the server-proxy icon endpoint and wraps raster
 images as SVGs for JupyterLab `LabIcon` support.
+The Webapps section heading uses the same icon as the More webapps tile.
+The launcher copies the rendered catalog SVG into the heading after React
+updates, retaining the heading dimensions. The catalog has the last launcher
+rank and a final CSS order so it stays after local apps when tiles refresh.
+
+The Neurodesk Slurm tile invokes `jupyterlab-slurm:open`, the command supplied
+by the pinned NERSC extension. Its label and icon come from that command;
+the former `slurm:open` name has no compatibility alias. The upstream HPC Tools
+section is hidden because Neurodesk includes the dashboard in its own section.
+At image build time, `config/jupyter/patch_jupyterlab_slurm.py` patches the
+authenticated user endpoint to resolve the Jupyter process's effective UID
+through the OS account database. Slurm commands run as that account, which can
+differ from the JupyterHub login or token-generated identity. This keeps both
+My jobs only and Job History filters aligned with local or host Slurm job owners.
+The anchored patch fails the build if the upstream identity code changes.
 
 Jupyter Server Proxy buffers ordinary webapp responses through Tornado's HTTP
 client. Neurodesktop initially raises Tornado's matching `max_buffer_size` and
@@ -59,8 +80,11 @@ The Dockerfile clones neurocommand, copies its `neurodesk/webapps.json`, applies
 generates `jupyter_notebook_config.py` using a template system. It also writes
 the merged webapp configuration back to `/opt/neurodesktop/webapps.json`, which
 is what the webapp wrapper reads at launch time. To add new container-backed
-webapps, update the source `webapps.json`. To add hosted links or make an
-existing launcher tile open a hosted app directly, update `webapp_links.json`.
+webapps, update the source `webapps.json`. To change the catalog link or local
+launcher overrides, update `webapp_links.json`. Keep external webapp discovery
+in the single More webapps tile. A `null` app entry in the overlay removes that
+app from the generated proxies and runtime webapp config, even when it is
+present in neurocommand's source config.
 This config generation runs after the neurocommand install layer so local
 launcher-link edits do not invalidate the earlier runtime setup layers.
 Cached CI builds pass `NEUROCOMMAND_REF` as a resolved neurocommand `main` SHA

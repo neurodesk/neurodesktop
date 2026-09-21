@@ -11,6 +11,10 @@ import signal
 import socket
 import subprocess
 import time
+import urllib.error
+import urllib.request
+
+import pytest
 
 from testlib import load_source_module
 
@@ -29,6 +33,7 @@ def test_t3_code_runtime_and_native_terminal_support_are_installed():
     assert shutil.which("codex")
     assert shutil.which("claude")
     assert shutil.which("opencode")
+    assert "2026.9.1" in subprocess.check_output(["cloudflared", "--version"], text=True)
 
     build = platform_package()
     machine = {"x86_64": "x64", "aarch64": "arm64"}[os.uname().machine]
@@ -61,11 +66,20 @@ def test_t3_code_image_ships_one_platform_build_and_no_build_leftovers():
     assert os.access("/opt/neurodesktop/t3-provider-bin/opencode", os.X_OK)
 
 
-def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path):
+@pytest.mark.parametrize("legacy_default", [False, True])
+def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_default):
+    """Exercise the installed server and provider against fresh and legacy defaults."""
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
 
+    # An obsolete home install must not win after T3 hydrates the login PATH.
+    old_bin = tmp_path / ".local/bin"
+    old_bin.mkdir(parents=True)
+    old_codex = old_bin / "codex"
+    old_codex.write_text("#!/bin/sh\necho obsolete-home-codex >&2\nexit 1\n")
+    old_codex.chmod(0o755)
+    (tmp_path / ".bash_profile").write_text(f'export PATH="{old_bin}:$PATH"\n')
     environment = os.environ.copy()
     environment.update(
         {
@@ -75,8 +89,25 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path):
             "T3CODE_LOG_LEVEL": "Warn",
             "T3CODE_TRACE_MIN_LEVEL": "Warn",
             "T3CODE_TRACE_FILE": "/dev/null",
+            "NEURODESKTOP_T3_CODE_LABEL": "testuser@edu.neurodesk.org",
         }
     )
+    from neurodesk_t3_code import supervisor
+    from types import SimpleNamespace
+    settings_path = tmp_path / ".t3/userdata/settings.json"
+    if legacy_default:
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"providers": {"codex": {
+            "binaryPath": "/opt/neurodesktop/t3-provider-bin/codex"}}}))
+    supervisor.seed_provider_settings(SimpleNamespace(
+        base_dir=tmp_path / ".t3", provider_bin=Path("/opt/neurodesktop/t3-provider-bin")
+    ))
+    seeded = json.loads(settings_path.read_text())["providerInstances"]
+    assert seeded["codex"] == {
+        "driver": "codex", "config": {"binaryPath": "/opt/neurodesktop/t3-provider-bin/codex"}}
+    assert seeded["opencode"] == {
+        "driver": "opencode", "enabled": True,
+        "config": {"binaryPath": "/opt/neurodesktop/t3-provider-bin/opencode"}}
     process = subprocess.Popen(
         [
             "t3",
@@ -98,17 +129,24 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path):
         start_new_session=True,
     )
     try:
+        # T3 binds before its HTTP handler is ready. An early accepted request
+        # can stall, so retry with a short request timeout within one deadline.
         deadline = time.monotonic() + 20
+        client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         while time.monotonic() < deadline:
-            if process.poll() is not None:
-                raise AssertionError(f"T3 exited during startup with {process.returncode}")
-            with socket.socket() as client:
-                client.settimeout(0.2)
-                if client.connect_ex(("127.0.0.1", port)) == 0:
-                    break
-            time.sleep(0.1)
+            assert process.poll() is None, "T3 exited during HTTP startup"
+            try:
+                with client.open(
+                    f"http://127.0.0.1:{port}/.well-known/t3/environment", timeout=0.5
+                ) as response:
+                    info = json.load(response)
+            except (urllib.error.URLError, TimeoutError, ConnectionError):
+                time.sleep(0.1)
+                continue
+            assert info["label"] == "testuser@edu.neurodesk.org"
+            break
         else:
-            raise AssertionError("T3 did not listen within 20 seconds")
+            raise AssertionError("T3 did not answer HTTP within 20 seconds")
 
         # Server startup reloads the login-shell PATH, which can put the
         # interactive Codex wrapper ahead of the quiet provider directory.
@@ -123,10 +161,31 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path):
                     assert snapshot["installed"] is True
                     assert snapshot["version"] is not None, snapshot.get("message")
                     assert "decode-wire-message" not in (snapshot.get("message") or "")
+                    assert "decode-payload" not in (snapshot.get("message") or ""), snapshot
                     break
             time.sleep(0.1)
         else:
             raise AssertionError("T3 did not finish its Codex provider probe within 30 seconds")
+
+        # T3 ships the OpenCode driver disabled. Without the seeded instance
+        # this snapshot reads `"enabled": false` with the message below, and no
+        # OpenCode reaches the chat model picker. T3 probes this driver lazily,
+        # so the record can still be the unchecked placeholder here; assert what
+        # the seed decides and let the launcher test cover initialization.
+        opencode = tmp_path / ".t3/caches/opencode.json"
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            assert process.poll() is None, "T3 exited before its OpenCode status check"
+            if opencode.exists():
+                snapshot = json.loads(opencode.read_text())
+                assert snapshot["driver"] == "opencode"
+                assert snapshot["enabled"] is True, snapshot
+                assert snapshot["status"] != "error", snapshot
+                assert "disabled in T3 Code settings" not in snapshot["message"], snapshot
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError("T3 did not report OpenCode provider status within 30 seconds")
     finally:
         os.killpg(process.pid, signal.SIGTERM)
         try:
@@ -137,6 +196,69 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path):
 
     assert (tmp_path / ".t3/userdata").is_dir()
 
+
+def test_t3_opencode_provider_initializes_through_the_image_launcher(tmp_path):
+    """Cover the OpenCode contract T3's own driver depends on.
+
+    T3 does not reach OpenCode over ACP. It reads a semantic version from
+    `--version`, refuses releases below its floor, then starts `serve` and waits
+    for the announcement line carrying the server URL. An OpenCode upgrade that
+    renames that line or drops below the floor breaks every OpenCode thread
+    while the CLI itself still looks healthy.
+    """
+    launcher = "/opt/neurodesktop/t3-provider-bin/opencode"
+    environment = {**os.environ, "HOME": str(tmp_path)}
+    # Startup restores this config into the home before any agent runs, so lay
+    # the home out that way before the CLI can create its own directory here.
+    destination = tmp_path / ".config/opencode"
+    destination.mkdir(parents=True)
+    shutil.copy(
+        "/opt/jovyan_defaults/.config/opencode/opencode.json",
+        destination / "opencode.json",
+    )
+
+    reported = subprocess.run(
+        [launcher, "--version"], env=environment,
+        capture_output=True, text=True, timeout=120, check=True,
+    ).stdout
+    found = re.search(r"\bv?(\d+\.\d+\.\d+)\b", reported)
+    assert found, reported
+    assert tuple(int(part) for part in found[1].split(".")) >= (1, 14, 19), reported
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    log = tmp_path / "opencode-serve.log"
+    with log.open("wb") as stream:
+        server = subprocess.Popen(
+            [launcher, "serve", "--hostname=127.0.0.1", f"--port={port}"],
+            env=environment, stdout=stream, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    try:
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            output = log.read_text(errors="replace")
+            assert server.poll() is None, f"OpenCode server exited:\n{output}"
+            announced = [
+                line for line in output.splitlines()
+                if line.startswith("opencode server listening")
+            ]
+            if announced:
+                assert re.search(r"on\s+https?://\S+", announced[0]), announced[0]
+                break
+            time.sleep(0.2)
+        else:
+            raise AssertionError(
+                f"OpenCode server never announced its URL:\n{log.read_text()}"
+            )
+    finally:
+        os.killpg(server.pid, signal.SIGTERM)
+        try:
+            server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.killpg(server.pid, signal.SIGKILL)
+            server.wait(timeout=5)
 
 def test_guided_setup_mints_a_pairing_link_from_the_installed_cli(tmp_path):
     """Guard the CLI contract the wizard prints its pairing link from.
@@ -161,3 +283,24 @@ def test_guided_setup_mints_a_pairing_link_from_the_installed_cli(tmp_path):
         capture_output=True, text=True, timeout=60, check=True,
     )
     assert any(entry["label"] == "Desktop app" for entry in json.loads(listed.stdout))
+
+
+def test_t3_connect_uses_image_relay_instead_of_cached_download(tmp_path):
+    from neurodesk_t3_code import supervisor
+    from types import SimpleNamespace
+
+    base = tmp_path / ".t3"
+    machine = {"x86_64": "x64", "aarch64": "arm64"}[os.uname().machine]
+    cached = base / "tools/cloudflared/2026.5.2" / f"linux-{machine}" / "cloudflared"
+    cached.parent.mkdir(parents=True)
+    cached.write_text("#!/bin/sh\nexit 99\n")
+    cached.chmod(0o755)
+    policy = SimpleNamespace(home=tmp_path, base_dir=base, host="127.0.0.1", port=3773,
+                             provider_bin=Path("/opt/neurodesktop/t3-provider-bin"))
+    environment = supervisor.server_environment(policy, os.environ)
+    result = subprocess.run(["t3", "connect", "status", "--json", "--base-dir", str(base)],
+                            env=environment, capture_output=True, text=True, check=True, timeout=30)
+    relay = json.loads(result.stdout)["relayClient"]
+    assert relay["source"] == "override"
+    assert relay["executablePath"] == "/usr/local/bin/cloudflared"
+    assert relay["status"] == "available"

@@ -80,6 +80,8 @@ CATALOG = (
     ),
     CatalogEntry("arg:MYST_YDOC_VERSION", "npm:@jupyter/ydoc", "npm"),
     CatalogEntry("arg:CODEX_CLI_VERSION", "npm:@openai/codex", "npm"),
+    CatalogEntry("arg:T3_CLOUDFLARED_VERSION", "github:cloudflare/cloudflared", "github-releases",
+                 why="Use a security-maintained relay release through T3's executable override; verify both architecture checksums."),
     CatalogEntry("arg:T3_CODE_VERSION", "npm:t3", "npm"),
     CatalogEntry("arg:TAILSCALE_VERSION", "github:tailscale/tailscale", "github-releases"),
     CatalogEntry("arg:CLAUDE_CODE_VERSION", "npm:@anthropic-ai/claude-code", "npm"),
@@ -116,9 +118,11 @@ CATALOG = (
     CatalogEntry("requirement:pypi:jupyter-ai-router", "pypi:jupyter-ai-router", "pypi"),
     CatalogEntry("requirement:pypi:jupyter-ai-tools", "pypi:jupyter-ai-tools", "pypi"),
     CatalogEntry("requirement:pypi:jupyter-server-documents", "pypi:jupyter-server-documents", "pypi"),
-    CatalogEntry("requirement:pypi:jupyter-server-mcp", "pypi:jupyter-server-mcp", "pypi"),
+    CatalogEntry("requirement:pypi:jupyter-server-mcp", "pypi:jupyter-server-mcp", "pypi",
+                 ">=0.3.0,<0.4.0", "Jupyter AI 3.2 requires jupyter-server-mcp>=0.3.0,<0.4.0."),
     CatalogEntry("requirement:pypi:jupyterlab-chat", "pypi:jupyterlab-chat", "pypi"),
-    CatalogEntry("requirement:pypi:jupyterlab-commands-toolkit", "pypi:jupyterlab-commands-toolkit", "pypi"),
+    CatalogEntry("requirement:pypi:jupyterlab-commands-toolkit", "pypi:jupyterlab-commands-toolkit", "pypi",
+                 ">=0.2.0,<0.3.0", "Jupyter AI 3.2 requires jupyterlab-commands-toolkit>=0.2.0,<0.3.0."),
     CatalogEntry("requirement:pypi:jupyterlab-notebook-awareness", "pypi:jupyterlab-notebook-awareness", "pypi"),
     CatalogEntry("requirement:pypi:jupyterlab-niivue", "pypi:jupyterlab-niivue", "pypi"),
     CatalogEntry("requirement:pypi:jupyterlab-myst", "pypi:jupyterlab-myst", "pypi"),
@@ -136,7 +140,7 @@ CATALOG = (
         "pypi:packaging",
         "pypi",
         "<26",
-        "Snakemake 9.26.1 requires packaging below 26.",
+        "The pinned Snakemake release requires packaging below 26.",
     ),
     CatalogEntry("requirement:pypi:requests", "pypi:requests", "pypi"),
     CatalogEntry("requirement:pypi:litellm", "pypi:litellm", "pypi"),
@@ -308,6 +312,10 @@ def assess(entry: CatalogEntry, declaration: Declaration, releases: list[str]) -
             else raw_current
         )
         current_version = Version(comparable_current)
+        if not constraint.contains(current_version, prereleases=True):
+            raise ValueError(
+                f"declared version {declaration.current} violates compatibility constraint {entry.constraint}"
+            )
         if compatible_version > current_version:
             status = "compatible-update-available" if entry.constraint else "update-available"
         elif upstream_version > current_version and entry.constraint:

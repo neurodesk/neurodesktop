@@ -1,4 +1,24 @@
 #!/bin/sh
 set -eu
 
+if [ -r /opt/neurodesktop/agent_shell_setup.sh ]; then
+    . /opt/neurodesktop/agent_shell_setup.sh
+fi
+
+# The interactive wrapper stores this key as a ~/.bashrc export, and T3 execs
+# this launcher without a login shell, so the image's default OpenCode provider
+# would otherwise reach llm.neurodesk.org unauthenticated.
+if [ -z "${NEURODESK_API_KEY:-}" ] && [ -f "${HOME:-}/.bashrc" ]; then
+    NEURODESK_API_KEY=$(sed -nE \
+        -e "s/^[[:space:]]*export[[:space:]]+NEURODESK_API_KEY='([^']+)'[[:space:]]*\$/\1/p" \
+        -e "s/^[[:space:]]*export[[:space:]]+NEURODESK_API_KEY=\"([^\"]+)\"[[:space:]]*\$/\1/p" \
+        -e "s/^[[:space:]]*export[[:space:]]+NEURODESK_API_KEY=([^[:space:]#]+)[[:space:]]*\$/\1/p" \
+        "${HOME}/.bashrc" 2>/dev/null | tail -n 1)
+    if [ -n "${NEURODESK_API_KEY}" ]; then
+        export NEURODESK_API_KEY
+    else
+        unset NEURODESK_API_KEY
+    fi
+fi
+
 exec /usr/bin/opencode "$@"

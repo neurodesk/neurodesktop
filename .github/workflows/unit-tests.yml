@@ -32,6 +32,11 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+
       - name: Install test dependencies
         run: |
           # httpx: imported by config/jupyter/webapp_wrapper/webapp_wrapper.py
@@ -46,9 +51,13 @@ jobs:
           # the single source for the exact ASTRA/anywidget dependency pins.
           python -m pip install pytest httpx traitlets \
             jupyter-server ./extensions/t3-code-server ./extensions/astra-viewer
-          # ssh-keygen for SSH key tests, jq for terminal-creation tests
+          # ssh-keygen and ACLs for SSH permission tests, jq for terminal tests
           sudo apt-get update -qq
-          sudo apt-get install -y -qq openssh-client jq
+          sudo apt-get install -y -qq openssh-client acl jq
 
       - name: Run unit tests
-        run: pytest tests/unit -v
+        env:
+          NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES: ${{ runner.temp }}/launcher-dom/node_modules
+        run: |
+          npm install --prefix "$RUNNER_TEMP/launcher-dom" --no-audit --no-fund jsdom@26.1.0 typescript@5.2.2
+          pytest tests/unit -v

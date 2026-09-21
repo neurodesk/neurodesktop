@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-09-18"
+last-reviewed: "2026-09-21"
 ---
 
 # Testing
@@ -53,9 +53,23 @@ pytest tests/unit          # from a checkout, no container needed
 pytest /opt/tests/         # inside the built image
 ```
 
-Running `tests/unit` needs `pytest`, `httpx`, `traitlets`, `jq`, and `ssh-keygen`
-(`openssh-client`); see `.github/workflows/unit-tests.yml`. The terminal-creation
+Running `tests/unit` needs Python 3.12, Node.js 24, `pytest`, `httpx`,
+`traitlets`, Git, curl, `jq`, and `ssh-keygen` (`openssh-client`); see
+`.github/workflows/unit-tests.yml`. The terminal-creation
 tests stub `curl` but use the real `jq` to parse responses.
+
+The launcher DOM regressions, including T3 iframe file-link capture, reloads,
+and disposal, also require jsdom and TypeScript. Install them
+in a temporary directory and expose that directory when running the suite:
+
+```bash
+npm install --prefix /tmp/neurodesk-launcher-tests --no-audit --no-fund jsdom@26.1.0 typescript@5.2.2
+export NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES=/tmp/neurodesk-launcher-tests/node_modules
+pytest tests/unit
+```
+
+Missing launcher test dependencies fail with setup guidance instead of skipping.
+The unit-test workflow installs these same pinned dependencies automatically.
 
 Install those with the interpreter's own site packages rather than `pip install
 --user`. `tests/unit/test_agentic_validation.py` runs
@@ -77,6 +91,35 @@ run there:
   further packages.
 - `tests/unit/test_astra_view_filebrowser.py` needs `jupyter-server` to drive
   the file-browser server extension.
+
+## Image release validation
+
+Production, test, and development image workflows build native amd64 and arm64
+candidates tagged `run-<run_id>-<run_attempt>-<arch>`. Runtime tests and critical
+vulnerability scans consume those candidates. Only after every required job
+passes does `merge-manifests` promote the architecture, date, and `latest` tags
+and copy them to configured registries. Failed candidates remain available for
+diagnosis under their run tags; they do not replace release tags.
+
+The preparation job chooses one UTC build timestamp for both architectures and
+publication, so date tags match the version baked into the image even across
+midnight. All checkouts use the run's source SHA. Scheduled runs build that revision even
+when today's date tag exists, using the registry build cache. Development
+builds remain manual. When retrying an image release, rerun **all jobs** so the
+new attempt builds the candidate tags its validation jobs expect.
+
+Both architectures exercise sudo-disabled, sudo-enabled, package-only sudo,
+and HPC simulation profiles. Only amd64 exercises CVMFS; arm64 CVMFS remains
+excluded until its upstream content and routing are available. WebGL2 coverage
+still depends on the runner graphics capabilities described below.
+
+The test steps source [the cleanup script](../.github/scripts/image_test_cleanup.sh)
+before startup. Its EXIT trap removes the container and HPC temporary files
+on success, startup failure, security-policy failure, or pytest failure. Cleanup
+preserves the original failure status and fails an otherwise successful job if
+cleanup fails. Checkout coverage is in
+`tests/unit/test_build_neurodesktop_workflow.py` and
+`tests/unit/test_image_test_cleanup.py`.
 
 ## Shared helpers
 
@@ -105,6 +148,8 @@ non-obvious tiers protect.
 | Area | On a checkout | In the built image |
 | --- | --- | --- |
 | Jupyter isolated build dependencies | `pytest tests/unit/test_jupyter_build_constraints.py tests/unit/test_jupyterlab_slurm_build.py` | Fresh isolated wheel builds for Slurm and launcher |
+| Image packaging layers | `pytest tests/unit/test_image_packaging_layers.py tests/unit/test_myst_build_workaround.py` | `pytest /opt/tests/test_image_size_hygiene.py /opt/tests/test_additional_components.py` and image layer inventory |
+| ghapi public credential examples | `pytest tests/unit/test_ghapi_examples.py tests/unit/test_image_packaging_layers.py` | `pytest /opt/tests/test_image_size_hygiene.py` and unchanged image secret scan |
 | CVMFS inventory health | `pytest tests/unit/test_cvmfs_inventory_check.py` | Live mirror workflow |
 | Nightly JupyterHub probe (terminal creation, FSL commands) | `pytest tests/unit/test_jupyter_terminal_creation.py tests/unit/test_github_workflows.py` | Live `JupyterHub API Testing` workflow |
 | Lmod extension listing default | `pytest tests/unit/test_lmod_extensions.py` | `pytest /opt/tests/test_lmod_avail_extensions.py` |
@@ -114,13 +159,15 @@ non-obvious tiers protect.
 | T3 Code server, web UI, lifecycle, and packaging | `pytest tests/unit/test_t3_code_server.py tests/unit/test_t3_code_web.py` | `pytest /opt/tests/test_t3_code_server_image.py /opt/tests/test_t3_code_web_image.py` |
 | Tailscale binary packaging | `pytest tests/unit/test_tailscale_packaging.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_tailscale_image.py` |
 | Guided T3/Tailscale setup | `pytest tests/unit/test_t3_neurodesk_setup.py tests/unit/test_t3_code_server.py` | `pytest /opt/tests/test_tailscale_image.py /opt/tests/test_t3_code_server_image.py` |
-| Jupyter Server Proxy response limits | `pytest tests/unit/test_jupyter_server_proxy_limits.py` | `pytest /opt/tests/test_jupyter_server_proxy_limits.py`, then real large-response proxy check |
+| Jupyter Server Proxy response limits | `pytest tests/unit/test_jupyter_server_proxy_limits.py` | `pytest /opt/tests/test_jupyter_server_proxy_limits.py` |
 | ASTRA viewer core (adapter, graph, widget, previews) | `pytest tests/unit/test_astra_view_graph.py tests/unit/test_astra_view_packaging.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | `astra`/`lc` installs, Lightcone skills and hooks | `pytest tests/unit/test_astra_jupyter_ai_tooling.py tests/unit/test_lightcone_cli_patch.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
+| ASTRA run provenance sidecars and the spec agreement check | `pytest tests/unit/test_astra_provenance.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
 | Jupyter AI, ACP personas, collaboration/widget compatibility and server patches | see [below](#jupyter-ai-and-acp-personas) | `pytest /opt/tests/test_astra_jupyter_ai_image.py /opt/tests/test_widget_compatibility_image.py` |
 | Notebook Intelligence / MyST and standalone RISE | `pytest tests/unit/test_nbi_settings_patch.py tests/unit/test_myst_build_workaround.py tests/unit/test_jupyterlab_rise_patch.py` | `pytest /opt/tests/test_nbi_labextension_patch.py /opt/tests/test_rise_slides_image.py` |
 | Launcher extension, workspace link routing | `pytest tests/unit/test_workspace_link_routing.py` | `pytest /opt/tests/test_workspace_link_routing_image.py` |
+| Slurm dashboard launcher and user identity | `pytest tests/unit/test_launcher_webapps.py tests/unit/test_slurm_user_identity.py tests/unit/test_jupyterlab_slurm_build.py` | `pytest /opt/tests/test_slurm.py /opt/tests/test_workspace_link_routing_image.py` |
 | Subscription agent workflows and failure reporting | `pytest tests/unit/test_agentic_*.py tests/unit/test_report_workflow_failure.py` | Worker Docker sandbox probe |
 
 ### Jupyter Server Proxy response limits
@@ -128,10 +175,12 @@ non-obvious tiers protect.
 The unit test executes the single-load Jupyter server configuration, simulates
 JupyterHub replacing Tornado's mutable client defaults, applies the anchored
 Jupyter Server Proxy patch to its upstream seam, and instantiates both TCP and
-Unix-socket clients to assert matching 1024 MiB buffer and body limits. A
-runtime check must proxy a response larger than Tornado's 100 MiB default
-through a fully initialized single-user server in a built image; the unit
-construction test does not prove the full installed proxy request succeeds.
+Unix-socket clients to assert matching 1024 MiB buffer and body limits. The
+image test also starts a Jupyter server under a user URL prefix and resets the
+HTTP client defaults after configuration loading. It transfers 101 MiB through
+both TCP and Unix-socket backends and checks the complete payload's size and
+SHA-256 digest. The backend data is generated locally; no external service is
+needed.
 
 ### Tailscale binaries
 
@@ -167,12 +216,28 @@ a token. It reloads using the scoped session cookie and checks launcher reuse. I
 and WebSocket requests and cookie-authenticated POSTs without Jupyter XSRF,
 including the automatic session endpoint.
 It runs at both `/` and a JupyterHub-style `/user/t3-test/` prefix.
+The prefixed case also runs with JupyterHub's cookie-authenticated GET XSRF
+policy, so native imports of every startup bundle must pass the proxy's
+static-asset checks, including filenames containing additional dots.
 
+The supervisor waits for HTTP 200 from the local environment endpoint before
+reporting readiness. A TCP listener alone is insufficient: T3 can accept an
+early request without answering it. The image probe retries short HTTP requests
+within a 20-second deadline and verifies the environment label.
 
 The real-server image test also waits for the Codex provider probe to report
 its CLI version. This exercises T3's login-shell PATH reload and catches
 interactive wrapper banners that corrupt the app-server JSON stream. An
 unauthenticated Codex account is acceptable; a protocol decoding error is not.
+
+The same test checks that the seeded OpenCode instance reports enabled, which
+is the state T3 withholds from a driver it ships disabled. T3 probes OpenCode
+lazily, so that record can still be the unchecked placeholder; a separate image
+test covers the start contract instead. T3 reads a semantic version from
+`--version`, refuses releases below its floor, then runs `serve` and waits for
+the `opencode server listening` line carrying the server URL. OpenCode's ACP
+probe does not cover this path, because T3's driver speaks the OpenCode SDK
+rather than ACP.
 
 The checkout test drives the process supervisor with a real temporary child
 process. It also checks the pinned package, image cleanup, server extension,
@@ -204,14 +269,19 @@ docker buildx build --target apptainer --progress=plain .
 
 ### Workspace link routing
 
-The unit tier asserts the interception guards in the TypeScript source; the
-image tier asserts the plugin survived the labextension build, that JupyterLab
-accepts it, that `jupyterlab_server` still publishes the `serverRoot` page
-config option the mapping depends on, and that the `Markdown Preview` and
-`HTML Viewer` factories a clicked report opens with are registered and not
-disabled. Those factory names are upstream strings; if a JupyterLab upgrade
-renames one, a clicked report quietly falls back to the text editor rather
-than failing, which is exactly why the image tier pins them.
+The unit tier executes the complete TypeScript module with Node.js 24's type
+stripping and VM modules. Jupyter and DOM dependencies are substituted, while
+path mapping, click handling, line references, viewer selection, directory
+routing, and error reporting execute unchanged. The image tier opens JupyterLab
+at both root and user-prefixed URLs, clicks absolute workspace links, and
+requires Markdown and HTML viewers to open in the main panel without navigation.
+It also opens the Slurm dashboard through its Neurodesk launcher tile, checking
+its label and icon on two launcher renders against the installed Slurm extension.
+This browser test configures `SlurmCommandPaths.squeue_path` as `/usr/bin/true`
+and verifies the HTTP endpoint returns an empty queue using that command,
+so it does not depend on a host Slurm controller in the HPC simulation. The
+separate `test_slurm.py` suite exercises the real scheduler and batch commands.
+Installation and shipped page-configuration checks remain in the image tier.
 
 ### ASTRA CLIs, Lightcone skills, and hooks
 
@@ -236,13 +306,27 @@ pytest tests/unit/test_ipywidgets_control_comm_patch.py
 pytest tests/unit/test_jupyterlab_widgets_patch.py
 pytest tests/unit/test_jupyter_ai_acp_client_patch.py
 pytest tests/unit/test_jupyter_server_mcp_patch.py
-pytest tests/unit/test_coding_agents.py -k 'opencode_machine_commands or opencode_acp_exports_lmod'
+pytest tests/unit/test_coding_agents.py tests/unit/test_agent_shell_environment.py
 # In the rebuilt image:
 pytest /opt/tests/test_astra_jupyter_ai_image.py /opt/tests/test_widget_compatibility_image.py
 pip check
 jupyter server extension list
 jupyter labextension list --verbose
 ```
+
+The agent-shell unit tests execute fresh child Bash shells through the shared
+setup and provider launchers. They cover profile-path preference, legacy layout
+fallbacks, strict scripts, inherited initialization, and preflight failures.
+`pytest /opt/tests/test_agent_shell_environment.py /opt/tests/test_slurm.py`
+checks installed module loading and batch initialization in a running image.
+
+The coding-agent image test initializes all three ACP implementations and
+requests a session without credentials or a model prompt. For Codex and Claude,
+an executable shim records the arguments before running the image CLI. A
+successful session or the protocol's authentication-required response is
+accepted only after the expected CLI invocation is observed. Other errors,
+process exits, and timeouts fail the test. This check covers adapter upgrades
+that use an image CLI outside the adapter's declared dependency range.
 
 The Jupyter AI image test also imports Notebook Intelligence and the MCP v1
 ``mcp.server.fastmcp`` API. ``jupyter server extension list`` returns success
@@ -384,6 +468,42 @@ image tier runs the real `ml av` against a synthetic module that provides an
 extension and requires the extension to be listed with the variable set to
 `yes` and absent by default.
 
+### T3 desktop linking
+
+`tests/unit/test_t3_connect.py` covers device-code parsing, cancellation and expiry,
+restart protection, persisted-link recovery, relay delay, and credential isolation.
+Container browser tests cover the authenticated Connect endpoint under root and
+JupyterHub prefixes. Real account authorization and external tunnel readiness
+require an approved test account; CI must not approve a live device grant.
+The T3 provider probe must reject both wire-message and payload-decoding errors,
+including when an old home-installed Codex would otherwise precede the image CLI.
+
+
+## Scientific workflows and writable directories
+
+The CVMFS, Nipype, Nextflow, and Snakemake arithmetic tests use the shared
+`image_math_case` fixture in `tests/conftest.py`. It creates a 3×3×3 NIfTI image
+with nonzero voxel values. Each runner executes `fslmaths -mul 2`; the assertion
+loads the output and checks every voxel and the affine. These tests skip only
+when CVMFS is explicitly disabled. A missing module or invalid output fails.
+Each execution has a 600-second timeout to allow a cold Apptainer launch.
+
+The Slurm batch test waits for successful job completion and verifies a file
+written by the job. A 180-second deadline bounds queueing and execution, and
+cleanup cancels the submitted job if needed.
+
+Both `/home/jovyan` and `/neurodesktop-storage` are required writable directories
+in the Docker and HPC simulation profiles. Each receives one complete CRUD test
+inside a unique temporary directory. A missing directory fails instead of
+removing itself from parametrization. This checks accessibility, not whether a
+particular directory is backed by a bind mount.
+
+The office association updater runs on temporary desktop files in
+`tests/unit/test_office_mimeapps.py`. Coverage includes natural version ordering,
+per-MIME selection, unrelated settings, repeat execution, and failure without
+modifying defaults when MIME declarations are missing. The image tier retains
+the checks against installed desktop associations.
+
 ## Negative Test Convention
 
 When adding tests for pipeline or module-loading workflows, always include a
@@ -401,10 +521,12 @@ tool — which is exactly how
 `test_nipype.py::test_nipype_nonexistent_module_fails` used to pass outside the
 container. Every negative test must therefore:
 
-1. assert the environment it is about is really present (e.g.
-   `/usr/share/lmod/lmod/init/bash` exists), and
-2. assert the pipeline produced **no output file**, not just that something
-   returned non-zero.
+1. execute a successful prerequisite check, such as loading FSL and importing
+   the pipeline library;
+2. use valid input so malformed data cannot cause the expected failure;
+3. check that the error identifies the deliberately missing module; and
+4. assert that the pipeline produced **no output file**. When module loading
+   gates execution, also check that the interface was never entered.
 
 `test_nextflow.py::test_nextflow_nonexistent_module_fails` is the reference
 shape.
@@ -485,3 +607,21 @@ After `hpc` or `hpctest`, tear everything down with:
 docker rm -f neurodesktop-hpc   # or neurodesktop-hpctest
 rm -rf /tmp/neurodesktop-hpc-home.* /tmp/neurodesktop-hpc-passwd.* /tmp/neurodesktop-hpc-group.*
 ```
+
+## Startup performance regressions
+
+Run the startup checks on a checkout:
+
+```bash
+pytest tests/unit/test_startup_batching.py tests/unit/test_wait_for_jupyter.py tests/unit/test_nbi_opencode_sync.py tests/unit/test_startup_performance_fixes.py
+```
+
+These tests cover workspace quarantine in a single Python invocation, default
+restoration and ownership repair, SSH permission inheritance, NBI boot setup
+without live refresh, custom Jupyter ports and base paths, and independent
+CVMFS and Slurm execution. HTTP checks use temporary localhost servers.
+Readiness deadlines run on a controlled clock instead of real elapsed
+time, so scheduling delay cannot decide whether the helper probes at all.
+See the [startup flow](architecture.md#container-initialization-flow) for
+runtime behavior. Built-image service checks remain in
+`tests/container/test_startup_modes.py`.

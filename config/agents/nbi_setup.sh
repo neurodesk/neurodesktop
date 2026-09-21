@@ -12,6 +12,13 @@
 # selected or a fresh API key is saved, so NBI never lags behind.
 
 set -u
+umask 077
+export PYTHONPATH="$(dirname "${BASH_SOURCE[0]}")${PYTHONPATH:+:${PYTHONPATH}}"
+
+case "${1:-}" in
+    ""|--no-refresh) ;;
+    *) echo "Usage: nbi_setup.sh [--no-refresh]" >&2; exit 2 ;;
+esac
 
 NBI_CONFIG_FILE="${HOME}/.jupyter/nbi/config.json"
 NBI_DEFAULT_CONFIG="/opt/jovyan_defaults/.jupyter/nbi/config.json"
@@ -56,20 +63,11 @@ if [ -z "${BR_MCP_TOKEN_VALUE}" ]; then
 fi
 
 sync_claude_md() {
-    # NBI's Claude provider has its own system-prompt code path and does not
-    # consult ~/.jupyter/nbi/rules/, so the neurodesk rules are ignored in
-    # Claude mode. Mirror them as $HOME/CLAUDE.md so Claude Code (which NBI's
-    # Claude mode drives) picks them up via its own loader.
+    # Home guidance also loads in project sessions. Point at the shared analysis
+    # contract instead of injecting NBI's notebook-only rules into every agent.
+    # Retain the marker so existing managed copies migrate on the next setup.
     local marker='<!-- neurodesktop:nbi-rules (managed - do not edit) -->'
-    local source_file="/opt/jovyan_defaults/.jupyter/nbi/rules/neurodesk.md"
     local target_file="${HOME}/CLAUDE.md"
-
-    if [ ! -f "${source_file}" ]; then
-        source_file="/opt/AGENTS.md"
-    fi
-    if [ ! -f "${source_file}" ]; then
-        return 0
-    fi
 
     if [ -e "${target_file}" ] && ! head -n 1 "${target_file}" 2>/dev/null | grep -qF "${marker}"; then
         echo "nbi_setup.sh: leaving user-authored ${target_file} untouched (no neurodesktop marker)" >&2
@@ -79,7 +77,8 @@ sync_claude_md() {
     local tmp="${target_file}.tmp.$$"
     {
         printf '%s\n' "${marker}"
-        cat "${source_file}"
+        printf '%s\n' 'For scientific analyses, read and follow /opt/AGENTS.md.'
+        printf '%s\n' 'Preserve project-specific instructions in the workspace AGENTS.md or CLAUDE.md.'
     } > "${tmp}" 2>/dev/null || { rm -f "${tmp}"; return 0; }
     mv -f "${tmp}" "${target_file}" 2>/dev/null || rm -f "${tmp}"
 }
@@ -167,6 +166,7 @@ if command -v python3 >/dev/null 2>&1 && [ -f "${NBI_DEFAULT_CONFIG}" ]; then
 import json
 import os
 import sys
+from provider_security import is_neurodesk_endpoint
 
 cfg_path = os.environ["NBI_CONFIG_FILE"]
 default_path = os.environ["NBI_DEFAULT_CONFIG"]
@@ -211,7 +211,7 @@ for section in ("chat_model", "inline_completion_model"):
 
     base_url = get_prop(user_section.get("properties"), "base_url")
     # Custom OpenAI-compatible endpoint (e.g. Jetstream) -> hands off.
-    if base_url and "llm.neurodesk.org" not in base_url:
+    if base_url and not is_neurodesk_endpoint(base_url):
         continue
 
     # provider == openai-compatible AND (base_url empty OR points at
@@ -255,6 +255,7 @@ if command -v python3 >/dev/null 2>&1 && [ -f "${OPENCODE_CONFIG_FILE}" ]; then
 import json
 import os
 import sys
+from provider_security import is_neurodesk_endpoint
 
 cfg_path = os.environ["NBI_CONFIG_FILE"]
 opencode_path = os.environ["OPENCODE_CONFIG_FILE"]
@@ -301,7 +302,7 @@ def resolve_api_key(raw):
     if raw.startswith("{env:") and raw.endswith("}"):
         var_name = raw[5:-1]
         if var_name == "NEURODESK_API_KEY":
-            return neurodesk_key
+            return neurodesk_key if is_neurodesk_endpoint(base_url) else ""
         return os.environ.get(var_name, "")
     return raw
 
@@ -367,8 +368,8 @@ for section in ("chat_model", "inline_completion_model"):
         changed = True
     if set_prop(props, "model_id", model_id):
         changed = True
-    # Never wipe an existing key with an empty one (e.g. before first setup).
-    if api_key and set_prop(props, "api_key", api_key):
+    # Preserve a missing key only while staying on the same endpoint.
+    if (api_key or current_url != base_url) and set_prop(props, "api_key", api_key):
         changed = True
     if context_window and set_prop(props, "context_window", context_window):
         changed = True
@@ -394,6 +395,7 @@ python3 - <<'PY'
 import json
 import os
 import sys
+from provider_security import is_neurodesk_endpoint
 
 path = os.environ["NBI_CONFIG_FILE"]
 api_key = os.environ["NBI_API_KEY"]
@@ -422,7 +424,7 @@ for section in ("chat_model", "inline_completion_model"):
         if isinstance(prop, dict) and prop.get("id") == "base_url":
             base_url = str(prop.get("value") or "")
             break
-    if "llm.neurodesk.org" not in base_url:
+    if not is_neurodesk_endpoint(base_url):
         continue
     for prop in props:
         if not isinstance(prop, dict) or prop.get("id") != "api_key":
@@ -447,9 +449,9 @@ fi
 # GET /notebook-intelligence/capabilities reloads the config and rebuilds the
 # model objects server-side without writing anything back, and when the
 # brain-researcher MCP entry changed, POST /notebook-intelligence/
-# reload-mcp-servers makes the MCP connections follow too. Best-effort: at
-# container boot no server is up yet and stale jpserver-*.json files from
-# earlier sessions point at dead hosts, so failures are silently ignored.
+# reload-mcp-servers makes the MCP connections follow too. Boot passes
+# --no-refresh because the new server will read the generated files itself.
+# Interactive refresh tolerates stale runtime files and unreachable servers.
 refresh_running_nbi() {
     if ! command -v python3 >/dev/null 2>&1; then
         return 0
@@ -460,6 +462,7 @@ import glob
 import json
 import os
 import sys
+from provider_security import is_neurodesk_endpoint
 from urllib import error, request
 
 runtime_dir = os.environ.get("JUPYTER_RUNTIME_DIR") or os.path.join(
@@ -528,4 +531,6 @@ if refreshed:
 PY
 }
 
-refresh_running_nbi
+if [ "${1:-}" != "--no-refresh" ]; then
+    refresh_running_nbi
+fi

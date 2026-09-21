@@ -73,6 +73,9 @@ class T3SessionHandler(APIHandler):
         service = self.t3_app._supervisor
         if service is None or service.state is not ServiceState.READY:
             raise web.HTTPError(503, reason="T3 Code is starting. Wait a moment and reopen it.")
+        manager = getattr(self.t3_app, '_connect', None)
+        if manager is not None:
+            await manager.configure_name(self.request.host)
         host = service.policy.readiness_host
         authority = f"[{host}]" if ":" in host else host
         origin = f"http://{authority}:{service.policy.port}"
@@ -147,6 +150,13 @@ def rewrite_client(body: bytes, content_type: str, path: str, prefix: str) -> by
         if '<div id="root">' not in text or 'id="boot-shell"' not in text:
             return body
         text = re.sub(r'((?:src|href)=")/(?!/)', lambda m: m[1] + prefix, text)
+        # Manifests omit cookies by default, even for same-origin URLs.
+        text = re.sub(
+            r'<link\b[^>]*\brel="manifest"[^>]*>',
+            lambda m: re.sub(r'\s+crossorigin(?:="[^"]*")?', '', m[0])
+            .replace('<link', '<link crossorigin="use-credentials"', 1),
+            text,
+        )
         bootstrap = '<script src="' + prefix + '_adapter.js"></script>'
         return text.replace("<head>", "<head>" + bootstrap, 1).encode()
     if path.startswith("/assets/") and path.endswith(".css"):
@@ -179,6 +189,19 @@ class T3ProxyHandler(ProxyHandler):
         )
 
     def check_xsrf_cookie(self):
+        # Hub 6 checks cookie-authenticated CORS GETs too. Native module imports
+        # cannot add the XSRF header supplied by our fetch adapter. Fetch Metadata
+        # establishes the origin for these read-only, fixed static assets; it is
+        # browser-controlled. Authentication still runs in the proxy handler.
+        path = self.request.path.removeprefix(self.prefix)
+        if (
+            self.request.method in {"GET", "HEAD"}
+            and self.request.headers.get("Sec-Fetch-Site") == "same-origin"
+            and self.request.path.startswith(self.prefix)
+            and (path == "manifest.webmanifest"
+                 or re.fullmatch(r"assets/[\w-]+(?:\.[\w-]+)*\.(?:js|css|wasm)", path))
+        ):
+            return
         # Unlike the generic proxy, this app's fetch adapter supplies Jupyter XSRF.
         JupyterHandler.check_xsrf_cookie(self)
 

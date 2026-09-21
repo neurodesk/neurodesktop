@@ -46,7 +46,7 @@ def test_dockerfile_pins_the_native_claude_install():
         encoding="utf-8"
     )
 
-    assert 'ARG CLAUDE_CODE_VERSION="2.1.274"' in dockerfile
+    assert 'ARG CLAUDE_CODE_VERSION="2.1.278"' in dockerfile
     assert "bash -s -- ${CLAUDE_CODE_VERSION}" in dockerfile
     assert "bash -s -- stable" not in dockerfile
 
@@ -89,10 +89,13 @@ def test_agent_guidance_prevents_stale_outputs_and_false_job_success():
     assert "Queue disappearance is not success" in compact
     assert "`sacct`" in compact
     assert "`ExitCode` `0:0`" in compact
-    # `--wait` waits out queue time too, so the recommended form must be bounded
-    # and must say the job survives the timeout.
-    assert "timeout 300 sbatch --parsable --wait" in compact
-    assert "recovered through the ID `--parsable` already printed" in compact
+    assert "Submit without `--wait`" in compact
+    assert "Bound the monitoring period" in compact
+    assert "retain the IDs of outstanding jobs for recovery" in compact
+    assert "--kill-on-invalid-dep=yes" in guidance
+    assert "DependencyNeverSatisfied" in guidance
+    assert "wait for every terminal job" in compact
+    assert "Cancel superseded jobs before retrying" in compact
 
 
 def test_agent_guidance_separates_astra_validation_execution_and_provenance():
@@ -105,6 +108,8 @@ def test_agent_guidance_separates_astra_validation_execution_and_provenance():
     assert "**Execution:**" in guidance
     assert "**Provenance:**" in guidance
     assert "`spec-only`" in compact
+    assert "remove illustrative findings before execution" in compact
+    assert "preserve the original command and script version" in compact
 
 
 def test_agent_guidance_keeps_the_environment_and_schema_lookup_facts():
@@ -159,60 +164,6 @@ def test_opencode_machine_commands_bypass_interactive_setup(tmp_path, args):
     assert not (tmp_path / "AGENTS.md").exists()
     assert not (home_dir / ".config/opencode/opencode.json").exists()
 
-
-def test_opencode_acp_exports_lmod_to_child_bash_shells(tmp_path):
-    """ACP tool shells inherit Lmod without sourcing an interactive bashrc."""
-    bash_env = tmp_path / "opencode_bash_env.sh"
-    bash_env.write_text(
-        "module() {\n"
-        "  if [ \"$1\" = load ] && [ \"$2\" = funny-name-tool ]; then\n"
-        "    return 1\n"
-        "  fi\n"
-        "  printf 'MODULE:%s\\n' \"$*\"\n"
-        "}\n",
-        encoding="utf-8",
-    )
-
-    fake_opencode = tmp_path / "fake-opencode"
-    fake_opencode.write_text(
-        "#!/bin/bash\n"
-        "output_file=\"${TMPDIR:-/tmp}/funny-name-tool.out\"\n"
-        "/bin/bash -c '\n"
-        "type module >/dev/null || exit 1\n"
-        "module spider fsl\n"
-        "if module load funny-name-tool >\"$1\" 2>/dev/null; then exit 1; fi\n"
-        "test ! -s \"$1\"\n"
-        "' _ \"$output_file\"\n",
-        encoding="utf-8",
-    )
-    fake_opencode.chmod(0o755)
-
-    test_wrapper = tmp_path / "opencode-wrapper-test"
-    wrapper_contents = opencode_wrapper_path().read_text(encoding="utf-8")
-    wrapper_contents = wrapper_contents.replace("/usr/bin/opencode", str(fake_opencode))
-    wrapper_contents = wrapper_contents.replace(
-        "/opt/neurodesktop/opencode_bash_env.sh", str(bash_env)
-    )
-    test_wrapper.write_text(wrapper_contents, encoding="utf-8")
-    test_wrapper.chmod(0o755)
-
-    home_dir = tmp_path / "home"
-    home_dir.mkdir()
-    result = subprocess.run(
-        [str(test_wrapper), "acp"],
-        cwd=tmp_path,
-        env={
-            **os.environ,
-            "HOME": str(home_dir),
-        },
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        timeout=5,
-    )
-
-    assert result.returncode == 0, result.stdout
-    assert result.stdout.strip() == "MODULE:spider fsl"
 
 
 def run_pty_command(args, input_text, cwd, env, timeout=15):

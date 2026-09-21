@@ -2,17 +2,28 @@
 import { JupyterFrontEnd, JupyterFrontEndPlugin } from '@jupyterlab/application';
 import { MainAreaWidget, showDialog, Dialog } from '@jupyterlab/apputils';
 import { URLExt } from '@jupyterlab/coreutils';
+import { IDocumentManager } from '@jupyterlab/docmanager';
+import { bindWorkspaceLinkFrame } from './workspaceLinks';
 import { ILauncher } from '@jupyterlab/launcher';
 import { ServerConnection } from '@jupyterlab/services';
 import { codeIcon } from '@jupyterlab/ui-components';
 import { Widget } from '@lumino/widgets';
+import { createConnectPanel } from './t3Connect';
 
 const plugin: JupyterFrontEndPlugin<void> = {
   id: 'neurodesk-launcher:t3-code',
   autoStart: true,
-  requires: [ILauncher],
-  activate: (app: JupyterFrontEnd, launcher: ILauncher) => {
+  requires: [ILauncher, IDocumentManager],
+  activate: (app: JupyterFrontEnd, launcher: ILauncher, docManager: IDocumentManager) => {
     let panel: MainAreaWidget<Widget> | null = null;
+    let connectPanel: MainAreaWidget<Widget> | null = null;
+    const openConnect = () => {
+      if (connectPanel && !connectPanel.isDisposed) app.shell.activateById(connectPanel.id);
+      else connectPanel = createConnectPanel(app);
+    };
+    app.commands.addCommand('neurodesk-launcher:t3-connect', {
+      label: 'Setup T3 connect', icon: codeIcon, execute: openConnect
+    });
     const command = 'neurodesk-launcher:open-t3-code';
     app.commands.addCommand(command, {
       label: 'scigent.ai',
@@ -41,11 +52,31 @@ const plugin: JupyterFrontEndPlugin<void> = {
             throw new Error('Could not connect to scigent.ai. Wait a moment and reopen it.');
           }
           const frame = document.createElement('iframe');
+          const disposeFileLinks = bindWorkspaceLinkFrame(frame, app, docManager);
           frame.title = 'scigent.ai';
           frame.src = URLExt.join(settings.baseUrl, 'neurodesk-t3') + '/';
           frame.style.cssText = 'width:100%;height:100%;border:0;display:block';
           frame.allow = 'clipboard-read; clipboard-write';
-          const content = new Widget({ node: frame });
+          const container = document.createElement('div');
+          container.style.cssText = 'display:flex;flex-direction:column;height:100%';
+          const connect = document.createElement('button');
+          connect.className = 'jp-mod-styled';
+          connect.textContent = 'Setup T3 connect';
+          connect.style.cssText = 'align-self:flex-end;flex-shrink:0;height:22px;min-height:0;margin:2px 6px;padding:0 8px;font-size:11px;line-height:20px';
+          connect.onclick = openConnect;
+          frame.style.flex = '1';
+          frame.style.minHeight = '0';
+          container.append(connect, frame);
+          const content = new Widget({ node: container });
+          const onMessage = (event: MessageEvent) => {
+            if (event.origin === window.location.origin && event.source === frame.contentWindow &&
+                event.data?.type === 'neurodesk-t3-connect') openConnect();
+          };
+          window.addEventListener('message', onMessage);
+          content.disposed.connect(() => {
+            window.removeEventListener('message', onMessage);
+            disposeFileLinks();
+          });
           panel = new MainAreaWidget({ content });
           panel.id = 'neurodesk-t3-code';
           panel.title.label = 'scigent.ai';

@@ -12,6 +12,7 @@ import websocket
 import pytest
 
 from test_rise_slides_image import _BidiSession, _unused_port, _wait_for_server, _stop
+from testlib import reload_browsing_context
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -21,7 +22,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def assert_jupyter_auth_required(prefix):
     client = urllib.request.build_opener(NoRedirect)
-    for path in ("neurodesk-t3/", "neurodesk-t3/_adapter.js", "neurodesk-t3-status"):
+    for path in ("neurodesk-t3/", "neurodesk-t3/_adapter.js", "neurodesk-t3-status", "neurodesk-t3/_connect"):
         with pytest.raises(urllib.error.HTTPError) as error:
             client.open(prefix + path, timeout=5)
         assert error.value.code in {302, 403}
@@ -56,6 +57,9 @@ def wait_text(bidi, context, text):
 def wait_connected(bidi, context):
     deadline = time.monotonic() + 35
     while time.monotonic() < deadline:
+        if not evaluate(bidi, context, "typeof window.__neurodeskT3Target === 'function'"):
+            time.sleep(.25)
+            continue
         connected = evaluate(bidi, context, """(async () => {
             const session = await (await fetch('/api/auth/session')).json();
             return session.authenticated === true &&
@@ -71,8 +75,8 @@ def wait_connected(bidi, context):
 
 
 
-@pytest.mark.parametrize("base", ["/", "/user/t3-test/"])
-def test_t3_web_in_jupyter(tmp_path: Path, base):
+@pytest.mark.parametrize("base,hub_xsrf", [("/", False), ("/user/t3-test/", False), ("/user/t3-test/", True)])
+def test_t3_web_in_jupyter(tmp_path: Path, base, hub_xsrf):
     server_port, t3_port, browser_port = _unused_port(), _unused_port(), _unused_port()
     origin = f"http://127.0.0.1:{server_port}"
     prefix = origin + base
@@ -82,10 +86,36 @@ def test_t3_web_in_jupyter(tmp_path: Path, base):
     log_path = tmp_path / "jupyter.log"
     profile = tmp_path / "firefox-profile"
     profile.mkdir()
+    config = tmp_path / "jupyter_server_config.py"
+    config.write_text("""
+from jupyterhub._xsrf_utils import _needs_check_xsrf
+from jupyter_server.base.handlers import JupyterHandler
+from neurodesk_t3_code.web import T3ProxyHandler
+from tornado.web import RequestHandler
+
+# Exercise Hub's cookie-authenticated GET policy with the actual browser module
+# graph. Standalone Jupyter otherwise skips this check for all GET requests.
+_check_xsrf = JupyterHandler.check_xsrf_cookie
+def hub_check_xsrf(self):
+    if self.request.method in {"GET", "HEAD"}:
+        if _needs_check_xsrf(self):
+            # Keep standalone Jupyter's token format; only borrow Hub's GET policy.
+            RequestHandler.check_xsrf_cookie(self)
+    else:
+        _check_xsrf(self)
+JupyterHandler.check_xsrf_cookie = hub_check_xsrf
+_prepare = T3ProxyHandler.prepare
+async def hub_prepare(self, *args, **kwargs):
+    await _prepare(self, *args, **kwargs)
+    if self.current_user and not self.token_authenticated:
+        self.check_xsrf_cookie()
+T3ProxyHandler.prepare = hub_prepare
+""" if hub_xsrf else "")
     with log_path.open("w") as log, (tmp_path / "firefox.log").open("w") as browser_log:
         server = subprocess.Popen([
             "jupyter", "lab", "--no-browser", "--LabApp.expose_app_in_browser=True", f"--ServerApp.port={server_port}",
             "--ServerApp.port_retries=0", f"--ServerApp.base_url={base}",
+            f"--config={config}",
             f"--ServerApp.root_dir={tmp_path}", f"--FileContentsManager.preferred_dir={tmp_path}", f"--IdentityProvider.token={token}",
             '--ServerApp.jpserver_extensions={"jupyterlab":True,"neurodesk_t3_code":True}',
         ], env=environment, stdout=log, stderr=subprocess.STDOUT)
@@ -137,9 +167,27 @@ def test_t3_web_in_jupyter(tmp_path: Path, base):
             # The launcher establishes the session before loading T3. No terminal
             # command, token, or form submission should be needed in this browser.
             wait_connected(bidi, context)
+            connect_status = json.loads(evaluate(bidi, context,
+                "fetch(" + json.dumps(base + "neurodesk-t3/_connect") + ").then(r => r.text())"))
+            assert connect_status["state"] in {"idle", "starting"}, connect_status
+            assert connect_status["code"] is None
+            assert evaluate(bidi, context,
+                "fetch(" + json.dumps(base + "neurodesk-t3/_connect") +
+                ",{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'invalid'})}).then(r => r.status)") == 400
+
+            evaluate(bidi, parent_context,
+                "window.jupyterapp.commands.execute('neurodesk-launcher:t3-connect')")
+            wait_text(bidi, parent_context, "Use T3 here without linking")
+            assert evaluate(bidi, parent_context,
+                "document.querySelector('#neurodesk-t3-connect [role=status]').textContent.includes('without linking')")
+            evaluate(bidi, parent_context,
+                "[...window.jupyterapp.shell.widgets('main')].find(widget => widget.id === 'neurodesk-t3-connect').dispose()")
+            assert evaluate(bidi, parent_context,
+                "fetch(" + json.dumps(base + "neurodesk-t3/_connect") +
+                ",{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'link'})}).then(r => r.status)") == 403
+
             # Reload reconstructs the app using the scoped session cookie.
-            bidi.request("browsingContext.navigate", {"context": context,
-                "url": prefix + "neurodesk-t3/", "wait": "interactive"})
+            reload_browsing_context(bidi, context)
             wait_connected(bidi, context)
             evaluate(bidi, parent_context, "window.jupyterapp.commands.execute('neurodesk-launcher:open-t3-code')")
             assert evaluate(bidi, parent_context, "document.querySelectorAll('iframe[title=\"scigent.ai\"]').length") == 1

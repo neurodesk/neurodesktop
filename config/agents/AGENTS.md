@@ -4,6 +4,21 @@ Use this contract for scientific analyses in Neurodesk. Keep the work
 reproducible without turning routine discovery, conventional defaults, or short
 parameter sweeps into unnecessary user prompts and scheduler jobs.
 
+Environment guidance revision: 2026-09-21.2
+
+## Session preflight
+
+Run `neurodesk-agent-preflight` once before analysis. It checks Lmod and shows
+live Slurm node capacity, state, and time limits. If it reports differing
+workspace guidance, preserve project edits and consult `/opt/AGENTS.md` for
+current environment instructions. Resolve a failed preflight before submission.
+
+Every Bash call that uses `module`, including interactive calls, must first
+source `/opt/neurodesktop/agent_bash_env.sh`. Do the same in retained Bash
+scripts. It refreshes Neurodesk's module paths and selects the installed Lmod
+initializer. Do not rely on the tool shell loading an rc file or inheriting
+`BASH_ENV`. A module loaded in one call does not persist into another shell.
+
 ## Operating contract
 
 1. **Respect choices the user already made.** If the user names FSL BET, do not
@@ -34,43 +49,91 @@ parameter sweeps into unnecessary user prompts and scheduler jobs.
    acquisition scripts such as `analysis_00_download_data.sh`. Use one script
    per analytical step, not one per output or universe. A universe is not a
    job: batch short alternatives with identical dependencies and resources in
-   one script or a Slurm array; split them only when isolation or materially
-   different resources justify it.
-5. **Pin execution environments.** Every neuroimaging script loads an explicit
-   module version (`module load <tool>/<version>`). DataLad, Git, rclone, and
-   osfclient are already in the main environment and data-only scripts do not
-   load a neuroimaging module. Submit from the project root and resolve it in
-   every job with `PROJECT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"`; Slurm executes a
-   spool copy, so `BASH_SOURCE[0]` points at `/var/spool/slurmd`, not the
-   workspace.
+   one allocation. Use arrays when independent scheduling, retries, or useful
+   parallelism justify them. Define script arguments for varying decisions,
+   inputs, and output paths before execution, and invoke the same commands as
+   the resolved ASTRA recipes. Have existing validation steps write metric
+   artifacts instead of adding jobs to recompute the same numbers.
+5. **Pin execution environments in the scripts and in the specification.**
+   Every neuroimaging script loads an explicit module version
+   (`module load <tool>/<version>`). DataLad, Git, rclone, and osfclient are
+   already in the main environment and data-only scripts do not load a
+   neuroimaging module. The specification carries the same pin: every recipe
+   with a `command` names the software producing that output in `container:`,
+   on the recipe or on the enclosing analysis. `astra validate` never asks for
+   it, so nothing but this rule and the completion check below will. Read the
+   version from the tool itself, not from the module name; a module label and
+   the binary it exposes can disagree. Submit from the project root and
+   resolve it in every job with `PROJECT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"`;
+   Slurm executes a spool copy, so `BASH_SOURCE[0]` points at
+   `/var/spool/slurmd`, not the workspace.
 6. **Never publish partial or stale outputs.** Write each attempt to a
    job-specific temporary file or directory on the same filesystem, validate
    that temporary artifact, and atomically rename it into its final path only
    after success. Refuse to overwrite an existing final result unless the user
    requested replacement or the old result has first been preserved. Never
    use `test -s` on a path that could have survived an earlier attempt. Remove
-   or isolate failed-attempt artifacts before retrying.
-7. **Submit cleanly and monitor efficiently.** Run validation first, then run
-   `sbatch --parsable` as its own command. Do not chain submission behind
-   linting, Git, or validation commands. For a job expected to finish within
-   two minutes, `timeout 300 sbatch --parsable --wait` avoids repeated queue
-   polling; `--wait` waits out queue time as well as runtime, so if the timeout
-   fires the job is still queued or running and must be recovered through the
-   ID `--parsable` already printed. For a longer job, poll the exact job no more
-   often than every ten seconds. Queue disappearance is not success.
-8. **Use a complete success predicate.** A job is submitted only when its job
-   ID was captured. It succeeds only when `sacct` reports `COMPLETED` with
-   `ExitCode` `0:0`, its logs have been inspected, and its expected artifacts
-   were freshly produced and validated. An empty log can be valid, but it is
-   never sufficient evidence by itself.
-9. **Inspect the result, not merely the exit code.** Check numerical and file
-   plausibility, create a correctly encoded PNG QC artifact, verify its real
-   format with `identify`, and inspect it visually. For an unfamiliar command,
-   inspect its actual CLI help or use a tested project example before fan-out.
-   Comparative scientific claims require comparative evidence: for example,
-   mask volume supports a volume difference, while a claim about where tissue
-   differs requires a mask-difference or boundary overlay.
-10. **Use ASTRA as the scientific record.** Document every analysis with the
+   or isolate failed-attempt artifacts before retrying. Perform that rename
+   with `neurodesk-astra-provenance publish`, which also writes the
+   `<output>.prov.json` sidecar the completion check reads:
+
+   ```bash
+   neurodesk-astra-provenance publish "${TMP}" "${FINAL}" \
+       --output-id <astra_output_id> --tool <command> --script "$0"
+   ```
+
+   It records the resolved binary, the version that binary reported, the
+   loaded modules, the container image behind them, the script digest, the
+   host, and the job ID. It tries `--version`, `-version`, and `-V`; for a
+   tool that spells it otherwise add `--version-flag=-v`, with the `=` so the
+   leading dash is read as the value. It refuses to publish a tool whose
+   version it could not read, and refuses an existing final path unless you
+   pass `--replace`.
+7. **Size jobs against the selected partition.** The preflight runs
+   `sinfo -o "%P %c %m %l %t"`. CPU count and memory describe nodes, with memory in
+   MiB; they do not expose every partition or account limit. Inspect
+   `scontrol show partition <partition>` and applicable account or QOS limits
+   when needed. Keep CPU, memory, and time requests within those limits while
+   meeting the analysis requirements. `nproc` is not the scheduler's CPU
+   limit. If a job cannot fit, choose a suitable partition or revise the work;
+   do not reduce resources below what it needs.
+8. **Submit settled dependencies together.** Run validation and create `logs/`
+   before submission. One Bash call may issue several `sbatch --parsable`
+   commands, capturing each job ID and stopping on submission failure. Do not
+   chain submission behind linting, Git, or validation commands. Capture each
+   job ID and submit known downstream steps with `--dependency=afterok:<id>`
+   and `--kill-on-invalid-dep=yes`. Stop the chain at any scientific choice
+   that needs inspection of an earlier result. Monitor all captured IDs for
+   failures and wait for every terminal job, including separate branches.
+   Cancel superseded jobs before retrying and rebuild affected dependencies
+   with the new IDs.
+9. **Diagnose pending jobs before waiting.** Submit without `--wait` so the ID
+   is available immediately. Check `squeue -j <ids> -o "%i %T %R"` once within
+   about ten seconds. For `PartitionConfig`, `PartitionNodeLimit`, or
+   `PartitionTimeLimit`, inspect the job, partition, and node state before
+   changing the request: `PartitionNodeLimit` can also mean nodes are down or
+   drained. Handle `DependencyNeverSatisfied` as a failed prerequisite, not
+   normal queue delay. Poll only the captured jobs, no more often than every
+   ten seconds, and re-read their state each time. Between checks, use the
+   runner's documented wait or background-task mechanism. Use only tools
+   exposed by that runner; do not chain shell sleeps or search for an
+   undocumented monitoring tool. If no supported wait mechanism exists,
+   report the outstanding IDs and the next status command. Bound the monitoring
+   period; if it expires, report and retain the IDs of outstanding jobs for recovery.
+   Queue disappearance is not success.
+10. **Use a complete success predicate.** A job is submitted only when its job
+    ID was captured. It succeeds only when `sacct` reports `COMPLETED` with
+    `ExitCode` `0:0`, its logs have been inspected, and its expected artifacts
+    were freshly produced and validated. An empty log can be valid, but it is
+    never sufficient evidence by itself.
+11. **Inspect the result, not merely the exit code.** Check numerical and file
+    plausibility, create a correctly encoded PNG QC artifact, verify its real
+    format with `identify`, and inspect it visually. For an unfamiliar command,
+    inspect its actual CLI help or use a tested project example before fan-out.
+    Comparative scientific claims require comparative evidence: for example,
+    mask volume supports a volume difference, while a claim about where tissue
+    differs requires a mask-difference or boundary overlay.
+12. **Use ASTRA as the scientific record.** Document every analysis with the
     ASTRA skill, preserve existing decisions and findings, and record findings
     only after their artifacts exist and have been inspected. Report schema
     validation, script execution, and recorded run provenance as three separate
@@ -92,13 +155,26 @@ parameter sweeps into unnecessary user prompts and scheduler jobs.
 
 ## Fast path for ASTRA authoring
 
+- `astra validate` with no argument validates the whole project, including universes.
+- There is no `--universe` option. Use `astra validate universes/<name>.yaml -a astra.yaml`; `-a` supplies the parent analysis.
+- Give every locally produced output an explicit `format:` field, including QC images and metric artifacts. Re-exported `from:` outputs inherit it and forbid redeclaring it.
+- Give every recipe with a `command` an explicit `container:`. Load the module
+  first, then read the version out of the tool (`bet --version`,
+  `antsRegistration --version`, `dcm2niix -v`) and record what you observed.
+  A spec whose recipes shell out to pinned tools while naming no software
+  validates clean, so validation will not catch the omission.
+
 **Start from the closest worked project** rather than rebuilding a familiar
 analysis from prose. For FSL BET, the canonical project is installed at
 `/opt/neurodesktop/examples/astra-bet`; copy it into the writable workspace and
-adapt it. Inspecting that project satisfies the initial ASTRA orientation for a
-matching BET task. For other analyses, begin with the short `astra spec`
-concept map, then query only an unfamiliar term with `astra spec <term>`. Do
-not read the long getting-started tutorial or run `astra spec --full` when the
+adapt it using its README. The example supplies neither data nor processing
+scripts. Replace its placeholder inputs, implement its recipes, and remove
+illustrative findings before execution; they are not observations from your
+project. Preserve findings from actual prior analyses. Inspecting that project
+satisfies the initial ASTRA orientation for a matching BET task. For other
+analyses, begin with the short `astra spec` concept map, then query only an
+unfamiliar term with `astra spec <term>`. Do not read the long getting-started
+tutorial or run `astra spec --full` when the
 worked project already demonstrates the needed concepts.
 
 **Match `version:` to the installed schema:**
@@ -106,6 +182,14 @@ worked project already demonstrates the needed concepts.
 ```bash
 python -c 'import importlib.metadata as m; print(m.version("astra-spec"))'
 ```
+
+**Draft the specification before execution.** Define inputs, decisions,
+outputs, and recipe commands, then build scripts to those interfaces. Add
+findings only after their artifacts exist and have been inspected. If scripts
+or recipes change afterward, preserve the original command and script version.
+Rerun affected outputs when inputs, parameters, environment, or processing logic
+changed, or when the original execution cannot be reconstructed. An interface
+change alone does not invalidate previously computed results.
 
 **Make each decision self-describing.** An option label carries its selected
 value (`Standard (-f 0.5)`, not merely `Standard`), and the recipe
@@ -141,23 +225,38 @@ get` paths are relative to the cloned dataset, so use:
 datalad -C data/<accession> get <path-below-the-dataset>
 ```
 
+**Create and edit `astra.yaml` and `universes/*.yaml` with the runner's Write
+or structured edit tool.** The save hook reads the edited path out of that
+tool call, so a specification written through a Bash heredoc is never
+validated and the hook stays silent, which looks exactly like a pass. This is
+an exception to any general instruction to edit files through Bash.
+
 **Do not re-validate what the save hook already validated.** The hook normally
 reports ASTRA validation after an edit. Run explicit validation once after a
 coherent edit batch, and once after adding final findings; validate every
-universe when a decision or universe changed. If the hook did not run or
-reported an error, use the CLI immediately.
+universe when a decision or universe changed. If the hook did not run,
+reported an error, or the file reached disk any other way, use the CLI
+immediately.
 
 **Treat an existing `astra.yaml` as an accumulated scientific record.** A
 follow-up request to try another defensible method normally adds an option and
 universe; it does not delete prior methods, findings, evidence, outputs, or
-results. Renaming or deleting their IDs requires explicit user authorization.
+results. Renaming or deleting IDs from actual prior analyses requires explicit
+user authorization. This protection does not apply to illustrative template
+findings.
 Findings describe completed observations, never planned or pending work, and
 cite the artifact that supports the claim.
 
 ## Slurm script baseline
 
-Use sensible resource estimates and comment only the commands whose purpose or
-contract is not obvious:
+When a file contains heredocs, use the runner's Write tool to create or replace
+it, or its structured edit/patch tool for targeted changes. This is an exception
+to any general instruction to edit files through Bash heredocs. Do not wrap
+such files in another Bash heredoc.
+
+Check the selected partition's resources as described above. From the project
+root, run `mkdir -p logs` before submission; Slurm opens the logs before the
+script runs. Comment only commands whose purpose or contract is not obvious:
 
 ```bash
 #!/bin/bash
@@ -169,16 +268,31 @@ contract is not obvious:
 #SBATCH --cpus-per-task=<N>
 
 set -euo pipefail
+source /opt/neurodesktop/agent_bash_env.sh
 
 # Slurm executes a spool copy; the submission directory is the project root.
 PROJECT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"
 cd "${PROJECT_DIR}"
 
+ALGORITHM="${1:?usage: $0 <algorithm> <input> <output>}"
+INPUT="${2:?usage: $0 <algorithm> <input> <output>}"
+FINAL="${3:?usage: $0 <algorithm> <input> <output>}"
+
 module load <tool>/<version>
 
-# Write and validate job-specific temporary outputs. Publish them to their
-# final paths only after every command and check succeeds.
-<commands>
+# Keep the output's own name: FSL and others read the format off the suffix,
+# and several refuse a path that already exists.
+TMP_DIR="$(mktemp -d "${FINAL}.attempt.XXXXXX")"
+trap 'rm -rf "${TMP_DIR}"' EXIT
+TMP="${TMP_DIR}/$(basename "${FINAL}")"
+
+<commands writing "${TMP}">
+<checks on "${TMP}">
+
+# Publishes atomically and records the tool version, modules, image, and
+# script digest in "${FINAL}.prov.json" for the completion check.
+neurodesk-astra-provenance publish "${TMP}" "${FINAL}" \
+    --output-id <astra_output_id> --tool <command> --script "$0"
 ```
 
 Before a Git-only check such as `git diff --check`, first run
@@ -195,7 +309,10 @@ and unexpected leftovers. A bounded final check should establish all of:
   task;
 - fresh expected artifacts with the intended file types and dimensions;
 - no partial or stale files from failed attempts mixed into final results;
-- visual QC that supports no stronger claim than it displays; and
+- visual QC that supports no stronger claim than it displays;
+- a passing `neurodesk-astra-provenance check`, which fails when a recipe
+  names no software or its `container:` disagrees with the version the tool
+  reported at execution time; and
 - a final `astra validate` pass after evidence-backed findings were recorded.
 
 In the final response, link key artifacts with absolute workspace paths so
@@ -203,12 +320,16 @@ JupyterLab opens them in the main panel. State separately:
 
 - **Specification:** whether `astra.yaml` and affected universes validate.
 - **Execution:** which Slurm jobs completed and which outputs were inspected.
-- **Provenance:** whether a recognised run manifest exists. Plain `sbatch`
-  execution remains honestly `spec-only` in the viewer even when the scripts
-  succeeded.
+- **Provenance:** the `neurodesk-astra-provenance check` result, and whether a
+  recognised run manifest exists. Plain `sbatch` execution remains honestly
+  `spec-only` in the viewer even when the scripts succeeded; the sidecars are
+  the record of what ran, not a badge.
 
-If the user explicitly asks for an ASTRA execution badge and the analysis has
-no `container:`, ask before adapting the project to the optional `lc` path:
+The optional `lc` path refuses a spec that declares `container:`, because
+Neurodesk has no container runtime `lc` supports and the declared image would
+be recorded as used without ever running. The two are mutually exclusive. If
+the user explicitly asks for an ASTRA execution badge, say that it costs the
+software declaration and ask before adapting the project:
 
 ```bash
 cd /home/jovyan/my-analysis

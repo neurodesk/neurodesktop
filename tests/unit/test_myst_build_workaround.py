@@ -31,7 +31,7 @@ def dockerfile() -> str:
 def test_myst_build_uses_pinned_release_and_frozen_lockfile(dockerfile: str) -> None:
     """MyST 2.7.0 ships pnpm-lock.yaml, so reproduce it with pinned pnpm."""
     assert "jupyterlab_myst==2.7.0" in DOCKERFILE.read_text()
-    assert 'ARG MYST_PNPM_VERSION="11.26.0"' in dockerfile
+    assert 'ARG MYST_PNPM_VERSION="11.27.0"' in dockerfile
     assert "pnpm@${MYST_PNPM_VERSION} install --frozen-lockfile" in dockerfile
     assert "npm install" not in dockerfile
     assert "npx --yes" not in dockerfile
@@ -75,13 +75,13 @@ def test_myst_build_removes_temporary_package_manager_state(dockerfile: str) -> 
     assert "/tmp/myst-pnpm-store" in cleanup
 
 
-def test_myst_build_copies_rebuilt_labextension(dockerfile: str) -> None:
+def test_myst_build_links_rebuilt_labextension(dockerfile: str) -> None:
     """After rebuilding, the labextension artifacts must replace the pip-installed
-    copies in both the package directory and the JupyterLab app directory.
+    copies with one package directory exposed through a JupyterLab symlink.
     """
     assert "cp -a /tmp/myst/jupyterlab_myst/labextension" in dockerfile
     assert "APP_MYST_DIR=/opt/conda/share/jupyter/labextensions/jupyterlab-myst" in dockerfile
-    assert "cp -a \"${MYST_LABEXT_DIR}\" \"${APP_MYST_DIR}\"" in dockerfile
+    assert "ln -s \"${MYST_LABEXT_DIR}\" \"${APP_MYST_DIR}\"" in dockerfile
 
 
 def test_legacy_mathjax3_frontend_is_not_exposed_to_jupyterlab():

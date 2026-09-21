@@ -4,7 +4,7 @@ description: T3 Code in JupyterLab, server lifecycle, provider paths, persistent
   state, and desktop connection procedures
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-16"
+last-reviewed: "2026-09-21"
 ---
 
 # T3 Code remote access
@@ -18,6 +18,15 @@ Choose **scigent.ai** in the JupyterLab launcher's **Neurodesk** section. It ope
 application in a main-panel tab. Reopening the launcher focuses the existing
 tab. Closing the tab leaves the Jupyter-owned T3 process running.
 
+Ordinary clicks on absolute workspace file links in T3 chat open the file in
+JupyterLab with its configured default document handler. Directories open in
+the Jupyter file browser. This includes NIfTI files that T3 cannot preview.
+The launcher attaches a capture listener to the same-origin T3 iframe and
+reattaches it after reloads; closing the panel removes the listener. Paths
+must be inside Jupyter's configured server root. External links, downloads,
+and modified clicks keep their existing behavior. T3's own file explorer
+continues to use its internal preview pane.
+
 The launcher connects using your existing Jupyter login. It establishes T3's
 browser session automatically; no terminal command or pairing token is needed.
 The one-time credential stays on the server, and the browser receives only an
@@ -28,7 +37,9 @@ Provider authentication still belongs to the container, as described
 This route requires only the Jupyter endpoint, including its existing HTTPS
 and JupyterHub user prefix. It does not require Tailscale or a separately
 published T3 port. Leave `NEURODESKTOP_T3_CODE_HOST` at its loopback default
-when using only JupyterLab. The launcher reports when the sidecar is not ready.
+when using only JupyterLab. The launcher reports when the sidecar is not ready. The supervisor requires
+an HTTP response from T3's local environment endpoint before reporting readiness;
+a listening TCP port alone does not mean startup has finished.
 
 The server extension authenticates `/neurodesk-t3/` and proxies HTTP and
 WebSockets to its supervised process. It strips Jupyter credentials before
@@ -37,6 +48,19 @@ T3 client assumes root-relative URLs, so the proxy adapts its router, asset
 loader and file URLs, with a transport adapter running only inside the T3
 frame. Upstream anchor changes fail explicitly. Adapted assets are not cached
 as immutable files. Desktop access continues to use the unmodified client.
+
+JupyterHub 6 applies XSRF checks to CORS-mode GET requests, including native
+JavaScript module imports. These imports cannot attach the fetch adapter's
+XSRF header. The proxy accepts authenticated GET/HEAD requests for static
+JS, CSS, WASM bundles and the manifest when the browser supplies
+`Sec-Fetch-Site: same-origin`. Other origins, API requests and writes retain
+Jupyter's XSRF checks. The manifest also uses `crossorigin="use-credentials"`
+so its request carries the Jupyter login cookie. Without this handling, the
+entry module loops through Hub login redirects and T3 stays on its splash screen.
+Bundle names can contain dots before the build hash, such as
+`BranchToolbar.logic-QOG-LgPV.js`; these transitive imports need the same
+handling. The image browser test also runs with Hub's GET XSRF policy to
+exercise the complete startup module graph.
 
 ## Connect through a published Docker port
 
@@ -189,18 +213,72 @@ give each Neurodesktop instance its own Tailscale state directory.
 
 ## Connect through T3 Connect
 
-T3 Connect uses an outbound managed connection, so it does not need a
-published port. Keep the sidecar on its default loopback host. In a
-Neurodesktop terminal, run:
+On JupyterHub, the default T3 environment name is `user@hub-host`, for example
+`stebo85@edu.neurodesk.org`. Named servers use `user/server@hub-host`.
+The extension prefers JupyterHub's public URL settings. When these are empty,
+the authenticated, XSRF-protected T3 session exchange remembers the request
+hostname in `$NEURODESKTOP_T3_CODE_HOME/neurodesktop-public-host` with mode 0600.
+It never uses the internal Hub API address or changes DNS.
+
+The image supplies T3's `hostnamectl --pretty` naming probe through its private
+provider PATH. Other hostnamectl commands delegate to the system executable.
+T3 still honors an explicit `/etc/machine-info` pretty hostname first; desktop
+connection aliases remain user-owned. `NEURODESKTOP_T3_CODE_LABEL` overrides
+the generated label. Local installations keep T3's normal hostname fallback.
+Existing links retain their environment ID and credentials. An idle T3 sidecar
+restarts once when it learns the public hostname; active or unknown chat state
+defers this until an idle session open, connection check, or normal server restart.
+
+Choose **Setup T3 connect** in the compact bar inside the scigent.ai tab.
+Desktop linking is optional; the embedded app already uses your Jupyter login.
+The guided panel displays a short-lived device code and an underlined link to
+`https://accounts.t3.codes/device`, which opens
+T3's hosted authorization page. Approve it using the account signed into your
+T3 desktop app. This grants that account remote access to the environment.
+
+The extension runs `t3 connect link --headless` as the notebook user. A pinned,
+checksum-verified relay client is installed in the image, so users do not need
+a terminal or a download prompt. The supervisor sets `T3CODE_CLOUDFLARED_PATH`
+to `/usr/local/bin/cloudflared` so older per-user cached clients cannot override
+the security-maintained image copy. The panel waits for authorization, waits for
+active chats to finish before restarting only T3, then checks that the public
+tunnel reaches T3. Routing can take several minutes. Only a successful live
+probe is shown as **Ready**. If system DNS cannot resolve a `*.t3coderelay.com` tunnel hostname, the
+credential-free readiness probe retries through Cloudflare DNS-over-HTTPS.
+Only public IPv4 addresses are accepted, the original HTTPS hostname and
+certificate validation are retained, and the system DNS configuration is
+unchanged. OAuth and Jupyter credentials are never sent to the DNS service. Select the displayed environment in the desktop
+app under **Settings → Connections**.
+
+The link persists in T3's private home directory and reconnects when Jupyter
+starts. **Retry** reuses saved authorization where possible; expired grants
+receive a fresh code. **Cancel setup** stops the current attempt without revoking
+an approved link. **Disconnect** invokes T3's unlink operation. Closing the
+panel leaves an in-progress setup running; reopening it restores its state.
+
+If the relay rejects registration because the account has reached its managed
+tunnel limit, setup immediately shows the limit reported by T3 and directs the
+user to disconnect an unused environment or request a higher limit from T3
+support, then Retry. Signing in again does not free a tunnel. The supervisor
+drains T3 output without saving or forwarding raw logs, recognizes only the
+pinned quota error wording, and retains only its numeric limit. This error is
+cleared on the next T3 process start so Retry can recover after capacity is freed.
+
+All controls use Jupyter authentication and XSRF protection. Device codes stay
+in memory and responses are not cached. OAuth credentials stay in T3's private
+store and never reach the browser or logs. The official relay is the only
+recipient of the CLI access token; the subsequent public endpoint probe sends
+no credentials. The adapter replaces the embedded cloud sign-in button because
+T3's production Clerk application rejects self-hosted Jupyter origins.
+
+For deployments without the launcher, the terminal fallback remains:
 
 ```bash
 t3 connect link --headless
 ```
 
-Complete the browser authorization and restart the Neurodesktop instance. Sign
-in to the same T3 Connect account in the desktop app, then select the linked
-environment. The restart is required because T3 reads the saved link when the
-server starts.
+Then restart T3 after active chats finish. T3 Connect uses an outbound managed
+connection and does not require a published port. Keep the default loopback host.
 
 T3 Connect is the supported route for an HPC allocation when the site permits
 its outbound traffic. Desktop-managed SSH to a cluster login node starts T3 on
@@ -232,11 +310,43 @@ that expires automatically.
 
 ## Providers
 
+The supervisor sets `enableProviderUpdateChecks` to `false` at startup, including
+for existing profiles, to suppress automatic provider update notices in the
+image-managed T3 environment. Upgrades are delivered through image releases.
+T3's desktop-app update controls are not rendered in its embedded web mode;
+this policy does not change a separately installed desktop app.
+
+Before startup, the supervisor seeds one provider instance per agent it owns,
+each naming the image's quiet launcher in `config.binaryPath`. T3 enables the
+Codex and Claude drivers by default and ships the Cursor, Grok, OpenCode, and
+Antigravity drivers disabled, so the OpenCode instance carries an explicit
+`enabled` flag. That flag belongs on the instance envelope, because T3 folds an
+in-config flag into the envelope on every load.
+
+Seeding never overwrites a user's choice. An instance under the seed's own id,
+or any instance that declares the same driver, leaves the settings alone, and
+so does a `providers.<driver>` entry that configures the driver. The supervisor
+still promotes the exact legacy `providers.codex` default written by earlier
+images and retains that entry for backward compatibility. T3 writes
+`providers.opencode.enabled` false into every fresh environment as its own
+bookkeeping, so that entry and an empty one carry no user intent and do not
+block the OpenCode seed.
+
+Seeding Codex avoids T3's login-shell PATH refresh selecting an old
+`~/.local/bin/codex`. An obsolete home CLI can fail the `initialize` response
+schema even when the image's Codex is compatible. Provider tests must check the
+actual T3 probe, including `decode-payload` failures, not merely the installed
+CLI version.
+
 T3 discovers provider commands through
 [`config/agents/t3-provider-bin`](../../config/agents/t3-provider-bin/). These
 quiet launchers call the image-owned Codex, Claude, and OpenCode binaries
 without the interactive Neurodesktop wrapper output. The Codex launcher still
-copies `/opt/AGENTS.md` into a project when `AGENTS.md` is absent.
+copies `/opt/AGENTS.md` into a project when `AGENTS.md` is absent. The OpenCode
+launcher exports `NEURODESK_API_KEY` from `~/.bashrc` when the environment
+lacks it. The interactive wrapper stores that key there, T3 execs the launcher
+without a login shell, and the image's default OpenCode provider authenticates
+with it.
 
 T3 reloads the login-shell `PATH` at startup, which can put the interactive
 Codex wrapper before the quiet directory. When `T3CODE_HOME` is set, that

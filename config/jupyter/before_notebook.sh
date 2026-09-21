@@ -281,9 +281,8 @@ fix_home_ownership_if_needed
 link_data_dir_if_present
 
 if [ "$EUID" -eq 0 ]; then
-    # # Overrides Dockerfile changes to NB_USER
-    # Keep startup non-interactive and avoid passwd prompt noise in logs.
-    echo "${NB_USER}:password" | chpasswd
+    /usr/bin/python3 -I /opt/neurodesktop/startup_security.py || exit 1
+    /bin/bash /opt/neurodesktop/prepare_cpuinfo.sh
     if [ "$(getent passwd "${NB_USER}" | cut -d: -f7)" != "/bin/bash" ]; then
         usermod --shell /bin/bash "${NB_USER}"
     fi

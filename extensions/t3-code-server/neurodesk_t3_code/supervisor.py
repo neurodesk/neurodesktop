@@ -11,8 +11,11 @@ import asyncio
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
+import json
+import tempfile
 import logging
 import os
+import re
 from pathlib import Path
 import signal
 import socket
@@ -22,6 +25,15 @@ from typing import Mapping
 DEFAULT_EXECUTABLE = Path("/opt/t3-code/node_modules/.bin/t3")
 DEFAULT_PROVIDER_BIN = Path("/opt/neurodesktop/t3-provider-bin")
 DEFAULT_PORT = 3773
+
+
+def relay_tunnel_limit(output: bytes) -> int | None:
+    """Extract only the quota from the pinned relay's public error message."""
+    match = re.search(
+        rb'Relay managed tunnel limit reached: this account allows at most ([0-9]{1,6}) tunnels',
+        output,
+    )
+    return int(match[1]) if match else None
 
 
 class ConfigError(ValueError):
@@ -139,6 +151,127 @@ def server_command(policy: Policy) -> list[str]:
     ]
 
 
+@dataclass(frozen=True)
+class ProviderSeed:
+    """A provider instance the image seeds into T3's settings.
+
+    The driver name doubles as the instance id and as the quiet launcher's
+    file name inside the image's provider directory.
+    """
+
+    driver: str
+    # T3 ships some drivers disabled, so their instances need an explicit flag.
+    disabled_by_default: bool = False
+    # Legacy ``providers.<driver>`` blobs that hold no user configuration.
+    # T3 writes ``{"enabled": false}`` for its own default-off drivers.
+    inert_legacy: tuple[dict, ...] = ()
+    # Earlier images wrote this driver's default into ``providers.<driver>``.
+    # Only such a driver can own an entry matching the config seeded below;
+    # for every other driver an identical entry was authored by the user.
+    promotes_image_default: bool = False
+
+    def config(self, provider_bin: Path) -> dict:
+        return {"binaryPath": str(provider_bin / self.driver)}
+
+    def instance(self, provider_bin: Path) -> dict:
+        instance = {"driver": self.driver}
+        if self.disabled_by_default:
+            instance["enabled"] = True
+        instance["config"] = self.config(provider_bin)
+        return instance
+
+    def is_user_owned(
+        self, instances: dict, providers: dict, provider_bin: Path
+    ) -> bool:
+        if self.driver in instances:
+            return True
+        if any(
+            instance.get("driver") == self.driver for instance in instances.values()
+        ):
+            return True
+        if self.driver not in providers:
+            return False
+        legacy = providers[self.driver]
+        if self.promotes_image_default and legacy == self.config(provider_bin):
+            return False
+        return legacy not in self.inert_legacy
+
+
+PROVIDER_SEEDS = (
+    ProviderSeed("codex", promotes_image_default=True),
+    ProviderSeed(
+        "opencode", disabled_by_default=True, inert_legacy=({}, {"enabled": False})
+    ),
+)
+
+
+def seed_provider_settings(policy: Policy) -> None:
+    """Give T3 the image's own agent launchers on a profile that lacks them.
+
+    Codex would otherwise follow a login-shell PATH refresh to an obsolete
+    ``~/.local/bin/codex``, and T3 ships the OpenCode driver disabled, so its
+    instance carries an explicit flag. Explicit paths and provider instances
+    remain user-owned. Write atomically before T3 starts watching its settings
+    file.
+    """
+    directory = policy.base_dir / "userdata"
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    target = directory / "settings.json"
+    try:
+        settings = json.loads(target.read_text())
+    except FileNotFoundError:
+        settings = {}
+    except (ValueError, UnicodeError):
+        return  # Let T3 report malformed user settings without replacing them.
+    if not isinstance(settings, dict):
+        return
+    instances = settings.get("providerInstances", {})
+    providers = settings.get("providers", {})
+    if not isinstance(instances, dict) or not isinstance(providers, dict):
+        return
+    # A driver is unreadable from a malformed instance, so seed nothing.
+    if any(not isinstance(instance, dict) for instance in instances.values()):
+        return
+    seeded = {
+        seed.driver: seed.instance(policy.provider_bin)
+        for seed in PROVIDER_SEEDS
+        if not seed.is_user_owned(instances, providers, policy.provider_bin)
+    }
+    if not seeded:
+        return
+    settings["providerInstances"] = {**instances, **seeded}
+    _write_settings(directory, settings)
+
+
+def _write_settings(directory: Path, settings: dict) -> None:
+    target = directory / "settings.json"
+    descriptor, name = tempfile.mkstemp(prefix=".settings-", dir=directory)
+    try:
+        with os.fdopen(descriptor, "w") as stream:
+            json.dump(settings, stream, indent=2)
+            stream.write("\n")
+        os.replace(name, target)
+    finally:
+        with suppress(FileNotFoundError):
+            os.unlink(name)
+
+
+def disable_update_notifications(policy: Policy) -> None:
+    """Image releases own agent updates; suppress automatic provider notices."""
+    directory = policy.base_dir / "userdata"
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        settings = json.loads((directory / "settings.json").read_text())
+    except FileNotFoundError:
+        settings = {}
+    except (ValueError, UnicodeError):
+        return
+    if not isinstance(settings, dict) or settings.get("enableProviderUpdateChecks") is False:
+        return
+    settings["enableProviderUpdateChecks"] = False
+    _write_settings(directory, settings)
+
+
 def server_environment(
     policy: Policy, environ: Mapping[str, str]
 ) -> dict[str, str]:
@@ -160,6 +293,7 @@ def server_environment(
             "PATH": str(policy.provider_bin)
             + (os.pathsep + current_path if current_path else ""),
             "CODEX_PATH": "/usr/bin/codex",
+            "T3CODE_CLOUDFLARED_PATH": "/usr/local/bin/cloudflared",
             "CLAUDE_CODE_EXECUTABLE": "/opt/jovyan_defaults/.local/bin/claude",
             "T3CODE_HOME": str(policy.base_dir),
             "T3CODE_HOST": policy.host,
@@ -172,6 +306,8 @@ def server_environment(
             "T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD": "false",
         }
     )
+    from .naming import environment_label
+    child['NEURODESKTOP_T3_CODE_LABEL'] = environment_label(policy, environ)
     return child
 
 
@@ -205,16 +341,37 @@ class T3Supervisor:
         self._process: asyncio.subprocess.Process | None = None
         self._task: asyncio.Task[None] | None = None
         self._ready = asyncio.Event()
+        self.connect_tunnel_limit: int | None = None
+        self._output_reader: asyncio.Task | None = None
+
+    async def _read_output(self, stream) -> None:
+        # Drain continuously so a noisy child cannot block. Raw output is never
+        # persisted or logged; retain only a bounded overlap for split messages.
+        overlap = b''
+        while chunk := await stream.read(4096):
+            output = overlap + chunk
+            limit = relay_tunnel_limit(output)
+            if limit is not None:
+                self.connect_tunnel_limit = limit
+            overlap = output[-256:]
+
+    async def _stop_output_reader(self) -> None:
+        if self._output_reader is not None:
+            self._output_reader.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._output_reader
+            self._output_reader = None
 
     def start(self) -> None:
         """Start ownership once; repeated calls keep the existing task."""
 
         if self._task is not None and not self._task.done():
             return
+        self._ready.clear()
         self._task = asyncio.create_task(self.run(), name="neurodesk-t3-code")
 
     async def wait_ready(self, *, timeout: float | None = None) -> None:
-        """Wait until T3 accepts TCP connections or startup parks."""
+        """Wait until T3 answers HTTP requests or startup parks."""
 
         await asyncio.wait_for(
             self._ready.wait(),
@@ -242,13 +399,16 @@ class T3Supervisor:
                 self.state = ServiceState.STARTING
                 self.policy.base_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
                 try:
+                    seed_provider_settings(self.policy)
+                    disable_update_notifications(self.policy)
+                    self.connect_tunnel_limit = None
                     self._process = await asyncio.create_subprocess_exec(
                         *server_command(self.policy),
                         env=server_environment(self.policy, self.environ),
                         cwd=self.policy.workdir,
                         stdin=asyncio.subprocess.DEVNULL,
-                        stdout=asyncio.subprocess.DEVNULL,
-                        stderr=asyncio.subprocess.DEVNULL,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.STDOUT,
                         start_new_session=True,
                     )
                 except OSError as error:
@@ -261,6 +421,7 @@ class T3Supervisor:
                         self.state = ServiceState.BACKING_OFF
                         await asyncio.sleep(min(2 ** (failures - 1), 8))
                     continue
+                self._output_reader = asyncio.create_task(self._read_output(self._process.stdout))
                 self.pid = self._process.pid
                 if await self._wait_for_listener():
                     self.state = ServiceState.READY
@@ -272,6 +433,7 @@ class T3Supervisor:
                         self.pid,
                     )
                     await self._process.wait()
+                await self._stop_output_reader()
                 failures += 1
                 self.pid = None
                 self._process = None
@@ -287,6 +449,7 @@ class T3Supervisor:
             )
         finally:
             await self._terminate_process()
+            await self._stop_output_reader()
             if self.state is not ServiceState.PARKED:
                 self.state = ServiceState.STOPPED
 
@@ -305,15 +468,43 @@ class T3Supervisor:
         self.state = ServiceState.STOPPED
 
     async def _wait_for_listener(self) -> bool:
+        """Wait for HTTP readiness within the startup deadline, terminating on timeout."""
         deadline = asyncio.get_running_loop().time() + self.readiness_timeout
         while asyncio.get_running_loop().time() < deadline:
             if self._process is None or self._process.returncode is not None:
                 return False
-            if await self._port_accepting():
+            if await self._http_responding():
                 return True
             await asyncio.sleep(0.1)
         await self._terminate_process()
         return False
+
+    async def _http_responding(self) -> bool:
+        """Probe the local environment endpoint without credentials or proxy routing."""
+        writer = None
+        try:
+            async with asyncio.timeout(0.5):
+                reader, writer = await asyncio.open_connection(
+                    self.policy.readiness_host, self.policy.port,
+                )
+                writer.write(
+                    b"GET /.well-known/t3/environment HTTP/1.1\r\n"
+                    b"Host: localhost\r\nConnection: close\r\n\r\n"
+                )
+                await writer.drain()
+                status = (await reader.readline()).split()
+                return (
+                    len(status) >= 2
+                    and status[0] in {b"HTTP/1.0", b"HTTP/1.1"}
+                    and status[1] == b"200"
+                )
+        except (OSError, TimeoutError, ValueError):
+            return False
+        finally:
+            if writer is not None:
+                writer.close()
+                with suppress(OSError):
+                    await writer.wait_closed()
 
     async def _port_accepting(self) -> bool:
         try:

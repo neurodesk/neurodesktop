@@ -43,22 +43,9 @@ load_bashrc_export_silently() {
     fi
 }
 
-configure_tool_shell_environment() {
-    local bash_env="/opt/neurodesktop/opencode_bash_env.sh"
-
-    if [ -r "${bash_env}" ]; then
-        export BASH_ENV="${bash_env}"
-        return 0
-    fi
-
-    # OpenCode runs tool commands in non-interactive child shells, which do not
-    # read ~/.bashrc. BASH_ENV is Bash's supported per-shell initialization
-    # hook; unlike a function defined only in this wrapper, it survives the
-    # OpenCode process boundary and refreshes Lmod for every tool shell.
-    if [ -r /usr/share/module.sh ]; then
-        export BASH_ENV=/usr/share/module.sh
-    fi
-}
+if [ -r /opt/neurodesktop/agent_shell_setup.sh ]; then
+    . /opt/neurodesktop/agent_shell_setup.sh
+fi
 
 case "${1:-}" in
     --version)
@@ -67,7 +54,6 @@ case "${1:-}" in
     acp)
         load_bashrc_export_silently NEURODESK_API_KEY
         load_bashrc_export_silently BR_MCP_TOKEN
-        configure_tool_shell_environment
         exec /usr/bin/opencode "$@"
         ;;
 esac

@@ -39,3 +39,35 @@ validates and renders without shipping data or an FSL environment:
   example does not ship. Write it (or replace the commands outright) before
   you execute anything; `astra validate` checks the specification, not the
   existence of the commands it names.
+- no recipe declares `container:`, because this example is also the fixture
+  for the optional `lc` path, which refuses a declared image. Your copy runs
+  real software, so add one to every recipe naming the version you read out
+  of the tool. `astra validate` will not ask for it;
+  `neurodesk-astra-provenance check` will.
+
+Before running your copy, remove the illustrative `findings:` entry. It
+demonstrates the schema and is not an observation from your data. Add findings
+after inspecting the artifacts from your run. Preserve observations when
+extending an actual prior analysis.
+
+## Script interfaces and small outputs
+
+Draft the recipes before execution and implement their positional interfaces
+under `src/`, using names such as `analysis_01_bet.sh`. Update the example's
+recipe commands to match. A dispatch argument can select the artifact without
+requiring a separate script for each output:
+
+```bash
+bash src/analysis_02_qc.sh <artifact_id> <input> <threshold> <output>
+```
+
+Each output's recipe must name the invocation that produces it. When several
+invocations are shorter than scheduling latency and use the same resources,
+run those resolved recipe commands together in one Slurm allocation. Use an
+array when independent scheduling, retries, or useful parallelism justify it.
+Have a validation step that already computes mask volume write the metric
+artifact rather than adding a job to compute it again.
+
+Create `logs/` from the project root before submitting jobs. Match requests to
+the selected partition and follow `/opt/AGENTS.md` for dependency submission,
+pending-job diagnosis, and completion checks.

@@ -4,7 +4,7 @@ description: Claude Code and Codex installation, the OpenCode terminal wrapper,
   and OpenCode session pruning
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-10"
+last-reviewed: "2026-09-21"
 ---
 
 # Coding agents
@@ -22,10 +22,28 @@ substantive data retrieval and neuroimaging computation in retained Slurm
 scripts while allowing lightweight module, command-interface, dataset-metadata,
 ASTRA, and file-format discovery in the active shell.
 
+NBI setup writes a short pointer to `/opt/AGENTS.md` in the managed
+`$HOME/CLAUDE.md`. Existing managed notebook-rule copies migrate on the next
+setup; user-authored home files are preserved. Notebook-specific rules remain
+in NBI's rules directory rather than loading in every Claude project session.
+
 The contract has a bounded fast path: an explicit user tool choice is not
 reopened, a conventional demonstration default is recorded in ASTRA without an
 automatic blocking question, a matching worked project is reused, and short
-same-resource universes may share one script or Slurm array. Jobs publish
+same-resource universes share an allocation when scheduling overhead would
+dominate. Arrays are used when independent scheduling, retries, or useful
+parallelism justify them. Scripts take the arguments declared by the ASTRA
+recipes before execution. Copied examples supply structure; their illustrative
+findings must be removed before recording actual observations.
+
+Agents size jobs against the selected partition, submit settled dependencies
+with `afterok` and `--kill-on-invalid-dep=yes`, and check pending reasons before
+waiting. Submission is asynchronous so this check can run promptly. Monitoring
+may begin after one Bash call submits several jobs and captures each ID;
+validation and linting must finish in an earlier call. Monitoring
+covers all captured job IDs and every terminal branch, with a bounded wait and
+retained IDs for recovery. Retries cancel superseded jobs and rebuild affected
+dependencies. Jobs publish
 validated temporary outputs atomically, and completion requires Slurm
 accounting (`COMPLETED`, exit code `0:0`), inspected logs, and fresh expected
 artifacts. The final report distinguishes a valid ASTRA specification, actual
@@ -115,11 +133,48 @@ OpenCode persists the `ctrl+x b` toggle under the same key, so the wrapper
 only writes it when absent and a user who re-enables the sidebar keeps that
 choice.
 
-The machine-facing `opencode acp` path also exports
-`BASH_ENV=/opt/neurodesktop/opencode_bash_env.sh`. OpenCode tools use
-non-interactive Bash shells, which do not read `.bashrc`; the initializer
-quietly refreshes Neurodesk's module paths and loads Lmod for every tool shell
-without writing into the ACP JSON-RPC stream.
+## Agent tool shells and preflight
+
+The terminal and ACP launchers for Codex and Claude, the OpenCode wrapper,
+and all T3 provider launchers export
+`BASH_ENV=/opt/neurodesktop/agent_bash_env.sh` through a shared shell setup.
+An existing `BASH_ENV` is retained in `NEURODESKTOP_PREVIOUS_BASH_ENV` and
+sourced before Neurodesk initialization. Launchers do not emit setup banners
+into agent protocol streams.
+For login tool shells, `/etc/profile.d/zz-neurodesk-agent.sh` restores the
+shared `BASH_ENV` after Lmod's system profile. It applies only to descendants
+of agent launchers.
+
+Each noninteractive Bash tool shell refreshes Neurodesk's module paths and
+loads `/etc/profile.d/lmod.sh` when installed. Older layouts fall back to
+`/usr/share/module.sh`, then `/usr/share/lmod/lmod/init/bash`. Retained Slurm
+scripts source the same initializer explicitly. It restores the caller's
+nounset option after initialization, so the script baseline can use `set -u`.
+Initialization failures stop the shell before its tool command runs.
+Module loads remain local to each shell.
+
+The analysis contract requires explicit sourcing before `module` in every
+Bash call, including interactive calls. Automatic initialization depends on
+the runner preserving `BASH_ENV`; interactive Bash does not read that variable.
+Agents must not assume that a fresh tool shell has initialized Lmod.
+
+`neurodesk-astra-provenance` is the other agent-facing command on `PATH`. The
+contract routes every published output through its `publish` subcommand and
+ends every analysis with its `check` subcommand, which is the only mechanism
+that compares a specification's declared software with what really ran. See
+[ASTRA integration](astra.md#recording-what-ran).
+
+`neurodesk-agent-preflight` reports the installed guidance revision, differences
+from workspace `AGENTS.md` or `CLAUDE.md`, Lmod availability, and live Slurm
+node capacity and state. Its scheduler query has a 15-second timeout.
+Differences can represent project edits or an older seed; preflight never
+rewrites those files. Existing workspaces can run the command after an image
+upgrade to consult current environment guidance without replacing project rules.
+The command does not verify module payloads or account/QOS limits.
+
+The analysis contract requires preflight before submission and runner-supported
+waiting between job checks. Runners without a wait mechanism return outstanding
+job IDs and the next status command instead of chaining shell sleeps.
 
 ## OpenCode session pruning
 

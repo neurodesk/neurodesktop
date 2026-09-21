@@ -1,0 +1,22 @@
+#!/bin/bash
+set -eo pipefail
+
+source /opt/neurodesktop/agent_bash_env.sh
+
+guidance=/opt/AGENTS.md
+printf 'Installed guidance: %s\n' "$guidance"
+sed -n '/^Environment guidance revision:/p' "$guidance"
+for workspace_guidance in AGENTS.md CLAUDE.md; do
+    if [ -f "$workspace_guidance" ] && ! cmp -s "$guidance" "$workspace_guidance"; then
+        printf '%s differs from installed guidance; preserve project edits and consult %s for current environment instructions.\n' "$workspace_guidance" "$guidance"
+    fi
+done
+
+type module >/dev/null
+module --version
+printf '\nConfigured node capacity, not free resources; memory is MiB:\n'
+timeout 15s sinfo -o '%P %c %m %l %t'
+printf '\nCheck selected partition/account/QOS limits before submission.\n'
+printf 'Before module in every Bash call or retained job: source /opt/neurodesktop/agent_bash_env.sh\n'
+printf 'Wait using the runner-provided wait/background mechanism; inspect pending reasons before waiting.\n'
+printf 'Publish outputs with neurodesk-astra-provenance publish, and finish with neurodesk-astra-provenance check.\n'

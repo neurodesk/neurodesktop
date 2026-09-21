@@ -80,6 +80,20 @@ def load_source_module(name, installed, relative):
     return module
 
 
+def reload_browsing_context(bidi, context):
+    """Start a BiDi reload and leave application readiness to the caller.
+
+    Waiting for ``interactive`` makes the command fail when an application
+    supersedes the requested navigation while it starts.  ``none`` returns
+    once the reload commits; browser tests can then wait on their actual
+    user-visible readiness condition.
+    """
+    return bidi.request(
+        "browsingContext.reload",
+        {"context": context, "wait": "none"},
+    )
+
+
 def run_cmd(cmd, cwd=None, env=None, timeout=None):
     """Run *cmd* through the shell, returning ``(exit_code, combined_output)``.
 

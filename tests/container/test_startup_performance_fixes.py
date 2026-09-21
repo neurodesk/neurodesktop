@@ -6,7 +6,9 @@ before_notebook.sh OLLAMA guard — runs without a container and lives in
 xrdp service and the image's /opt/jovyan_defaults tree.
 """
 
-import socket
+import os
+from pathlib import Path
+import pytest
 import time
 
 from testlib import resolve_source, run_cmd
@@ -28,30 +30,21 @@ def _restore_home_defaults():
 
 
 def test_rdp_backend_reuses_published_listening_port(tmp_path):
-    """A re-run must adopt the port a previous run published, not probe past it.
-
-    Regression: with xrdp already listening on 3389, a second run picked 3390,
-    waited the full timeout for a port xrdp never rebinds, and dropped RDP
-    from the Guacamole mapping.
-    """
-    listener = socket.socket()
-    listener.bind(("127.0.0.1", 0))
-    listener.listen(1)
-    port = listener.getsockname()[1]
-
+    """Adopt the root-provisioned RDP port without probing past its listener."""
+    credentials = Path(f"/run/neurodesktop/rdp/{os.getuid()}")
+    if not (credentials / "port").exists():
+        pytest.skip("RDP requires root startup provisioning")
+    port = (credentials / "port").read_text().strip()
     runtime_dir = tmp_path / "runtime"
     runtime_dir.mkdir()
-    (runtime_dir / "rdp_port").write_text(f"{port}\n")
-
-    try:
-        start = time.time()
-        code, output = run_cmd(
-            f"bash {_ensure_rdp_backend()}",
-            env={"NEURODESKTOP_RUNTIME_DIR": str(runtime_dir), "NEURODESKTOP_RDP_PORT": ""},
-        )
-        elapsed = time.time() - start
-    finally:
-        listener.close()
+    # An unrelated cached listener must not override the root-provisioned port.
+    (runtime_dir / "rdp_port").write_text("12345\n")
+    start = time.time()
+    code, output = run_cmd(
+        f"bash {_ensure_rdp_backend()}",
+        env={"NEURODESKTOP_RUNTIME_DIR": str(runtime_dir)},
+    )
+    elapsed = time.time() - start
 
     assert code == 0, f"ensure_rdp_backend.sh failed: {output}"
     assert (runtime_dir / "rdp_port").read_text().strip() == str(port), (

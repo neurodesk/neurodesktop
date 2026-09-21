@@ -51,15 +51,7 @@ project="${NEURODESK_ASTRA_PROJECT:-${SLURM_SUBMIT_DIR:-${PWD}}}"
 universe="${NEURODESK_ASTRA_UNIVERSE:-}"
 jobs="${NEURODESK_ASTRA_JOBS:-1}"
 
-# environment_variables.sh is written for an interactive shell and references
-# variables this script has not set.
-set +u
-# shellcheck disable=SC1091
-source /opt/neurodesktop/environment_variables.sh
-set -u
-
-# shellcheck disable=SC1091
-source /usr/share/lmod/lmod/init/bash
+source /opt/neurodesktop/agent_bash_env.sh
 module purge
 for spec in ${NEURODESK_ASTRA_MODULES:-}; do
     case "${spec}" in

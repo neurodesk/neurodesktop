@@ -1,7 +1,7 @@
 [build-system]
 requires = [
-    "hatchling==1.27.0",
-    "hatch-jupyter-builder==0.9.1",
+    "hatchling==1.32.3",
+    "hatch-jupyter-builder==0.10.0",
     "jupyterlab>=4.0.0,<5.0.0a0",
 ]
 build-backend = "hatchling.build"
@@ -28,7 +28,7 @@ include = [
 "neurodesk_launcher/labextension" = "share/jupyter/labextensions/neurodesk-launcher"
 
 [tool.hatch.build.hooks.jupyter-builder]
-dependencies = ["hatch-jupyter-builder==0.9.1"]
+dependencies = ["hatch-jupyter-builder==0.10.0"]
 build-function = "hatch_jupyter_builder.npm_builder"
 ensured-targets = [
     "neurodesk_launcher/labextension/static/style.js",

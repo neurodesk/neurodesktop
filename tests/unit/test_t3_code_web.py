@@ -5,12 +5,69 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-from testlib import repo_path
+from testlib import reload_browsing_context, repo_path
 
 sys.path.insert(0, str(repo_path("extensions/t3-code-server")))
 pytest.importorskip("jupyter_server_proxy")
 from neurodesk_t3_code.web import rewrite_client, T3ProxyHandler
 from tornado.httputil import HTTPHeaders
+
+
+def test_browser_reload_commits_without_waiting_for_page_readiness():
+    """The T3 readiness poll, rather than BiDi, owns reload completion."""
+    requests = []
+
+    class Bidi:
+        def request(self, method, params):
+            requests.append((method, params))
+            return {"navigation": "reload", "url": "http://localhost/neurodesk-t3/"}
+
+    reload_browsing_context(Bidi(), "t3-frame")
+
+    assert requests == [(
+        "browsingContext.reload",
+        {"context": "t3-frame", "wait": "none"},
+    )]
+
+
+@pytest.mark.parametrize("method,site,path,allowed", [
+    ("GET", "same-origin", "assets/index-a.js", True),
+    ("GET", "same-origin", "assets/pullRequestDetail.logic-BVaUUc1S.js", True),
+    ("GET", "same-origin", "assets/BranchToolbar.logic-QOG-LgPV.js", True),
+    ("HEAD", "same-origin", "assets/main-a.js", True),
+    ("GET", "same-origin", "assets/style-a.css", True),
+    ("GET", "same-origin", "assets/worker-a.wasm", True),
+    ("GET", "same-origin", "manifest.webmanifest", True),
+    ("POST", "same-origin", "assets/index-a.js", False),
+    ("GET", "cross-site", "assets/index-a.js", False),
+    ("GET", "same-site", "assets/index-a.js", False),
+    ("GET", None, "assets/index-a.js", False),
+    ("GET", "same-origin", "api/session", False),
+    ("GET", "same-origin", "assets/preview.html", False),
+    ("GET", "same-origin", "assets/../api/file.js", False),
+])
+@pytest.mark.parametrize("prefix", ["/neurodesk-t3/", "/user/alice/neurodesk-t3/"])
+def test_hub_module_requests_keep_xsrf_checks_for_api_writes_and_other_origins(
+    monkeypatch, method, site, path, allowed, prefix
+):
+    from neurodesk_t3_code.web import JupyterHandler
+    from tornado.web import HTTPError
+
+    def require_token(handler):
+        raise HTTPError(403, "missing XSRF token")
+
+    monkeypatch.setattr(JupyterHandler, "check_xsrf_cookie", require_token)
+    handler = object.__new__(T3ProxyHandler)
+    handler.prefix = prefix
+    headers = HTTPHeaders({"Sec-Fetch-Mode": "cors"})
+    if site:
+        headers["Sec-Fetch-Site"] = site
+    handler.request = SimpleNamespace(method=method, path=prefix + path, headers=headers)
+    if allowed:
+        handler.check_xsrf_cookie()
+    else:
+        with pytest.raises(HTTPError):
+            handler.check_xsrf_cookie()
 
 
 @pytest.mark.parametrize("prefix", ["/neurodesk-t3/", "/user/alice/neurodesk-t3/"])
@@ -25,6 +82,17 @@ def test_shell_and_chunks_stay_under_jupyter_base(prefix):
     result = rewrite_client(loader, "text/javascript", "/assets/index-a.js", prefix).decode()
     assert f'return{json.dumps(prefix)}+e' in result
     assert f'new Worker(`{prefix}assets/worker-a.js`)' in result
+
+
+@pytest.mark.parametrize("crossorigin", ["", ' crossorigin', ' crossorigin="anonymous"'])
+def test_manifest_uses_jupyter_login_cookie(crossorigin):
+    shell = (
+        '<head><link rel="manifest"' + crossorigin + ' href="/manifest.webmanifest"></head>'
+        '<div id="root"><div id="boot-shell"></div></div>'
+    ).encode()
+    result = rewrite_client(shell, "text/html", "/", "/user/alice/neurodesk-t3/").decode()
+    assert '<link crossorigin="use-credentials" rel="manifest" href="/user/alice/neurodesk-t3/manifest.webmanifest">' in result
+    assert result.count("crossorigin") == 1
 
 
 def test_upstream_drift_fails_instead_of_serving_broken_ui():

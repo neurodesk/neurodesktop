@@ -4,7 +4,7 @@ Each assertion pins a deliberate build-time deletion so the saving cannot
 silently regress: the duplicate vendored Claude CLI inside claude-agent-sdk,
 the in-layer build-essential purge, sourcemap and bundled-test-suite
 stripping, the node headers, Tomcat's default webapps, and the single-copy
-NBI labextension. The build-essential purge itself is asserted in
+NBI and MyST labextensions. The build-essential purge itself is asserted in
 test_additional_components.py::test_build_toolchain_removed.
 """
 
@@ -13,6 +13,23 @@ import os
 import shutil
 import subprocess
 import sysconfig
+
+import pytest
+
+from testlib import first_existing_path
+
+
+def test_ghapi_public_credential_samples_are_placeholders():
+    """Import the shipped spec without token-shaped documentation examples."""
+    from ghapi.gh_spec import spec
+
+    operation = next(op for op in spec["ops"] if op["path"] == "/credentials/revoke")
+    assert operation["verb"] == "POST"
+    assert operation["body_params"] == ["credentials"]
+    assert operation["body_examples"]["default"]["value"]["credentials"] == [
+        "<example-personal-access-token>", "<example-fine-grained-token>",
+        "<example-oauth-token>", "<example-github-app-token>", "<example-refresh-token>",
+    ]
 
 
 def test_claude_agent_sdk_bundled_cli_removed():
@@ -93,19 +110,24 @@ def test_no_large_sourcemaps_remain():
     assert not offenders, f"large sourcemaps shipped: {offenders[:10]}"
 
 
-def test_nbi_labextension_is_single_sourced():
-    """The application-level NBI labextension is a symlink into the package
-    copy, so patch_nbi.py's patch reaches the only real bundle and the
-    ~24 MB build is not shipped twice."""
-    app_dir = (
-        "/opt/conda/share/jupyter/labextensions/@plmbr/notebook-intelligence"
-    )
+@pytest.mark.parametrize(
+    ("extension", "package"),
+    [
+        ("@plmbr/notebook-intelligence", "notebook_intelligence"),
+        ("jupyterlab-myst", "jupyterlab_myst"),
+    ],
+)
+def test_rebuilt_labextension_is_single_sourced(extension, package):
+    """The application symlink exposes the package's single rebuilt bundle."""
+    app_dir = str(first_existing_path(
+        f"/opt/conda/share/jupyter/labextensions/{extension}"
+    ))
     assert os.path.islink(app_dir), f"{app_dir} must be a symlink"
 
     target = os.path.realpath(app_dir)
     assert os.path.isdir(target), "symlink target missing"
-    assert "/site-packages/notebook_intelligence/" in target + "/", (
-        f"symlink must resolve into the notebook_intelligence package, got {target}"
+    assert f"/site-packages/{package}/" in target + "/", (
+        f"symlink must resolve into the {package} package, got {target}"
     )
     remote_entries = glob.glob(os.path.join(app_dir, "static", "remoteEntry*.js"))
     assert remote_entries, "remoteEntry bundle unreachable through the symlink"

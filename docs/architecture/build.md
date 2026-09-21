@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-16"
+last-reviewed: "2026-09-21"
 ---
 
 # Build-Time Behaviors
@@ -16,7 +16,25 @@ further build-time behaviors live with their subsystems:
 [config generation](webapps.md#build-time-config-generation) and
 [CVMFS setup](cvmfs.md#build-time-cvmfs-setup).
 
+## Publication
+
+The [image release workflows](../testing.md#image-release-validation) build
+candidates for a specific run and attempt, test and scan them, and then promote
+the same candidates to release tags. Native runtime checks cover both image
+architectures. A date tag never substitutes for building the run's source SHA.
+
 ## Layer Ordering and Cache
+
+The pip install layer runs
+[`sanitize_ghapi_examples.py`](../../scripts/sanitize_ghapi_examples.py) to replace
+five public credential-revocation examples in `ghapi/gh_spec.py` with descriptive
+placeholders. These are the sample values published in
+[GitHub's API documentation](https://docs.github.com/en/rest/credentials/revoke),
+which otherwise trigger Trivy secret findings in the source and its compiled
+cache. The cleanup matches only those exact examples, preserves API metadata,
+and removes only `gh_spec.*.pyc` cache files before the install layer is committed.
+Unexpected example changes fail the build for reassessment. Secret-scanning
+rules and release gates remain unchanged.
 
 The runtime stage is ordered by how often each layer's inputs change, because
 invalidating a layer re-runs every layer after it. Three bands, in order:
@@ -49,7 +67,7 @@ fresh direct solves; the build does not run an unbounded post-solve pip or
 conda upgrade that could replace the base image's tested Jupyter environment.
 Where two current direct packages conflict, the user-facing tool wins: both
 the main image environment and Lightcone's isolated tool environment install
-Snakemake 9.26.1 and hold its infrastructure dependency `packaging` at the
+Snakemake 9.27.0 and hold its infrastructure dependency `packaging` at the
 newest allowed release, 25.0.
 
 The ipyniivue patch is one deliberate exception: its version-coupled source is
@@ -57,34 +75,35 @@ mounted into the pip layer because that layer must replace the installed 5 MB
 bundle before it is committed. Applying the patch in the later local-file band
 would leave the unused package copy in image history.
 
-The pip layer also builds `jupyterlab-slurm` from an exact source revision.
-That source still names the retired `@jupyterlab/builder` package, so the build
-asserts the old declaration and replaces it with the current
-`@jupyter/builder` package before producing the wheel. The assertion turns an
-upstream fix or dependency change into an explicit image-build failure instead
-of silently carrying the workaround forward.
+The pip layer also builds `jupyterlab-slurm` 4.1.0 from an exact source
+revision. Upstream now uses `@jupyter/builder` directly. The build checks its
+declared builder range against the image's builder pin before producing the
+wheel; the previous package-rename workaround is no longer needed.
 
 Both Jupyter source builds use [build constraints](../../config/jupyter/build-constraints.txt)
-for the isolated Python build environment. Hatchling 1.32.1 cannot import
-hatch-jupyter-builder 0.9.1; the constraints retain a tested compatible pair.
-The launcher also declares that pair in its own build metadata so a checkout
-build has the same protection. Use pip's `--build-constraint`, not `-c`:
-ordinary runtime constraints do not constrain isolated build dependencies.
-Retire these pins only after fresh isolated wheel builds pass for both
-`jupyterlab-slurm` and `neurodesk-launcher`.
+for the isolated Python build environment. The toolchain pins Hatchling 1.32.3
+and hatch-jupyter-builder 0.10.0. The launcher also declares that pair in its
+own build metadata. Use pip's `--build-constraint`, not `-c`: ordinary runtime
+constraints do not constrain isolated build dependencies. Changes to these
+pins require fresh isolated wheel builds for both `jupyterlab-slurm` and
+`neurodesk-launcher`.
 
 ## Image Size Hygiene
 
 Layers are append-only: deleting or re-owning a file in a later layer only
 adds whiteouts or duplicates while the original layer keeps shipping the
-bytes. The image therefore follows three rules, asserted by
-`pytest /opt/tests/test_image_size_hygiene.py` in the built image:
+bytes. Checkout tests in `tests/unit/test_image_packaging_layers.py` check
+that cleanup happens before each layer ends. Built-image tests in
+`tests/container/test_image_size_hygiene.py` check the remaining runtime assets.
+The image follows these rules:
 
 - **Build-only packages are purged in the layer that needs them.** The pip
   layer runs as root, installs `build-essential` (gcc for sdist-only
   packages such as `traits`, which ships no cp313 wheel), runs the pip steps
   as `${NB_USER}` via `runuser`, and purges the toolchain before the layer
-  ends. Node's unused C headers are deleted in the nodejs install layer.
+  ends. The same layer installs and purges `libgpgme-dev` and
+  `libossp-uuid-dev`. Node's unused C headers are deleted in the nodejs
+  install layer.
 - **Ownership and modes are set where a tree is created.** `/usr/local/tomcat`
   is chowned and made world-readable in its install layer and in the WAR
   extraction layer; a whole-tree `chown -R` in a later layer would duplicate
@@ -97,6 +116,13 @@ bytes. The image therefore follows three rules, asserted by
   frontend is moved from its per-model anywidget trait into JupyterLab's static
   tree in its pip install layer, so the replaced package copy does not remain
   in image history.
+
+The pip layer removes the original NBI, MyST, collaboration, and document-provider
+frontend bundles before the later source builds replace them. NBI and MyST each
+expose one rebuilt package bundle through a symlink in Jupyter's extension
+directory. Guacamole's WAR is downloaded, migrated, extracted, patched, and
+deleted in one layer. Apptainer's unused CNI plugins are removed in its builder
+before the runtime tree is copied.
 
 ## ipyniivue Frontend Packaging
 

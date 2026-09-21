@@ -1,7 +1,28 @@
 import subprocess
 import os
 import pytest
-import time
+import shlex
+import json
+import logging
+import pwd
+from types import SimpleNamespace
+
+
+def test_dashboard_user_matches_slurm_process_identity(monkeypatch):
+    """The installed endpoint must not filter by a JupyterHub login name."""
+    from jupyterlab_slurm.handlers import UserFetchHandler
+
+    monkeypatch.setenv("USER", "unrelated-hub-login")
+    responses = []
+    handler = SimpleNamespace(
+        current_user=SimpleNamespace(username="unrelated-hub-login"),
+        _serverlog=logging.getLogger(__name__),
+        finish=lambda value: responses.append(json.loads(value)),
+        set_status=lambda status: pytest.fail(f"User endpoint returned {status}"),
+    )
+    UserFetchHandler.get(handler)
+    assert responses[0]["success"] is True
+    assert responses[0]["data"]["user"] == pwd.getpwuid(os.geteuid()).pw_name
 
 def run_cmd(cmd):
     """Utility to run a shell command and return its exit code and output."""
@@ -95,29 +116,40 @@ def test_srun_smoke_test():
     code, output = run_cmd(f"srun -I20 -N1 -n1 -p {partition_name} /bin/hostname")
     assert code == 0, f"srun smoke test failed: {output}"
 
-def test_sbatch_account_check():
-    """Verify sbatch submits correctly and does not fail with InvalidAccount."""
+def test_sbatch_completes_and_writes_output(tmp_path):
+    """Submission alone cannot detect a broken batch execution environment."""
     _skip_if_slurm_not_expected()
-    partition_name = os.environ.get("NEURODESKTOP_SLURM_PARTITION", "neurodesktop")
-    code, output = run_cmd(f"sbatch --parsable -p {partition_name} --time=00:01:00 --ntasks=1 --cpus-per-task=1 --mem=64M --wrap '/bin/true'")
-    assert code == 0, f"sbatch check failed to submit: {output}"
-    
-    job_id = output.split(";")[0].strip()
-    assert job_id.isdigit(), f"sbatch output did not provide a valid job ID: {output}"
-    
-    account_invalid = False
-    for _ in range(10):
-        code, status_out = run_cmd(f"squeue -h -j {job_id} -o '%T|%r'")
-        if not status_out:
-            break
-        
-        parts = status_out.split("|")
-        if len(parts) > 1 and parts[1] == "InvalidAccount":
-            account_invalid = True
-            break
-        
-        time.sleep(1)
-        
-    run_cmd(f"scancel {job_id}")
-    
-    assert not account_invalid, f"sbatch job {job_id} pending with Reason=InvalidAccount"
+    partition = os.environ.get("NEURODESKTOP_SLURM_PARTITION", "neurodesktop")
+    output_file = tmp_path / "batch-result.txt"
+    script = tmp_path / "job.sh"
+    script.write_text("#!/bin/bash\nset -euo pipefail\n"
+                      "source /opt/neurodesktop/agent_bash_env.sh\n"
+                      "module --version\n"
+                      "printf 'neurodesktop-batch-ok\\n' > "
+                      + shlex.quote(str(output_file)) + "\n")
+    process = subprocess.Popen(
+        ["sbatch", "--parsable", "--wait", "--job-name=neurodesktop-test",
+         "--partition", partition, "--time=00:01:00", "--ntasks=1",
+         "--cpus-per-task=1", "--mem=64M", "--output", str(tmp_path / "slurm-%j.out"),
+         str(script)],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    output = ""
+    try:
+        output, _ = process.communicate(timeout=180)
+        assert process.returncode == 0, f"Batch job did not complete successfully: {output}"
+        job_id = output.splitlines()[0].split(";")[0].strip()
+        assert job_id.isdigit(), output
+        assert output_file.read_text() == "neurodesktop-batch-ok\n"
+    except subprocess.TimeoutExpired:
+        process.kill()
+        output, _ = process.communicate(timeout=10)
+        pytest.fail(f"Batch job did not complete within 180s: {output}")
+    finally:
+        # sbatch emits its job ID before waiting. Cancel that specific job even
+        # if the wait timed out; never cancel another user's jobs by name.
+        for line in output.splitlines():
+            job_id = line.split(";")[0].strip()
+            if job_id.isdigit():
+                subprocess.run(["scancel", job_id], capture_output=True, timeout=10)
+                break

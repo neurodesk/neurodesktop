@@ -4,7 +4,7 @@ description: The astra/lc command-line tools, Lightcone agent skills and hooks
   for the bundled coding agents, and the read-only provenance viewer
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-10"
+last-reviewed: "2026-09-21"
 ---
 
 # ASTRA integration
@@ -16,6 +16,10 @@ focused tests are listed in
 [Testing](../testing.md#focused-tests-by-area).
 
 ## ASTRA and Lightcone command-line tools
+
+The [shared-environment investigation](../designs/image-packaging-and-lightcone.md)
+records the dependency comparison and validation needed to retire Lightcone's
+isolated environment.
 
 `astra` on the image `PATH` comes from the `astra-tools` install in the conda
 environment — the same one the viewer imports. The isolated Lightcone tool
@@ -35,6 +39,38 @@ dependency declaration, and adapts its one callback before building the tool.
 Both edits use exact anchors so a changed upstream release stops the build and
 forces the workaround to be reassessed. This keeps the stable Lightcone
 pipeline on the same current ASTRA release used by the viewer and agent skill.
+
+## Recording what ran
+
+`astra validate` checks a specification against the schema. It never compares
+a recipe's `container:` with anything that executed, and it does not require
+one at all, so a spec whose recipes shell out to pinned neuroimaging tools
+while naming no software validates clean. That leaves the declaration a typed
+assertion: an agent can write the wrong version and every validation still
+passes.
+
+`/usr/local/bin/neurodesk-astra-provenance` closes that from the execution
+side, and [the analysis contract](../../config/agents/AGENTS.md) requires both
+halves. Its `publish` subcommand performs the atomic temporary-to-final rename
+the contract already mandates, and writes a `<output>.prov.json` sidecar
+first, so a published artifact never exists without its provenance record. The
+sidecar holds the resolved binary path, the version that binary reported for
+itself, the loaded modules from `LOADEDMODULES`, the container image read out
+of the transparent-singularity wrapper or the `_LMFILES_` modulefiles, the
+producing script's digest, the hostname, and the Slurm job ID. It refuses to
+publish a tool it could not get a version out of rather than record a claim it
+did not observe.
+
+Its `check` subcommand walks the specification, resolves each output's
+effective `container:` through the analysis tree, and fails when a recipe with
+a `command` names no software, when nothing recorded its run, or when the
+declared string carries no version token the tool actually reported. Version
+tokens are compared whole, so `2.5.1` does not satisfy a declared `12.5.10`.
+That is the completion check agents run, and it needs no judgment.
+
+The two paths are mutually exclusive by design: the optional `lc` path below
+refuses a declared `container:` for the same reason the viewer paints a
+declared-image-plus-`runtime: none` manifest red.
 
 ## Executing an analysis with `lc`
 

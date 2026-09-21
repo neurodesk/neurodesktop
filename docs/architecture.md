@@ -4,7 +4,7 @@ description: Startup flow, services, directory layout, and the map of
   per-subsystem architecture pages
 parent: index.md
 status: current
-last-reviewed: "2026-09-16"
+last-reviewed: "2026-09-20"
 ---
 
 # Architecture
@@ -38,16 +38,32 @@ The startup sequence follows this order (per
 1. [`config/jupyter/start_notebook.sh`](../config/jupyter/start_notebook.sh)
    sets ownership permissions for the home directory.
 2. [`config/jupyter/before_notebook.sh`](../config/jupyter/before_notebook.sh)
-   mounts CVMFS, ranks the CVMFS servers by measured download throughput via
-   [`config/jupyter/cvmfs_server_select.sh`](../config/jupyter/cvmfs_server_select.sh),
-   and configures the environment. It also launches
+   configures the environment and launches the deferred worker for lazy
+   CVMFS and Slurm startup, the default. Eager mode runs each selected service
+   synchronously. The worker reads the live Jupyter server's runtime file and
+   probes its local HTTP endpoint, including its configured port and base path.
+   It starts CVMFS and Slurm independently after readiness, or after a
+   120-second timeout. CVMFS ranks servers by measured download throughput via
+   [`config/jupyter/cvmfs_server_select.sh`](../config/jupyter/cvmfs_server_select.sh).
+   The worker waits for both components before writing its completion marker;
+   that marker records completion of the attempts, not service health.
+   The hook also launches
    [`config/jupyter/print_access_url.sh`](../config/jupyter/print_access_url.sh)
    in the background, which waits until the Jupyter server answers HTTP and
    then reprints the access URL (read from the server's `jpserver-<pid>.json`
    runtime info file) at the end of the startup log, where the ServerApp's own
    token banner has already scrolled out of view.
 3. [`config/jupyter/jupyterlab_startup.sh`](../config/jupyter/jupyterlab_startup.sh)
-   starts JupyterLab and associated services. OpenCode database maintenance is
+   prepares the user's home before Jupyter starts. It validates workspace JSON
+   in one Python process and quarantines invalid files. Default restoration
+   preserves missing-file restoration, newer-default migration, and privileged
+   ownership repair without launching a process per destination path. SSH
+   default ACLs are applied once, and matplotlib cache permissions are set at
+   the cache root without traversing generated files.
+   Notebook Intelligence setup uses `--no-refresh` to write configuration
+   without probing saved server addresses. Interactive OpenCode changes still
+   refresh running Jupyter servers.
+   OpenCode database maintenance is
    deliberately excluded from this startup path; the manual recovery tool is
    described under
    [OpenCode session pruning](architecture/coding-agents.md#opencode-session-pruning).
