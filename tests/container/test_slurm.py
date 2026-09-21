@@ -2,6 +2,27 @@ import subprocess
 import os
 import pytest
 import shlex
+import json
+import logging
+import pwd
+from types import SimpleNamespace
+
+
+def test_dashboard_user_matches_slurm_process_identity(monkeypatch):
+    """The installed endpoint must not filter by a JupyterHub login name."""
+    from jupyterlab_slurm.handlers import UserFetchHandler
+
+    monkeypatch.setenv("USER", "unrelated-hub-login")
+    responses = []
+    handler = SimpleNamespace(
+        current_user=SimpleNamespace(username="unrelated-hub-login"),
+        _serverlog=logging.getLogger(__name__),
+        finish=lambda value: responses.append(json.loads(value)),
+        set_status=lambda status: pytest.fail(f"User endpoint returned {status}"),
+    )
+    UserFetchHandler.get(handler)
+    assert responses[0]["success"] is True
+    assert responses[0]["data"]["user"] == pwd.getpwuid(os.geteuid()).pw_name
 
 def run_cmd(cmd):
     """Utility to run a shell command and return its exit code and output."""

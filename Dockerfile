@@ -593,6 +593,7 @@ ARG JUPYTER_BUILDER_VERSION
 ARG JUPYTERLAB_SLURM_REF="8dccb39808f8a1b77712a9a5773a7d2601a56683"
 USER root
 RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch_ipyniivue.py,ro \
+    --mount=type=bind,source=config/jupyter/patch_jupyterlab_slurm.py,target=/tmp/patch_jupyterlab_slurm.py,ro \
     --mount=type=bind,source=config/jupyter/build-constraints.txt,target=/tmp/build-constraints.txt,ro \
     install -d -m 0755 -o root -g users /opt/neurodesktop \
     && apt-install-retry build-essential libgpgme-dev libossp-uuid-dev \
@@ -600,6 +601,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     && git -C /tmp/jupyterlab-slurm checkout --detach "${JUPYTERLAB_SLURM_REF}" \
     && test "$(git -C /tmp/jupyterlab-slurm rev-parse HEAD)" = "${JUPYTERLAB_SLURM_REF}" \
     && test "$(jq -r '.devDependencies["@jupyter/builder"]' /tmp/jupyterlab-slurm/package.json)" = "^${JUPYTER_BUILDER_VERSION}" \
+    && /opt/conda/bin/python /tmp/patch_jupyterlab_slurm.py /tmp/jupyterlab-slurm/jupyterlab_slurm/handlers.py \
     && chown -R ${NB_UID}:${NB_GID} /tmp/jupyterlab-slurm \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --build-constraint /tmp/build-constraints.txt --upgrade \
     datalad \
