@@ -61,9 +61,16 @@ def _loaded_modules():
     return [spec for spec in os.environ.get("LOADEDMODULES", "").split(":") if spec]
 
 
+#: A wrapper script and a modulefile are both small. Reading a bounded prefix
+#: keeps this from pulling a multi-hundred-megabyte ELF binary into memory
+#: when the resolved command turns out to be the real executable.
+TEXT_PREFIX_BYTES = 64 * 1024
+
+
 def _text_of(path):
     try:
-        return Path(path).read_text(encoding="utf-8", errors="replace")
+        with open(path, "rb") as handle:
+            return handle.read(TEXT_PREFIX_BYTES).decode("utf-8", errors="replace")
     except OSError:
         return ""
 
@@ -83,10 +90,11 @@ def _resolve_image(command_path):
     return None
 
 
-def _probe_version(command):
+def _probe_version(command, preferred_flag=None):
     """Ask *command* for its own version, trying each conventional flag."""
+    flags = ([preferred_flag] if preferred_flag else []) + list(VERSION_FLAGS)
     attempt = {"flag": None, "exit_code": None, "output": None, "versions": []}
-    for flag in VERSION_FLAGS:
+    for flag in flags:
         try:
             completed = subprocess.run(
                 [command, flag],
@@ -115,7 +123,7 @@ def _probe_version(command):
     return attempt
 
 
-def _describe_tool(command):
+def _describe_tool(command, preferred_flag=None):
     resolved = shutil.which(command)
     if resolved is None:
         return {
@@ -125,7 +133,7 @@ def _describe_tool(command):
             "versions": [],
             "image": None,
         }
-    probe = _probe_version(resolved)
+    probe = _probe_version(resolved, preferred_flag)
     return {
         "command": command,
         "path": resolved,
@@ -137,7 +145,7 @@ def _describe_tool(command):
     }
 
 
-def _build_record(output_id, artifact, temporary, tool, script):
+def _build_record(output_id, artifact, temporary, tool, version_flag, script):
     record = {
         "schema": SCHEMA,
         "output_id": output_id,
@@ -147,7 +155,7 @@ def _build_record(output_id, artifact, temporary, tool, script):
         "hostname": socket.gethostname(),
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         "modules": _loaded_modules(),
-        "tool": _describe_tool(tool),
+        "tool": _describe_tool(tool, version_flag),
         "script": None,
     }
     if script:
@@ -178,12 +186,16 @@ def publish(args):
             "result first, or pass --replace when the user asked for it."
         )
 
-    record = _build_record(args.output_id, final, temporary, args.tool, args.script)
+    record = _build_record(
+        args.output_id, final, temporary, args.tool, args.version_flag, args.script
+    )
     if not record["tool"]["versions"]:
         detail = record["tool"].get("error") or record["tool"].get("version_output")
         sys.exit(
             f"Could not read a version from '{args.tool}': {detail}\n"
-            "The sidecar would claim provenance it did not observe."
+            "The sidecar would claim provenance it did not observe. Pass "
+            "--version-flag=<flag> when it is not one of "
+            f"{', '.join(VERSION_FLAGS)}."
         )
 
     if not final.parent.is_dir():
@@ -312,6 +324,12 @@ def main(argv=None):
         "--tool",
         required=True,
         help="the command that produced it, asked for its own version",
+    )
+    publisher.add_argument(
+        "--version-flag",
+        help="tried before the conventional flags, for a tool that spells it "
+        "differently; pass it as --version-flag=-v so argparse reads the "
+        "leading dash as part of the value",
     )
     publisher.add_argument("--script", help="the script that ran it")
     publisher.add_argument(

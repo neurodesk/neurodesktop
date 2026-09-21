@@ -164,6 +164,44 @@ def test_publish_reads_the_version_from_a_tool_that_exits_non_zero(tmp_path):
     assert record["tool"]["version_exit_code"] == 1
 
 
+def test_publish_accepts_a_tool_that_spells_the_flag_differently(tmp_path):
+    """dcm2niix answers `-v`, which is `--verbose` almost everywhere else."""
+    project = make_project(tmp_path, ONE_OUTPUT)
+    tool = tmp_path / "bin" / "dcm2niix"
+    (tmp_path / "bin").mkdir(parents=True, exist_ok=True)
+    tool.write_text(
+        '#!/bin/bash\n'
+        'if [ "$1" = "-v" ]; then echo "dcm2niiX version v1.0.20240202"; exit 0; fi\n'
+        'echo "unknown option $1" >&2\nexit 1\n',
+        encoding="utf-8",
+    )
+    tool.chmod(0o755)
+    temporary = project / "derivatives" / "brain.nii.gz.tmp"
+    temporary.write_text("artifact bytes", encoding="utf-8")
+
+    result = run_provenance(
+        "publish",
+        str(temporary),
+        str(project / "derivatives" / "brain.nii.gz"),
+        "--output-id",
+        "brain",
+        "--tool",
+        "dcm2niix",
+        # The `=` form is required: argparse reads a bare `-v` as an option.
+        "--version-flag=-v",
+        path_prefix=str(tmp_path / "bin"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    record = json.loads(
+        (project / "derivatives" / "brain.nii.gz.prov.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert record["tool"]["versions"] == ["1.0.20240202"]
+    assert record["tool"]["version_command"] == "dcm2niix -v"
+
+
 def test_publish_refuses_a_tool_it_cannot_question(tmp_path):
     """A sidecar must never claim provenance the helper did not observe."""
     project = make_project(tmp_path, ONE_OUTPUT)
@@ -184,6 +222,7 @@ def test_publish_refuses_a_tool_it_cannot_question(tmp_path):
 
     assert result.returncode != 0
     assert "Could not read a version" in result.stderr
+    assert "--version-flag" in result.stderr
     assert not (project / "derivatives" / "brain.nii.gz").exists()
     assert not (project / "derivatives" / "brain.nii.gz.prov.json").exists()
     assert temporary.exists(), "a refused publish must leave the attempt intact"

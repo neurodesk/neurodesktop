@@ -84,8 +84,11 @@ initializer. Do not rely on the tool shell loading an rc file or inheriting
 
    It records the resolved binary, the version that binary reported, the
    loaded modules, the container image behind them, the script digest, the
-   host, and the job ID. It refuses to publish a tool whose version it could
-   not read, and refuses an existing final path unless you pass `--replace`.
+   host, and the job ID. It tries `--version`, `-version`, and `-V`; for a
+   tool that spells it otherwise add `--version-flag=-v`, with the `=` so the
+   leading dash is read as the value. It refuses to publish a tool whose
+   version it could not read, and refuses an existing final path unless you
+   pass `--replace`.
 7. **Size jobs against the selected partition.** The preflight runs
    `sinfo -o "%P %c %m %l %t"`. CPU count and memory describe nodes, with memory in
    MiB; they do not expose every partition or account limit. Inspect
