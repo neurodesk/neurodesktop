@@ -43,10 +43,9 @@ async function panelFor(response) {
   const panel = exported.createConnectPanel({ shell });
   await new Promise(resolve => setImmediate(resolve));
   await new Promise(resolve => setImmediate(resolve));
-  const links = [...panel.content.node.querySelectorAll('a')];
-  const connections = links.find(link => link.textContent.includes(PAGE));
+  const [authorize, connections] = [...panel.content.node.querySelectorAll('a')];
   panel.dispose();
-  return { node: panel.content.node, connections };
+  return { node: panel.content.node, authorize, connections };
 }
 function status(extra) {
   return { ok: true, json: async () => ({
@@ -57,10 +56,12 @@ function status(extra) {
 }
 (async () => {
   const limited = await panelFor(status({ connections_url: PAGE }));
+  assert.equal(limited.authorize.href, 'https://accounts.t3.codes/device',
+    'the device-code link stays first, so the second link is the connections link');
   assert.ok(limited.connections, 'the connections link must exist in the panel');
   assert.equal(limited.connections.hidden, false, 'a tunnel failure must show the connections link');
   assert.equal(limited.connections.href, PAGE);
-  assert.match(limited.connections.textContent, /Manage your T3 connections/);
+  assert.equal(limited.connections.textContent, `Manage your T3 connections at ${PAGE}`);
   assert.match(limited.node.querySelector('[role="status"]').textContent,
     /relay is not reachable yet/, 'the failure itself stays in the status line');
 
