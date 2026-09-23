@@ -243,7 +243,11 @@ to `/usr/local/bin/cloudflared` so older per-user cached clients cannot override
 the security-maintained image copy. The panel waits for authorization, waits for
 active chats to finish before restarting only T3, then checks that the public
 tunnel reaches T3. Routing can take several minutes. Only a successful live
-probe is shown as **Ready**. If system DNS cannot resolve a `*.t3coderelay.com` tunnel hostname, the
+probe is shown as **Ready**. A tunnel that never becomes reachable ends with a
+saved link and an error that names the T3 account default of 3 connected
+environments. That error and the reported quota error both show an underlined
+link to `https://app.t3.codes/settings/general`, where a connection that is no
+longer used can be removed. If system DNS cannot resolve a `*.t3coderelay.com` tunnel hostname, the
 credential-free readiness probe retries through Cloudflare DNS-over-HTTPS.
 Only public IPv4 addresses are accepted, the original HTTPS hostname and
 certificate validation are retained, and the system DNS configuration is
@@ -263,6 +267,9 @@ support, then Retry. Signing in again does not free a tunnel. The supervisor
 drains T3 output without saving or forwarding raw logs, recognizes only the
 pinned quota error wording, and retains only its numeric limit. This error is
 cleared on the next T3 process start so Retry can recover after capacity is freed.
+The connections link is a fixed client-side destination. The panel shows it only
+when the server sets `connections_url` to that exact address, and never builds a
+link or markup from server text.
 
 All controls use Jupyter authentication and XSRF protection. Device codes stay
 in memory and responses are not cached. OAuth credentials stay in T3's private

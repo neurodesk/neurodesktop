@@ -9,7 +9,10 @@ from testlib import repo_path
 
 sys.path.insert(0, str(repo_path('extensions/t3-code-server')))
 from neurodesk_t3_code import supervisor
-from neurodesk_t3_code.connect import ConnectManager
+from neurodesk_t3_code import connect as connect_module
+from neurodesk_t3_code.connect import ConnectError, ConnectManager
+
+CONNECTIONS_PAGE = 'https://app.t3.codes/settings/general'
 
 
 @pytest.mark.parametrize('value,expected', [
@@ -33,6 +36,32 @@ def test_quota_message_uses_actual_limit_without_waiting_for_routing():
         assert 'T3 support' in manager.message
         assert 'Retry' in manager.message
         assert 'sign-in is saved' in manager.message
+        assert manager.snapshot()['connections_url'] == CONNECTIONS_PAGE
+    asyncio.run(scenario())
+
+
+def test_unreachable_relay_names_the_connection_limit_and_its_settings_page(monkeypatch):
+    monkeypatch.setattr(connect_module, 'ROUTE_TIMEOUT', 0)
+    async def scenario():
+        manager = ConnectManager(SimpleNamespace(connect_tunnel_limit=None))
+        await manager._run(manager._wait_reachable)
+        assert manager.state == 'error'
+        assert 'only 3 connected environments' in manager.message
+        assert manager.snapshot()['connections_url'] == CONNECTIONS_PAGE
+    asyncio.run(scenario())
+
+
+def test_unrelated_failures_do_not_advertise_the_connections_page():
+    async def scenario():
+        manager = ConnectManager(SimpleNamespace())
+        async def limited():
+            raise ConnectError('At capacity.', connections_url=CONNECTIONS_PAGE)
+        async def unrelated():
+            raise ConnectError('The relay client is missing from this image.')
+        await manager._run(limited)
+        assert manager.snapshot()['connections_url'] == CONNECTIONS_PAGE
+        await manager._run(unrelated)
+        assert manager.snapshot()['connections_url'] is None
     asyncio.run(scenario())
 
 
