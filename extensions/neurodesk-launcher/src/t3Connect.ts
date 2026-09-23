@@ -13,7 +13,10 @@ interface Status {
   expires_at: number | null;
   label: string | null;
   linked: boolean;
+  connections_url: string | null;
 }
+
+const CONNECTIONS_PAGE = 'https://app.t3.codes/settings/general';
 
 export function createConnectPanel(app: JupyterFrontEnd): MainAreaWidget<Widget> {
   const node = document.createElement('div');
@@ -36,9 +39,16 @@ export function createConnectPanel(app: JupyterFrontEnd): MainAreaWidget<Widget>
   authorize.style.cssText = 'color:var(--jp-content-link-color, #0066cc);text-decoration:underline;cursor:pointer';
   authorize.target = '_blank';
   authorize.rel = 'noopener noreferrer';
+  const connections = document.createElement('a');
+  connections.hidden = true;
+  connections.textContent = `Manage your T3 connections at ${CONNECTIONS_PAGE}`;
+  connections.style.cssText = 'color:var(--jp-content-link-color, #0066cc);text-decoration:underline;cursor:pointer';
+  connections.target = '_blank';
+  connections.rel = 'noopener noreferrer';
+  connections.href = CONNECTIONS_PAGE;
   const actions = document.createElement('div');
   actions.style.cssText = 'display:flex;gap:12px;margin-top:20px';
-  node.append(heading, intro, status, label, code, expiry, authorize, actions);
+  node.append(heading, intro, status, label, code, expiry, authorize, connections, actions);
   const content = new Widget({ node });
   const panel = new MainAreaWidget({ content });
   panel.id = 'neurodesk-t3-connect';
@@ -69,6 +79,7 @@ export function createConnectPanel(app: JupyterFrontEnd): MainAreaWidget<Widget>
     // Never turn arbitrary server text into markup or a navigation destination.
     authorize.hidden = !value.code || value.verification_url !== 'https://accounts.t3.codes/device';
     authorize.href = 'https://accounts.t3.codes/device';
+    connections.hidden = value.connections_url !== CONNECTIONS_PAGE;
     const busy = ['starting', 'authorizing', 'waiting_idle', 'restarting', 'connecting', 'disconnecting'].includes(value.state);
     buttons.get('link')!.hidden = value.state !== 'idle';
     buttons.get('retry')!.hidden = !['error', 'expired'].includes(value.state);
@@ -93,6 +104,7 @@ export function createConnectPanel(app: JupyterFrontEnd): MainAreaWidget<Widget>
     } catch (error) {
       if (!panel.isDisposed) {
         status.textContent = error instanceof Error ? error.message : 'Connection check failed.';
+        connections.hidden = true;
         buttons.get('retry')!.hidden = false;
       }
     } finally {

@@ -26,12 +26,18 @@ from .supervisor import server_environment
 
 RELAY = 'https://relay.t3.codes'
 DEVICE_PAGE = 'https://accounts.t3.codes/device'
+CONNECTIONS_PAGE = 'https://app.t3.codes/settings/general'
+DEFAULT_TUNNEL_LIMIT = 3
 AUTH_TIMEOUT = 660
 ROUTE_TIMEOUT = 240
 
 
 class ConnectError(Exception):
     """A deliberately credential-free user-facing failure."""
+
+    def __init__(self, message, *, connections_url=None):
+        super().__init__(message)
+        self.connections_url = connections_url
 
 
 class RoutePending(ConnectError):
@@ -89,6 +95,7 @@ class ConnectManager:
         self.expires_at = None
         self.label = None
         self.linked = False
+        self.connections_url = None
         self.last_checked = 0
         self.task = None
         self.lock = asyncio.Lock()
@@ -122,10 +129,11 @@ class ConnectManager:
         return dict(state=self.state, message=self.message, code=self.code,
                     verification_url=DEVICE_PAGE if self.code else None,
                     expires_at=self.expires_at, label=self.label, linked=self.linked,
-                    last_checked=self.last_checked)
+                    connections_url=self.connections_url, last_checked=self.last_checked)
 
     def set_state(self, state, message):
         self.state, self.message = state, message
+        self.connections_url = None
         if state != 'authorizing':
             self.code = self.expires_at = None
 
@@ -253,7 +261,8 @@ class ConnectManager:
                     f'This T3 account has reached its limit of {limit} managed tunnels. '
                     'Disconnect an unused environment from T3 Connect, or ask T3 support '
                     'to increase the account limit, then choose Retry. '
-                    'Your sign-in is saved; signing in again will not free a tunnel.'
+                    'Your sign-in is saved; signing in again will not free a tunnel.',
+                    connections_url=CONNECTIONS_PAGE,
                 )
             if self._name_pending and not self.active_chats():
                 await self._restart()
@@ -271,7 +280,13 @@ class ConnectManager:
             await asyncio.sleep(3)
         if dns_failed:
             raise ConnectError('The link is saved, but Neurodesktop cannot resolve the relay hostname. Ask your administrator to check cluster DNS. The connection may already work from your T3 app.')
-        raise ConnectError('The link is saved, but the relay is not reachable yet. Retry checks the saved link and refreshes authorization if needed.')
+        raise ConnectError(
+            'The link is saved, but the relay is not reachable yet. Retry checks the saved '
+            'link and refreshes authorization if needed. A T3 account allows only '
+            f'{DEFAULT_TUNNEL_LIMIT} connected environments by default, so an account that is '
+            'already full cannot add this one.',
+            connections_url=CONNECTIONS_PAGE,
+        )
 
     async def _link(self):
         saved = await self.saved_status()
@@ -321,6 +336,7 @@ class ConnectManager:
             self.set_state('expired', 'The request timed out or the code expired. Choose Retry for a new attempt.')
         except ConnectError as error:
             self.set_state('error', str(error))
+            self.connections_url = error.connections_url
         except Exception:
             # Never expose subprocess output, HTTP errors with headers, or secrets.
             self.set_state('error', 'Could not complete T3 Connect setup. Please retry.')

@@ -59,7 +59,7 @@ Running `tests/unit` needs Python 3.12, Node.js 24, `pytest`, `httpx`,
 tests stub `curl` but use the real `jq` to parse responses.
 
 The launcher DOM regressions, including T3 iframe file-link capture, reloads,
-and disposal, also require jsdom and TypeScript. Install them
+disposal, and the T3 Connect panel, also require jsdom and TypeScript. Install them
 in a temporary directory and expose that directory when running the suite:
 
 ```bash
