@@ -432,7 +432,7 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull container image
-        run: docker pull "$IMAGE_REF"
+        run: bash scripts/retry.sh docker pull "$IMAGE_REF"
       - name: Initialize CVMFS
         if: matrix.profile.needs_cvmfs
         uses: cvmfs-contrib/github-action-cvmfs@10197e000cc0add8e54ac4fb73d3ed44e2de72b4 # v5.5
@@ -590,7 +590,7 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull container image
-        run: docker pull "$IMAGEID:run-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}"
+        run: bash scripts/retry.sh docker pull "$IMAGEID:run-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}"
       - name: Container image scan (${{ matrix.arch }})
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

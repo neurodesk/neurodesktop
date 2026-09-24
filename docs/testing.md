@@ -96,7 +96,9 @@ run there:
 
 Production, test, and development image workflows build native amd64 and arm64
 candidates tagged `run-<run_id>-<run_attempt>-<arch>`. Runtime tests and critical
-vulnerability scans consume those candidates. Only after every required job
+vulnerability scans consume those candidates, pulling them through
+[`scripts/retry.sh`](../scripts/retry.sh) so a transient registry error does not
+fail validation. Only after every required job
 passes does `merge-manifests` promote the architecture, date, and `latest` tags
 and copy them to configured registries. Failed candidates remain available for
 diagnosis under their run tags; they do not replace release tags.

@@ -62,6 +62,9 @@ def test_code_server_private_socket_serves_owner_and_rejects_other_uid():
                 log.flush()
                 log.seek(0)
                 assert endpoint.exists(), log.read()
+                # code-server applies --socket-mode only after listen() creates the socket.
+                while endpoint.stat().st_mode & 0o777 != 0o600 and time.monotonic() < deadline:
+                    time.sleep(0.1)
                 assert endpoint.stat().st_mode & 0o777 == 0o600
                 assert root.stat().st_mode & 0o777 == 0o700
                 with socket.socket(socket.AF_UNIX) as client:

@@ -16,7 +16,8 @@ def test_agent_tool_shell_discovers_and_loads_a_module(tmp_path, login):
             . /opt/neurodesktop/agent_shell_setup.sh
             exec bash {"--login" if login else "--noprofile --norc"} -c '
                 set -euo pipefail
-                module use "$1"
+                # Spider walks every MODULEPATH entry; a cold CVMFS tree can outlast the timeout.
+                export MODULEPATH="$1"
                 module spider neurodesk-shell-probe/1.0
                 module load neurodesk-shell-probe/1.0
                 test "$NEURODESK_SHELL_PROBE" = loaded
