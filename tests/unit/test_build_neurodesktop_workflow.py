@@ -224,3 +224,53 @@ def test_image_version_and_publish_tag_share_one_build_timestamp():
                           if step.get("name") == "Set environment variables")
             assert 'BUILDDATE="${{ needs.prepare-build.outputs.build_date }}"' in script
             assert "$(date" not in script
+
+
+def test_candidate_pulls_retry_a_transient_registry_failure(tmp_path):
+    fake_docker = tmp_path / "docker"
+    fake_docker.write_text(
+        """#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$DOCKER_CALLS"
+if [ ! -e "$DOCKER_FAILED_ONCE" ]; then
+    touch "$DOCKER_FAILED_ONCE"
+    echo 'Error response from daemon: Head "https://ghcr.io/v2/x/manifests/y": EOF' >&2
+    exit 1
+fi
+"""
+    )
+    fake_docker.chmod(0o755)
+    expressions = {
+        "${{ github.run_id }}": "123",
+        "${{ github.run_attempt }}": "1",
+        "${{ matrix.arch }}": "amd64",
+    }
+    for path in IMAGE_TEST_WORKFLOWS:
+        workflow = yaml.safe_load(path.read_text())
+        for job in ("test-image", "scan-image"):
+            steps = workflow["jobs"][job]["steps"]
+            script = next(step["run"] for step in steps if step.get("name") == "Pull container image")
+            for expression, value in expressions.items():
+                script = script.replace(expression, value)
+            calls = tmp_path / f"{path.stem}-{job}.calls"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{tmp_path}{os.pathsep}{env['PATH']}",
+                    "DOCKER_CALLS": str(calls),
+                    "DOCKER_FAILED_ONCE": str(tmp_path / f"{path.stem}-{job}.failed"),
+                    "IMAGEID": "ghcr.io/neurodesk/candidate",
+                    "IMAGE_REF": "ghcr.io/neurodesk/candidate:run-123-1-amd64",
+                    "RETRY_DELAY": "0",
+                }
+            )
+
+            result = subprocess.run(
+                ["bash", "-e", "-c", script],
+                capture_output=True,
+                cwd=repo_path("."),
+                env=env,
+                text=True,
+            )
+
+            assert result.returncode == 0, (path.name, job, result.stderr)
+            assert calls.read_text() == "pull ghcr.io/neurodesk/candidate:run-123-1-amd64\n" * 2
