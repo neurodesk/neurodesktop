@@ -14,6 +14,7 @@ import importlib.util
 import os
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 
 TESTS_DIR = Path(__file__).resolve().parent
 
@@ -78,6 +79,15 @@ def load_source_module(name, installed, relative):
     spec.loader.exec_module(module)
     module.SOURCE_PATH = path
     return module
+
+
+def assert_jupyterlab_url(current_url, lab_url):
+    """Allow Lab's document routes while rejecting navigation outside this app."""
+    current = urlsplit(current_url)
+    lab = urlsplit(lab_url)
+    assert (current.scheme, current.netloc) == (lab.scheme, lab.netloc), current_url
+    lab_path = lab.path.rstrip("/")
+    assert current.path == lab_path or current.path.startswith(lab_path + "/"), current_url
 
 
 def reload_browsing_context(bidi, context):

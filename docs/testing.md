@@ -169,7 +169,7 @@ non-obvious tiers protect.
 | ASTRA run provenance sidecars and the spec agreement check | `pytest tests/unit/test_astra_provenance.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
 | Jupyter AI, ACP personas, collaboration/widget compatibility and server patches | see [below](#jupyter-ai-and-acp-personas) | `pytest /opt/tests/test_astra_jupyter_ai_image.py /opt/tests/test_widget_compatibility_image.py` |
 | Notebook Intelligence / MyST and standalone RISE | `pytest tests/unit/test_nbi_settings_patch.py tests/unit/test_myst_build_workaround.py tests/unit/test_jupyterlab_rise_patch.py` | `pytest /opt/tests/test_nbi_labextension_patch.py /opt/tests/test_rise_slides_image.py` |
-| Launcher extension, workspace link routing | `pytest tests/unit/test_workspace_link_routing.py` | `pytest /opt/tests/test_workspace_link_routing_image.py` |
+| Launcher extension, workspace link routing | `pytest tests/unit/test_workspace_link_routing.py tests/unit/test_jupyterlab_url.py` | `pytest /opt/tests/test_workspace_link_routing_image.py` |
 | Slurm dashboard launcher and user identity | `pytest tests/unit/test_launcher_webapps.py tests/unit/test_slurm_user_identity.py tests/unit/test_jupyterlab_slurm_build.py` | `pytest /opt/tests/test_slurm.py /opt/tests/test_workspace_link_routing_image.py` |
 | Subscription agent workflows and failure reporting | `pytest tests/unit/test_agentic_*.py tests/unit/test_report_workflow_failure.py` | Worker Docker sandbox probe |
 
@@ -277,7 +277,12 @@ stripping and VM modules. Jupyter and DOM dependencies are substituted, while
 path mapping, click handling, line references, viewer selection, directory
 routing, and error reporting execute unchanged. The image tier opens JupyterLab
 at both root and user-prefixed URLs, clicks absolute workspace links, and
-requires Markdown and HTML viewers to open in the main panel without navigation.
+requires Markdown and HTML viewers to open in the main panel. JupyterLab may
+update the address bar to a document route such as `/lab/tree/a%20report.md`.
+The URL must stay on the same origin and within the configured `/lab` route,
+including its user prefix. Raw filesystem URLs such as `/home/jovyan/...` fail
+this check. `tests/unit/test_jupyterlab_url.py` covers accepted document routes
+and rejected navigation targets.
 It also opens the Slurm dashboard through its Neurodesk launcher tile, checking
 its label and icon on two launcher renders against the installed Slurm extension.
 This browser test configures `SlurmCommandPaths.squeue_path` as `/usr/bin/true`

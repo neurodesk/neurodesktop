@@ -12,7 +12,7 @@ import pytest
 
 from test_rise_slides_image import _BidiSession, _unused_port, _wait_for_server, _stop
 
-from testlib import run_cmd
+from testlib import assert_jupyterlab_url, run_cmd
 
 
 LABEXTENSION = Path(
@@ -181,7 +181,6 @@ def test_clicking_workspace_links_opens_rendered_documents(tmp_path, base):
             evaluate(bidi, context,
                      "window.jupyterapp.activatePlugin('neurodesk-launcher:workspace-links').then(() => true)")
             check_slurm_launcher(bidi, context)
-            original_url = evaluate(bidi, context, "location.href")
             for name, reference, rendered in [
                 ("a report.md", ":12", "Boolean(window.jupyterapp.shell.currentWidget?.node.querySelector('h1')?.textContent.includes('Workspace link opened'))"),
                 ("report.html", "", "Boolean(window.jupyterapp.shell.currentWidget?.node.querySelector('iframe'))"),
@@ -206,7 +205,7 @@ def test_clicking_workspace_links_opens_rendered_documents(tmp_path, base):
                 else:
                     pytest.fail(f"Workspace link did not open {name} in its renderer: " +
                                 str(evaluate(bidi, context, "document.body.innerText"))[-2000:])
-                assert evaluate(bidi, context, "location.href") == original_url
+                assert_jupyterlab_url(evaluate(bidi, context, "location.href"), prefix + "lab")
         finally:
             if bidi:
                 bidi.close()
