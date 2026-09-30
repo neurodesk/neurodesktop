@@ -464,6 +464,36 @@ def test_cached_primary_slowdown_triggers_reprobe(tmp_path, mock_repo):
         server.server_close()
 
 
+def test_cached_fallback_chunk_failure_triggers_reprobe(tmp_path, mock_repo, fast_server):
+    class Fallback(_QuietHandler):
+        fail_chunks = False
+
+        def do_GET(self):
+            time.sleep(0.02)
+            if self.fail_chunks and urlparse(self.path).path.endswith("P"):
+                self.send_error(503)
+            else:
+                super().do_GET()
+
+    server, base = _start_server(mock_repo, Fallback)
+    try:
+        pool = f"{fast_server} {base}"
+        proc, config = run_select(tmp_path, pool)
+        assert proc.returncode == 0, proc.stdout
+        assert _configured_server_urls(config) == [
+            fast_server + "/cvmfs/@fqrn@", base + "/cvmfs/@fqrn@",
+        ]
+        Fallback.fail_chunks = True
+        proc, config = run_select(tmp_path, pool)
+        assert proc.returncode == 0, proc.stdout
+        assert "Cached fallback failed its transfer check" in proc.stdout
+        assert "Stage 1" in proc.stdout
+        assert _configured_server_urls(config) == [fast_server + "/cvmfs/@fqrn@"]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_legacy_cache_is_data_not_executable_shell(tmp_path, fast_server):
     marker = tmp_path / "executed"
     (tmp_path / "selection.env").write_text(

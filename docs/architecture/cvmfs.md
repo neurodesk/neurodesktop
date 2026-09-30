@@ -64,8 +64,8 @@ endpoint and retain it as a fallback if its data checks succeed. With
 
 Rankings are cached in `~/.cache/neurodesktop/cvmfs-selection.env` for one day.
 At startup, the primary must complete both hash-verified samples at at least half
-its recorded speed. The first fallback competes on the same objects; a fallback
-more than 20% faster triggers a full re-ranking. The primary must also serve a
+its recorded speed. The first fallback must also complete both objects; a failed
+transfer or a fallback more than 20% faster triggers a full re-ranking. The primary must also serve a
 valid manifest. Old cache formats, changed candidate pools, expired caches, and
 failed checks trigger a new benchmark. Cache contents are parsed as data, never
 executed as shell commands. Config and cache writes are atomic. Eager startup

@@ -300,6 +300,9 @@ def reuse_cache(benchmark, meta):
     # when the cached primary still wins on the representative data workload.
     if len(meta["bases"]) > 1:
         challenger = speed(meta["bases"][1])
+        if not challenger:
+            log("Cached fallback failed its transfer check; re-ranking.")
+            return False
         if challenger > primary * 1.2:
             log("Cached fallback is over 20% faster than the primary; re-ranking.")
             return False
