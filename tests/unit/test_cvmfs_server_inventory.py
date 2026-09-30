@@ -41,8 +41,10 @@ def test_replica_checks_wait_for_a_complete_authoritative_repository():
     assert "strategy" not in origin_job
     assert not origin_job.get("continue-on-error", False)
     assert not origin_step.get("continue-on-error", False)
-    assert jobs["test_cvmfs"]["needs"] == "test_cvmfs_origin"
-    assert jobs["test_cvmfs_1_2_3"]["needs"] == "test_cvmfs_origin"
+    for job_name in ("test_cvmfs", "test_cvmfs_1_2_3"):
+        job = jobs[job_name]
+        assert job["needs"] == "test_cvmfs_origin"
+        assert job.get("if", "success()") == "success()"
 
     replicas = jobs["test_cvmfs"]["strategy"]["matrix"]["cvmfs-servers"]
     assert ORIGIN not in replicas
