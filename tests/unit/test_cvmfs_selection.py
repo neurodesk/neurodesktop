@@ -575,3 +575,29 @@ def test_catalog_only_repository_can_still_be_ranked(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_failed_finalists_are_replaced_by_remaining_measured_mirrors(tmp_path, mock_repo):
+    class BrokenChunks(_QuietHandler):
+        def do_GET(self):
+            if urlparse(self.path).path.endswith("P"):
+                self.send_error(503)
+            else:
+                super().do_GET()
+
+    class Working(_QuietHandler):
+        def do_GET(self):
+            if urlparse(self.path).path.endswith("C"):
+                time.sleep(0.05)
+            super().do_GET()
+
+    servers = [_start_server(mock_repo, BrokenChunks) for _ in range(5)]
+    servers.append(_start_server(mock_repo, Working))
+    try:
+        proc, config = run_select(tmp_path, " ".join(base for _, base in servers))
+        assert proc.returncode == 0, proc.stdout
+        assert _configured_server_urls(config) == [servers[-1][1] + "/cvmfs/@fqrn@"]
+    finally:
+        for server, _ in servers:
+            server.shutdown()
+            server.server_close()

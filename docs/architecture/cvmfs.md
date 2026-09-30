@@ -35,7 +35,8 @@ Selection proceeds in three stages:
    discovered from the catalog. Prefer a small and a large file chunk; inspect
    at most three catalogs and supplement with the root catalog if chunks are
    unavailable. Rank by total verified bytes divided by total transfer time.
-   A failed, truncated, or corrupt transfer disqualifies the finalist.
+   A failed, truncated, or corrupt transfer disqualifies the finalist. Fill
+   missing fallback slots from the remaining measured destinations.
 
 Each request has a unique query string to avoid reusing a CDN edge response.
 This does not flush origin caches. All HTTP probes use direct connections,

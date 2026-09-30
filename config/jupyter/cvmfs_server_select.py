@@ -327,6 +327,26 @@ def select(benchmark, hosts):
             score = sum(r["bytes"] for r in results) / sum(r["seconds"] for r in results)
             ranked.append((score, base))
             log(f"  {base}: verified data {score / 1024:.0f} KiB/s")
+    # A catalog can be healthy while its data backend is unavailable. Fill
+    # missing fallback slots from the rest of the measured pool, and keep
+    # looking for a working direct origin if CDN finalists are all that survived.
+    for _, row in screened:
+        if len(ranked) >= 4 and any(not is_cdn(base) for _, base in ranked):
+            break
+        base = row["base"]
+        if base in measurements or (len(ranked) >= 4 and is_cdn(base)):
+            continue
+        results = []
+        for obj in samples:
+            result = benchmark.sample(base, obj)
+            if not result:
+                log(f"  {base}: replacement data transfer failed; excluded")
+                break
+            results.append(result)
+        if len(results) == len(samples):
+            score = sum(r["bytes"] for r in results) / sum(r["seconds"] for r in results)
+            ranked.append((score, base))
+            log(f"  {base}: replacement verified data {score / 1024:.0f} KiB/s")
     ranked.sort(reverse=True)
     if not ranked:
         return None
