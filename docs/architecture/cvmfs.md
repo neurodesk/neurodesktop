@@ -4,7 +4,7 @@ description: CVMFS server selection and mount configuration, and the
   neurocommand CLI/module system for neuroimaging tools
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-16"
+last-reviewed: "2026-09-30"
 ---
 
 # CVMFS and Neurocommand
@@ -43,8 +43,12 @@ verified by SHA-256 so the `latest` URL cannot silently change a reproducible
 build.
 
 The scheduled [CVMFS health workflow](../../.github/workflows/test-cvmfs.yml)
-mounts each advertised endpoint and compares it with neurocommand's desired
-container inventory. Both its single-server and fallback-list jobs use
+first mounts the authoritative Stratum 0 repository and compares it with
+neurocommand's desired container inventory. Only after that source is complete
+does it fan out across the advertised replicas and the fallback-list job. This
+turns a publication omission into one source failure instead of an identical
+failure from every downstream replica. Both its single-server and fallback-list
+jobs use
 [`check_cvmfs_inventory.sh`](../../.github/workflows/check_cvmfs_inventory.sh),
 which fails unavailable or empty inventory downloads and reports every missing
 container in the snapshot before failing. When the first comparison finds a

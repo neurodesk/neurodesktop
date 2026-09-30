@@ -15,13 +15,24 @@ env:
   DOCKERHUB_ORG: ${{ secrets.DOCKERHUB_ORG }}
 
 jobs:
+  # Check the authoritative repository before fanning out to its replicas. If
+  # the desired inventory is ahead of Stratum 0, every replica necessarily
+  # reports the same omission and obscures the single publication failure.
+  test_cvmfs_origin:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    - name: check if the authoritative CVMFS repository is online and complete
+      run: /bin/bash .github/workflows/test_cvmfs.sh stratum0.neurodesk.cloud.edu.au
   test_cvmfs_1_2_3:
+    needs: test_cvmfs_origin
     runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
     - name: check if cvmfs setup with multiple entries works
       run: /bin/bash .github/workflows/test_cvmfs_1_2_3.sh
   test_cvmfs:
+    needs: test_cvmfs_origin
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -39,7 +50,6 @@ jobs:
                         "s1nikhef-cvmfs.openhtc.io",
                         "cvmfs-stratum-one.ihep.ac.cn:8000",
                         "s1sampa-cvmfs.openhtc.io:8080",
-                        "stratum0.neurodesk.cloud.edu.au",
                         "cvmfs-geoproximity.neurodesk.org"]
                         # not yet active:
                           # "cvmfs-s1.hpc.swin.edu.au",
