@@ -28,9 +28,11 @@ Selection proceeds in three stages:
    aliases with the same observed IP, scheme, and port, while preserving separate
    `openhtc.io` hostnames because shared CDN edge IPs can route to different origins.
 2. Download the same hash-verified root catalog sequentially from **every**
-   distinct reachable destination advertising the selected revision or newer.
-   The source catalog comes from the newest reachable revision whose catalog can
-   be downloaded and verified. Manifest latency does not determine the shortlist.
+   distinct reachable destination. Prefer the most widely advertised catalog
+   hash, rather than trusting a claimed revision number. If a mirror cannot serve
+   that snapshot, test its own verified catalog and objects so an untrusted or
+   lagging source cannot exclude healthy alternatives. Manifest latency does not
+   determine the shortlist.
 3. Test the five fastest catalog responders with two immutable data objects
    discovered from the catalog. Prefer a small and a large file chunk; inspect
    at most three catalogs and supplement with the root catalog if chunks are
@@ -44,8 +46,12 @@ matching the image's `CVMFS_HTTP_PROXY=DIRECT` configuration. Downloads must
 finish successfully with HTTP 200 and match the catalog's content hash.
 These hashes detect corrupted transfers; the CVMFS client still verifies
 repository signatures when mounting. Requests, object size, catalog expansion,
-and the entire 180-second benchmark have bounds. An incomplete ranking is not
-cached. No verified finalist produces the static GeoAPI fallback and exit 1.
+and the entire 180-second benchmark have bounds. Catalog inspection runs in an
+isolated Python child with a clean environment, a four-second deadline, CPU and
+file-size limits, and a 256 MiB Linux address-space limit. Root startup drops the
+child to `nobody` with no supplementary groups before Python executes. Catalog
+inspection failure falls back to catalog-object transfers without parsing those
+bytes in the parent. An incomplete ranking is not cached. No verified finalist produces the static GeoAPI fallback and exit 1.
 
 The fastest four verified destinations become `CVMFS_SERVER_URL`. If the
 shortlist is entirely CDN endpoints, also test the fastest screened direct

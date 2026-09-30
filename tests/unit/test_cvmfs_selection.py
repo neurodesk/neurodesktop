@@ -601,3 +601,71 @@ def test_failed_finalists_are_replaced_by_remaining_measured_mirrors(tmp_path, m
         for server, _ in servers:
             server.shutdown()
             server.server_close()
+
+
+def test_untrusted_higher_revision_cannot_exclude_healthy_mirrors(tmp_path, mock_repo, fast_server):
+    other = tmp_path / "other"
+    _build_mock_repo(other)
+    manifest = other / "cvmfs" / REPO / ".cvmfspublished"
+    manifest.write_text(manifest.read_text().replace("S42", "S999999"))
+    # Give the untrusted candidate a different, self-consistent catalog.
+    db_path = other / "catalog.db"
+    with sqlite3.connect(db_path) as db:
+        db.execute("CREATE TABLE unrelated (value TEXT)")
+    data = zlib.compress(db_path.read_bytes())
+    digest = hashlib.sha1(data).hexdigest()
+    obj = other / "cvmfs" / REPO / "data" / digest[:2] / (digest[2:] + "C")
+    obj.parent.mkdir(parents=True, exist_ok=True)
+    obj.write_bytes(data)
+    manifest.write_text(f"C{digest}\nS999999\n")
+    server, base = _start_server(other, _QuietHandler)
+    try:
+        proc, config = run_select(tmp_path, f"{base} {fast_server}")
+        assert proc.returncode == 0, proc.stdout
+        assert fast_server + "/cvmfs/@fqrn@" in _configured_server_urls(config)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_catalog_parser_runs_in_isolated_child(tmp_path, mock_repo, monkeypatch):
+    from testlib import load_source_module
+
+    selector = load_source_module(
+        "cvmfs_isolated_catalog", "/opt/neurodesktop/cvmfs_server_select.py",
+        "config/jupyter/cvmfs_server_select.py",
+    )
+    catalog = next((mock_repo / "cvmfs" / REPO / "data").glob("*/*C"))
+    called = []
+    original_run = subprocess.run
+
+    def record_run(*args, **kwargs):
+        called.append(kwargs)
+        return original_run(*args, **kwargs)
+
+    def forbidden_parent_parser(*args):
+        raise AssertionError("remote SQLite was opened in the startup process")
+
+    monkeypatch.setenv("CVMFS_TEST_SENTINEL", "not-for-the-catalog-worker")
+    monkeypatch.setattr(selector, "catalog_samples", forbidden_parent_parser)
+    monkeypatch.setattr(selector.subprocess, "run", record_run)
+    samples, nested = selector.inspect_catalog(catalog.read_bytes())
+    assert len(samples) == 2
+    assert nested == []
+    assert "CVMFS_TEST_SENTINEL" not in called[0]["env"]
+    assert called[0]["cwd"] == "/"
+    if os.geteuid() == 0:
+        assert called[0]["user"] != 0
+        assert called[0]["group"] != 0
+        assert called[0]["extra_groups"] == []
+
+
+def test_catalog_worker_refuses_root(monkeypatch):
+    from testlib import load_source_module
+
+    selector = load_source_module(
+        "cvmfs_root_catalog_guard", "/opt/neurodesktop/cvmfs_server_select.py",
+        "config/jupyter/cvmfs_server_select.py",
+    )
+    monkeypatch.setattr(selector.os, "geteuid", lambda: 0)
+    assert selector.catalog_worker() == 1

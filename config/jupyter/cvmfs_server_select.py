@@ -7,17 +7,21 @@ the CVMFS client remains responsible for repository signature verification.
 """
 
 import argparse
+from collections import Counter
 import concurrent.futures
 import hashlib
 import json
 import math
 import os
 from pathlib import Path
+import pwd
 import random
+import resource
 import re
 import shlex
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import time
 from urllib.parse import urlsplit
@@ -109,14 +113,14 @@ class Benchmark:
                 continue
             manifest = result["data"].split(b"\n--\n", 1)[0].decode("ascii", errors="replace")
             digest = re.search(r"^C([0-9a-f]{40})$", manifest, re.MULTILINE)
-            revision = re.search(r"^S(\d+)$", manifest, re.MULTILINE)
+            revision = re.search(r"^S(\d{1,20})$", manifest, re.MULTILINE)
             if digest and revision:
                 replies.append({"base": base, "hash": digest[1], "revision": int(revision[1]),
                                 "latency": result["seconds"], "ip": result["ip"]})
         if not replies:
             log(f"  {base}: manifest unavailable or invalid")
             return None
-        return min(replies, key=lambda r: (-r["revision"], r["latency"]))
+        return min(replies, key=lambda r: r["latency"])
 
     def sample(self, base, obj):
         return self.fetch(base, object_path(obj["hash"], obj["suffix"]), digest=obj["hash"])
@@ -156,17 +160,56 @@ def catalog_samples(data):
     return samples, [row[0] for row in nested if isinstance(row[0], str) and HASH.fullmatch(row[0])]
 
 
+def inspect_catalog(data, timeout=4):
+    """Parse remote SQLite outside the startup process, dropping root authority."""
+    identity = {}
+    if os.geteuid() == 0:
+        nobody = pwd.getpwnam("nobody")
+        identity = {"user": nobody.pw_uid, "group": nobody.pw_gid, "extra_groups": []}
+    proc = subprocess.run(
+        [sys.executable, "-I", str(Path(__file__).resolve()), "--inspect-catalog"],
+        input=data, capture_output=True, timeout=timeout, cwd="/",
+        env={"PATH": os.defpath, "LANG": "C.UTF-8"}, **identity,
+    )
+    if proc.returncode:
+        raise ValueError("catalog worker failed")
+    result = json.loads(proc.stdout)
+    if os.geteuid() == 0 and result["uid"] == 0:
+        raise ValueError("catalog worker retained root")
+    return result["samples"], result["nested"]
+
+
+def catalog_worker():
+    """Bound the isolated reader's CPU, address space, file output and input."""
+    if os.geteuid() == 0:
+        return 1
+    resource.setrlimit(resource.RLIMIT_CPU, (2, 2))
+    if sys.platform == "linux":
+        resource.setrlimit(resource.RLIMIT_AS, (256 * 1024 * 1024,) * 2)
+    resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_CATALOG_BYTES,) * 2)
+    data = sys.stdin.buffer.read(MAX_BYTES + 1)
+    if len(data) > MAX_BYTES:
+        return 1
+    try:
+        samples, nested = catalog_samples(data)
+    except (ValueError, zlib.error, sqlite3.Error):
+        return 1
+    print(json.dumps({"samples": samples, "nested": nested, "uid": os.geteuid()}))
+    return 0
+
+
 def discover_samples(benchmark, source, root):
     samples = []
     queue = [root]
     seen = {source["hash"]}
     for _ in range(3):
-        if not queue:
+        remaining = benchmark.deadline - time.monotonic()
+        if not queue or remaining <= 0:
             break
         result = queue.pop(0)
         try:
-            found, nested = catalog_samples(result["data"])
-        except (ValueError, zlib.error, sqlite3.Error):
+            found, nested = inspect_catalog(result["data"], timeout=min(4, remaining))
+        except (ValueError, OSError, KeyError, subprocess.TimeoutExpired):
             continue
         for obj in found:
             if obj not in samples:
@@ -234,7 +277,7 @@ def read_cache(path, hosts, ttl):
         if not math.isfinite(meta["baseline"]) or meta["baseline"] <= 0:
             return None
         return meta
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, OverflowError):
         return None
 
 
@@ -264,7 +307,7 @@ def select(benchmark, hosts):
     log("Stage 1: probing candidate hosts in parallel...")
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(20, len(hosts))) as pool:
         reachable = [row for row in pool.map(benchmark.probe, hosts) if row]
-    reachable.sort(key=lambda row: (-row["revision"], row["latency"], row["base"]))
+    reachable.sort(key=lambda row: (row["latency"], row["base"]))
     unique = []
     destinations = set()
     for row in reachable:
@@ -274,8 +317,11 @@ def select(benchmark, hosts):
             continue
         destinations.add(key)
         unique.append(row)
-    # Get a verified common catalog so different replica revisions cannot win
-    # just because they serve a smaller catalog. Prefer the newest revision.
+    # Prefer a corroborated snapshot, never an unauthenticated revision claim.
+    # A mirror that cannot serve this snapshot still gets tested against its own
+    # catalog; one lying or lagging endpoint must not exclude healthy replicas.
+    support = Counter(row["hash"] for row in unique)
+    unique.sort(key=lambda row: (-support[row["hash"]], row["latency"], row["base"]))
     source = root = None
     for row in unique:
         result = benchmark.sample(row["base"], {"hash": row["hash"], "suffix": "C"})
@@ -286,14 +332,22 @@ def select(benchmark, hosts):
         return None
     samples = discover_samples(benchmark, source, root)
     catalog = {"hash": source["hash"], "suffix": "C"}
-    eligible = [r for r in unique if r["revision"] >= source["revision"]]
-    log(f"Stage 2: screening all {len(eligible)} distinct current destinations by throughput...")
+    eligible = list(unique)
+    log(f"Stage 2: screening all {len(eligible)} distinct destinations by throughput...")
     # Rotate the order so startup ordering does not repeatedly favor one host.
     random.SystemRandom().shuffle(eligible)
     screened = []
+    plans = {}
     for row in eligible:
         result = benchmark.sample(row["base"], catalog)
+        plan = samples
+        if not result and row["hash"] != catalog["hash"]:
+            result = benchmark.sample(row["base"], {"hash": row["hash"], "suffix": "C"})
+            if result:
+                log(f"  {row['base']}: common snapshot unavailable; testing its own verified objects")
+                plan = discover_samples(benchmark, row, result)
         if result:
+            plans[row["base"]] = plan
             screened.append((result["speed"], row))
             log(f"  {row['base']}: catalog {result['speed'] / 1024:.0f} KiB/s")
         else:
@@ -307,7 +361,7 @@ def select(benchmark, hosts):
             finalists.append(direct)
     log(f"Stage 3: validating {len(finalists)} finalists with two data-object transfers...")
     measurements = {row["base"]: [] for _, row in finalists}
-    for obj in samples:
+    for index in range(2):
         order = list(measurements)
         random.SystemRandom().shuffle(order)
         for base in order:
@@ -315,7 +369,7 @@ def select(benchmark, hosts):
             # a lucky best-of-two result or accepting an HTTP 200 partial body.
             if measurements[base] is None:
                 continue
-            result = benchmark.sample(base, obj)
+            result = benchmark.sample(base, plans[base][index])
             if result:
                 measurements[base].append(result)
             else:
@@ -337,7 +391,7 @@ def select(benchmark, hosts):
         if base in measurements or (len(ranked) >= 4 and is_cdn(base)):
             continue
         results = []
-        for obj in samples:
+        for obj in plans[base]:
             result = benchmark.sample(base, obj)
             if not result:
                 log(f"  {base}: replacement data transfer failed; excluded")
@@ -356,7 +410,7 @@ def select(benchmark, hosts):
         if direct:
             chosen.append(direct)
     return {"version": CACHE_VERSION, "pool": hosts,
-            "bases": [base for _, base in chosen], "samples": samples,
+            "bases": [base for _, base in chosen], "samples": plans[chosen[0][1]],
             "baseline": chosen[0][0], "complete": time.monotonic() < benchmark.deadline}
 
 
@@ -398,4 +452,6 @@ def main():
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--inspect-catalog"]:
+        raise SystemExit(catalog_worker())
     raise SystemExit(main())
