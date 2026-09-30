@@ -144,11 +144,15 @@ def catalog_samples(data):
             # Limit VM work as well as file size when inspecting remote metadata.
             deadline = time.monotonic() + 1
             db.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
-            chunks = db.execute(
-                "SELECT DISTINCT lower(hex(hash)), size FROM chunks "
-                "WHERE length(hash)=20 AND size BETWEEN 262144 AND 7340032 "
-                "ORDER BY size, hex(hash) LIMIT 256"
-            ).fetchall()
+            chunks = []
+            for order in ("ASC", "DESC"):
+                chunk = db.execute(
+                    "SELECT lower(hex(hash)), size FROM chunks "
+                    "WHERE length(hash)=20 AND size BETWEEN 262144 AND 7340032 "
+                    f"ORDER BY size {order}, hex(hash) {order} LIMIT 1"
+                ).fetchone()
+                if chunk:
+                    chunks.append(chunk)
             nested = db.execute(
                 "SELECT sha1 FROM nested_catalogs ORDER BY path LIMIT 2"
             ).fetchall()

@@ -34,7 +34,8 @@ Selection proceeds in three stages:
    lagging source cannot exclude healthy alternatives. Manifest latency does not
    determine the shortlist.
 3. Test the five fastest catalog responders with two immutable data objects
-   discovered from the catalog. Prefer a small and a large file chunk; inspect
+   discovered from the catalog. Select the smallest and largest eligible file
+   chunks, with distinct hashes when sizes tie; inspect
    at most three catalogs and supplement with the root catalog if chunks are
    unavailable. Rank by total verified bytes divided by total transfer time.
    A failed, truncated, or corrupt transfer disqualifies the finalist. Fill

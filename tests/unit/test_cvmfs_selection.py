@@ -660,6 +660,32 @@ def test_catalog_parser_runs_in_isolated_child(tmp_path, mock_repo, monkeypatch)
         assert called[0]["extra_groups"] == []
 
 
+@pytest.mark.parametrize("large_size", [256 * 1024, 7 * 1024 * 1024])
+def test_catalog_samples_include_extremes_beyond_first_256(tmp_path, large_size):
+    from testlib import load_source_module
+
+    selector = load_source_module(
+        "cvmfs_catalog_extremes", "/opt/neurodesktop/cvmfs_server_select.py",
+        "config/jupyter/cvmfs_server_select.py",
+    )
+    catalog = tmp_path / "catalog.db"
+    smallest = (0).to_bytes(20, "big")
+    largest = (257).to_bytes(20, "big")
+    with sqlite3.connect(catalog) as db:
+        db.execute("CREATE TABLE chunks (hash BLOB, size INTEGER)")
+        db.execute("CREATE TABLE nested_catalogs (path TEXT, sha1 TEXT)")
+        db.executemany("INSERT INTO chunks VALUES (?, ?)",
+                       [(index.to_bytes(20, "big"), 256 * 1024) for index in range(257)])
+        db.execute("INSERT INTO chunks VALUES (?, ?)", (largest, large_size))
+
+    samples, nested = selector.inspect_catalog(zlib.compress(catalog.read_bytes()))
+    assert samples == [
+        {"hash": smallest.hex(), "suffix": "P"},
+        {"hash": largest.hex(), "suffix": "P"},
+    ]
+    assert nested == []
+
+
 def test_catalog_worker_refuses_root(monkeypatch):
     from testlib import load_source_module
 
