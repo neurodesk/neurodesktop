@@ -589,6 +589,7 @@ ARG ASTRA_TOOLS_VERSION="0.2.17"
 ARG ANYWIDGET_VERSION="0.11.0"
 ARG IPYNIIVUE_VERSION="2.4.4"
 ARG SNAKEMAKE_VERSION="9.27.0"
+ARG PYJWT_VERSION="2.14.0"
 ARG JUPYTER_BUILDER_VERSION
 ARG JUPYTERLAB_SLURM_REF="8dccb39808f8a1b77712a9a5773a7d2601a56683"
 USER root
@@ -673,6 +674,10 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     xnat \
     pytest \
     bash_kernel \
+    # PyJWT 2.14.0 rejects loader-compatible, non-canonical public-key PEMs
+    # before an HS256 verifier can reuse the public key as its HMAC secret
+    # (CVE-2026-102268). Keep this transitive dependency on the fixed release.
+    PyJWT==${PYJWT_VERSION} \
     # Snakemake 9.27.0 declares packaging<26. Keep its newest compatible
     # release rather than silently backtracking the user-facing workflow CLI.
     "packaging==25.0" \

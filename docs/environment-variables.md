@@ -302,6 +302,10 @@ reviewed; the Dockerfile itself is authoritative.
   `9.27.0` in the main and isolated Lightcone environments. Its current
   metadata requires `packaging<26`, so the image holds that infrastructure
   library at the newest compatible release, `25.0`
+- `PYJWT_VERSION`: exact PyJWT release installed into the main Python
+  environment; defaults to `2.14.0`, the first release that rejects
+  non-canonical public-key PEM encodings before they can be reused as HMAC
+  secrets (CVE-2026-102268)
 - `AGENT_SKILLS_REF`: exact commit of
   `LightconeResearch/agent-skills` used for the Codex and Claude reproduction
   plugin and OpenCode's copied skills and hook adapter;
