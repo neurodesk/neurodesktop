@@ -22,3 +22,16 @@ def test_ihep_stratum_one_uses_its_published_service_port_everywhere():
 
     assert f"http://{IHEP_HOST}\n" not in selector
     assert f'"{IHEP_HOST}"' not in workflow
+
+
+def test_selector_helper_is_installed_beside_shell_entry_point():
+    dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
+    assert "install -m 0644 /tmp/jupyter/cvmfs_server_select.py /opt/neurodesktop/cvmfs_server_select.py" in dockerfile
+
+
+def test_fnal_is_in_the_default_candidate_pool():
+    selector = resolve_source(
+        "/opt/neurodesktop/cvmfs_server_select.sh",
+        "config/jupyter/cvmfs_server_select.sh",
+    ).read_text(encoding="utf-8")
+    assert "http://s1fnal-cvmfs.openhtc.io:8080" in selector
