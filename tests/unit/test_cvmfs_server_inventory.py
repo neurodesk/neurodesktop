@@ -34,4 +34,4 @@ def test_fnal_is_in_the_default_candidate_pool():
         "/opt/neurodesktop/cvmfs_server_select.sh",
         "config/jupyter/cvmfs_server_select.sh",
     ).read_text(encoding="utf-8")
-    assert "http://s1fnal-cvmfs.openhtc.io:8080" in selector.splitlines()
+    assert any(line == "http://s1fnal-cvmfs.openhtc.io:8080" for line in selector.splitlines())
