@@ -75,68 +75,69 @@ jobs:
         SERVER_API_URL="${API_URL}/hub/api/users/${USER}"
         SERVER_START_URL="${SERVER_API_URL}/server"
 
+        # Reduce the Hub's user model to the default server's state, or
+        # nothing when the response is not a user model.
+        server_state() {
+          curl -s -k -H "Authorization: token $ADMIN_TOKEN" "$SERVER_API_URL" 2>/dev/null \
+            | bash .github/workflows/jupyterhub_server_state.sh || true
+        }
+
         # Check if server is already running and stop it
         echo "Checking if server is already running..."
-        SERVER_STATUS=$(curl -s -k -H "Authorization: token $ADMIN_TOKEN" "$SERVER_API_URL" 2>/dev/null || echo "{}")
-
-        # check if the token is valid
-        if [[ "$SERVER_STATUS" == *"403"* ]]; then
+        STATUS_CODE=$(curl -s -k -o /dev/null -w '%{http_code}' \
+          -H "Authorization: token $ADMIN_TOKEN" "$SERVER_API_URL" 2>/dev/null || true)
+        if [ "$STATUS_CODE" = "403" ]; then
           echo "❌ Authentication failed - 403 Forbidden. Check your API token."
-          echo "Server response: $SERVER_STATUS"
           exit 1
         fi
-        
-        # Check if server is running (server is not null and ready is true)
-        if [[ "$SERVER_STATUS" == *"\"server\": \"/user/$USER/\""* ]] && [[ "$SERVER_STATUS" == *"\"ready\": true"* ]]; then
+        STATE=$(server_state)
+        echo "Current server state: ${STATE:-unknown (HTTP $STATUS_CODE)}"
+
+        if [ "$STATE" = "ready" ] || [ "$STATE" = "starting" ]; then
           echo "Server is running, stopping it first..."
           curl -s -k -X DELETE -H "Authorization: token $ADMIN_TOKEN" "$SERVER_START_URL"
-          
+
           echo "Waiting for server to stop..."
           for i in {1..12}; do
             sleep 10
-            STATUS=$(curl -s -k -H "Authorization: token $ADMIN_TOKEN" "$SERVER_API_URL" 2>/dev/null || echo "{}")
-            # Server is stopped when server is null and pending is null
-            if [[ "$STATUS" == *"\"server\": null"* ]] && [[ "$STATUS" == *"\"pending\": null"* ]]; then
+            if [ "$(server_state)" = "stopped" ]; then
               echo "✅ Server stopped successfully"
               break
             fi
             echo "Waiting for server to stop... (${i}0s elapsed)"
           done
-        # Check if server is pending/starting
-        elif [[ "$SERVER_STATUS" == *"\"pending\": \"spawn\""* ]]; then
+        elif [ "$STATE" = "pending:spawn" ]; then
           echo "Server is already starting, waiting for it to complete..."
         else
           echo "Server is stopped, ready to start"
         fi
-        
+
         # Start the server
         echo "Starting server for $USER..."
         START_RESPONSE=$(curl -s -k -X POST -H "Authorization: token $ADMIN_TOKEN" "$SERVER_START_URL" || echo "Failed to start server")
         echo "Start server response: ${START_RESPONSE:0:100}..."
-        
+
         # Wait for server to start
         echo "Waiting for server to start..."
         SERVER_STARTED=false
-        
+
         for i in {1..24}; do
           sleep 10
-          SERVER_STATUS=$(curl -s -k -H "Authorization: token $ADMIN_TOKEN" "$SERVER_API_URL" 2>/dev/null || echo "{}")
-          
-          # Server is fully started when server has a value, ready is true, and pending is null
-          if [[ "$SERVER_STATUS" == *"\"server\": \"/user/$USER/\""* ]] && [[ "$SERVER_STATUS" == *"\"ready\": true"* ]] && [[ "$SERVER_STATUS" == *"\"pending\": null"* ]]; then
+          STATE=$(server_state)
+
+          if [ "$STATE" = "ready" ]; then
             echo "✅ Server started successfully (${i}0s elapsed)"
-            echo "Server status: ${SERVER_STATUS:0:150}..."
             SERVER_STARTED=true
             break
-          elif [[ "$SERVER_STATUS" == *"\"pending\": \"spawn\""* ]]; then
+          elif [ "$STATE" = "pending:spawn" ]; then
             echo "Server is still starting... (${i}0s elapsed)"
           else
-            echo "Waiting for server to start... (${i}0s elapsed)"
+            echo "Waiting for server to start (state: ${STATE:-unknown})... (${i}0s elapsed)"
           fi
         done
-        
+
         if [ "$SERVER_STARTED" != true ]; then
-          echo "❌ Server failed to start within timeout"
+          echo "❌ Server failed to start within timeout (last state: ${STATE:-unknown})"
           exit 1
         fi
         
@@ -434,21 +435,30 @@ jobs:
         SERVER_API_URL="${API_URL}/hub/api/users/${USER}"
         SERVER_START_URL="${SERVER_API_URL}/server"
 
-        # Stop the server
+        server_state() {
+          curl -s -k -H "Authorization: token $ADMIN_TOKEN" "$SERVER_API_URL" 2>/dev/null \
+            | bash .github/workflows/jupyterhub_server_state.sh || true
+        }
+
+        # Stop the server. The Hub refuses to stop a server that is still
+        # spawning, so the request is repeated until the Hub accepts it.
         echo "Stopping server..."
         curl -s -k -X DELETE -H "Authorization: token $ADMIN_TOKEN" "$SERVER_START_URL" || true
-        
+
         echo "Waiting for server to stop..."
         for i in {1..12}; do
           sleep 10
-          STATUS=$(curl -s -k -H "Authorization: token $ADMIN_TOKEN" "$SERVER_API_URL" 2>/dev/null || echo "{}")
-          if [[ "$STATUS" != *"\"server\":"* ]]; then
+          STATE=$(server_state)
+          if [ "$STATE" = "stopped" ]; then
             echo "✅ Server stopped successfully"
             break
           fi
-          echo "Waiting for server to stop... (${i}0s elapsed)"
+          if [ "$STATE" != "pending:stop" ]; then
+            curl -s -k -X DELETE -H "Authorization: token $ADMIN_TOKEN" "$SERVER_START_URL" >/dev/null || true
+          fi
+          echo "Waiting for server to stop (state: ${STATE:-unknown})... (${i}0s elapsed)"
         done
-        
+
         echo "✅ Server cleanup completed"
 
     - name: Generate Test Report

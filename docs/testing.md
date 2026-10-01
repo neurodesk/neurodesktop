@@ -468,6 +468,15 @@ change, such as HTTP 403. `TERMINAL_CREATE_ATTEMPTS` and
 `TERMINAL_CREATE_DELAY` bound the wait. The unit tier drives the helper
 against a stubbed `curl`, so it needs no network and no listening socket.
 
+The start and cleanup steps read the default server's state through
+`.github/workflows/jupyterhub_server_state.sh`, which parses the Hub's user
+model with `jq` into `ready`, `pending:<action>`, `starting`, or `stopped`.
+It prefers `servers[""]` and falls back to the top-level `server` and
+`pending` fields. The Hub keeps the `server` key as `null` once a server
+stops, so cleanup waits for `stopped` rather than for the key to disappear.
+Cleanup repeats the stop request while a timed-out spawn is still pending.
+The unit tier runs both workflow steps against a stubbed `curl` and `sleep`.
+
 ### Lmod extension listing
 
 The unit tier asserts that `environment_variables.sh` exports
