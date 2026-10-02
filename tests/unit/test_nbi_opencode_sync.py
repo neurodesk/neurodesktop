@@ -457,6 +457,71 @@ def test_nbi_defaults_kept_without_opencode_config(tmp_path):
         assert get_prop(section, "api_key") == "neurodesk-test-key"
 
 
+def test_nbi_default_uses_gateway_stable_alias(tmp_path):
+    """A fresh home targets llm.neurodesk.org's maintained `neurodesk` alias."""
+    test_script, home_dir = make_nbi_setup_sandbox(tmp_path)
+
+    run_nbi_setup(test_script, home_dir, "--no-refresh")
+
+    cfg = read_nbi_config(home_dir)
+    for section_name in ("chat_model", "inline_completion_model"):
+        assert get_prop(cfg[section_name], "model_id") == "neurodesk"
+
+
+def write_nbi_sections(home_dir, base_url, model_id):
+    nbi_dir = home_dir / ".jupyter/nbi"
+    nbi_dir.mkdir(parents=True)
+    cfg = {}
+    for section_name in ("chat_model", "inline_completion_model"):
+        cfg[section_name] = {
+            "provider": "openai-compatible",
+            "model": f"openai-compatible-{section_name}",
+            "properties": [
+                {"id": "api_key", "value": "existing-key"},
+                {"id": "model_id", "value": model_id},
+                {"id": "base_url", "value": base_url},
+                {"id": "context_window", "value": "64000"},
+            ],
+        }
+    (nbi_dir / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+
+
+def test_nbi_migrates_legacy_seeded_model_on_gateway(tmp_path):
+    """The model earlier images seeded is replaced; other settings survive."""
+    test_script, home_dir = make_nbi_setup_sandbox(tmp_path)
+    write_nbi_sections(home_dir, "https://llm.neurodesk.org/openai", "kimi-k2.5")
+
+    output = run_nbi_setup(test_script, home_dir, "--no-refresh")
+
+    assert "repaired" in output
+    cfg = read_nbi_config(home_dir)
+    for section_name in ("chat_model", "inline_completion_model"):
+        section = cfg[section_name]
+        assert get_prop(section, "model_id") == "neurodesk"
+        assert get_prop(section, "base_url") == "https://llm.neurodesk.org/openai"
+        assert get_prop(section, "api_key") == "existing-key"
+        assert get_prop(section, "context_window") == "64000"
+
+
+@pytest.mark.parametrize(
+    ("base_url", "model_id"),
+    [
+        ("https://llm.neurodesk.org/openai", "qwen3.5-122b"),
+        ("https://my-own-endpoint.example/v1", "kimi-k2.5"),
+    ],
+)
+def test_nbi_keeps_user_model_choices(tmp_path, base_url, model_id):
+    """Only the legacy default on the gateway is migrated."""
+    test_script, home_dir = make_nbi_setup_sandbox(tmp_path)
+    write_nbi_sections(home_dir, base_url, model_id)
+
+    run_nbi_setup(test_script, home_dir, "--no-refresh")
+
+    cfg = read_nbi_config(home_dir)
+    for section_name in ("chat_model", "inline_completion_model"):
+        assert get_prop(cfg[section_name], "model_id") == model_id
+
+
 def test_boot_sync_writes_config_without_contacting_running_server(tmp_path):
     test_script, home_dir = make_nbi_setup_sandbox(tmp_path)
     write_opencode_config(home_dir, "jetstream/gpt-oss-120b")

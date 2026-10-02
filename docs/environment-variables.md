@@ -207,7 +207,11 @@ Connect procedures.
   OpenCode (the top-level `model` in `~/.config/opencode/opencode.json`)
   into Notebook Intelligence, so picking a model in the OpenCode startup
   menu updates both tools; Notebook Intelligence sections pointed at a
-  custom endpoint via its Settings UI are left alone. After writing the
+  custom endpoint via its Settings UI are left alone. Without an OpenCode
+  selection, Notebook Intelligence uses the gateway's stable `neurodesk`
+  alias; `nbi_setup.sh` migrates the `kimi-k2.5` ID that earlier images
+  seeded for llm.neurodesk.org, which the gateway now hides, to that alias
+  and keeps every other model choice. After writing the
   files, `nbi_setup.sh` asks every running Jupyter server (discovered via
   `jpserver-*.json` under the Jupyter runtime directory) to re-read the
   config so the change applies without a JupyterLab restart. An NBI

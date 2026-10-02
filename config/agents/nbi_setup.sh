@@ -159,7 +159,9 @@ sync_mcp_brain_researcher
 # settings panel resets the property values (base_url / model_id) to the
 # provider's blank defaults instead of merging the previously-saved values,
 # and on Save persists those blanks. We detect that fingerprint here and
-# restore the section from the seeded default.
+# restore the section from the seeded default. It also migrates the exact
+# model ID that earlier images seeded on llm.neurodesk.org; the gateway now
+# hides that legacy EGI alias, so it can no longer be a working choice.
 if command -v python3 >/dev/null 2>&1 && [ -f "${NBI_DEFAULT_CONFIG}" ]; then
     NBI_CONFIG_FILE="${NBI_CONFIG_FILE}" NBI_DEFAULT_CONFIG="${NBI_DEFAULT_CONFIG}" \
     python3 - <<'PY'
@@ -190,6 +192,8 @@ def get_prop(props, prop_id):
         if isinstance(prop, dict) and prop.get("id") == prop_id:
             return str(prop.get("value") or "")
     return ""
+
+LEGACY_DEFAULT_MODEL_IDS = {"kimi-k2.5"}
 
 changed = False
 for section in ("chat_model", "inline_completion_model"):
@@ -229,6 +233,11 @@ for section in ("chat_model", "inline_completion_model"):
                 if isinstance(prop, dict) and prop.get("id") == "api_key":
                     prop["value"] = existing_api_key
                     break
+        changed = True
+    elif user_model_id in LEGACY_DEFAULT_MODEL_IDS and default_model_id:
+        for prop in user_section.get("properties", []):
+            if isinstance(prop, dict) and prop.get("id") == "model_id":
+                prop["value"] = default_model_id
         changed = True
 
 if changed:
