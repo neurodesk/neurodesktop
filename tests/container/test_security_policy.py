@@ -39,6 +39,32 @@ def test_restricted_sudo_rejects_shells_and_apt_overrides():
         assert result.returncode != 0, arguments
 
 
+def _healthz_status(endpoint):
+    with socket.socket(socket.AF_UNIX) as client:
+        client.settimeout(10)
+        client.connect(str(endpoint))
+        client.sendall(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        response = b""
+        while chunk := client.recv(4096):
+            response += chunk
+    return response.split(b"\r\n", 1)[0]
+
+
+def _wait_for_healthz(endpoint, process, deadline):
+    # code-server listens on the socket before registering /healthz, so an
+    # early request reaches the empty router and gets a transient 404.
+    status = b""
+    while process.poll() is None and time.monotonic() < deadline:
+        try:
+            status = _healthz_status(endpoint)
+        except OSError as error:
+            status = repr(error).encode()
+        if status.split(b" ")[1:2] == [b"200"]:
+            break
+        time.sleep(0.1)
+    return status
+
+
 def test_code_server_private_socket_serves_owner_and_rejects_other_uid():
     config = resolve_source("/opt/neurodesktop/jupyter_notebook_config.py.template",
                             "config/jupyter/jupyter_notebook_config.py.template").read_text()
@@ -67,11 +93,10 @@ def test_code_server_private_socket_serves_owner_and_rejects_other_uid():
                     time.sleep(0.1)
                 assert endpoint.stat().st_mode & 0o777 == 0o600
                 assert root.stat().st_mode & 0o777 == 0o700
-                with socket.socket(socket.AF_UNIX) as client:
-                    client.settimeout(10)
-                    client.connect(str(endpoint))
-                    client.sendall(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-                    assert b"200" in client.recv(4096).split(b"\r\n", 1)[0]
+                status = _wait_for_healthz(endpoint, process, deadline)
+                log.flush()
+                log.seek(0)
+                assert status.split(b" ")[1:2] == [b"200"], (status, log.read())
                 if os.geteuid() == 0:
                     other_uid = pwd.getpwnam("nobody").pw_uid
                     probe = (
