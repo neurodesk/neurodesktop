@@ -67,11 +67,40 @@ def test_code_server_private_socket_serves_owner_and_rejects_other_uid():
                     time.sleep(0.1)
                 assert endpoint.stat().st_mode & 0o777 == 0o600
                 assert root.stat().st_mode & 0o777 == 0o700
-                with socket.socket(socket.AF_UNIX) as client:
-                    client.settimeout(10)
-                    client.connect(str(endpoint))
-                    client.sendall(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-                    assert b"200" in client.recv(4096).split(b"\r\n", 1)[0]
+                status = b"No health response"
+                while process.poll() is None and time.monotonic() < deadline:
+                    try:
+                        with socket.socket(socket.AF_UNIX) as client:
+                            for operation, argument in (
+                                (client.connect, str(endpoint)),
+                                (client.sendall, b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"),
+                            ):
+                                remaining = deadline - time.monotonic()
+                                if remaining <= 0:
+                                    raise TimeoutError
+                                client.settimeout(min(10, remaining))
+                                operation(argument)
+                            response = b""
+                            while b"\r\n" not in response:
+                                remaining = deadline - time.monotonic()
+                                if remaining <= 0:
+                                    raise TimeoutError
+                                client.settimeout(min(10, remaining))
+                                chunk = client.recv(4096)
+                                if not chunk:
+                                    break
+                                response += chunk
+                            status = response.split(b"\r\n", 1)[0] if b"\r\n" in response else b"Incomplete health response"
+                            if status.split()[1:2] == [b"200"] and time.monotonic() >= deadline:
+                                raise TimeoutError
+                    except TimeoutError:
+                        status = b"Health request timed out"
+                    if status.split()[1:2] == [b"200"]:
+                        break
+                    time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+                else:
+                    log.seek(0)
+                    pytest.fail(f"code-server health check failed: {status!r}; exit={process.poll()}\n{log.read()}")
                 if os.geteuid() == 0:
                     other_uid = pwd.getpwnam("nobody").pw_uid
                     probe = (
