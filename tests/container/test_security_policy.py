@@ -69,11 +69,14 @@ def test_code_server_private_socket_serves_owner_and_rejects_other_uid():
                 assert root.stat().st_mode & 0o777 == 0o700
                 status = b"No health response"
                 while process.poll() is None and (remaining := deadline - time.monotonic()) > 0:
-                    with socket.socket(socket.AF_UNIX) as client:
-                        client.settimeout(min(10, remaining))
-                        client.connect(str(endpoint))
-                        client.sendall(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-                        status = client.recv(4096).split(b"\r\n", 1)[0]
+                    try:
+                        with socket.socket(socket.AF_UNIX) as client:
+                            client.settimeout(min(10, remaining))
+                            client.connect(str(endpoint))
+                            client.sendall(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                            status = client.recv(4096).split(b"\r\n", 1)[0]
+                    except TimeoutError:
+                        status = b"Health request timed out"
                     if status.split()[1:2] == [b"200"]:
                         break
                     time.sleep(min(0.1, max(0, deadline - time.monotonic())))
