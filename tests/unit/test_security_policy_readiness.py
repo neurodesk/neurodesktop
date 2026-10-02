@@ -58,6 +58,8 @@ def security_probe(monkeypatch):
             state.elapsed += min(10, self.timeout)
             response = state.responses[min(state.requests, len(state.responses) - 1)]
             state.requests += 1
+            if isinstance(response, TimeoutError):
+                raise response
             return response + b"\r\n\r\n"
 
     monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: state.elapsed, sleep=sleep))
@@ -71,6 +73,25 @@ def test_private_socket_waits_for_health_route(security_probe):
     probe, state = security_probe
     probe()
     assert state.requests == 2
+    assert state.terminated and state.waited
+
+
+def test_private_socket_retries_timed_out_health_request(security_probe):
+    probe, state = security_probe
+    state.responses = [TimeoutError(), b"HTTP/1.1 200 OK"]
+    probe()
+    assert state.requests == 2
+    assert state.terminated and state.waited
+
+
+def test_private_socket_permanent_timeout_reports_status_and_log(security_probe):
+    probe, state = security_probe
+    state.responses = [TimeoutError()]
+    with pytest.raises(pytest.fail.Exception) as failure:
+        probe()
+    assert "Health request timed out" in str(failure.value)
+    assert "test server startup log" in str(failure.value)
+    assert 45 <= state.elapsed <= 45.1
     assert state.terminated and state.waited
 
 
