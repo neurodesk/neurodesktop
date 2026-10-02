@@ -257,6 +257,15 @@ provider settings intact.
 
 ### Desktop tests
 
+The private VS Code socket check in `tests/container/test_security_policy.py`
+checks mode `0600` and the private directory before waiting for HTTP 200 from
+`/healthz`. Code-server starts listening before registering its routes, so an
+early HTTP 404 is retried within the same 45-second startup deadline. A child
+exit or an expired deadline reports the last HTTP status and server log.
+The root-run check also requires another UID to be denied access.
+`pytest tests/unit/test_security_policy_readiness.py` exercises delayed route
+readiness, permanent failure, and early process exit with a controlled clock.
+
 Desktop smoke tests keep Guacamole, Tomcat, VNC, and credential state in
 temporary per-test homes by default. Tests that need to start the global xrdp
 service are skipped unless
