@@ -49,3 +49,16 @@ def test_replica_checks_wait_for_a_complete_authoritative_repository():
     replicas = jobs["test_cvmfs"]["strategy"]["matrix"]["cvmfs-servers"]
     assert ORIGIN not in replicas
     assert len(replicas) == len(set(replicas)) == 14
+
+
+def test_selector_helper_is_installed_beside_shell_entry_point():
+    dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
+    assert "install -m 0644 /tmp/jupyter/cvmfs_server_select.py /opt/neurodesktop/cvmfs_server_select.py" in dockerfile
+
+
+def test_fnal_is_in_the_default_candidate_pool():
+    selector = resolve_source(
+        "/opt/neurodesktop/cvmfs_server_select.sh",
+        "config/jupyter/cvmfs_server_select.sh",
+    ).read_text(encoding="utf-8")
+    assert any(line == "http://s1fnal-cvmfs.openhtc.io:8080" for line in selector.splitlines())

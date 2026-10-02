@@ -18,23 +18,65 @@ listed in
 CVMFS, the CernVM File System, distributes neuroimaging software containers
 without local storage. Server selection is handled by
 [`config/jupyter/cvmfs_server_select.sh`](../../config/jupyter/cvmfs_server_select.sh):
-it probes a pool of direct Stratum-1 servers and Cloudflare-fronted CDN
-endpoints in parallel for reachability, measures cold-cache download
-throughput on the lowest-latency finalists, and writes `CVMFS_SERVER_URL` with
-the fastest server first and the runners-up as fallbacks (plus a non-CDN host
-if the top picks are all on the same CDN). Every probe carries a unique
-cache-busting query string so CDN edge caches cannot inflate the measurement —
-real workloads fetch long-tail objects that are cold at the edge. The CVMFS
-client walks the list in order and abandons a degraded server at runtime via
-the failover settings (`CVMFS_LOW_SPEED_LIMIT`, `CVMFS_TIMEOUT`,
-`CVMFS_MAX_RETRIES`, `CVMFS_HOST_RESET_AFTER`) in
-[`config/cvmfs/default.local`](../../config/cvmfs/default.local). A successful
-ranking is cached in `~/.cache/neurodesktop/cvmfs-selection.env` for seven days
-and reused while its primary server passes a health check; a failed mount
-triggers a forced re-probe. Eager Docker startup runs the selector as root, so
-after writing this cache it restores ownership of the cache path to the
-remapped notebook UID/GID; otherwise Jupyter cannot create its own sibling
-cache directories.
+the shell entry point runs
+[`cvmfs_server_select.py`](../../config/jupyter/cvmfs_server_select.py), which
+uses Python's standard library and curl without requiring a mounted repository.
+
+Selection proceeds in three stages:
+
+1. Probe manifests in parallel, including the FNAL CDN endpoint. Collapse direct
+   aliases with the same observed IP, scheme, and port, while preserving separate
+   `openhtc.io` hostnames because shared CDN edge IPs can route to different origins.
+2. Download the same hash-verified root catalog sequentially from **every**
+   distinct reachable destination. Prefer the most widely advertised catalog
+   hash, rather than trusting a claimed revision number. If a mirror cannot serve
+   that snapshot, test its own verified catalog and objects so an untrusted or
+   lagging source cannot exclude healthy alternatives. Manifest latency does not
+   determine the shortlist.
+3. Test the five fastest catalog responders with two immutable data objects
+   discovered from the catalog. Select the smallest and largest eligible file
+   chunks, with distinct hashes when sizes tie; inspect
+   at most three catalogs and supplement with the root catalog if chunks are
+   unavailable. Rank by total verified bytes divided by total transfer time.
+   A failed, truncated, or corrupt transfer disqualifies the finalist. Fill
+   missing fallback slots from the remaining measured destinations.
+
+Each request has a unique query string to avoid reusing a CDN edge response.
+This does not flush origin caches. All HTTP probes use direct connections,
+matching the image's `CVMFS_HTTP_PROXY=DIRECT` configuration. Downloads must
+finish successfully with HTTP 200 and match the catalog's content hash.
+These hashes detect corrupted transfers; the CVMFS client still verifies
+repository signatures when mounting. Requests, object size, catalog expansion,
+and the entire 180-second benchmark have bounds. Catalog inspection runs in an
+isolated Python child with a clean environment, a four-second deadline, CPU and
+file-size limits, and a 256 MiB Linux address-space limit. Root startup drops the
+child to `nobody` with no supplementary groups before Python executes. Catalog
+inspection failure falls back to catalog-object transfers without parsing those
+bytes in the parent. An incomplete ranking is not cached. No verified finalist produces the static GeoAPI fallback and exit 1.
+
+The fastest four verified destinations become `CVMFS_SERVER_URL`. If the
+shortlist is entirely CDN endpoints, also test the fastest screened direct
+endpoint and retain it as a fallback if its data checks succeed. With
+`CVMFS_USE_GEOAPI=no`, the client walks this order. Runtime failover settings
+(`CVMFS_LOW_SPEED_LIMIT`, `CVMFS_TIMEOUT`, `CVMFS_MAX_RETRIES`,
+`CVMFS_HOST_RESET_AFTER`) remain in
+[`config/cvmfs/default.local`](../../config/cvmfs/default.local).
+
+Rankings are cached in `~/.cache/neurodesktop/cvmfs-selection.env` for one day.
+At startup, the primary must complete both hash-verified samples at at least half
+its recorded speed. The first fallback must also complete both objects; a failed
+transfer or a fallback more than 20% faster triggers a full re-ranking. The primary must also serve a
+valid manifest. Old cache formats, changed candidate pools, expired caches, and
+failed checks trigger a new benchmark. Cache contents are parsed as data, never
+executed as shell commands. Config and cache writes are atomic. Eager startup
+restores notebook ownership of the home cache path after root writes it.
+
+These checks select mirrors at startup, not continuously while a mount is in
+use. A failed mount forces a re-probe. Runtime failover only detects a server
+that crosses the client's failure thresholds; it does not continuously compare
+healthy mirrors. Use `cvmfs_server_select.sh --force-probe` to bypass the cache.
+A benchmark measures this client's current network path and cannot guarantee
+that its winner will remain fastest for every object or future workload.
 
 Configuration lives in [`config/cvmfs/`](../../config/cvmfs/). CVMFS can be
 disabled with `CVMFS_DISABLE=true`. The Dockerfile pins both the CVMFS client

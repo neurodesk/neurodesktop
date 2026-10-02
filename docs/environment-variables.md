@@ -41,8 +41,9 @@ The session home is `/home/kasm-user`; persist that path instead of overriding
   `MODULEPATH`. Fixed to `/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/` by
   `environment_variables.sh`; not a user override
 - `NEURODESKTOP_CVMFS_SELECTION_TTL_SECONDS`: lifetime of the cached CVMFS
-  server ranking produced by `cvmfs_server_select.sh`; defaults to `604800`
-  (7 days). Set to `0` to re-probe on every startup
+  server ranking produced by `cvmfs_server_select.sh`; defaults to `86400`
+  (1 day). Cached rankings also undergo transfer-speed and fallback comparison
+  checks at startup. Set to `0` to re-probe on every startup
 - `NEURODESKTOP_CVMFS_HOST_POOL`: whitespace-separated `http://host[:port]`
   list overriding the built-in pool of CVMFS servers that
   `cvmfs_server_select.sh` probes (mainly for testing)

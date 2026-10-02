@@ -153,6 +153,7 @@ non-obvious tiers protect.
 | Image packaging layers | `pytest tests/unit/test_image_packaging_layers.py tests/unit/test_myst_build_workaround.py` | `pytest /opt/tests/test_image_size_hygiene.py /opt/tests/test_additional_components.py` and image layer inventory |
 | PyJWT asymmetric/HMAC key confusion | `pytest tests/unit/test_pyjwt_security.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_pyjwt_security.py` |
 | ghapi public credential examples | `pytest tests/unit/test_ghapi_examples.py tests/unit/test_image_packaging_layers.py` | `pytest /opt/tests/test_image_size_hygiene.py` and unchanged image secret scan |
+| CVMFS mirror selection | `pytest tests/unit/test_cvmfs_selection.py tests/unit/test_cvmfs_server_inventory.py` | Run the selector with temporary config/cache paths, then verify a mounted read; see [CVMFS](architecture/cvmfs.md) |
 | CVMFS inventory health | `pytest tests/unit/test_cvmfs_inventory_check.py` | Live mirror workflow |
 | Nightly JupyterHub probe (terminal creation, FSL commands) | `pytest tests/unit/test_jupyter_terminal_creation.py tests/unit/test_github_workflows.py` | Live `JupyterHub API Testing` workflow |
 | Lmod extension listing default | `pytest tests/unit/test_lmod_extensions.py` | `pytest /opt/tests/test_lmod_avail_extensions.py` |
@@ -466,6 +467,15 @@ carry no terminal name, and it fails immediately on a rejection that will not
 change, such as HTTP 403. `TERMINAL_CREATE_ATTEMPTS` and
 `TERMINAL_CREATE_DELAY` bound the wait. The unit tier drives the helper
 against a stubbed `curl`, so it needs no network and no listening socket.
+
+The start and cleanup steps read the default server's state through
+`.github/workflows/jupyterhub_server_state.sh`, which parses the Hub's user
+model with `jq` into `ready`, `pending:<action>`, `starting`, or `stopped`.
+It prefers `servers[""]` and falls back to the top-level `server` and
+`pending` fields. The Hub keeps the `server` key as `null` once a server
+stops, so cleanup waits for `stopped` rather than for the key to disappear.
+Cleanup repeats the stop request while a timed-out spawn is still pending.
+The unit tier runs both workflow steps against a stubbed `curl` and `sleep`.
 
 ### Lmod extension listing
 
