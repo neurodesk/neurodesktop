@@ -39,17 +39,6 @@ def test_restricted_sudo_rejects_shells_and_apt_overrides():
         assert result.returncode != 0, arguments
 
 
-def _healthz_status(endpoint):
-    with socket.socket(socket.AF_UNIX) as client:
-        client.settimeout(10)
-        client.connect(str(endpoint))
-        client.sendall(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-        response = b""
-        while chunk := client.recv(4096):
-            response += chunk
-    return response.split(b"\r\n", 1)[0]
-
-
 def test_code_server_private_socket_serves_owner_and_rejects_other_uid():
     config = resolve_source("/opt/neurodesktop/jupyter_notebook_config.py.template",
                             "config/jupyter/jupyter_notebook_config.py.template").read_text()
@@ -73,15 +62,45 @@ def test_code_server_private_socket_serves_owner_and_rejects_other_uid():
                 log.flush()
                 log.seek(0)
                 assert endpoint.exists(), log.read()
-                # The launcher renames the socket into place only after
-                # code-server has applied --socket-mode and registered its
-                # routes, so the proxy's first request must already succeed.
+                # code-server applies --socket-mode only after listen() creates the socket.
+                while endpoint.stat().st_mode & 0o777 != 0o600 and time.monotonic() < deadline:
+                    time.sleep(0.1)
                 assert endpoint.stat().st_mode & 0o777 == 0o600
                 assert root.stat().st_mode & 0o777 == 0o700
-                status = _healthz_status(endpoint)
-                log.flush()
-                log.seek(0)
-                assert status.split(b" ")[1:2] == [b"200"], (status, log.read())
+                status = b"No health response"
+                while process.poll() is None and time.monotonic() < deadline:
+                    try:
+                        with socket.socket(socket.AF_UNIX) as client:
+                            for operation, argument in (
+                                (client.connect, str(endpoint)),
+                                (client.sendall, b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"),
+                            ):
+                                remaining = deadline - time.monotonic()
+                                if remaining <= 0:
+                                    raise TimeoutError
+                                client.settimeout(min(10, remaining))
+                                operation(argument)
+                            response = b""
+                            while b"\r\n" not in response:
+                                remaining = deadline - time.monotonic()
+                                if remaining <= 0:
+                                    raise TimeoutError
+                                client.settimeout(min(10, remaining))
+                                chunk = client.recv(4096)
+                                if not chunk:
+                                    break
+                                response += chunk
+                            status = response.split(b"\r\n", 1)[0] if b"\r\n" in response else b"Incomplete health response"
+                            if status.split()[1:2] == [b"200"] and time.monotonic() >= deadline:
+                                raise TimeoutError
+                    except TimeoutError:
+                        status = b"Health request timed out"
+                    if status.split()[1:2] == [b"200"]:
+                        break
+                    time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+                else:
+                    log.seek(0)
+                    pytest.fail(f"code-server health check failed: {status!r}; exit={process.poll()}\n{log.read()}")
                 if os.geteuid() == 0:
                     other_uid = pwd.getpwnam("nobody").pw_uid
                     probe = (
