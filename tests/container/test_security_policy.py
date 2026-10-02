@@ -68,13 +68,31 @@ def test_code_server_private_socket_serves_owner_and_rejects_other_uid():
                 assert endpoint.stat().st_mode & 0o777 == 0o600
                 assert root.stat().st_mode & 0o777 == 0o700
                 status = b"No health response"
-                while process.poll() is None and (remaining := deadline - time.monotonic()) > 0:
+                while process.poll() is None and time.monotonic() < deadline:
                     try:
                         with socket.socket(socket.AF_UNIX) as client:
-                            client.settimeout(min(10, remaining))
-                            client.connect(str(endpoint))
-                            client.sendall(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-                            status = client.recv(4096).split(b"\r\n", 1)[0]
+                            for operation, argument in (
+                                (client.connect, str(endpoint)),
+                                (client.sendall, b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"),
+                            ):
+                                remaining = deadline - time.monotonic()
+                                if remaining <= 0:
+                                    raise TimeoutError
+                                client.settimeout(min(10, remaining))
+                                operation(argument)
+                            response = b""
+                            while b"\r\n" not in response:
+                                remaining = deadline - time.monotonic()
+                                if remaining <= 0:
+                                    raise TimeoutError
+                                client.settimeout(min(10, remaining))
+                                chunk = client.recv(4096)
+                                if not chunk:
+                                    break
+                                response += chunk
+                            status = response.split(b"\r\n", 1)[0] if b"\r\n" in response else b"Incomplete health response"
+                            if status.split()[1:2] == [b"200"] and time.monotonic() >= deadline:
+                                raise TimeoutError
                     except TimeoutError:
                         status = b"Health request timed out"
                     if status.split()[1:2] == [b"200"]:
