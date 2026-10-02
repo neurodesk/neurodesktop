@@ -18,7 +18,7 @@ from testlib import load_source_module, repo_path, resolve_source
 LAUNCHER = resolve_source("/opt/neurodesktop/code_server_ready.py", "config/jupyter/code_server_ready.py")
 
 FAKE_CODE_SERVER = """\
-import os, signal, socket, sys
+import os, signal, socket, sys, time
 from pathlib import Path
 
 state = Path(sys.argv[1])
@@ -27,6 +27,17 @@ endpoint = sys.argv[sys.argv.index("--socket") + 1]
 (state / "socket-arg").write_text(endpoint)
 if (state / "exit-early").exists():
     sys.exit(3)
+def shut_down(signum, _frame):
+    # Like libuv, unlink the bound path when the server closes.
+    time.sleep(float((state / "shutdown-delay").read_text()) if (state / "shutdown-delay").exists() else 0)
+    try:
+        os.unlink(endpoint)
+    except FileNotFoundError:
+        pass
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+
+signal.signal(signal.SIGTERM, shut_down)
 server = socket.socket(socket.AF_UNIX)
 server.bind(endpoint)
 os.chmod(endpoint, 0o600)
@@ -69,9 +80,9 @@ def launch(tmp_path):
     endpoint = socket_dir / "socket"
     processes = []
 
-    def start():
+    def start(state=tmp_path):
         process = subprocess.Popen(
-            [str(LAUNCHER), str(fake), str(tmp_path), "--auth", "none",
+            [str(LAUNCHER), str(fake), str(state), "--auth", "none",
              "--socket", str(endpoint), "--socket-mode", "0600", str(tmp_path)],
         )
         processes.append(process)
@@ -82,9 +93,9 @@ def launch(tmp_path):
         if process.poll() is None:
             process.kill()
             process.wait()
-    pid_file = tmp_path / "pid"
-    if pid_file.exists() and pid_running(int(pid_file.read_text())):
-        os.kill(int(pid_file.read_text()), signal.SIGKILL)
+    for pid_file in tmp_path.glob("**/pid"):
+        if pid_running(int(pid_file.read_text())):
+            os.kill(int(pid_file.read_text()), signal.SIGKILL)
     shutil.rmtree(socket_dir, ignore_errors=True)
 
 
@@ -102,7 +113,7 @@ def test_socket_appears_only_after_code_server_routes_answer(launch):
 
     wait_until(lambda: (state / "requests").exists() and "404" in (state / "requests").read_text())
     staging = state / "socket-arg"
-    assert staging.read_text() != str(endpoint)
+    assert staging.read_text() == str(endpoint.parent / f".socket.{process.pid}.starting")
     assert os.path.dirname(staging.read_text()) == str(endpoint.parent)
     assert not endpoint.exists()
 
@@ -117,6 +128,46 @@ def test_socket_appears_only_after_code_server_routes_answer(launch):
     assert process.wait(timeout=10) == 128 + signal.SIGTERM
     assert not pid_running(int((state / "pid").read_text()))
     assert not endpoint.exists()
+
+
+def test_launcher_leaves_a_socket_it_did_not_publish(launch):
+    start, endpoint, state = launch
+    process = start()
+    (state / "routes").touch()
+    wait_until(endpoint.exists)
+
+    # A later launch for the same proxy path has replaced this one's socket.
+    with socket.socket(socket.AF_UNIX) as successor:
+        replacement = endpoint.with_name("successor")
+        successor.bind(str(replacement))
+        os.replace(replacement, endpoint)
+
+        process.send_signal(signal.SIGTERM)
+        assert process.wait(timeout=10) == 128 + signal.SIGTERM
+        assert endpoint.is_socket()
+
+
+def test_orphan_from_a_timed_out_launch_keeps_off_the_next_socket(launch):
+    start, endpoint, state = launch
+    first_state, second_state = state / "first", state / "second"
+    first_state.mkdir()
+    second_state.mkdir()
+    (first_state / "shutdown-delay").write_text("0.5")
+    first = start(first_state)
+    wait_until(lambda: (first_state / "requests").exists())
+
+    # Jupyter Server Proxy SIGKILLs a launch that misses its readiness timeout
+    # and starts another while the orphaned code-server is still shutting down.
+    first.kill()
+    first.wait()
+    second = start(second_state)
+    wait_until(lambda: (second_state / "requests").exists())
+    wait_until(lambda: not pid_running(int((first_state / "pid").read_text())))
+    (second_state / "routes").touch()
+    wait_until(endpoint.exists)
+
+    assert get_status(endpoint) == b"HTTP/1.1 200 OK"
+    assert second.poll() is None
 
 
 def test_code_server_exit_before_ready_is_reported(launch):

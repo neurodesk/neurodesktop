@@ -77,6 +77,9 @@ forward a user's first request to an empty router and show a 404.
 the same private directory and renames it to the proxy's path once `/healthz`
 returns 200. The launcher forwards termination signals and gives code-server a
 parent-death signal, so the proxy's SIGKILL cannot leave code-server running.
+Each launch uses its own staging name and removes the published socket only if
+it is still the one that launch placed. An orphan from a launch that missed the
+proxy's timeout cannot remove the next launch's socket while it shuts down.
 
 ## Clipboard sync
 

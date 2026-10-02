@@ -32,7 +32,9 @@ def staging_command(command: list[str]) -> tuple[list[str], Path, Path]:
         raise ValueError("expected exactly one '--socket PATH' argument")
     index = command.index("--socket")
     target = Path(command[index + 1])
-    staging = target.with_name(f".{target.name}.starting")
+    # A per-launch name keeps an orphan from a timed-out launch, which libuv
+    # unlinks by path on shutdown, from removing this launch's socket.
+    staging = target.with_name(f".{target.name}.{os.getpid()}.starting")
     return [*command[: index + 1], str(staging), *command[index + 2 :]], target, staging
 
 
@@ -70,10 +72,12 @@ def run(command: list[str], poll_interval: float = 0.05) -> int:
     for signum in FORWARDED_SIGNALS:
         signal.signal(signum, lambda received, _frame: child.send_signal(received))
 
+    published = None
     try:
         while child.poll() is None:
             if healthz_status(staging) == 200:
                 os.replace(staging, target)
+                published = target.stat().st_ino
                 break
             time.sleep(poll_interval)
         returncode = child.wait()
@@ -81,8 +85,12 @@ def run(command: list[str], poll_interval: float = 0.05) -> int:
         if child.poll() is None:
             child.terminate()
             child.wait()
-        for path in (target, staging):
-            path.unlink(missing_ok=True)
+        staging.unlink(missing_ok=True)
+        try:
+            if target.stat().st_ino == published:
+                target.unlink()
+        except FileNotFoundError:
+            pass
     return 128 - returncode if returncode < 0 else returncode
 
 
