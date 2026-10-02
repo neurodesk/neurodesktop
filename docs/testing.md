@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-09-21"
+last-reviewed: "2026-10-02"
 ---
 
 # Testing
@@ -271,6 +271,15 @@ The root-run check also requires another UID to be denied access.
 exercises delayed route readiness, fragmented responses, request timeouts,
 deadline enforcement, permanent failure, and early process exit with a
 controlled clock.
+The shipped command starts code-server through
+[`config/jupyter/code_server_ready.py`](../config/jupyter/code_server_ready.py),
+which only moves the socket to the proxy's path after `/healthz` returns 200, so
+Jupyter Server Proxy never sees that early 404.
+[`pytest tests/unit/test_code_server_ready.py`](../tests/unit/test_code_server_ready.py)
+runs the launcher against a fake code-server. It covers the hidden socket while
+routes return 404, mode `0600` after the rename, signal forwarding, early exit,
+cleanup of code-server when the launcher is killed, and an orphan from a
+timed-out launch shutting down while the next launch starts.
 
 Desktop smoke tests keep Guacamole, Tomcat, VNC, and credential state in
 temporary per-test homes by default. Tests that need to start the global xrdp

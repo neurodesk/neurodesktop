@@ -93,7 +93,10 @@ c.ServerProxy.servers = {
   # third launcher tile. New launcher entries choose the backend explicitly.
   'neurodesktop': _neurodesktop_server('rdp', 'Neurodesktop', 'neurodesktop', launcher_enabled=False),
   'vscode': {
+    # The launcher renames code-server's socket into place once /healthz
+    # answers, because the proxy treats code-server's early 404 as ready.
     'command': [
+      '/opt/neurodesktop/code_server_ready.py',
       '/usr/local/bin/code-server',
       '--auth',
       'none',

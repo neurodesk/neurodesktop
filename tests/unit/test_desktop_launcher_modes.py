@@ -143,6 +143,7 @@ def test_vscode_uses_private_socket_in_shared_network_namespace(tmp_path, monkey
     server = _execute_jupyter_config(config, tmp_path, monkeypatch, apptainer=True, euid=5000)["vscode"]
     assert server.get("unix_socket") is True
     command = server["command"]
+    assert command[:2] == ["/opt/neurodesktop/code_server_ready.py", "/usr/local/bin/code-server"]
     assert command[command.index("--socket") + 1] == "{unix_socket}"
     assert command[command.index("--socket-mode") + 1] == "0600"
     assert "--bind-addr" not in command

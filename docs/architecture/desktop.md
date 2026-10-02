@@ -4,7 +4,7 @@ description: LXDE desktop over VNC/RDP through Guacamole, clipboard sync,
   per-display Firefox profiles, and office file associations
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-20"
+last-reviewed: "2026-10-02"
 ---
 
 # Desktop Environment
@@ -69,6 +69,17 @@ by Jupyter Server Proxy. It does not open an unauthenticated TCP listener on the
 shared host. Jupyter authenticates browser requests before forwarding them.
 The proxy's [Unix-socket option](https://jupyter-server-proxy.readthedocs.io/en/latest/server-process.html#unix-socket)
 provides the private directory and WebSocket transport.
+
+The proxy considers VS Code ready as soon as its socket returns any HTTP
+response. code-server listens before it registers its routes, so the proxy could
+forward a user's first request to an empty router and show a 404.
+`config/jupyter/code_server_ready.py` starts code-server on a staging socket in
+the same private directory and renames it to the proxy's path once `/healthz`
+returns 200. The launcher forwards termination signals and gives code-server a
+parent-death signal, so the proxy's SIGKILL cannot leave code-server running.
+Each launch uses its own staging name and removes the published socket only if
+it is still the one that launch placed. An orphan from a launch that missed the
+proxy's timeout cannot remove the next launch's socket while it shuts down.
 
 ## Clipboard sync
 
