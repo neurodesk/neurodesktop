@@ -14,6 +14,7 @@ def security_probe(monkeypatch):
     state = SimpleNamespace(
         elapsed=0, responses=[b"HTTP/1.1 404 Not Found", b"HTTP/1.1 200 OK"],
         requests=0, exit_after=None, terminated=False, waited=False,
+        fragment_size=None, close_after_fragment=False, connect_delay_fraction=0,
     )
 
     def sleep(seconds):
@@ -48,19 +49,26 @@ def security_probe(monkeypatch):
 
         def connect(self, endpoint):
             assert Path(endpoint).stat().st_mode & 0o777 == 0o600
+            state.elapsed += self.timeout * state.connect_delay_fraction
 
         def sendall(self, request):
             assert request.startswith(b"GET /healthz HTTP/1.1\r\n")
             assert not self.used, "Each retry needs a fresh connection"
             self.used = True
+            self.response = state.responses[min(state.requests, len(state.responses) - 1)]
+            if not isinstance(self.response, TimeoutError):
+                self.response += b"\r\n\r\n"
+            state.requests += 1
 
         def recv(self, size):
             state.elapsed += min(10, self.timeout)
-            response = state.responses[min(state.requests, len(state.responses) - 1)]
-            state.requests += 1
-            if isinstance(response, TimeoutError):
-                raise response
-            return response + b"\r\n\r\n"
+            if isinstance(self.response, TimeoutError):
+                raise self.response
+            size = min(size, state.fragment_size or size)
+            response, self.response = self.response[:size], self.response[size:]
+            if state.close_after_fragment:
+                self.response = b""
+            return response
 
     monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: state.elapsed, sleep=sleep))
     monkeypatch.setattr(module, "subprocess", SimpleNamespace(Popen=start))
@@ -73,6 +81,39 @@ def test_private_socket_waits_for_health_route(security_probe):
     probe, state = security_probe
     probe()
     assert state.requests == 2
+    assert state.terminated and state.waited
+
+
+def test_private_socket_reads_fragmented_status_line(security_probe):
+    probe, state = security_probe
+    state.responses = [b"HTTP/1.1 200 OK"]
+    state.fragment_size = 10
+    probe()
+    assert state.requests == 1
+    assert state.terminated and state.waited
+
+
+def test_private_socket_rejects_success_after_startup_deadline(security_probe):
+    probe, state = security_probe
+    state.responses = [TimeoutError(), TimeoutError(), b"HTTP/1.1 200 OK"]
+    state.connect_delay_fraction = 0.9
+    with pytest.raises(pytest.fail.Exception) as failure:
+        probe()
+    assert "Health request timed out" in str(failure.value)
+    assert "test server startup log" in str(failure.value)
+    assert state.elapsed <= 45.1
+    assert state.terminated and state.waited
+
+
+def test_private_socket_rejects_unterminated_status_line(security_probe):
+    probe, state = security_probe
+    state.responses = [b"HTTP/1.1 200 OK"]
+    state.fragment_size = 15
+    state.close_after_fragment = True
+    with pytest.raises(pytest.fail.Exception) as failure:
+        probe()
+    assert "test server startup log" in str(failure.value)
+    assert state.elapsed <= 45.1
     assert state.terminated and state.waited
 
 
