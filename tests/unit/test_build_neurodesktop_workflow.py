@@ -198,10 +198,14 @@ def test_every_image_flavor_runs_native_arm64_runtime_checks():
 
 def test_every_image_flavor_invokes_the_runtime_validator_with_its_profile():
     for path in IMAGE_TEST_WORKFLOWS:
-        job = yaml.safe_load(path.read_text())["jobs"]["test-image"]
+        workflow = yaml.safe_load(path.read_text())
+        job = workflow["jobs"]["test-image"]
         tests = [step for step in job["steps"]
                  if step.get("name", "").startswith("Test container (")]
         assert len(tests) == 2
+        assert "shell" not in workflow.get("defaults", {}).get("run", {})
+        assert "shell" not in job.get("defaults", {}).get("run", {})
+        assert all("shell" not in step for step in tests)
         assert [step["if"] for step in tests] == [
             "${{ ! matrix.profile.hpc_mode }}", "${{ matrix.profile.hpc_mode }}",
         ]

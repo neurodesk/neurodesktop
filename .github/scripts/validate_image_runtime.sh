@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e -o pipefail
+set -e
 
 usage() {
   echo 'Usage: validate_image_runtime.sh IMAGE regular CVMFS_DISABLE GRANT_SUDO NEEDS_CVMFS | IMAGE hpc' >&2

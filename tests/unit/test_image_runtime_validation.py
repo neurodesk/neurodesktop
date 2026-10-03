@@ -57,7 +57,7 @@ if args[0] == "run":
     print("test-container")
     sys.exit(int(os.environ.get("START_STATUS", "0")))
 if args[0] == "inspect":
-    print("false" if os.environ.get("CONTAINER_EXITED") == "1" else "true")
+    print(os.environ.get("INSPECT_OUTPUT", "false" if os.environ.get("CONTAINER_EXITED") == "1" else "true"))
     sys.exit(int(os.environ.get("INSPECT_STATUS", "0")))
 if args[0] == "logs":
     print("test container startup log")
@@ -141,7 +141,7 @@ exec /bin/rm "$@"
             release = tmp_path / "probe-release"
             env.update(PROBE_MARKER=str(marker), PROBE_RELEASE=str(release))
         process = subprocess.Popen(
-            ["bash", "-e", "-o", "pipefail", str(script)], cwd=repo_path("."),
+            ["bash", "-e", str(script)], cwd=repo_path("."),
             env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             start_new_session=True,
         )
@@ -364,12 +364,22 @@ def test_hpc_allocation_failure_cleans_up_owned_paths(validate, allocation):
 
 
 def test_hpc_inspect_failure_keeps_liveness_failure_despite_failed_diagnostics(validate):
-    result, records, resources = validate(hpc=True, INSPECT_STATUS=17, LOG_STATUS=18)
+    result, records, resources = validate(hpc=True, INSPECT_OUTPUT="false", INSPECT_STATUS=17, LOG_STATUS=18)
 
     assert result.returncode == 1
     assert not pytest_calls(records)
     assert not any("curl" in record["args"] for record in records)
     assert ["logs", "--tail", "120", "neurodesktop-test"] in [record["args"] for record in records]
+    assert not list(resources.iterdir())
+
+
+@pytest.mark.parametrize("output", ["true", "prefix-true-suffix"])
+def test_hpc_liveness_preserves_grep_success_despite_inspect_failure(validate, output):
+    result, records, resources = validate(hpc=True, INSPECT_OUTPUT=output, INSPECT_STATUS=17)
+
+    assert result.returncode == 0, result.stderr
+    assert len(pytest_calls(records)) == 1
+    assert not any(record["args"][0] == "logs" for record in records)
     assert not list(resources.iterdir())
 
 
