@@ -99,10 +99,12 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
         settings_path.parent.mkdir(parents=True)
         settings_path.write_text(json.dumps({"providers": {"codex": {
             "binaryPath": "/opt/neurodesktop/t3-provider-bin/codex"}}}))
-    supervisor.seed_provider_settings(SimpleNamespace(
+    supervisor.prepare_startup_settings(SimpleNamespace(
         base_dir=tmp_path / ".t3", provider_bin=Path("/opt/neurodesktop/t3-provider-bin")
     ))
-    seeded = json.loads(settings_path.read_text())["providerInstances"]
+    settings = json.loads(settings_path.read_text())
+    assert settings["enableProviderUpdateChecks"] is False
+    seeded = settings["providerInstances"]
     assert seeded["codex"] == {
         "driver": "codex", "config": {"binaryPath": "/opt/neurodesktop/t3-provider-bin/codex"}}
     assert seeded["opencode"] == {

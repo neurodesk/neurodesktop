@@ -4,7 +4,7 @@ description: T3 Code in JupyterLab, server lifecycle, provider paths, persistent
   state, and desktop connection procedures
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-21"
+last-reviewed: "2026-10-03"
 ---
 
 # T3 Code remote access
@@ -317,7 +317,13 @@ that expires automatically.
 
 ## Providers
 
-The supervisor sets `enableProviderUpdateChecks` to `false` at startup, including
+The supervisor prepares `userdata/settings.json` before startup with one JSON
+read and at most one atomic replacement. If both policies are already satisfied,
+it preserves the file bytes. Malformed JSON, invalid UTF-8, and a non-object root
+remain untouched. Malformed provider data skips only provider seeding; update
+notice suppression still applies to a valid settings object.
+
+The supervisor sets `enableProviderUpdateChecks` to `false`, including
 for existing profiles, to suppress automatic provider update notices in the
 image-managed T3 environment. Upgrades are delivered through image releases.
 T3's desktop-app update controls are not rendered in its embedded web mode;
@@ -331,7 +337,7 @@ Antigravity drivers disabled, so the OpenCode instance carries an explicit
 in-config flag into the envelope on every load.
 
 Seeding never overwrites a user's choice. An instance under the seed's own id,
-or any instance that declares the same driver, leaves the settings alone, and
+or any instance that declares the same driver, prevents that driver's seed, and
 so does a `providers.<driver>` entry that configures the driver. The supervisor
 still promotes the exact legacy `providers.codex` default written by earlier
 images and retains that entry for backward compatibility. T3 writes

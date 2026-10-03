@@ -205,15 +205,8 @@ PROVIDER_SEEDS = (
 )
 
 
-def seed_provider_settings(policy: Policy) -> None:
-    """Give T3 the image's own agent launchers on a profile that lacks them.
-
-    Codex would otherwise follow a login-shell PATH refresh to an obsolete
-    ``~/.local/bin/codex``, and T3 ships the OpenCode driver disabled, so its
-    instance carries an explicit flag. Explicit paths and provider instances
-    remain user-owned. Write atomically before T3 starts watching its settings
-    file.
-    """
+def prepare_startup_settings(policy: Policy) -> None:
+    """Apply provider and update policies with at most one atomic replacement."""
     directory = policy.base_dir / "userdata"
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     target = directory / "settings.json"
@@ -225,22 +218,27 @@ def seed_provider_settings(policy: Policy) -> None:
         return  # Let T3 report malformed user settings without replacing them.
     if not isinstance(settings, dict):
         return
+    changed = False
     instances = settings.get("providerInstances", {})
     providers = settings.get("providers", {})
-    if not isinstance(instances, dict) or not isinstance(providers, dict):
-        return
-    # A driver is unreadable from a malformed instance, so seed nothing.
-    if any(not isinstance(instance, dict) for instance in instances.values()):
-        return
-    seeded = {
-        seed.driver: seed.instance(policy.provider_bin)
-        for seed in PROVIDER_SEEDS
-        if not seed.is_user_owned(instances, providers, policy.provider_bin)
-    }
-    if not seeded:
-        return
-    settings["providerInstances"] = {**instances, **seeded}
-    _write_settings(directory, settings)
+    if (
+        isinstance(instances, dict)
+        and isinstance(providers, dict)
+        and all(isinstance(instance, dict) for instance in instances.values())
+    ):
+        seeded = {
+            seed.driver: seed.instance(policy.provider_bin)
+            for seed in PROVIDER_SEEDS
+            if not seed.is_user_owned(instances, providers, policy.provider_bin)
+        }
+        if seeded:
+            settings["providerInstances"] = {**instances, **seeded}
+            changed = True
+    if settings.get("enableProviderUpdateChecks") is not False:
+        settings["enableProviderUpdateChecks"] = False
+        changed = True
+    if changed:
+        _write_settings(directory, settings)
 
 
 def _write_settings(directory: Path, settings: dict) -> None:
@@ -254,22 +252,6 @@ def _write_settings(directory: Path, settings: dict) -> None:
     finally:
         with suppress(FileNotFoundError):
             os.unlink(name)
-
-
-def disable_update_notifications(policy: Policy) -> None:
-    """Image releases own agent updates; suppress automatic provider notices."""
-    directory = policy.base_dir / "userdata"
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    try:
-        settings = json.loads((directory / "settings.json").read_text())
-    except FileNotFoundError:
-        settings = {}
-    except (ValueError, UnicodeError):
-        return
-    if not isinstance(settings, dict) or settings.get("enableProviderUpdateChecks") is False:
-        return
-    settings["enableProviderUpdateChecks"] = False
-    _write_settings(directory, settings)
 
 
 def server_environment(
@@ -399,8 +381,7 @@ class T3Supervisor:
                 self.state = ServiceState.STARTING
                 self.policy.base_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
                 try:
-                    seed_provider_settings(self.policy)
-                    disable_update_notifications(self.policy)
+                    prepare_startup_settings(self.policy)
                     self.connect_tunnel_limit = None
                     self._process = await asyncio.create_subprocess_exec(
                         *server_command(self.policy),
