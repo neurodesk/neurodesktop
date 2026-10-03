@@ -228,6 +228,8 @@ the generated label. Local installations keep T3's normal hostname fallback.
 Existing links retain their environment ID and credentials. An idle T3 sidecar
 restarts once when it learns the public hostname; active or unknown chat state
 defers this until an idle session open, connection check, or normal server restart.
+The extension serializes hostname updates with restarts, so updates received
+during a readiness wait cannot be cleared by the earlier restart.
 
 Choose **Setup T3 connect** in the compact bar inside the scigent.ai tab.
 Desktop linking is optional; the embedded app already uses your Jupyter login.

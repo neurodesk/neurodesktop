@@ -103,11 +103,11 @@ class ConnectManager:
 
     async def configure_name(self, host):
         from .naming import environment_label, remember_public_host
-        environ = self.service.environ
-        before = environment_label(self.service.policy, environ)
-        remember_public_host(self.service.policy, environ, host)
-        self._name_pending |= before != environment_label(self.service.policy, environ)
         async with self.lock:
+            environ = self.service.environ
+            before = environment_label(self.service.policy, environ)
+            remember_public_host(self.service.policy, environ, host)
+            self._name_pending |= before != environment_label(self.service.policy, environ)
             if self._name_pending and (not self.task or self.task.done()) and not self.active_chats():
                 await self._restart()
 
@@ -264,8 +264,9 @@ class ConnectManager:
                     'Your sign-in is saved; signing in again will not free a tunnel.',
                     connections_url=CONNECTIONS_PAGE,
                 )
-            if self._name_pending and not self.active_chats():
-                await self._restart()
+            async with self.lock:
+                if self._name_pending and not self.active_chats():
+                    await self._restart()
             dns_failed = False
             try:
                 if await self.reachable():
@@ -301,12 +302,15 @@ class ConnectManager:
         if not saved.get('linked') or self._name_pending:
             self.set_state('waiting_idle', 'Authorization saved. Waiting for active chats to finish before restarting T3.')
             deadline = time.monotonic() + 1800
-            while self.active_chats():
+            while True:
+                async with self.lock:
+                    if not self.active_chats():
+                        self.set_state('restarting', 'Restarting T3 to activate your link. Jupyter stays open.')
+                        await self._restart()
+                        break
                 if time.monotonic() > deadline:
                     raise ConnectError('T3 is still busy, or its chat status is unavailable. Finish active chats and choose Retry.')
                 await asyncio.sleep(3)
-            self.set_state('restarting', 'Restarting T3 to activate your link. Jupyter stays open.')
-            await self._restart()
         await self._wait_reachable()
 
     async def restore(self):

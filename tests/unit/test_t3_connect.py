@@ -219,6 +219,111 @@ def test_cancel_during_restart_finishes_restart(manager):
     run(scenario())
 
 
+@pytest.mark.parametrize('operation', ['_wait_reachable', '_link'])
+def test_cancel_background_restart_waits_for_readiness(manager, operation):
+    async def scenario():
+        started = asyncio.Event()
+        release_ready = asyncio.Event()
+        ready = asyncio.Event()
+        manager.service.environ = {'JUPYTERHUB_USER': 'user'}
+        manager.active_chats = lambda: True
+        await manager.configure_name('a.example.org')
+        manager.active_chats = lambda: False
+        manager.saved_status = AsyncMock(return_value={
+            'relayClient': {'status': 'available'}, 'desired': True,
+            'authenticated': True, 'linked': False})
+        manager._process = AsyncMock(return_value=b'')
+        manager.reachable = AsyncMock(return_value=True)
+
+        async def wait_ready():
+            started.set()
+            await release_ready.wait()
+            ready.set()
+
+        manager.service.wait_ready = wait_ready
+        manager.task = asyncio.create_task(manager._run(getattr(manager, operation)))
+        await started.wait()
+        manager.task.cancel()
+        release_ready.set()
+        await manager.close()
+        assert ready.is_set()
+        manager.service.close.assert_awaited_once()
+
+    run(asyncio.wait_for(scenario(), timeout=5))
+
+
+@pytest.mark.parametrize('operation', ['_wait_reachable', '_link'])
+def test_cancel_background_restart_waiting_for_manager_lock(manager, operation):
+    async def scenario():
+        attempted_restart = asyncio.Event()
+
+        class ObservedLock(asyncio.Lock):
+            async def acquire(self):
+                attempted_restart.set()
+                return await super().acquire()
+
+        manager.service.environ = {'JUPYTERHUB_USER': 'user'}
+        manager.active_chats = lambda: True
+        await manager.configure_name('a.example.org')
+        manager.active_chats = lambda: False
+        manager.saved_status = AsyncMock(return_value={
+            'relayClient': {'status': 'available'}, 'desired': True,
+            'authenticated': True, 'linked': False})
+        manager._process = AsyncMock(return_value=b'')
+        manager.reachable = AsyncMock(return_value=True)
+        manager.service.close = AsyncMock(side_effect=attempted_restart.set)
+        manager.lock = ObservedLock()
+        async with manager.lock:
+            attempted_restart.clear()
+            manager.task = asyncio.create_task(manager._run(getattr(manager, operation)))
+            await attempted_restart.wait()
+            await manager.close()
+            manager.service.close.assert_not_awaited()
+
+    run(asyncio.wait_for(scenario(), timeout=5))
+
+
+@pytest.mark.parametrize('operation', ['_wait_reachable', '_link'])
+def test_chat_becoming_active_during_restart_admission_defers_restart(manager, monkeypatch, operation):
+    async def scenario():
+        admission = asyncio.Event()
+        checked = asyncio.Event()
+        busy = False
+
+        class ObservedLock(asyncio.Lock):
+            async def acquire(self):
+                admission.set()
+                return await super().acquire()
+
+        async def sleep(_):
+            checked.set()
+            await asyncio.Event().wait()
+
+        manager.lock = ObservedLock()
+        manager._name_pending = True
+        manager.active_chats = lambda: busy
+        manager.saved_status = AsyncMock(return_value={
+            'relayClient': {'status': 'available'}, 'desired': True,
+            'authenticated': True, 'linked': False})
+        manager._process = AsyncMock(return_value=b'')
+        manager.reachable = AsyncMock(return_value=False)
+        manager.service.close = AsyncMock(side_effect=admission.set)
+        monkeypatch.setattr('neurodesk_t3_code.connect.asyncio.sleep', sleep)
+
+        async with manager.lock:
+            admission.clear()
+            manager.task = asyncio.create_task(manager._run(getattr(manager, operation)))
+            await admission.wait()
+            busy = True
+        await checked.wait()
+        manager.service.close.assert_not_awaited()
+        assert manager._name_pending
+        await manager.action('cancel')
+        assert manager.state == 'idle'
+
+    run(asyncio.wait_for(scenario(), timeout=5))
+
+
 def test_dns_failure_reports_cluster_resolution_problem(manager, monkeypatch):
     import socket
     real_sleep = asyncio.sleep
