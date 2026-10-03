@@ -99,10 +99,24 @@ def check_slurm_launcher(bidi, context):
         assert evaluate(bidi, context, f"({tile}).textContent.includes('Slurm Dashboard')")
         assert not evaluate(bidi, context, visible), "New launcher should hide the previous dashboard"
         target = bidi.request("script.evaluate", {
-            "expression": f"""(() => {{
+            "expression": f"""(async () => {{
                 const node = {tile};
                 node.scrollIntoView({{block: 'center', behavior: 'instant'}});
-                return node;
+                const deadline = performance.now() + 20000;
+                let previous = null;
+                let stableFrames = 0;
+                while (performance.now() < deadline) {{
+                    await new Promise(requestAnimationFrame);
+                    const rect = node.getBoundingClientRect();
+                    const geometry = JSON.stringify([rect.x, rect.y, rect.width, rect.height]);
+                    const hit = document.elementFromPoint(
+                        rect.x + rect.width / 2, rect.y + rect.height / 2);
+                    stableFrames = geometry === previous && node.contains(hit)
+                        ? stableFrames + 1 : 0;
+                    if (stableFrames >= 2) return node;
+                    previous = geometry;
+                }}
+                throw new Error('Slurm launcher tile did not become stable and unobscured');
             }})()""",
             "target": {"context": context}, "awaitPromise": True,
         })
