@@ -82,6 +82,47 @@ def test_explicit_name_never_restarts_service(tmp_path):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize('latest_host', ['a.example.org', 'b.example.org'])
+def test_overlapping_name_requests_apply_latest_label(tmp_path, latest_host):
+    async def scenario():
+        first_started = asyncio.Event()
+        release_ready = asyncio.Event()
+        second_requested = asyncio.Event()
+        spawned_labels = []
+        policy = SimpleNamespace(base_dir=tmp_path)
+        environ = {'JUPYTERHUB_USER': 'user'}
+
+        def start():
+            spawned_labels.append(environment_label(policy, environ))
+
+        async def wait_ready():
+            if len(spawned_labels) == 1:
+                first_started.set()
+                await release_ready.wait()
+
+        service = SimpleNamespace(policy=policy, environ=environ,
+            close=AsyncMock(), start=start, wait_ready=wait_ready)
+        manager = ConnectManager(service)
+        manager.active_chats = lambda: False
+
+        async def request_latest():
+            second_requested.set()
+            await manager.configure_name(latest_host)
+
+        first = asyncio.create_task(manager.configure_name('a.example.org'))
+        await first_started.wait()
+        second = asyncio.create_task(request_latest())
+        await second_requested.wait()
+        release_ready.set()
+        await asyncio.gather(first, second)
+
+        assert spawned_labels[-1] == f'user@{latest_host}'
+        if latest_host == 'a.example.org':
+            assert len(spawned_labels) == 1
+
+    asyncio.run(asyncio.wait_for(scenario(), timeout=5))
+
+
 def test_pending_name_applies_during_connection_check_without_relink(tmp_path):
     async def scenario():
         service = SimpleNamespace(policy=SimpleNamespace(base_dir=tmp_path),
@@ -98,3 +139,56 @@ def test_pending_name_applies_during_connection_check_without_relink(tmp_path):
         service.close.assert_awaited_once()
         manager._process.assert_not_awaited()
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('operation', ['_wait_reachable', '_link'])
+def test_name_requested_during_background_restart_reaches_running_service(tmp_path, operation):
+    async def scenario():
+        first_started = asyncio.Event()
+        release_ready = asyncio.Event()
+        latest_requested = asyncio.Event()
+        release_route = asyncio.Event()
+        spawned_labels = []
+        policy = SimpleNamespace(base_dir=tmp_path)
+        environ = {'JUPYTERHUB_USER': 'user'}
+
+        async def wait_ready():
+            first_started.set()
+            await release_ready.wait()
+
+        async def reachable():
+            await release_route.wait()
+            return True
+
+        service = SimpleNamespace(policy=policy, environ=environ, close=AsyncMock(),
+            start=lambda: spawned_labels.append(environment_label(policy, environ)),
+            wait_ready=wait_ready)
+        manager = ConnectManager(service)
+        manager.active_chats = lambda: True
+        await manager.configure_name('a.example.org')
+        manager.active_chats = lambda: False
+        manager.reachable = reachable
+        manager.saved_status = AsyncMock(return_value={
+            'relayClient': {'status': 'available'}, 'desired': True,
+            'authenticated': True, 'linked': False})
+        manager._process = AsyncMock(return_value=b'')
+        manager.task = asyncio.create_task(manager._run(getattr(manager, operation)))
+        await first_started.wait()
+
+        async def request_latest():
+            latest_requested.set()
+            await manager.configure_name('b.example.org')
+
+        latest = asyncio.create_task(request_latest())
+        await latest_requested.wait()
+        release_ready.set()
+        await latest
+        assert not manager.task.done()
+        release_route.set()
+        await manager.task
+        await manager.configure_name('b.example.org')
+
+        assert spawned_labels == ['user@a.example.org', 'user@b.example.org']
+        assert manager.state == 'ready'
+
+    asyncio.run(asyncio.wait_for(scenario(), timeout=5))
