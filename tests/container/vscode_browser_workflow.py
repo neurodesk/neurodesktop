@@ -89,12 +89,38 @@ def run_vscode_edit_workflow(tmp_path):
             "wait": "complete",
         })
         _wait(bidi, context, "Boolean(document.querySelector('.monaco-workbench'))", timeout=90)
-        _evaluate(bidi, context, "[...document.querySelectorAll('button')].find(button => button.textContent.includes('Yes, I trust the authors'))?.click()")
-        _keys(bidi, context, "\ue009", "p")
-        _wait(bidi, context, "Boolean(document.querySelector('.quick-input-widget input'))")
-        _type(bidi, context, "acceptance.txt")
-        _wait(bidi, context, "Boolean(document.querySelector('.quick-input-list .monaco-list-row'))")
-        _keys(bidi, context, "\ue007")
+        point = json.loads(_wait(bidi, context, """(() => {
+            const trust = [...document.querySelectorAll('button, [role="button"], .monaco-button')]
+                .find(node => node.textContent.includes('Yes, I trust the authors'));
+            if (trust && trust.getClientRects().length) {
+                trust.click();
+                return false;
+            }
+            const label = [...document.querySelectorAll('.monaco-list-row .label-name')]
+                .find(node => node.textContent === 'acceptance.txt');
+            if (!label) return false;
+            const row = label.closest('.monaco-list-row');
+            const rect = label.getBoundingClientRect();
+            const x = Math.round(rect.left + rect.width / 2);
+            const y = Math.round(rect.top + rect.height / 2);
+            if (!rect.width || !rect.height || !row.contains(document.elementFromPoint(x, y))) {
+                return false;
+            }
+            return JSON.stringify({x, y});
+        })()"""))
+        bidi.request("input.performActions", {
+            "context": context, "actions": [{
+                "type": "pointer", "id": "vscode-file", "parameters": {"pointerType": "mouse"},
+                "actions": [
+                    {"type": "pointerMove", "duration": 0, "origin": "viewport", **point},
+                    {"type": "pointerDown", "button": 0},
+                    {"type": "pointerUp", "button": 0},
+                    {"type": "pause", "duration": 100},
+                    {"type": "pointerDown", "button": 0},
+                    {"type": "pointerUp", "button": 0},
+                ],
+            }],
+        })
         _wait(bidi, context, "[...document.querySelectorAll('.view-lines')].some(node => /original\\s+document/.test(node.textContent))")
         _evaluate(bidi, context, "document.querySelector('.monaco-editor textarea').focus()")
         _keys(bidi, context, "\ue009", "a")
