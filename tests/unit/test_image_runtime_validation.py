@@ -78,6 +78,8 @@ if args[0] == "exec":
         sys.stdout.write(response)
         sys.exit(int(os.environ.get("CURL_STATUS", "0")))
     if "pytest" in args:
+        if "/opt/tests/test_niivue_rendering_image.py" in args:
+            sys.exit(int(os.environ.get("GRAPHICS_STATUS", "0")))
         security = "/opt/tests/test_security_policy.py" in args
         sys.exit(int(os.environ.get("SECURITY_STATUS" if security else "TEST_STATUS", "0")))
 print("Unexpected Docker command", args, file=sys.stderr)
@@ -103,13 +105,17 @@ exec /bin/rm "$@"
     rm.chmod(0o755)
 
     def run(workflow=WORKFLOWS[0], *, hpc=False, grant_sudo="no", cvmfs=False,
-            cancel_scope=None, **scenario):
-        steps = yaml.safe_load(workflow.read_text())["jobs"]["test-image"]["steps"]
-        step = next(
-            step for step in steps
-            if step.get("name", "").startswith("Test container (")
-            and ("HPC" in step["name"]) == hpc
-        )
+            cancel_scope=None, acceptance=False, **scenario):
+        if acceptance:
+            steps = yaml.safe_load(repo_path(".github/workflows/pr-image-validation.yml").read_text())["jobs"]["image"]["steps"]
+            step = next(step for step in steps if step.get("run", "").endswith(" acceptance"))
+        else:
+            steps = yaml.safe_load(workflow.read_text())["jobs"]["test-image"]["steps"]
+            step = next(
+                step for step in steps
+                if step.get("name", "").startswith("Test container (")
+                and ("HPC" in step["name"]) == hpc
+            )
         values = {
             "matrix.profile.grant_sudo": grant_sudo,
             "matrix.profile.needs_cvmfs": str(cvmfs).lower(),
@@ -194,14 +200,14 @@ def test_authenticated_http_response_runs_tests_and_cleans_up(validate, workflow
 
 @pytest.mark.parametrize("workflow", WORKFLOWS, ids=lambda path: path.stem)
 @pytest.mark.parametrize("hpc", [False, True], ids=["regular", "hpc"])
-def test_readiness_exhaustion_preserves_regular_fallthrough_and_hpc_failure(validate, workflow, hpc):
+def test_readiness_exhaustion_fails_without_running_tests(validate, workflow, hpc):
     result, records, resources = validate(workflow, hpc=hpc, HTTP_STATUS="000")
 
-    assert result.returncode == (1 if hpc else 0), result.stderr
+    assert result.returncode == 1, result.stderr
     probes = [record for record in records if "curl" in record["args"]]
     assert len(probes) == (90 if hpc else 60)
     assert (resources.parent / "sleep.log").read_text().splitlines() == ["2"] * len(probes)
-    assert len(pytest_calls(records)) == (0 if hpc else 1)
+    assert len(pytest_calls(records)) == 0
     assert any(record["args"] == ["rm", "-f", "neurodesktop-test"] for record in records[2:])
     assert not list(resources.iterdir())
     if hpc:
@@ -305,12 +311,12 @@ def test_cleanup_failure_rejects_otherwise_successful_validation(validate, hpc):
 
 
 @pytest.mark.parametrize("hpc", [False, True])
-def test_multiline_failed_curl_preserves_existing_acceptance(validate, hpc):
+def test_multiline_failed_curl_cannot_claim_readiness(validate, hpc):
     result, records, _ = validate(hpc=hpc, HTTP_STATUS="000\n", CURL_STATUS=7)
 
-    assert result.returncode == 0, result.stderr
-    assert len([record for record in records if "curl" in record["args"]]) == 1
-    assert len(pytest_calls(records)) == 1
+    assert result.returncode == 1, result.stderr
+    assert len([record for record in records if "curl" in record["args"]]) == (90 if hpc else 60)
+    assert len(pytest_calls(records)) == 0
 
 
 @pytest.mark.parametrize("hpc", [False, True])
@@ -318,9 +324,9 @@ def test_multiline_failed_curl_preserves_existing_acceptance(validate, hpc):
 def test_unready_curl_output_keeps_each_timeout_policy(validate, hpc, response, curl_status):
     result, records, _ = validate(hpc=hpc, HTTP_STATUS=response, CURL_STATUS=curl_status)
 
-    assert result.returncode == (1 if hpc else 0)
+    assert result.returncode == 1
     assert len([record for record in records if "curl" in record["args"]]) == (90 if hpc else 60)
-    assert len(pytest_calls(records)) == (0 if hpc else 1)
+    assert len(pytest_calls(records)) == 0
 
 
 @pytest.mark.parametrize("hpc", [False, True])
@@ -424,3 +430,22 @@ def test_invalid_request_has_no_container_side_effects(tmp_path, args):
     assert result.returncode == 2
     assert "Usage:" in result.stderr
     assert not marker.exists()
+
+
+def test_acceptance_requires_applications_and_graphics_and_propagates_failure(validate):
+    result, records, _ = validate(acceptance=True, GRAPHICS_STATUS=37)
+    assert result.returncode == 37, result.stderr
+    calls = pytest_calls(records)
+    assert any("NEURODESKTOP_REQUIRE_APPLICATIONS=1" in call for call in calls)
+    assert any("NEURODESKTOP_REQUIRE_WEBGL=1" in call and
+               "/opt/tests/test_niivue_rendering_image.py" in call for call in calls)
+    assert records[-1]["args"] == ["rm", "-f", "neurodesktop-test"]
+
+
+@pytest.mark.parametrize("scope", ["shell", "group"])
+def test_pr_acceptance_cancellation_stops_tests_and_cleans_up(validate, scope):
+    result, records, resources = validate(acceptance=True, cancel_scope=scope)
+    assert result.returncode == -signal.SIGTERM
+    assert not pytest_calls(records)
+    assert any(record["args"] == ["rm", "-f", "neurodesktop-test"] for record in records[2:])
+    assert not list(resources.iterdir())

@@ -261,9 +261,9 @@ The notebook widget is handed its run evidence as `AstraView(spec, run=…)`; a
 double-click has nobody to hand it one, so the plugin discovers it from the
 spec's own directory and fills in `run=` itself. It looks for exactly the
 filenames `manifest._directory_run_file` accepts — `run-manifest.json`,
-`manifest.json`, `status.json`, `ro-crate-metadata.json` — and a unit test
-holds the two lists together, since a name only the frontend knows is a
-manifest that never loads. None present sends no `run=`, which is the honest
+`manifest.json`, `status.json`, `ro-crate-metadata.json`. Document tests open
+each supported filename and check the rendered evidence. None present sends
+no `run=`, which is the honest
 `spec-only` reading of a directory with no evidence in it; two or more sends
 the *directory*, so the one ambiguity rule in `manifest.py` refuses it rather
 than the frontend silently picking a file. A `Refresh` beside the universe

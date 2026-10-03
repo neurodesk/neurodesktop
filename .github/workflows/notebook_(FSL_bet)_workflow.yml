@@ -50,27 +50,25 @@ jobs:
       USER_TOKEN: ${{ secrets[matrix.token_secret] }}
       USER: ${{ vars[matrix.user_var] || matrix.default_user }}
       API_URL: ${{ vars[matrix.url_var] || matrix.default_url }}
-      NOTEBOOK_NAME: "FSL_course_bet_test.ipynb"
       OUTPUT_NAME: "FSL_course_bet_test_output.ipynb"
       SERVER_START_SUCCEEDED: "false"
       SERVER_START_DIAGNOSTIC: "not-attempted"
       SERVER_STOP_SUCCEEDED: "false"
-      NOTEBOOK_CREATED: "false"
       NOTEBOOK_SUCCESS: "false"
-      PATTERN_COUNT: "0"
-      SUCCESS_PATTERNS_TOTAL: "8"
     
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
     
+    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      with:
+        python-version: "3.12"
+
     - name: Install Required Tools
       run: |
         echo "Installing required tools..."
         sudo apt-get update
         sudo apt-get install -y jq
-        wget -qO /tmp/websocat https://github.com/vi/websocat/releases/latest/download/websocat.x86_64-unknown-linux-musl
-        sudo chmod +x /tmp/websocat
-        sudo mv /tmp/websocat /usr/local/bin/websocat
+        python -m pip install requests websocket-client
 
     - name: Setup Configuration
       run: |
@@ -78,7 +76,6 @@ jobs:
         echo "Server: ${{ matrix.server_name }}"
         echo "User: ${{ vars[matrix.user_var] || matrix.default_user }}"
         echo "API URL: ${{ vars[matrix.url_var] || matrix.default_url }}"
-        echo "Notebook: $NOTEBOOK_NAME"
         echo "Output: $OUTPUT_NAME"
 
     - name: Start JupyterHub Server
@@ -96,10 +93,7 @@ jobs:
           echo "SERVER_START_SUCCEEDED=false"
           echo "SERVER_START_DIAGNOSTIC=not-attempted"
           echo "SERVER_STOP_SUCCEEDED=false"
-          echo "NOTEBOOK_CREATED=false"
           echo "NOTEBOOK_SUCCESS=false"
-          echo "PATTERN_COUNT=0"
-          echo "SUCCESS_PATTERNS_TOTAL=8"
         } >> "$GITHUB_ENV"
 
         set_start_diagnostic() {
@@ -140,8 +134,6 @@ jobs:
         parse_server_state() {
           if ! jq -e 'type == "object"' "$RESPONSE_BODY" >/dev/null; then
             echo "❌ JupyterHub returned invalid JSON"
-            head -c 500 "$RESPONSE_BODY" || true
-            echo
             return 1
           fi
 
@@ -281,363 +273,19 @@ jobs:
 
     - name: Create and Execute FSL Notebook
       run: |
-        set +e  # Don't exit on errors, we want to capture them
-        
-        echo "=== Creating and Executing FSL Notebook ==="
-        
-        # Create FSL Notebook
-        echo "🔍 STEP 1: Create FSL Notebook"
-        echo "----------------------------------------"
-        
-        # shellcheck disable=SC2016
-        NOTEBOOK_JSON='{
-          "type": "notebook",
-          "content": {
-            "cells": [
-              {
-                "cell_type": "markdown",
-                "metadata": {},
-                "source": ["# FSL course - BET\n\nThis interactive demonstration is based on the official FSL course **\"Introductory FSL Practicals/ Introduction - BET\"**.\n\nBrain extraction is a fundamental preprocessing step in neuroimaging analysis, particularly critical for structural image segmentation where precision matters most. While BET is straightforward to use, achieving optimal results often requires understanding how to fine-tune parameters for challenging datasets.\nThis interactive version covers the core BET fundamentals, including parameter adjustment techniques for difficult images, and troubleshooting approaches for problematic cases. The hands-on format allows you to experiment with different settings and immediately see their effects on brain extraction quality.\n\n**Author:** Monika Doerig\n\n**Citation/ Resources:** \n- Jenkinson, M., Beckmann, C. F., Behrens, T. E. J., Woolrich, M. W., & Smith, S. M. (2012). FSL. NeuroImage, 62(2), 782–790. [https://doi.org/10.1016/j.neuroimage.2011.09.015](https://doi.org/10.1016/j.neuroimage.2011.09.015)\n\n- [FSL course online materials](https://open.win.ox.ac.uk/pages/fslcourse/website/online_materials.html)\n- [FSL course practicals BET](https://open.win.ox.ac.uk/pages/fslcourse/practicals/intro2/index.html)\n- [FSL Wiki BET](https://fsl.fmrib.ox.ac.uk/fsl/docs/#/structural/bet?id=bet-brain-extraction-tool)"]
-              },
-              {
-                "cell_type": "markdown",
-                "metadata": {},
-                "source": ["### Output CPU information"]
-              },
-              {
-                "cell_type": "code",
-                "execution_count": null,
-                "metadata": {},
-                "outputs": [],
-                "source": ["!cat /proc/cpuinfo | grep \"vendor\" | uniq\n!cat /proc/cpuinfo | grep \"model name\" | uniq"]
-              },
-              {
-                "cell_type": "code",
-                "execution_count": null,
-                "metadata": {},
-                "outputs": [],
-                "source": ["import module\nawait module.load(\"fsl/6.0.7.16\")\nawait module.list()"]
-              },
-              {
-                "cell_type": "markdown",
-                "metadata": {},
-                "source": ["## Download course material"]
-              },
-              {
-                "cell_type": "code",
-                "execution_count": null,
-                "metadata": {},
-                "outputs": [],
-                "source": ["!wget -c -nc https://fsl.fmrib.ox.ac.uk/fslcourse/downloads/preCourse.tar.gz\n!tar -xzvf preCourse.tar.gz --skip-old-files"]
-              },
-              {
-                "cell_type": "markdown",
-                "metadata": {},
-                "source": ["## BET basics\nBET performs brain extraction by removing non-brain tissue from structural MRI images:\n\n`bet <input> <output> [options]`\n\n- Input: Structural image (e.g., structural.nii.gz)\n- Output: Brain-extracted image\n- Options: Additional outputs like binary mask or skull surface (optional)\n\nFor detailed instructions, see the complete FSL tutorial and the help page."]
-              },
-              {
-                "cell_type": "code",
-                "execution_count": null,
-                "metadata": {},
-                "outputs": [],
-                "source": ["!bet"]
-              },
-              {
-                "cell_type": "code",
-                "execution_count": null,
-                "metadata": {},
-                "outputs": [],
-                "source": ["! mkdir -p ./output\n! bet ./fsl_course_data/intro/structural.nii.gz ./output/structural_brain -m -s"]
-              },
-              {
-                "cell_type": "code",
-                "execution_count": null,
-                "metadata": {},
-                "outputs": [],
-                "source": ["! ls output -lrt"]
-              },
-              {
-                "cell_type": "markdown",
-                "metadata": {},
-                "source": ["### Test completion\nSimple test to verify the notebook ran successfully:"]
-              },
-              {
-                "cell_type": "code",
-                "execution_count": null,
-                "metadata": {},
-                "outputs": [],
-                "source": ["print(\"FSL BET notebook execution completed successfully!\")\nprint(\"Brain extraction demo finished.\")\nprint(\"All steps completed.\")"]
-              }
-            ],
-            "metadata": {
-              "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
-              "language_info": {"name": "python", "version": "3.12.10"}
-            },
-            "nbformat": 4,
-            "nbformat_minor": 4
-          }
-        }'
-        
-        CREATE_RESPONSE=$(curl \
-            --silent --show-error --fail-with-body \
-            --connect-timeout 15 \
-            --max-time 60 \
-            --request PUT \
-            -H "Authorization: token $USER_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$NOTEBOOK_JSON" \
-            "$API_URL/user/$USER/api/contents/$NOTEBOOK_NAME")
-        
-        if echo "$CREATE_RESPONSE" | grep -q '"name"'; then
-            echo "✅ FSL Notebook created successfully"
-            echo "NOTEBOOK_CREATED=true" >> "$GITHUB_ENV"
-        else
-            echo "❌ Failed to create notebook"
-            echo "Response: $CREATE_RESPONSE"
-            exit 1
-        fi
-        
-        # Create terminal session
-        echo ""
-        echo "🔍 STEP 2: Create Terminal Session"
-        echo "----------------------------------------"
-        
-        TERMINAL_RESPONSE=$(curl \
-            --silent --show-error --fail-with-body \
-            --connect-timeout 15 \
-            --max-time 60 \
-            --request POST \
-            -H "Authorization: token $USER_TOKEN" \
-            "$API_URL/user/$USER/api/terminals")
-        
-        TERMINAL_NAME=$(echo "$TERMINAL_RESPONSE" | jq -r '.name')
-        
-        if [ -n "$TERMINAL_NAME" ] && [ "$TERMINAL_NAME" != "null" ]; then
-            echo "✅ Terminal created: $TERMINAL_NAME"
-            echo "TERMINAL_NAME=$TERMINAL_NAME" >> "$GITHUB_ENV"
-            sleep 5
-        else
-            echo "❌ Terminal creation failed"
-            echo "Response: $TERMINAL_RESPONSE"
-            exit 1
-        fi
-        
-        # Setup WebSocket connection function
-        clean_api_url=${API_URL#*//}
-        WS_URL="ws://$clean_api_url/user/$USER/terminals/websocket/$TERMINAL_NAME"
-        
-        execute_command() {
-            local cmd="$1"
-            local timeout="${2:-30}"
-            
-            echo "Executing: $cmd"
-            
-            local output
-            output=$(printf '%s\n' "[\"stdin\", \"$cmd\\r\\n\"]" | \
-                timeout "$timeout" websocat --text "$WS_URL" \
-                -H "Authorization: token $USER_TOKEN" 2>/dev/null | \
-                grep '^\["stdout"' | \
-                head -20 | \
-                sed 's/^\["stdout", *"//; s/"\]$//; s/\\r\\n/\n/g; s/\\n/\n/g' | \
-                tr -d '\000-\037' || echo "")
-            
-            if [ -n "$output" ]; then
-                echo "✅ Command executed successfully"
-                echo "Output: $output"
-                return 0
-            else
-                echo "❌ Command failed or no output"
-                return 1
-            fi
-        }
-        
-        # Install papermill
-        echo ""
-        echo "🔍 STEP 3: Install papermill"
-        echo "----------------------------------------"
-        execute_command "pip install papermill"
-        
-        # Update kernel specification
-        echo ""
-        echo "🔍 STEP 4: Update kernel specification"
-        echo "----------------------------------------"
-        KERNEL_CMD="python -c \"import nbformat; f = '$NOTEBOOK_NAME'; nb = nbformat.read(open(f), as_version=4); nb['metadata']['kernelspec']['name'] = 'python3'; nbformat.write(nb, open(f, 'w'))\""
-        execute_command "$KERNEL_CMD"
-        sleep 30
-        # Execute notebook with papermill
-        echo ""
-        echo "🔍 STEP 5: Execute notebook with papermill"
-        echo "----------------------------------------"
-        execute_command "papermill \"${NOTEBOOK_NAME}\" \"${OUTPUT_NAME}\"" 120
-        sleep 60
-        # Verify papermill completed
-        echo "Checking if papermill completed successfully..."
-        execute_command "echo 'Papermill exit code:' && echo \$?" 5
-        execute_command "wc -l \"${OUTPUT_NAME}\"" 10
+        python scripts/check_fsl_notebook.py \
+          --server-url "$API_URL/user/$USER/" \
+          --output-name "$OUTPUT_NAME" \
+          --evidence-dir fsl-evidence
+        echo "NOTEBOOK_SUCCESS=true" >> "$GITHUB_ENV"
 
-    - name: Check Notebook Execution Results
-      run: |
-        echo "=== Checking Notebook Execution Results ==="
-        
-        # Setup WebSocket connection function
-        clean_api_url=${API_URL#*//}
-        WS_URL="ws://$clean_api_url/user/$USER/terminals/websocket/$TERMINAL_NAME"
-        
-        execute_command() {
-            local cmd="$1"
-            local timeout="${2:-30}"
-            
-            echo "Executing: $cmd"
-            
-            local output
-            output=$(printf '%s\n' "[\"stdin\", \"$cmd\\r\\n\"]" | \
-                timeout "$timeout" websocat --text "$WS_URL" \
-                -H "Authorization: token $USER_TOKEN" 2>/dev/null | \
-                grep '^\["stdout"' | \
-                head -20 | \
-                sed 's/^\["stdout", *"//; s/"\]$//; s/\\r\\n/\n/g; s/\\n/\n/g' | \
-                tr -d '\000-\037' || echo "")
-            
-            if [ -n "$output" ]; then
-                echo "✅ Command executed successfully"
-                echo "Output: $output"
-                return 0
-            else
-                echo "❌ Command failed or no output"
-                return 1
-            fi
-        }
-        
-        # Check if output file exists
-        execute_command "ls -la \"${OUTPUT_NAME}\"" 10
-        
-        # Check for success patterns
-        SUCCESS_PATTERNS=(
-            "FSL BET notebook execution completed successfully"
-            "Brain extraction demo finished" 
-            "All steps completed"
-            "vendor_id"
-            "model name"
-            "Usage.*bet"
-            "preCourse.tar.gz"
-            "structural_brain"
-        )
-        
-        echo "Checking for success patterns in output..."
-        PATTERN_COUNT=0
-        for pattern in "${SUCCESS_PATTERNS[@]}"; do
-            if execute_command "grep -q '$pattern' \"${OUTPUT_NAME}\"" 5; then
-                echo "✅ Found pattern: $pattern"
-                PATTERN_COUNT=$((PATTERN_COUNT + 1))
-            else
-                echo "❌ Missing pattern: $pattern"
-            fi
-        done
-        
-        # Check for errors
-        echo ""
-        echo "Checking for errors..."
-        ERROR_CHECK=$(execute_command "grep -i 'error\|exception\|failed' \"${OUTPUT_NAME}\" || echo 'No errors found'" 10)
-        
-        if echo "$ERROR_CHECK" | grep -q "No errors found"; then
-            echo "✅ No obvious errors detected"
-        else
-            echo "⚠️ Potential errors found:"
-            echo "$ERROR_CHECK"
-        fi
-        
-        # Export results
-        {
-          echo "PATTERN_COUNT=$PATTERN_COUNT"
-          echo "SUCCESS_PATTERNS_TOTAL=8"
-        } >> "$GITHUB_ENV"
-
-        if [ "$PATTERN_COUNT" -ge 5 ]; then
-          echo "✅ Notebook execution successful! ($PATTERN_COUNT/8 patterns found)"
-          echo "NOTEBOOK_SUCCESS=true" >> "$GITHUB_ENV"
-        else
-          echo "❌ Notebook execution may have failed ($PATTERN_COUNT/8 patterns found)"
-          echo "NOTEBOOK_SUCCESS=false" >> "$GITHUB_ENV"
-        fi
-
-    - name: Cleanup Notebook Files
+    - name: Upload executed notebook evidence
       if: always()
-      run: |
-        echo "=== Cleaning up Notebook Files ==="
-
-        if [ -z "${TERMINAL_NAME:-}" ]; then
-          echo "No terminal was created; skipping terminal cleanup"
-          if [ "${NOTEBOOK_CREATED:-false}" = "true" ]; then
-            echo "Removing notebook files through the Jupyter Contents API"
-            for notebook in "$NOTEBOOK_NAME" "$OUTPUT_NAME"; do
-              curl \
-                --silent --show-error \
-                --connect-timeout 15 \
-                --max-time 60 \
-                --request DELETE \
-                --header "Authorization: token $USER_TOKEN" \
-                "$API_URL/user/$USER/api/contents/$notebook" || true
-            done
-          fi
-          exit 0
-        fi
-        
-        # Setup WebSocket connection function
-        clean_api_url=${API_URL#*//}
-        WS_URL="ws://$clean_api_url/user/$USER/terminals/websocket/$TERMINAL_NAME"
-        
-        execute_command() {
-            local cmd="$1"
-            local timeout="${2:-30}"
-            
-            echo "Executing: $cmd"
-            
-            local output
-            output=$(printf '%s\n' "[\"stdin\", \"$cmd\\r\\n\"]" | \
-                timeout "$timeout" websocat --text "$WS_URL" \
-                -H "Authorization: token $USER_TOKEN" 2>/dev/null | \
-                grep '^\["stdout"' | \
-                head -20 | \
-                sed 's/^\["stdout", *"//; s/"\]$//; s/\\r\\n/\n/g; s/\\n/\n/g' | \
-                tr -d '\000-\037' || echo "")
-            
-            if [ -n "$output" ]; then
-                echo "✅ Command executed successfully"
-                echo "Output: $output"
-                return 0
-            else
-                echo "❌ Command failed or no output"
-                return 1
-            fi
-        }
-        
-        # List files before cleanup
-        echo "Files before cleanup:"
-        execute_command "ls -la *.ipynb" 10
-        
-        # Remove notebook files via terminal
-        echo ""
-        echo "Removing notebook files..."
-        execute_command "rm -f \"${NOTEBOOK_NAME}\" \"${OUTPUT_NAME}\"" 10
-        
-        # Verify files are removed
-        echo ""
-        echo "Verifying files are removed:"
-        execute_command "ls -la *.ipynb || echo 'No notebook files found'" 10
-        
-        
-        # Delete terminal session
-        echo ""
-        echo "Deleting terminal session..."
-        curl \
-            --silent --show-error \
-            --connect-timeout 15 \
-            --max-time 60 \
-            --request DELETE \
-            --header "Authorization: token $USER_TOKEN" \
-            "$API_URL/user/$USER/api/terminals/$TERMINAL_NAME" || true
-        
-        echo "✅ Cleanup completed"
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: fsl-bet-${{ matrix.server_name }}
+        path: fsl-evidence/
+        if-no-files-found: ignore
 
     - name: Stop JupyterHub Server
       if: always()
@@ -710,44 +358,12 @@ jobs:
     - name: Generate Test Report
       if: always()
       run: |
-        echo "=== Final Notebook Test Report ==="
-        
-        PATTERNS_FOUND=${PATTERN_COUNT:-0}
-        PATTERNS_TOTAL=${SUCCESS_PATTERNS_TOTAL:-8}
-        NOTEBOOK_STATUS=${NOTEBOOK_SUCCESS:-false}
-        SERVER_STATUS=${SERVER_START_SUCCEEDED:-false}
-        SERVER_STOP_STATUS=${SERVER_STOP_SUCCEEDED:-false}
-        NOTEBOOK_CREATED_STATUS=${NOTEBOOK_CREATED:-false}
-        
-        echo "Test Results Summary:"
-        echo "- Server Start: $([ "$SERVER_STATUS" = "true" ] && echo "✅" || echo "❌")"
-        echo "- Server Stop: $([ "$SERVER_STOP_STATUS" = "true" ] && echo "✅" || echo "❌")"
-        echo "- Notebook Creation: $([ "$NOTEBOOK_CREATED_STATUS" = "true" ] && echo "✅" || echo "❌")"
-        echo "- Notebook Execution: $([ "$NOTEBOOK_STATUS" = "true" ] && echo "✅" || echo "❌")"
-        echo "- Success Patterns: $PATTERNS_FOUND/$PATTERNS_TOTAL $([ "$PATTERNS_FOUND" -ge 5 ] && echo "✅" || echo "❌")"
-
-        if [ "$SERVER_STATUS" != "true" ]; then
-          echo "- Primary Diagnostic: ${SERVER_START_DIAGNOSTIC:-unknown}"
+        echo "Server start: ${SERVER_START_SUCCEEDED:-false}"
+        echo "Server stop: ${SERVER_STOP_SUCCEEDED:-false}"
+        echo "Executed notebook and numerical BET validation: ${NOTEBOOK_SUCCESS:-false}"
+        if [ "${SERVER_START_SUCCEEDED:-false}" != "true" ]; then
+          echo "Primary diagnostic: ${SERVER_START_DIAGNOSTIC:-unknown}"
         fi
-        
-        echo ""
-        echo "Notebook Test Details:"
-        echo "- FSL Module Loading: $([ "$PATTERNS_FOUND" -ge 2 ] && echo "✅" || echo "❌")"
-        echo "- Course Data Download: $([ "$PATTERNS_FOUND" -ge 3 ] && echo "✅" || echo "❌")"
-        echo "- BET Execution: $([ "$PATTERNS_FOUND" -ge 4 ] && echo "✅" || echo "❌")"
-        echo "- Completion Markers: $([ "$PATTERNS_FOUND" -ge 5 ] && echo "✅" || echo "❌")"
-
-        if [ "$NOTEBOOK_STATUS" = "true" ] && [ "$PATTERNS_FOUND" -ge 5 ] \
-          && [ "$SERVER_STOP_STATUS" = "true" ]; then
-          echo ""
-          echo "🎉 NOTEBOOK TEST PASSED!"
-          echo "Server: ${{ matrix.server_name }}"
-          echo "All critical components working correctly."
-          exit 0
-        else
-          echo ""
-          echo "❌ NOTEBOOK TEST FAILED!"
-          echo "Server: ${{ matrix.server_name }}"
-          echo "Check logs above for details."
-          exit 1
-        fi
+        test "${SERVER_START_SUCCEEDED:-false}" = "true"
+        test "${SERVER_STOP_SUCCEEDED:-false}" = "true"
+        test "${NOTEBOOK_SUCCESS:-false}" = "true"

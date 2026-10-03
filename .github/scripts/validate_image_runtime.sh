@@ -2,7 +2,7 @@
 set -e
 
 usage() {
-  echo 'Usage: validate_image_runtime.sh IMAGE regular CVMFS_DISABLE GRANT_SUDO NEEDS_CVMFS | IMAGE hpc' >&2
+  echo 'Usage: validate_image_runtime.sh IMAGE regular CVMFS_DISABLE GRANT_SUDO NEEDS_CVMFS | IMAGE hpc | IMAGE acceptance' >&2
   exit 2
 }
 
@@ -11,6 +11,12 @@ image_ref=$1
 mode=$2
 case "$image_ref" in ''|-*) usage ;; esac
 case "$mode" in
+  acceptance)
+    [ "$#" -eq 2 ] || usage
+    cvmfs_disable=false
+    grant_sudo=packages
+    needs_cvmfs=true
+    ;;
   regular)
     [ "$#" -eq 5 ] || usage
     cvmfs_disable=$3
@@ -51,7 +57,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [ "$mode" = regular ]; then
+if [ "$mode" != hpc ]; then
   docker_args=()
   if [ "$needs_cvmfs" = "true" ]; then
     docker_args=(-v /cvmfs:/cvmfs:shared)
@@ -66,20 +72,35 @@ if [ "$mode" = regular ]; then
     -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
     "$image_ref"
   echo "Waiting for container startup..."
+  ready=0
   for i in $(seq 1 60); do
     code=$(docker exec neurodesktop-test curl -so /dev/null -w '%{http_code}' \
              --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
-    if echo "$code" | grep -Eq '^[0-9]{3}$' && [ "$code" != "000" ]; then
+    if [[ "$code" =~ ^[1-5][0-9]{2}$ ]]; then
       echo "Container ready after ~$((i*2))s (HTTP ${code})"
+      ready=1
       break
     fi
     sleep 2
   done
+  if [ "$ready" -ne 1 ]; then
+    echo "::error::Container did not reach /api/status in 120s."
+    docker logs --tail 120 neurodesktop-test || true
+    exit 1
+  fi
   if [ "$grant_sudo" = "packages" ]; then
     docker exec -u root neurodesktop-test pytest /opt/tests/test_security_policy.py -v
   fi
-  docker exec -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 \
+  acceptance_env=()
+  if [ "$mode" = acceptance ]; then
+    acceptance_env=(-e NEURODESKTOP_REQUIRE_APPLICATIONS=1)
+  fi
+  docker exec "${acceptance_env[@]}" -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 \
     -u jovyan neurodesktop-test pytest /opt/tests/ -v
+  if [ "$mode" = acceptance ]; then
+    docker exec -e NEURODESKTOP_REQUIRE_WEBGL=1 -u jovyan neurodesktop-test \
+      pytest /opt/tests/test_niivue_rendering_image.py -v
+  fi
 else
   hpc_user=sciget
   hpc_uid=5000
@@ -133,7 +154,7 @@ EOF
     fi
     code=$(docker exec neurodesktop-test curl -so /dev/null -w '%{http_code}' \
              --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
-    if echo "$code" | grep -Eq '^[0-9]{3}$' && [ "$code" != "000" ]; then
+    if [[ "$code" =~ ^[1-5][0-9]{2}$ ]]; then
       echo "Container ready after ~$((i*2))s (HTTP ${code})"
       ready=1
       break
