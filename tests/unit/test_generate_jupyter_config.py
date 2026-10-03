@@ -1,6 +1,8 @@
 import json
 import ast
 
+import pytest
+
 from testlib import load_source_module, resolve_source
 
 
@@ -113,14 +115,12 @@ def _real_template_path():
     return template_path
 
 
-def _render_real_config(tmp_path):
-    import pytest
-
+def _render_real_config(tmp_path, webapps=None):
     traitlets_config = pytest.importorskip("traitlets.config")
 
     generator = _load_generate_jupyter_config_module()
     webapps_json = tmp_path / "webapps.json"
-    webapps_json.write_text(json.dumps({"webapps": {}}))
+    webapps_json.write_text(json.dumps({"webapps": webapps or {}}))
     output_config = tmp_path / "jupyter_notebook_config.py"
 
     generator.generate_config(
@@ -133,6 +133,79 @@ def _render_real_config(tmp_path):
     c = traitlets_config.Config()
     exec(compile(output_config.read_text(), str(output_config), "exec"), {"c": c})
     return c
+
+
+@pytest.mark.parametrize("external", [False, True], ids=["local", "external"])
+@pytest.mark.parametrize("text", ["Researcher's tool", r"Research\tools"], ids=["apostrophe", "backslash"])
+def test_rendered_config_preserves_webapp_metadata(tmp_path, external, text):
+    app = {
+        "title": text,
+        "category": text,
+        "icon": f"/opt/icons/{text}.svg",
+        "startup_command": "research start",
+        "startup_timeout": 240,
+    }
+    if external:
+        app["direct_url"] = f"https://example.org/view?label={text}"
+
+    c = _render_real_config(tmp_path, {"research": app})
+    entry = c.ServerProxy.servers["research"]
+    expected_launcher = {
+        "path_info": "research",
+        "title": text,
+        "category": text,
+        "icon_path": app["icon"],
+    }
+    if external:
+        expected_launcher["url"] = app["direct_url"]
+        assert entry["command"] == [
+            "python3", "/opt/neurodesktop/external_webapp_redirect.py",
+            "--url", app["direct_url"], "--port", "{port}",
+        ]
+        assert entry["timeout"] == 10
+    else:
+        assert entry["command"] == ["/opt/neurodesktop/webapp_launcher.sh", "research"]
+        assert entry["unix_socket"] == "/tmp/neurodesk_webapp_research.sock"
+        assert entry["timeout"] == 240
+    assert entry["launcher_entry"] == expected_launcher
+    assert entry["absolute_url"] is True
+    assert entry["new_browser_tab"] is True
+
+
+@pytest.mark.parametrize("external", [False, True], ids=["local", "external"])
+@pytest.mark.parametrize("name", ["researcher's-tool", r"research\tool"], ids=["apostrophe", "backslash"])
+def test_rendered_config_preserves_webapp_names(tmp_path, external, name):
+    app = {"icon": "/opt/icons/research.svg"}
+    if external:
+        app["direct_url"] = "https://example.org/"
+
+    c = _render_real_config(tmp_path, {name: app})
+    entry = c.ServerProxy.servers[name]
+    assert entry["launcher_entry"]["path_info"] == name
+    assert entry["launcher_entry"]["title"] == name
+    if not external:
+        assert entry["command"] == ["/opt/neurodesktop/webapp_launcher.sh", name]
+        assert entry["unix_socket"] == f"/tmp/neurodesk_webapp_{name}.sock"
+
+
+@pytest.mark.parametrize("path", ["researcher's-api", r"research\api"], ids=["apostrophe", "backslash"])
+def test_rendered_config_preserves_additional_proxy_paths(tmp_path, path):
+    c = _render_real_config(tmp_path, {
+        "research": {
+            "icon": "/opt/icons/research.svg",
+            "startup_timeout": 240,
+            "additional_proxies": [{"path": path}, {"path": f"research/{path}"}],
+        },
+    })
+
+    assert f"research/{path}" not in c.ServerProxy.servers
+    assert c.ServerProxy.servers[path] == {
+        "command": ["/opt/neurodesktop/webapp_launcher.sh", "research"],
+        "unix_socket": "/tmp/neurodesk_webapp_research.sock",
+        "timeout": 240,
+        "absolute_url": True,
+        "launcher_entry": {"enabled": False},
+    }
 
 
 def test_rendered_config_keeps_blocking_prometheus_exporter_disabled(tmp_path):
