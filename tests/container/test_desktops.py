@@ -1152,7 +1152,7 @@ def test_guac_vnc_tunnel():
         _cleanup_guacamole_process(process, home_dir=home_dir, guacamole_home=guacamole_home)
 
 
-def test_guac_rdp_tunnel(tmp_path):
+def test_guac_rdp_tunnel():
     """Verify the Guacamole RDP tunnel renders a desktop without TLS key permission errors."""
     nb_user, home_dir, root_cmds_available, guacamole_home = _prepare_guacamole_runtime()
 
@@ -1206,9 +1206,10 @@ def test_guac_rdp_tunnel(tmp_path):
         key(65471, False)
         key(65513, False)
         _collect_guacamole_desktop_frames(tunnel, timeout_seconds=10)
-        output = tmp_path / "rdp-command.txt"
+        # The RDP session user owns home_dir; a root pytest tmp_path is private.
+        output = os.path.join(home_dir, "rdp-command.txt")
         command = "sh -c " + shlex.quote(
-            "printf desktop-ready > " + shlex.quote(str(output))
+            "printf desktop-ready > " + shlex.quote(output)
         )
         for character in command:
             key(ord(character), True)
@@ -1216,10 +1217,11 @@ def test_guac_rdp_tunnel(tmp_path):
         key(65293, True)
         key(65293, False)
         deadline = time.monotonic() + 20
-        while not output.exists() and time.monotonic() < deadline:
+        while not os.path.exists(output) and time.monotonic() < deadline:
             time.sleep(0.1)
-        assert output.is_file(), "RDP desktop did not execute the keyboard-launched command"
-        assert output.read_text() == "desktop-ready"
+        assert os.path.isfile(output), "RDP desktop did not execute the keyboard-launched command"
+        with open(output) as output_file:
+            assert output_file.read() == "desktop-ready"
 
         if root_cmds_available:
             xrdp_log = _read_xrdp_log()
