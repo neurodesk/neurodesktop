@@ -6,6 +6,7 @@ This script reads webapp configurations from webapps.json and generates
 the ServerProxy.servers entries for JupyterLab integration.
 """
 
+import ast
 import json
 import sys
 import urllib.request
@@ -60,7 +61,7 @@ def generate_server_proxy_entries(webapps: Dict[str, Any]) -> str:
     entries = []
 
     for name, config in sorted(webapps.items()):
-        category = config.get('category', 'Webapps')
+        category = str(config.get('category', 'Webapps'))
         icon_config = config.get('icon', '/opt/neurodesk_brain_icon.svg')
 
         # If icon is a URL, download it locally (JupyterLab needs local file paths)
@@ -76,41 +77,44 @@ def generate_server_proxy_entries(webapps: Dict[str, Any]) -> str:
             if not direct_url.startswith(('http://', 'https://')):
                 raise ValueError(f"direct_url for {name} must be an HTTP(S) URL")
 
-            entry = f"""  '{name}': {{
-    'command': ['python3', '/opt/neurodesktop/external_webapp_redirect.py', '--url', '{direct_url}', '--port', '{{port}}'],
-    'timeout': 10,
-    'absolute_url': True,
-    'new_browser_tab': True,
-    'launcher_entry': {{
-      'path_info': '{name}',
-      'title': '{config.get('title', name)}',
-      'icon_path': '{icon_path}',
-      'category': '{category}',
-      'url': '{direct_url}'
-    }}
-  }}"""
-            entries.append(entry)
+            entry = {
+                'command': ['python3', '/opt/neurodesktop/external_webapp_redirect.py', '--url', direct_url, '--port', '{port}'],
+                'timeout': 10,
+                'absolute_url': True,
+                'new_browser_tab': True,
+                'launcher_entry': {
+                    'path_info': name,
+                    'title': str(config.get('title', name)),
+                    'icon_path': icon_path,
+                    'category': category,
+                    'url': direct_url,
+                },
+            }
+            entries.append((name, entry))
             continue
+
+        if isinstance(startup_timeout, str):
+            startup_timeout = ast.literal_eval(startup_timeout)
 
         # Use Unix socket - path is deterministic from app name (no port conflicts!)
         socket_path = f"/tmp/neurodesk_webapp_{name}.sock"
 
         # Main webapp entry. The custom Neurodesk launcher extension reads
         # icon_path values through the server-proxy icon endpoint.
-        entry = f"""  '{name}': {{
-    'command': ['/opt/neurodesktop/webapp_launcher.sh', '{name}'],
-    'unix_socket': '{socket_path}',
-    'timeout': {startup_timeout},
-    'absolute_url': True,
-    'new_browser_tab': True,
-    'launcher_entry': {{
-      'path_info': '{name}',
-      'title': '{config.get('title', name)}',
-      'icon_path': '{icon_path}',
-      'category': '{category}'
-    }}
-  }}"""
-        entries.append(entry)
+        entry = {
+            'command': ['/opt/neurodesktop/webapp_launcher.sh', name],
+            'unix_socket': socket_path,
+            'timeout': startup_timeout,
+            'absolute_url': True,
+            'new_browser_tab': True,
+            'launcher_entry': {
+                'path_info': name,
+                'title': str(config.get('title', name)),
+                'icon_path': icon_path,
+                'category': category,
+            },
+        }
+        entries.append((name, entry))
 
         # Additional proxy entries - only register separately if they're NOT under the app's path
         # Routes under the app path (e.g., ezbids/api) are handled by the main entry
@@ -119,18 +123,18 @@ def generate_server_proxy_entries(webapps: Dict[str, Any]) -> str:
             # Skip if the proxy path is under the main app path (will be handled by main entry)
             if proxy_path.startswith(f"{name}/"):
                 continue
-            proxy_entry = f"""  '{proxy_path}': {{
-    'command': ['/opt/neurodesktop/webapp_launcher.sh', '{name}'],
-    'unix_socket': '{socket_path}',
-    'timeout': {startup_timeout},
-    'absolute_url': True,
-    'launcher_entry': {{
-      'enabled': False
-    }}
-  }}"""
-            entries.append(proxy_entry)
+            proxy_entry = {
+                'command': ['/opt/neurodesktop/webapp_launcher.sh', name],
+                'unix_socket': socket_path,
+                'timeout': startup_timeout,
+                'absolute_url': True,
+                'launcher_entry': {
+                    'enabled': False,
+                },
+            }
+            entries.append((proxy_path, proxy_entry))
 
-    return ",\n".join(entries)
+    return ",\n".join(f"  {name!r}: {entry!r}" for name, entry in entries)
 
 
 def merge_webapp_configs(base_config: Dict[str, Any], overlay_config: Dict[str, Any]) -> Dict[str, Any]:
