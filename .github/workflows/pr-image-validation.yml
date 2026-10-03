@@ -68,9 +68,21 @@ jobs:
           sudo cp config/cvmfs/default.local /etc/cvmfs/default.local
           sudo cvmfs_config setup
           ls /cvmfs/neurodesk.ardc.edu.au
+      - name: Permit nested scientific containers on the disposable runner
+        if: matrix.arch == 'amd64'
+        run: |
+          sysctl -n kernel.apparmor_restrict_unprivileged_userns > "$RUNNER_TEMP/neurodesktop-userns-policy"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Validate scientific and desktop applications with required WebGL
         if: matrix.arch == 'amd64'
         run: exec bash .github/scripts/validate_image_runtime.sh "$IMAGE_REF" acceptance
+      - name: Restore host user namespace policy
+        if: always() && matrix.arch == 'amd64'
+        run: |
+          if [ -s "$RUNNER_TEMP/neurodesktop-userns-policy" ]; then
+            read -r userns_policy < "$RUNNER_TEMP/neurodesktop-userns-policy"
+            sudo sysctl -w "kernel.apparmor_restrict_unprivileged_userns=$userns_policy"
+          fi
       - name: Remove candidate
         if: always()
         run: docker image rm "$IMAGE_REF" || true

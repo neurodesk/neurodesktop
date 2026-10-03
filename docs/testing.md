@@ -206,7 +206,10 @@ with the candidate image and the `regular`, `hpc`, or `acceptance` profile. The 
 owns startup, readiness polling, security-policy checks, pytest, and cleanup.
 The workflows own candidate pulls and host CVMFS provisioning.
 The steps use `exec` so the command retains the workflow shell's cancellation
-boundary.
+boundary. On its disposable Ubuntu 24.04 runner, PR scientific acceptance
+temporarily disables AppArmor's restriction on unprivileged user namespaces,
+as required for nested Apptainer. An `always()` step restores the original host
+policy after acceptance, including on failure or cancellation.
 
 The regular and acceptance profiles poll readiness up to 60 times and fail
 before pytest if polling expires. The HPC profile also checks container
