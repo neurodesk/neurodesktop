@@ -98,18 +98,21 @@ def check_slurm_launcher(bidi, context):
         assert evaluate(bidi, context, f"Boolean({tile})"), "Slurm launcher icon missing"
         assert evaluate(bidi, context, f"({tile}).textContent.includes('Slurm Dashboard')")
         assert not evaluate(bidi, context, visible), "New launcher should hide the previous dashboard"
-        point = json.loads(evaluate(bidi, context, f"""JSON.stringify((() => {{
-            const node = {tile};
-            node.scrollIntoView({{block: 'center'}});
-            const rect = node.getBoundingClientRect();
-            return {{x: Math.round(rect.left + rect.width / 2),
-                     y: Math.round(rect.top + rect.height / 2)}};
-        }})())"""))
+        target = bidi.request("script.evaluate", {
+            "expression": f"""(() => {{
+                const node = {tile};
+                node.scrollIntoView({{block: 'center', behavior: 'instant'}});
+                return node;
+            }})()""",
+            "target": {"context": context}, "awaitPromise": True,
+        })
+        assert target["type"] == "success", target
+        origin = {"type": "element", "element": {"sharedId": target["result"]["sharedId"]}}
         bidi.request("input.performActions", {
             "context": context,
             "actions": [{"type": "pointer", "id": "slurm-mouse",
                          "parameters": {"pointerType": "mouse"}, "actions": [
-                {"type": "pointerMove", "duration": 0, "origin": "viewport", **point},
+                {"type": "pointerMove", "duration": 0, "origin": origin, "x": 0, "y": 0},
                 {"type": "pointerDown", "button": 0},
                 {"type": "pointerUp", "button": 0},
             ]}],

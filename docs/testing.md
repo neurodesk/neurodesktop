@@ -326,6 +326,8 @@ this check. `tests/unit/test_jupyterlab_url.py` covers accepted document routes
 and rejected navigation targets.
 It also opens the Slurm dashboard through its Neurodesk launcher tile, checking
 its label and icon on two launcher renders against the installed Slurm extension.
+The mouse action targets the tile's BiDi element reference so Firefox resolves
+its position at dispatch time, after any launcher reflow.
 This browser test configures `SlurmCommandPaths.squeue_path` as `/usr/bin/true`
 and verifies the HTTP endpoint returns an empty queue using that command,
 so it does not depend on a host Slurm controller in the HPC simulation. The
