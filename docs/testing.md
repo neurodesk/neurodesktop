@@ -92,6 +92,40 @@ run there:
 - `tests/unit/test_astra_view_filebrowser.py` needs `jupyter-server` to drive
   the file-browser server extension.
 
+## Behavioral coverage
+
+Checkout tests execute scripts, HTTP handlers, and DOM interactions. Source
+assertions establish packaging contracts only. Expected inputs and outputs come
+from worked examples, documented behavior, or independent upstream fixtures.
+The widget patch CLI uses frozen excerpts from the pinned upstream wheel under
+`tests/fixtures/widget-manager/`; changing its search constants cannot silently
+change those fixtures too.
+
+The ASTRA renderer cases run its shipped ESM in jsdom. They cover filtering,
+layout ordering, warnings, selection, scroll retention, and shared-model
+cleanup. The ASTRA HTTP cases start real token-authenticated Jupyter servers at
+`/` and `/user/alice/`, exercise both asset and graph routes, and reject workspace
+escapes through `spec`, `universe`, and `run` request parameters.
+
+The Bash negative case requires a successful calculation and the specific
+missing-command error in executed cell output. An unrelated nbconvert failure
+fails the test. DataLad creates a local annexed dataset, saves and clones it,
+retrieves exact content, drops the clone's content, and retrieves it again.
+Neither test needs an external dataset or account.
+
+The RDP test uses the service provisioned by root startup. It runs as the
+notebook user without unrestricted sudo, waits for desktop pixels, then launches
+a command through Guacamole keyboard input and checks its output file. A login
+screen alone does not satisfy this check. Enable it only in disposable test
+containers with `NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1`. The HPC
+profile skips RDP because unprivileged startup does not provision that service.
+
+Pull-request CI runs the checkout tier. The separately triggered image workflows
+validate installed applications before promotion. Neither a version check nor
+a passing checkout suite proves every shipped application works. The
+[behavior audit](designs/test-behavior-audit-2026-10-03.md) records the coverage
+and remaining acceptance gaps.
+
 ## Image release validation
 
 Production, test, and development image workflows build native amd64 and arm64
@@ -180,8 +214,8 @@ non-obvious tiers protect.
 | Tailscale binary packaging | `pytest tests/unit/test_tailscale_packaging.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_tailscale_image.py` |
 | Guided T3/Tailscale setup | `pytest tests/unit/test_t3_neurodesk_setup.py tests/unit/test_t3_code_server.py` | `pytest /opt/tests/test_tailscale_image.py /opt/tests/test_t3_code_server_image.py` |
 | Jupyter Server Proxy response limits | `pytest tests/unit/test_jupyter_server_proxy_limits.py` | `pytest /opt/tests/test_jupyter_server_proxy_limits.py` |
-| ASTRA viewer core (adapter, graph, widget, previews) | `pytest tests/unit/test_astra_view_graph.py tests/unit/test_astra_view_packaging.py` | `pytest /opt/tests/test_astra_view_image.py` |
-| File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py` | `pytest /opt/tests/test_astra_view_image.py` |
+| ASTRA viewer core (adapter, graph, widget, previews) | `pytest tests/unit/test_astra_view_graph.py tests/unit/test_astra_view_packaging.py tests/unit/test_astra_view_renderer.py` | `pytest /opt/tests/test_astra_view_image.py` |
+| File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py tests/unit/test_astra_view_http.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | `astra`/`lc` installs, Lightcone skills and hooks | `pytest tests/unit/test_astra_jupyter_ai_tooling.py tests/unit/test_lightcone_cli_patch.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
 | ASTRA run provenance sidecars and the spec agreement check | `pytest tests/unit/test_astra_provenance.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
 | Jupyter AI, ACP personas, collaboration/widget compatibility and server patches | see [below](#jupyter-ai-and-acp-personas) | `pytest /opt/tests/test_astra_jupyter_ai_image.py /opt/tests/test_widget_compatibility_image.py` |

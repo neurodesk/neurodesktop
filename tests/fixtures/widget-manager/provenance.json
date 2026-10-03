@@ -1,0 +1,48 @@
+{
+  "package": "jupyterlab_widgets",
+  "version": "3.0.17",
+  "manager_version": "5.0.16",
+  "wheel_sha256": "40ac1e9955acf116c4d995d9bfa082d86ad9ec6d91c4f134827cf5e0a5eb75e0",
+  "note": "Pristine wheel assets; the image retains only patched variants under 32.7ccffe58fb23310e57e3.js and 160.eb32b8a6c3261844bd5c.js. Excerpts are literal slices of the upstream wheel, not generated from patcher constants. These excerpts are packaging fixtures, not executable bundles.",
+  "bundles": [
+    {
+      "source_path": "share/jupyter/labextensions/@jupyter-widgets/jupyterlab-manager/static/32.3281b05d23655ae8.js",
+      "source_sha256": "e65b20289742b09992e2b7333c28086854d7f1f52c436af25f8c082d11f22fe5",
+      "fixture": "32.upstream-excerpts.js",
+      "fixture_sha256": "238a4a95c5f7aab79cf9f23e305584a347f15a84d20bc1ce181e11738d7c0477",
+      "utf8_character_ranges": [
+        [
+          3361,
+          3586
+        ],
+        [
+          5222,
+          6534
+        ]
+      ]
+    },
+    {
+      "source_path": "share/jupyter/labextensions/@jupyter-widgets/jupyterlab-manager/static/160.235911d8e26dc735.js",
+      "source_sha256": "9e322d6b33ec775d6e703df8076708225458bc6aac8419a7d30752cf63b35162",
+      "fixture": "160.upstream-excerpts.js",
+      "fixture_sha256": "bad623dbe7745ba938d50bd0e92cdd83becf0cd6d0b3e251a4d6731ef8f3473b",
+      "utf8_character_ranges": [
+        [
+          69903,
+          70815
+        ],
+        [
+          76596,
+          76658
+        ],
+        [
+          79734,
+          80414
+        ]
+      ]
+    }
+  ],
+  "source": "https://pypi.org/project/jupyterlab-widgets/3.0.17/#files",
+  "wheel_filename": "jupyterlab_widgets-3.0.17-py3-none-any.whl",
+  "retrieved": "2026-10-03"
+}

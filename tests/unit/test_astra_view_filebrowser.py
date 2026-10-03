@@ -76,25 +76,6 @@ def test_a_symlink_out_of_the_root_is_rejected(tmp_path, serverext):
         serverext.resolve_confined(root, "link/astra.yaml")
 
 
-def test_served_frontend_is_exactly_the_anywidget_frontend(serverext):
-    """One frontend, two transports: nothing for the two viewers to drift on."""
-    static = VIEWER / "neurodesk_astra_view/static"
-    expected_esm = (static / "index.js").read_text(encoding="utf-8")
-
-    assets = serverext._assets()
-    assert assets["esm"][1] == expected_esm
-    assert assets["css"][1] == (static / "style.css").read_text(encoding="utf-8")
-    assert assets["esm"][0].startswith("text/javascript")
-    assert assets["css"][0].startswith("text/css")
-
-
-def test_both_handlers_require_an_authenticated_request(serverext):
-    for handler in (serverext.AstraGraphHandler, serverext.AstraAssetHandler):
-        # tornado's @web.authenticated wraps with functools.wraps, so the
-        # undecorated method is reachable as __wrapped__.
-        assert hasattr(handler.get, "__wrapped__"), handler.__name__
-
-
 def test_extension_point_and_config_enable_the_serverext_module(serverext):
     assert serverext._jupyter_server_extension_points() == [
         {"module": "neurodesk_astra_view.serverext"}

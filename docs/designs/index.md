@@ -28,5 +28,6 @@ current behavior see [Architecture](../architecture.md),
 | [Agentic workflow reliability remediation](agentic-workflow-reliability-remediation.md) | implemented | Size hard invocation ceilings from transcripts, split diagnosis from fixing, rotate maintenance, and stop conflating scheduled infrastructure failures with agent failures |
 | [ASTRA and Lightcone integration](astra-lightcone-integration.md) | implemented | Adopt the ASTRA specification layer and build the read-only provenance viewer; defer Lightcone execution behind explicit upstream blockers |
 | [OpenCode web interface plan](opencode-integration-plan.md) | implemented | Ship the official OpenCode web UI behind a rewriting reverse proxy with browser-based key setup |
+| [Test behavior audit, 3 October 2026](test-behavior-audit-2026-10-03.md) | applied | Replace circular and source-only tests with HTTP, DOM, CLI, and installed workflow checks; record remaining application acceptance gaps |
 | [Test suite audit](test-suite-audit.md) | applied | Split the suite into checkout-runnable `tests/unit/` and image-only `tests/container/` |
 | [Distributed compute broker design](distributed-compute-broker.md) | proposed | Production design for JupyterHub → Forgejo Actions → site-local dispatchers → SLURM/Kubernetes with DataLad-managed data |

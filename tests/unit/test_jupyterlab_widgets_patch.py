@@ -1,6 +1,9 @@
 """Build-time contract for Neurodesktop's widget restore workaround."""
 
+import hashlib
 import json
+import subprocess
+import sys
 
 import pytest
 
@@ -64,75 +67,65 @@ def active_bundle_text(tmp_path, package_json, chunk):
     return active_bundles[0].read_text(encoding="utf-8"), patched_remote_entry
 
 
-def test_patch_waits_for_the_kernel_and_retries_a_lost_bulk_request(tmp_path):
-    patcher = load_patcher_module()
-    original_source = (
-        patcher.MODEL_RETRY_BEFORE
-        + patcher.CONTROL_TIMEOUT_BEFORE
-        + patcher.CONTROL_RETRY_BEFORE
-        + patcher.CONNECTION_WAIT_BEFORE
-    )
+def test_patch_cli_packages_frozen_upstream_assets_under_new_hashes(tmp_path):
+    fixture_dir = repo_path("tests/fixtures/widget-manager")
+    original_source = (fixture_dir / "32.upstream-excerpts.js").read_text()
+    renderer_source = (fixture_dir / "160.upstream-excerpts.js").read_text()
     original_bundle, original_remote_entry, package_json = write_labextension_fixture(
-        tmp_path,
-        original_source,
-        renderer_source=(
-            patcher.RENDERER_SETUP_BEFORE
-            + patcher.RENDERER_RECOVERY_RERENDER_BEFORE
-            + patcher.RENDERER_RERENDER_SINGLE_FLIGHT_BEFORE
-            + patcher.MODEL_REGISTRATION_RERENDER_BEFORE
-        ),
+        tmp_path, original_source, renderer_source=renderer_source
     )
+    original_files = {
+        path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()
+    }
+    command = [
+        sys.executable,
+        str(repo_path("config/jupyter/patch_jupyterlab_widgets.py")),
+        str(tmp_path),
+    ]
 
-    assert patcher.patch_labextension(tmp_path)
-
-    patched_text, patched_remote_entry = active_bundle_text(
-        tmp_path,
-        package_json,
-        32,
-    )
-    assert patched_remote_entry != original_remote_entry
-    assert patcher.CACHE_SAFE_MARKER in patched_remote_entry.read_text(
-        encoding="utf-8"
-    )
-    assert patcher.MODEL_RETRY_MARKER in patched_text
-    assert patcher.MODEL_RECOVERY_MARKER in patched_text
-    assert patcher.MODEL_RECOVERY_LIFECYCLE_MARKER in patched_text
-    assert "Date.now()-o<1e4" in patched_text
-    assert "__neurodesktopMissingModelRecovery" in patched_text
-    assert "__neurodesktopMissingModelRecoveryAt" in patched_text
-    assert "Date.now()-neurodeskRecoveredAt<30e3" in patched_text
-    assert "await neurodeskRecovery" in patched_text
-    assert "this.restoreWidgets(this.context&&this.context.model" in patched_text
-    assert patcher.CONTROL_TIMEOUT_MARKER in patched_text
-    assert "this.__neurodesktopControlRetry?3e4:1e4" in patched_text
-    assert patcher.CONTROL_RETRY_MARKER in patched_text
-    assert "neurodeskRetryKernel.reconnect()" in patched_text
-    assert "return await this._loadFromKernel()" in patched_text
-    assert "neurodeskRetries<2" in patched_text
-    assert patcher.CONNECTION_WAIT_MARKER in patched_text
-    assert "if(!this.__neurodesktopControlRetry)" in patched_text
-    assert '"connected"!==neurodeskKernel.connectionStatus' in patched_text
-    assert "neurodeskKernel.requestKernelInfo()" in patched_text
-    assert "neurodeskKernel.reconnect().then(()=>!0)" in patched_text
-    assert "__neurodesktopKernelProbeStatus" in patched_text
-    assert 'readiness probe")),3e3)' in patched_text
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert "workaround applied" in result.stdout
+    patched_text, patched_remote_entry = active_bundle_text(tmp_path, package_json, 32)
     renderer_text, _ = active_bundle_text(tmp_path, package_json, 160)
-    assert patcher.RENDERER_OUTPUT_WATCH_MARKER in renderer_text
-    assert patcher.RENDERER_RECOVERY_RERENDER_MARKER in renderer_text
-    assert patcher.RENDERER_RERENDER_SINGLE_FLIGHT_MARKER in renderer_text
-    assert patcher.MODEL_REGISTRATION_RERENDER_MARKER in renderer_text
-    assert renderer_text.index("this._rerenderMimeModel=e") < renderer_text.index(
-        'this.node.textContent="Error displaying widget: model not found"'
-    )
-    assert renderer_text.index("this._rerenderMimeModel=null") < (
-        renderer_text.index("this.renderModel(neurodeskMimeModel)")
-    )
-    assert patcher.LEGACY_RENDERER_MANAGER_ORDER_MARKER not in renderer_text
-    assert renderer_text.index("for(let i of o)i.manager=s") < (
-        renderer_text.index("i.addFactory")
-    ) < renderer_text.index("outputLengthChanged.connect(neurodeskAttach)")
-    assert original_bundle.read_text(encoding="utf-8") == original_source
-    assert not patcher.patch_labextension(tmp_path)
+    assert patched_remote_entry != original_remote_entry
+    assert "neurodesktop-widget-retry-cache-safe-entry" in patched_remote_entry.read_text()
+    for text, markers in (
+        (patched_text, (
+            "neurodesktop-widget-model-retry",
+            "neurodesktop-widget-missing-model-restore-lifecycle",
+            "neurodesktop-widget-control-timeout-staged-retry",
+            "neurodesktop-widget-control-retry-reconnect",
+            "neurodesktop-widget-kernel-connection-reconnect",
+        )),
+        (renderer_text, (
+            "neurodesktop-widget-output-watch",
+            "neurodesktop-widget-rerender-after-recovery-failure",
+            "neurodesktop-widget-rerender-single-flight",
+            "neurodesktop-widget-rerender-on-model-registration",
+        )),
+    ):
+        assert all(marker in text for marker in markers)
+    remote_text = patched_remote_entry.read_text()
+    for chunk, text in ((32, patched_text), (160, renderer_text)):
+        digest = hashlib.sha256(text.encode()).hexdigest()[:20]
+        assert (tmp_path / "static" / f"{chunk}.{digest}.js").read_text() == text
+        assert digest in remote_text
+    remote_digest = hashlib.sha256(patched_remote_entry.read_bytes()).hexdigest()[:20]
+    assert patched_remote_entry.name == f"remoteEntry.{remote_digest}.js"
+    for path, data in original_files.items():
+        if path != package_json:
+            assert path.read_bytes() == data
+    assert original_bundle.read_text() == original_source
+    packaged_files = {
+        path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()
+    }
+    repeated = subprocess.run(command, capture_output=True, text=True, check=False)
+    assert repeated.returncode == 0, repeated.stderr
+    assert "workaround already present" in repeated.stdout
+    assert {
+        path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()
+    } == packaged_files
 
 
 def test_patch_upgrades_the_existing_missing_model_recovery(tmp_path):

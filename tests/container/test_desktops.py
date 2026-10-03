@@ -314,24 +314,6 @@ def _prepare_guacamole_runtime():
     return nb_user, home_dir, root_cmds_available, guacamole_home
 
 
-def _xrdp_already_running():
-    """True when an xrdp daemon is already bound on this netns.
-
-    When the real Jupyter-spawned Neurodesktop has already started xrdp on port
-    3389, a second test-side `ensure_rdp_backend.sh` picks a fresh port (3390,
-    ...) but the system `service xrdp start` is a no-op against the existing
-    daemon, so the test's chosen port never binds and the RDP connection is
-    legitimately stripped from the test mapping. That is not a product bug -
-    it's the known "two Neurodesktop sessions on one netns" RDP limitation.
-    Detect it up-front so dependent tests skip cleanly with an actionable
-    message instead of failing deep inside the Guacamole handshake."""
-    code, out = run_cmd("pgrep -x xrdp 2>/dev/null | head -n1")
-    if code == 0 and out.strip():
-        return True
-    code, out = run_cmd("ss -lnt 2>/dev/null | awk 'NR>1 {print $4}' | grep -E '(^|:)3389$'")
-    return code == 0 and bool(out.strip())
-
-
 def _start_guacamole_as_user(nb_user, home_dir, guacamole_home, tomcat_port=None, backend=None):
     """Start guacamole.sh in a child process, publishing the chosen Tomcat port.
 
@@ -433,35 +415,6 @@ def _open_guacamole_tunnel(port, token, data_source, connection_id, width=1280, 
     return tunnel
 
 
-def _collect_guacamole_frames(tunnel, timeout_seconds=8):
-    """Legacy liberal check - accepts the first control frame as success.
-
-    Kept for RDP compatibility (RDP authenticates via PAM which is a different
-    failure surface). The VNC test uses _collect_guacamole_desktop_frames
-    below, which is much stricter because VNC auth failures only show up as
-    .error frames *after* the initial .sync handshake, and the old check was
-    returning successfully before the backend ever responded."""
-    deadline = time.time() + timeout_seconds
-    frames = []
-
-    while time.time() < deadline:
-        try:
-            frame = tunnel.recv()
-        except websocket.WebSocketTimeoutException:
-            continue
-
-        frames.append(frame)
-        if isinstance(frame, str) and any(
-            opcode in frame for opcode in (".sync,", ".img,", ".size,", ".mouse,")
-        ):
-            return frames
-
-    raise AssertionError(
-        "Guacamole RDP tunnel did not deliver desktop instructions. "
-        f"Frames received: {frames}"
-    )
-
-
 def _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30):
     """Wait for real desktop pixels and reject any Guacamole error frames.
 
@@ -512,7 +465,7 @@ def _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30):
     if not saw_pixels:
         raise AssertionError(
             "Guacamole tunnel produced no pixel frames (.img/.png/.jpeg) within "
-            f"{timeout_seconds}s - VNC backend never handed a rendered desktop "
+            f"{timeout_seconds}s - backend never handed a rendered desktop "
             f"through. Frames received ({len(frames)}):\n"
             + "\n".join(str(f)[:200] for f in frames)
         )
@@ -1097,10 +1050,8 @@ def test_xrdp_tls_key_access():
 def test_guac_vnc_tunnel():
     """End-to-end VNC smoke test through Guacamole - auth + desktop render.
 
-    Stricter than the RDP equivalent because VNC auth errors only surface as
-    .error frames *after* the initial .sync handshake; the legacy collector
-    returned success on that handshake alone. This test additionally
-    cross-checks that the VNC port stamped into user-mapping.xml actually
+    Authentication errors may follow the initial sync handshake.
+    This test also checks that the VNC port stamped into user-mapping.xml
     matches an Xvnc process that is listening, to catch cache-drift bugs where
     Guacamole read the mapping before guacamole.sh finished stamping the
     dynamic port."""
@@ -1201,7 +1152,7 @@ def test_guac_vnc_tunnel():
         _cleanup_guacamole_process(process, home_dir=home_dir, guacamole_home=guacamole_home)
 
 
-def test_guac_rdp_tunnel():
+def test_guac_rdp_tunnel(tmp_path):
     """Verify the Guacamole RDP tunnel renders a desktop without TLS key permission errors."""
     nb_user, home_dir, root_cmds_available, guacamole_home = _prepare_guacamole_runtime()
 
@@ -1209,24 +1160,19 @@ def test_guac_rdp_tunnel():
         shutil.rmtree(guacamole_home, ignore_errors=True)
         shutil.rmtree(home_dir, ignore_errors=True)
         pytest.skip(
-            "RDP smoke test starts the global xrdp service; set "
+            "RDP smoke test opens a session on the provisioned xrdp service; set "
             "NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 in disposable "
             "test containers to enable it."
         )
 
-    if not root_cmds_available:
+    if os.environ.get("APPTAINER_CONTAINER"):
         shutil.rmtree(guacamole_home, ignore_errors=True)
         shutil.rmtree(home_dir, ignore_errors=True)
-        pytest.skip("RDP smoke test requires root or passwordless sudo to start xrdp")
+        pytest.skip("Unprivileged HPC startup does not provision RDP")
 
-    if _xrdp_already_running():
-        shutil.rmtree(guacamole_home, ignore_errors=True)
-        shutil.rmtree(home_dir, ignore_errors=True)
-        pytest.skip(
-            "xrdp is already running on this netns (likely from the live Neurodesktop "
-            "session). A second guacamole.sh cannot rebind xrdp to its own port, so "
-            "the RDP tunnel smoke test is not meaningful here."
-        )
+    account = pwd.getpwnam(nb_user)
+    with open(f"/run/neurodesktop/rdp/{account.pw_uid}/port") as port_file:
+        _wait_for_tcp_port(int(port_file.read()))
 
     process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home, backend="rdp")
     tunnel = None
@@ -1249,19 +1195,39 @@ def test_guac_rdp_tunnel():
             auth_response["dataSource"],
             rdp_connection_id,
         )
-        frames = _collect_guacamole_frames(tunnel)
-        assert any(
-            isinstance(frame, str)
-            and any(opcode in frame for opcode in (".sync,", ".img,", ".size,", ".mouse,"))
-            for frame in frames
-        ), f"Guacamole RDP tunnel did not render desktop output: {frames}"
+        _collect_guacamole_desktop_frames(tunnel)
 
-        xrdp_log = _read_xrdp_log()
-        assert "Cannot read private key file /etc/xrdp/key.pem: Permission denied" not in xrdp_log, xrdp_log
-        assert (
-            "Cannot accept TLS connections because certificate or private key file is not readable"
-            not in xrdp_log
-        ), xrdp_log
+        def key(keysym, pressed):
+            value = str(keysym)
+            tunnel.send(f"3.key,{len(value)}.{value},1.{int(pressed)};")
+
+        key(65513, True)
+        key(65471, True)
+        key(65471, False)
+        key(65513, False)
+        _collect_guacamole_desktop_frames(tunnel, timeout_seconds=10)
+        output = tmp_path / "rdp-command.txt"
+        command = "sh -c " + shlex.quote(
+            "printf desktop-ready > " + shlex.quote(str(output))
+        )
+        for character in command:
+            key(ord(character), True)
+            key(ord(character), False)
+        key(65293, True)
+        key(65293, False)
+        deadline = time.monotonic() + 20
+        while not output.exists() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert output.is_file(), "RDP desktop did not execute the keyboard-launched command"
+        assert output.read_text() == "desktop-ready"
+
+        if root_cmds_available:
+            xrdp_log = _read_xrdp_log()
+            assert "Cannot read private key file /etc/xrdp/key.pem: Permission denied" not in xrdp_log, xrdp_log
+            assert (
+                "Cannot accept TLS connections because certificate or private key file is not readable"
+                not in xrdp_log
+            ), xrdp_log
     finally:
         if tunnel is not None:
             try:
