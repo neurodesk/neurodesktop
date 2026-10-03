@@ -132,7 +132,9 @@ brain/skull fixture under `tests/container/fixtures/fsl-bet/` is executed by
 `test_fsl_bet_image.py`; it requires known brain tissue to survive and excludes
 the surrounding shell, so a consistent but anatomically wrong mask fails.
 
-Desktop acceptance in `test_desktop_application_workflows.py` checks document
+Desktop acceptance in
+[test_desktop_application_workflows.py](../tests/container/test_desktop_application_workflows.py)
+checks document
 content after LibreOffice format conversions, saved VS Code editor content,
 a segmentation exported from ITK-SNAP, and FSLeyes pixels from a known volume.
 `NEURODESKTOP_REQUIRE_APPLICATIONS=1` prevents the required science profile
@@ -167,7 +169,8 @@ bash .github/scripts/validate_image_runtime.sh IMAGE acceptance
 ```
 
 That profile requires scientific and desktop application workflows, followed
-by `test_niivue_rendering_image.py` with `NEURODESKTOP_REQUIRE_WEBGL=1`.
+by [test_niivue_rendering_image.py](../tests/container/test_niivue_rendering_image.py)
+with `NEURODESKTOP_REQUIRE_WEBGL=1`.
 The graphics test starts a private Xtigervnc display without network listeners
 and uses Mesa software rendering in Firefox. It requires volume pixels and
 browser-to-kernel scene updates. Missing WebGL is a failure. The portable

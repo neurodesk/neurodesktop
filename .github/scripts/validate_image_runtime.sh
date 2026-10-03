@@ -76,7 +76,7 @@ if [ "$mode" != hpc ]; then
   for i in $(seq 1 60); do
     code=$(docker exec neurodesktop-test curl -so /dev/null -w '%{http_code}' \
              --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
-    if [[ "$code" =~ ^[1-5][0-9]{2}$ ]]; then
+    if [[ "$code" =~ ^[1-4][0-9]{2}$ ]]; then
       echo "Container ready after ~$((i*2))s (HTTP ${code})"
       ready=1
       break
@@ -154,7 +154,7 @@ EOF
     fi
     code=$(docker exec neurodesktop-test curl -so /dev/null -w '%{http_code}' \
              --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
-    if [[ "$code" =~ ^[1-5][0-9]{2}$ ]]; then
+    if [[ "$code" =~ ^[1-4][0-9]{2}$ ]]; then
       echo "Container ready after ~$((i*2))s (HTTP ${code})"
       ready=1
       break

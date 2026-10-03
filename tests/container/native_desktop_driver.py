@@ -96,9 +96,12 @@ class Desktop:
                 self.x.XGetWindowAttributes(self.connection, children[index], ctypes.byref(attributes))
                 if attributes.map_state != 2:
                     continue
-                if self.x.XFetchName(self.connection, children[index], ctypes.byref(title)) and title.value:
-                    result[children[index]] = title.value.decode(errors="replace")
-                    self.x.XFree(title)
+                if self.x.XFetchName(self.connection, children[index], ctypes.byref(title)):
+                    try:
+                        if title.value:
+                            result[children[index]] = title.value.decode(errors="replace")
+                    finally:
+                        self.x.XFree(title)
         finally:
             if children:
                 self.x.XFree(children)

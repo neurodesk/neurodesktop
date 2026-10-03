@@ -320,7 +320,7 @@ def test_multiline_failed_curl_cannot_claim_readiness(validate, hpc):
 
 
 @pytest.mark.parametrize("hpc", [False, True])
-@pytest.mark.parametrize("response,curl_status", [("000", 7), ("malformed", 0)])
+@pytest.mark.parametrize("response,curl_status", [("000", 7), ("malformed", 0), ("503", 0)])
 def test_unready_curl_output_keeps_each_timeout_policy(validate, hpc, response, curl_status):
     result, records, _ = validate(hpc=hpc, HTTP_STATUS=response, CURL_STATUS=curl_status)
 
@@ -331,11 +331,11 @@ def test_unready_curl_output_keeps_each_timeout_policy(validate, hpc, response, 
 
 @pytest.mark.parametrize("hpc", [False, True])
 def test_delayed_readiness_stops_polling_after_the_first_accepted_response(validate, hpc):
-    result, records, resources = validate(hpc=hpc, HTTP_RESPONSES=json.dumps(["000", "garbage", "403"]))
+    result, records, resources = validate(hpc=hpc, HTTP_RESPONSES=json.dumps(["000", "503", "garbage", "403"]))
 
     assert result.returncode == 0, result.stderr
-    assert len([record for record in records if "curl" in record["args"]]) == 3
-    assert (resources.parent / "sleep.log").read_text().splitlines() == ["2", "2"]
+    assert len([record for record in records if "curl" in record["args"]]) == 4
+    assert (resources.parent / "sleep.log").read_text().splitlines() == ["2", "2", "2"]
     assert len(pytest_calls(records)) == 1
 
 
