@@ -208,6 +208,19 @@ def test_rendered_config_preserves_additional_proxy_paths(tmp_path, path):
     }
 
 
+
+@pytest.mark.parametrize("external", [False, True], ids=["local", "external"])
+def test_rendered_config_retains_legacy_metadata_conversion(tmp_path, external):
+    app = {"title": None, "category": 7, "startup_timeout": "240"}
+    if external:
+        app["direct_url"] = "https://example.org/"
+    c = _render_real_config(tmp_path, {"research": app})
+    entry = c.ServerProxy.servers["research"]
+    assert entry["launcher_entry"]["title"] == "None"
+    assert entry["launcher_entry"]["category"] == "7"
+    assert entry["timeout"] == (10 if external else 240)
+
+
 def test_rendered_config_keeps_blocking_prometheus_exporter_disabled(tmp_path):
     """jupyter-resource-usage's Prometheus exporter runs psutil in a 1 s
     PeriodicCallback on the tornado event loop. With track_cpu_percent it
