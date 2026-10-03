@@ -206,10 +206,10 @@ The workflows own candidate pulls and host CVMFS provisioning.
 The steps use `exec` so the command retains the workflow shell's cancellation
 boundary.
 
-The regular profile polls readiness 60 times, then runs pytest even if polling
-expires. The HPC profile checks container liveness during its 90 readiness
-attempts and fails before pytest if the container exits or polling expires.
-These timeout behaviors are preserved from the workflow steps.
+The regular and acceptance profiles poll readiness up to 60 times and fail
+before pytest if polling expires. The HPC profile also checks container
+liveness during its 90 readiness attempts and fails before pytest if the
+container exits or polling expires.
 
 The command installs its EXIT trap before startup or temporary-file allocation.
 The trap removes the container, repairs HPC home ownership, and deletes HPC
@@ -541,9 +541,10 @@ with bounded Firefox and Jupyter Server log tails. The test also requires
 `ipykernel` 6.31.0 as the stable main-shell widget-comm path. When WebGL2 is
 available, the same browser test creates nine NiiVue models, re-executes them,
 and restores them in the second client. It requires nine canvases with no
-permanent ``Loading widget...`` output. It interacts with every canvas and
-requires scene-model traffic to stop once idle. A preload probe counts interval
-callbacks created by the shared ipyniivue asset, so the upstream 30 ms polling
+permanent ``Loading widget...`` output. It interacts with the first,
+volume-bearing canvas and requires scene-model traffic to stop once idle. A
+preload probe counts interval callbacks created by the shared ipyniivue asset,
+so the upstream 30 ms polling
 loop fails even when repeated scene comparisons produce no model delta. The
 ipyniivue unit test moves the installed 5 MB frontend into one content-hashed
 JupyterLab asset, keeps model state inside a factory-created definition, and

@@ -97,20 +97,25 @@ def test_unexecuted_notebook_with_success_in_source_fails(tmp_path):
     assert 'was not executed' in result.stderr
 
 
-@pytest.mark.parametrize('corruption', ['error-output', 'repeated-count', 'changed-source'])
-def test_saved_notebook_corruption_is_rejected(tmp_path, corruption):
+@pytest.mark.parametrize(('corruption', 'error'), [
+    (None, None),
+    ('error-output', 'saved notebook cell 2 contains an error'),
+    ('repeated-count', 'saved notebook cell 2 execution result differs'),
+    ('changed-source', 'saved notebook cell 2 differs'),
+])
+def test_saved_notebook_preserves_executed_cells(tmp_path, corruption, error):
     expected = {'cells': [{'cell_type': 'code', 'source': 'print(42)',
-        'execution_count': None, 'outputs': []}, {'cell_type': 'code', 'source': 'print(43)',
-        'execution_count': None, 'outputs': []}]}
+        'execution_count': 1, 'outputs': [{'output_type': 'stream', 'name': 'stdout',
+                                         'text': '42\n'}]},
+        {'cell_type': 'code', 'source': 'print(43)', 'execution_count': 2,
+         'outputs': [{'output_type': 'stream', 'name': 'stdout', 'text': '43\n'}]}]}
     saved = json.loads(json.dumps(expected))
-    saved['cells'][0]['execution_count'] = 1
-    saved['cells'][1]['execution_count'] = 2
     if corruption == 'error-output':
         saved['cells'][1]['outputs'] = [{'output_type': 'error', 'ename': 'CalledProcessError',
             'evalue': 'failed', 'traceback': []}]
     elif corruption == 'repeated-count':
         saved['cells'][1]['execution_count'] = 1
-    else:
+    elif corruption == 'changed-source':
         saved['cells'][1]['source'] = "print('All steps completed')"
     original = tmp_path / 'expected.ipynb'
     artifact = tmp_path / 'saved.ipynb'
@@ -118,7 +123,9 @@ def test_saved_notebook_corruption_is_rejected(tmp_path, corruption):
     artifact.write_text(json.dumps(saved))
     result = subprocess.run([sys.executable, str(CLI), '--validate-notebook', str(artifact),
         '--expected-notebook', str(original)], capture_output=True, text=True)
-    assert result.returncode == 1
+    assert result.returncode == (1 if error else 0), result.stderr
+    if error:
+        assert result.stderr.strip() == error
 
 
 def test_stdout_before_timeout_does_not_establish_completion(server, tmp_path):

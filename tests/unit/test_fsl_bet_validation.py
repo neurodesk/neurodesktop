@@ -34,9 +34,14 @@ def test_worked_brain_and_mask_have_three_voxels_and_sum_eight(tmp_path):
     'wrong-brain', 'nan-brain', 'wrong-affine', 'wrong-shape'])
 def test_bad_numerical_outputs_fail(tmp_path, change):
     options = {
-        'zero-mask': {'mask': np.zeros((2, 2, 2), dtype=np.float32)},
-        'full-mask': {'mask': np.ones((2, 2, 2), dtype=np.float32)},
-        'fractional-mask': {'mask': np.full((2, 2, 2), .5, dtype=np.float32)},
+        'zero-mask': {'mask': np.zeros((2, 2, 2), dtype=np.float32),
+                      'brain': np.zeros((2, 2, 2), dtype=np.float32)},
+        'full-mask': {'mask': np.ones((2, 2, 2), dtype=np.float32),
+                      'brain': np.array([1, 2, 3, 4, 5, 6, 7, 8],
+                                        dtype=np.float32).reshape(2, 2, 2)},
+        'fractional-mask': {
+            'mask': np.array([.5, .5, 0, 0, .5, 0, 0, 0], dtype=np.float32).reshape(2, 2, 2),
+            'brain': np.array([.5, 1, 0, 0, 2.5, 0, 0, 0], dtype=np.float32).reshape(2, 2, 2)},
         'wrong-brain': {'brain': np.ones((2, 2, 2), dtype=np.float32)},
         'nan-brain': {'brain': np.full((2, 2, 2), np.nan, dtype=np.float32)},
         'wrong-affine': {'affine': np.diag([2, 1, 1, 1])},
