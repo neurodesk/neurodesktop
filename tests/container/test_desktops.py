@@ -9,6 +9,7 @@ import json
 import socket
 import shutil
 import tempfile
+from pathlib import Path
 import time
 import urllib.error
 import urllib.parse
@@ -1206,10 +1207,10 @@ def test_guac_rdp_tunnel():
         key(65471, False)
         key(65513, False)
         _collect_guacamole_desktop_frames(tunnel, timeout_seconds=10)
-        # The RDP session user owns home_dir; a root pytest tmp_path is private.
-        output = os.path.join(home_dir, "rdp-command.txt")
+        output = Path(home_dir) / "rdp-command.txt"
+        assert not output.exists(), "RDP command output must be new for this session"
         command = "sh -c " + shlex.quote(
-            "printf desktop-ready > " + shlex.quote(output)
+            "printf desktop-ready > " + shlex.quote(str(output))
         )
         for character in command:
             key(ord(character), True)
@@ -1217,11 +1218,10 @@ def test_guac_rdp_tunnel():
         key(65293, True)
         key(65293, False)
         deadline = time.monotonic() + 20
-        while not os.path.exists(output) and time.monotonic() < deadline:
+        while not output.exists() and time.monotonic() < deadline:
             time.sleep(0.1)
-        assert os.path.isfile(output), "RDP desktop did not execute the keyboard-launched command"
-        with open(output) as output_file:
-            assert output_file.read() == "desktop-ready"
+        assert output.is_file(), "RDP desktop did not execute the keyboard-launched command"
+        assert output.read_text() == "desktop-ready"
 
         if root_cmds_available:
             xrdp_log = _read_xrdp_log()

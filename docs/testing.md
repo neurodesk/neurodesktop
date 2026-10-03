@@ -140,14 +140,16 @@ from silently skipping when CVMFS is disabled.
 
 The RDP test uses the service provisioned by root startup. It runs as the
 notebook user without unrestricted sudo, waits for desktop pixels, then launches
-a command through Guacamole keyboard input and checks its output file. A login
+a command through Guacamole keyboard input and checks its output file. The
+marker lives in a fresh, session-owned temporary directory, so root-run tests
+remain writable by the desktop user and cannot accept a prior result. A login
 screen alone does not satisfy this check. Enable it only in disposable test
 containers with `NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1`. The HPC
 profile skips RDP because unprivileged startup does not provision that service.
 
-Pull-request CI runs the checkout tier. The separately triggered image workflows
-validate installed applications before promotion. Neither a version check nor
-a passing checkout suite proves every shipped application works. The
+Pull-request CI runs the checkout tier and native image acceptance. Release
+workflows also validate installed applications before promotion. Neither a
+version check nor a passing checkout suite proves every shipped application works. The
 [behavior audit](designs/test-behavior-audit-2026-10-03.md) records the coverage
 and remaining acceptance gaps.
 
