@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-02"
+last-reviewed: "2026-10-03"
 ---
 
 # Testing
@@ -115,13 +115,28 @@ and HPC simulation profiles. Only amd64 exercises CVMFS; arm64 CVMFS remains
 excluded until its upstream content and routing are available. WebGL2 coverage
 still depends on the runner graphics capabilities described below.
 
-The test steps source [the cleanup script](../.github/scripts/image_test_cleanup.sh)
-before startup. Its EXIT trap removes the container and HPC temporary files
-on success, startup failure, security-policy failure, or pytest failure. Cleanup
-preserves the original failure status and fails an otherwise successful job if
-cleanup fails. Checkout coverage is in
-`tests/unit/test_build_neurodesktop_workflow.py` and
-`tests/unit/test_image_test_cleanup.py`.
+Each test step runs [the runtime validation command](../.github/scripts/validate_image_runtime.sh)
+with the candidate image and either the `regular` or `hpc` profile. The command
+owns startup, readiness polling, security-policy checks, pytest, and cleanup.
+The workflows own candidate pulls and host CVMFS provisioning.
+The steps use `exec` so the command retains the workflow shell's cancellation
+boundary.
+
+The regular profile polls readiness 60 times, then runs pytest even if polling
+expires. The HPC profile checks container liveness during its 90 readiness
+attempts and fails before pytest if the container exits or polling expires.
+These timeout behaviors are preserved from the workflow steps.
+
+The command installs its EXIT trap before startup or temporary-file allocation.
+The trap removes the container, repairs HPC home ownership, and deletes HPC
+temporary files on success or failure. Cleanup preserves the original failure
+status and fails an otherwise successful job if cleanup fails. Checkout tests
+execute the command with temporary Docker and sleep adapters and check workflow
+calls. Run the focused checks with:
+
+```bash
+pytest tests/unit/test_image_runtime_validation.py tests/unit/test_build_neurodesktop_workflow.py
+```
 
 ## Shared helpers
 

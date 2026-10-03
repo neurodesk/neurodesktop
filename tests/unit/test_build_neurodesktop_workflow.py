@@ -1,4 +1,5 @@
 import os
+import shlex
 import subprocess
 
 import yaml
@@ -118,10 +119,6 @@ def test_image_workflows_exercise_package_policy_and_second_uid_isolation():
         profiles = matrix.get("include", matrix.get("profile"))
         assert any(profile["grant_sudo"] == "packages" for profile in profiles)
         assert any(profile["grant_sudo"] == "yes" for profile in profiles)
-        commands = "\n".join(step.get("run", "") for step in job["steps"])
-        grant = "matrix.profile.grant_sudo" if "profile" in matrix else "matrix.grant_sudo"
-        assert 'if [ "${{ ' + grant + ' }}" = "packages" ]; then' in commands
-        assert "docker exec -u root neurodesktop-test pytest /opt/tests/test_security_policy.py -v" in commands
 
 
 def test_production_build_updates_the_date_tag_without_deleting_it():
@@ -199,16 +196,22 @@ def test_every_image_flavor_runs_native_arm64_runtime_checks():
         assert 'blacksmith' in job['runs-on']
 
 
-def test_image_cleanup_is_installed_before_each_runtime_profile_starts():
-    """Ensure startup failures reach cleanup, even before pytest can run."""
+def test_every_image_flavor_invokes_the_runtime_validator_with_its_profile():
     for path in IMAGE_TEST_WORKFLOWS:
         job = yaml.safe_load(path.read_text())["jobs"]["test-image"]
-        tests = [step["run"] for step in job["steps"]
+        tests = [step for step in job["steps"]
                  if step.get("name", "").startswith("Test container (")]
         assert len(tests) == 2
-        for command in tests:
-            assert command.splitlines()[0] == "source .github/scripts/image_test_cleanup.sh"
-            assert "test_rc=$?" not in command
+        assert [step["if"] for step in tests] == [
+            "${{ ! matrix.profile.hpc_mode }}", "${{ matrix.profile.hpc_mode }}",
+        ]
+        commands = [shlex.split(step["run"].replace("\\\n", " ")) for step in tests]
+        assert commands == [
+            ["exec", "bash", ".github/scripts/validate_image_runtime.sh", "$IMAGE_REF", "regular",
+             "${{ matrix.profile.cvmfs_disable }}", "${{ matrix.profile.grant_sudo }}",
+             "${{ matrix.profile.needs_cvmfs }}"],
+            ["exec", "bash", ".github/scripts/validate_image_runtime.sh", "$IMAGE_REF", "hpc"],
+        ]
 
 
 def test_image_version_and_publish_tag_share_one_build_timestamp():
