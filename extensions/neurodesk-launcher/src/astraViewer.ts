@@ -258,7 +258,9 @@ class AstraDocumentContent extends Widget {
       await this._reload();
       // The viewer shares its context with the text editor: a save from
       // "Open With > Editor" re-renders the graph here.
-      context.fileChanged.connect(this._onFileChanged, this);
+      if (!this.isDisposed) {
+        context.fileChanged.connect(this._onFileChanged, this);
+      }
     });
   }
 

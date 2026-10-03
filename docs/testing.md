@@ -31,7 +31,7 @@ single question: **does it need a running container to answer?**
 | --- | --- | --- |
 | Runs on | a repository checkout | inside the built image |
 | Command | `pytest tests/unit` | `pytest /opt/tests/` |
-| Run by | the `Unit tests` workflow, on every push and pull request | the build workflows, once per test profile |
+| Run by | the `Unit tests` workflow, on every push and pull request | PR candidate and release workflows, once per test profile |
 | Covers | repository sources, importable Python modules, shell scripts driven against a temporary `HOME` | mounts, installed kernels, running services, CVMFS, the shipped binaries |
 
 Default to `tests/unit/`. Reach for `tests/container/` only when the assertion
@@ -54,16 +54,21 @@ pytest /opt/tests/         # inside the built image
 ```
 
 Running `tests/unit` needs Python 3.12, Node.js 24, `pytest`, `httpx`,
-`traitlets`, Git, curl, `jq`, and `ssh-keygen` (`openssh-client`); see
+`traitlets`, `requests`, `ipykernel`, `websocket-client`, `nibabel`, `numpy`,
+Git, curl, `jq`, and `ssh-keygen` (`openssh-client`); see
 `.github/workflows/unit-tests.yml`. The terminal-creation
 tests stub `curl` but use the real `jq` to parse responses.
 
 The launcher DOM regressions, including T3 iframe file-link capture, reloads,
-disposal, and the T3 Connect panel, also require jsdom and TypeScript. Install them
+disposal, and the T3 Connect panel, also require jsdom and TypeScript.
+ASTRA document tests additionally load the
+real JupyterLab registry, document context, and Lumino widgets. Install them
 in a temporary directory and expose that directory when running the suite:
 
 ```bash
-npm install --prefix /tmp/neurodesk-launcher-tests --no-audit --no-fund jsdom@26.1.0 typescript@5.2.2
+npm install --prefix /tmp/neurodesk-launcher-tests --no-audit --no-fund jsdom@26.1.0 typescript@5.2.2 esbuild@0.28.2 \
+  @jupyterlab/docregistry@4.6.3 @jupyterlab/coreutils@6.6.3 \
+  @jupyterlab/services@7.6.3 @lumino/widgets@2.9.0
 export NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES=/tmp/neurodesk-launcher-tests/node_modules
 pytest tests/unit
 ```
@@ -105,13 +110,33 @@ The ASTRA renderer cases run its shipped ESM in jsdom. They cover filtering,
 layout ordering, warnings, selection, scroll retention, and shared-model
 cleanup. The ASTRA HTTP cases start real token-authenticated Jupyter servers at
 `/` and `/user/alice/`, exercise both asset and graph routes, and reject workspace
-escapes through `spec`, `universe`, and `run` request parameters.
+escapes through `spec`, `universe`, and `run` request parameters. Document tests
+exercise evidence discovery, save, refresh, retry, stale requests, and disposal
+through the real document factory. The installed browser journey opens the
+example from the file browser, selects a universe and evidence mode, saves
+changed files through Jupyter Contents, and refreshes the graph.
 
 The Bash negative case requires a successful calculation and the specific
 missing-command error in executed cell output. An unrelated nbconvert failure
 fails the test. DataLad creates a local annexed dataset, saves and clones it,
 retrieves exact content, drops the clone's content, and retrieves it again.
 Neither test needs an external dataset or account.
+
+The FSL notebook workflow executes code over the authenticated kernel
+WebSocket and requires a matching successful reply plus idle status. It saves
+and retrieves the executed notebook through Contents, validates code-cell
+outputs, and checks finite, compatible brain and binary-mask images against
+the input. A printed success message cannot hide a failed subprocess. Retrieved counts
+and outputs must match the results captured during execution. The independent
+brain/skull fixture under `tests/container/fixtures/fsl-bet/` is executed by
+`test_fsl_bet_image.py`; it requires known brain tissue to survive and excludes
+the surrounding shell, so a consistent but anatomically wrong mask fails.
+
+Desktop acceptance in `test_desktop_application_workflows.py` checks document
+content after LibreOffice format conversions, saved VS Code editor content,
+a segmentation exported from ITK-SNAP, and FSLeyes pixels from a known volume.
+`NEURODESKTOP_REQUIRE_APPLICATIONS=1` prevents the required science profile
+from silently skipping when CVMFS is disabled.
 
 The RDP test uses the service provisioned by root startup. It runs as the
 notebook user without unrestricted sudo, waits for desktop pixels, then launches
@@ -125,6 +150,31 @@ validate installed applications before promotion. Neither a version check nor
 a passing checkout suite proves every shipped application works. The
 [behavior audit](designs/test-behavior-audit-2026-10-03.md) records the coverage
 and remaining acceptance gaps.
+
+## Pull request image acceptance
+
+[PR image acceptance](../.github/workflows/pr-image-validation.yml) builds the
+run SHA on disposable native amd64 and arm64 GitHub runners. Its token has only
+`contents: read`; checkout credentials are not persisted. The candidate stays
+local to each runner, and the workflow neither publishes nor promotes tags.
+Both architectures run the package-only sudo and foreign-UID HPC suites.
+The amd64 runner also provisions CVMFS and runs the `acceptance` profile.
+
+```bash
+bash .github/scripts/validate_image_runtime.sh IMAGE acceptance
+```
+
+That profile requires scientific and desktop application workflows, followed
+by `test_niivue_rendering_image.py` with `NEURODESKTOP_REQUIRE_WEBGL=1`.
+The graphics test starts a private Xtigervnc display without network listeners
+and uses Mesa software rendering in Firefox. It requires volume pixels and
+browser-to-kernel scene updates. Missing WebGL is a failure. The portable
+widget suite remains available on displayless runners.
+
+The validator installs cleanup before startup, rejects a readiness timeout or
+malformed HTTP status, and propagates application and graphics test failures.
+CVMFS-backed application validation currently applies to amd64; arm64 still
+runs the portable installed-image suite.
 
 ## Image release validation
 
@@ -146,11 +196,11 @@ new attempt builds the candidate tags its validation jobs expect.
 
 Both architectures exercise sudo-disabled, sudo-enabled, package-only sudo,
 and HPC simulation profiles. Only amd64 exercises CVMFS; arm64 CVMFS remains
-excluded until its upstream content and routing are available. WebGL2 coverage
-still depends on the runner graphics capabilities described below.
+excluded until its upstream content and routing are available. PR acceptance
+requires WebGL2 on amd64 through the image's software-rendered display.
 
 Each test step runs [the runtime validation command](../.github/scripts/validate_image_runtime.sh)
-with the candidate image and either the `regular` or `hpc` profile. The command
+with the candidate image and the `regular`, `hpc`, or `acceptance` profile. The command
 owns startup, readiness polling, security-policy checks, pytest, and cleanup.
 The workflows own candidate pulls and host CVMFS provisioning.
 The steps use `exec` so the command retains the workflow shell's cancellation

@@ -242,14 +242,10 @@ def test_notebook_server_start_reports_transport_failures_and_reconciles_retries
     assert 'SERVER_START_DIAGNOSTIC=not-attempted' in start_step
 
 
-def test_notebook_failure_cleanup_and_report_preserve_the_primary_failure():
+def test_notebook_workflow_packages_the_authenticated_acceptance_cli():
     workflow = NOTEBOOK_TEST_WORKFLOW.read_text()
-
-    assert 'if [ -z "${TERMINAL_NAME:-}" ]; then' in workflow
-    assert 'NOTEBOOK_SUCCESS=false' in workflow
-    assert 'PATTERN_COUNT=0' in workflow
-    assert 'NOTEBOOK_CREATED=true' in workflow
-    assert 'echo "TERMINAL_NAME=$TERMINAL_NAME" >> "$GITHUB_ENV"' in workflow
-    # A stop timeout must not report a passing test; the central reporter
-    # links the complete failed job log.
-    assert '&& [ "$SERVER_STOP_STATUS" = "true" ]; then' in workflow
+    assert 'python scripts/check_fsl_notebook.py' in workflow
+    assert '--server-url "$API_URL/user/$USER/"' in workflow
+    assert 'path: fsl-evidence/' in workflow
+    assert 'test "${SERVER_STOP_SUCCEEDED:-false}" = "true"' in workflow
+    assert 'test "${NOTEBOOK_SUCCESS:-false}" = "true"' in workflow

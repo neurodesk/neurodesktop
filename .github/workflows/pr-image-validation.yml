@@ -1,0 +1,76 @@
+name: PR image acceptance
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-image-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    name: Installed image (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    env:
+      IMAGE_REF: neurodesktop-pr:run-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Make room on the disposable runner
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift
+          df -h /
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - name: Build local candidate
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          push: false
+          provenance: false
+          tags: ${{ env.IMAGE_REF }}
+          build-args: |
+            VCS_REF=${{ github.sha }}
+            NEURODESKTOP_VERSION=pr-${{ github.event.pull_request.number || github.run_id }}
+          cache-from: type=registry,ref=ghcr.io/neurodesk/neurodesktop:latest
+      - name: Validate package-only sudo and portable applications
+        run: exec bash .github/scripts/validate_image_runtime.sh "$IMAGE_REF" regular true packages false
+      - name: Validate foreign UID and HPC startup
+        run: exec bash .github/scripts/validate_image_runtime.sh "$IMAGE_REF" hpc
+      - name: Install CVMFS
+        if: matrix.arch == 'amd64'
+        uses: cvmfs-contrib/github-action-cvmfs@10197e000cc0add8e54ac4fb73d3ed44e2de72b4 # v5.5
+      - name: Mount scientific tools
+        if: matrix.arch == 'amd64'
+        run: |
+          sudo mkdir -p /etc/cvmfs/keys/ardc.edu.au
+          sudo cp config/cvmfs/neurodesk.ardc.edu.au.pub /etc/cvmfs/keys/ardc.edu.au/
+          sudo cp config/cvmfs/neurodesk.ardc.edu.au.conf /etc/cvmfs/config.d/
+          sudo cp config/cvmfs/default.local /etc/cvmfs/default.local
+          sudo cvmfs_config setup
+          ls /cvmfs/neurodesk.ardc.edu.au
+      - name: Validate scientific and desktop applications with required WebGL
+        if: matrix.arch == 'amd64'
+        run: exec bash .github/scripts/validate_image_runtime.sh "$IMAGE_REF" acceptance
+      - name: Remove candidate
+        if: always()
+        run: docker image rm "$IMAGE_REF" || true
