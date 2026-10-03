@@ -176,7 +176,7 @@ non-obvious tiers protect.
 | Apptainer NVIDIA auto-configuration | `pytest tests/unit/test_apptainer_nv.py` | — |
 | Access-URL banner (`print_access_url.sh`) | `pytest tests/unit/test_print_access_url.py` | — |
 | Sherlock launcher (`scripts/connectSherlock.sh`) | `pytest tests/unit/test_connect_sherlock.py` | — |
-| T3 Code server, web UI, lifecycle, and packaging | `pytest tests/unit/test_t3_code_server.py tests/unit/test_t3_code_web.py` | `pytest /opt/tests/test_t3_code_server_image.py /opt/tests/test_t3_code_web_image.py` |
+| T3 Code server, web UI, lifecycle, and packaging | `pytest tests/unit/test_t3_code_server.py tests/unit/test_t3_startup_settings.py tests/unit/test_t3_code_web.py` | `pytest /opt/tests/test_t3_code_server_image.py /opt/tests/test_t3_code_web_image.py` |
 | Tailscale binary packaging | `pytest tests/unit/test_tailscale_packaging.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_tailscale_image.py` |
 | Guided T3/Tailscale setup | `pytest tests/unit/test_t3_neurodesk_setup.py tests/unit/test_t3_code_server.py` | `pytest /opt/tests/test_tailscale_image.py /opt/tests/test_t3_code_server_image.py` |
 | Jupyter Server Proxy response limits | `pytest tests/unit/test_jupyter_server_proxy_limits.py` | `pytest /opt/tests/test_jupyter_server_proxy_limits.py` |
@@ -245,8 +245,9 @@ reporting readiness. A TCP listener alone is insufficient: T3 can accept an
 early request without answering it. The image probe retries short HTTP requests
 within a 20-second deadline and verifies the environment label.
 
-The real-server image test also waits for the Codex provider probe to report
-its CLI version. This exercises T3's login-shell PATH reload and catches
+The real-server image test checks both startup settings policies for fresh
+profiles and exact legacy defaults, then waits for the Codex provider probe
+to report its CLI version. This exercises T3's login-shell PATH reload and catches
 interactive wrapper banners that corrupt the app-server JSON stream. An
 unauthenticated Codex account is acceptable; a protocol decoding error is not.
 
@@ -261,7 +262,11 @@ rather than ACP.
 
 The checkout test drives the process supervisor with a real temporary child
 process. It also checks the pinned package, image cleanup, server extension,
-provider launchers, and direct Docker port settings. The image test starts the
+provider launchers, and direct Docker port settings. Startup settings preparation
+checks provider ownership and update notice suppression together.
+`tests/unit/test_t3_startup_settings.py` covers one JSON read, at most one atomic
+replacement, unchanged bytes on a no-op, and independent update suppression
+when provider data is malformed. The image test starts the
 installed T3 server, loads its native PTY module, and verifies that the build
 removed foreign native payloads and the duplicate Claude binary.
 
