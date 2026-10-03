@@ -208,7 +208,6 @@ def test_rendered_config_preserves_additional_proxy_paths(tmp_path, path):
     }
 
 
-
 @pytest.mark.parametrize("external", [False, True], ids=["local", "external"])
 def test_rendered_config_retains_legacy_metadata_conversion(tmp_path, external):
     app = {"title": None, "category": 7, "startup_timeout": "240"}

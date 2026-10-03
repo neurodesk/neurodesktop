@@ -6,6 +6,7 @@ This script reads webapp configurations from webapps.json and generates
 the ServerProxy.servers entries for JupyterLab integration.
 """
 
+import ast
 import json
 import sys
 import urllib.request
@@ -60,7 +61,7 @@ def generate_server_proxy_entries(webapps: Dict[str, Any]) -> str:
     entries = []
 
     for name, config in sorted(webapps.items()):
-        category = config.get('category', 'Webapps')
+        category = str(config.get('category', 'Webapps'))
         icon_config = config.get('icon', '/opt/neurodesk_brain_icon.svg')
 
         # If icon is a URL, download it locally (JupyterLab needs local file paths)
@@ -83,7 +84,7 @@ def generate_server_proxy_entries(webapps: Dict[str, Any]) -> str:
                 'new_browser_tab': True,
                 'launcher_entry': {
                     'path_info': name,
-                    'title': config.get('title', name),
+                    'title': str(config.get('title', name)),
                     'icon_path': icon_path,
                     'category': category,
                     'url': direct_url,
@@ -91,6 +92,9 @@ def generate_server_proxy_entries(webapps: Dict[str, Any]) -> str:
             }
             entries.append((name, entry))
             continue
+
+        if isinstance(startup_timeout, str):
+            startup_timeout = ast.literal_eval(startup_timeout)
 
         # Use Unix socket - path is deterministic from app name (no port conflicts!)
         socket_path = f"/tmp/neurodesk_webapp_{name}.sock"
@@ -105,7 +109,7 @@ def generate_server_proxy_entries(webapps: Dict[str, Any]) -> str:
             'new_browser_tab': True,
             'launcher_entry': {
                 'path_info': name,
-                'title': config.get('title', name),
+                'title': str(config.get('title', name)),
                 'icon_path': icon_path,
                 'category': category,
             },
