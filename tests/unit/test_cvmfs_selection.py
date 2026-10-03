@@ -19,8 +19,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
+import yaml
 
-from testlib import resolve_source
+from testlib import repo_path, resolve_source
 
 
 REPO = "neurodesk.ardc.edu.au"
@@ -186,6 +187,26 @@ def test_ranked_config_written(tmp_path, fast_server):
     cache = (tmp_path / "selection.env").read_text()
     assert "CACHED_CVMFS_SERVER_URL=" in cache
     assert "CACHED_TIMESTAMP=" in cache
+
+
+def test_pr_host_generates_a_verified_mount_configuration(tmp_path, fast_server, dead_server_url):
+    workflow = yaml.safe_load(repo_path(".github/workflows/pr-image-validation.yml").read_text())
+    steps = workflow["jobs"]["image"]["steps"]
+    for step in steps:
+        if "cvmfs_server_select.sh" not in step.get("run", ""):
+            continue
+        result = subprocess.run(
+            ["bash", "-e", "-c", step["run"]], cwd=repo_path("."),
+            env={**os.environ, "RUNNER_TEMP": str(tmp_path),
+                 "NEURODESKTOP_CVMFS_HOST_POOL": f"{dead_server_url} {fast_server}"},
+            capture_output=True, text=True, timeout=120,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    config = tmp_path / "neurodesk-cvmfs.conf"
+    assert config.is_file(), "The PR host must select verified mirrors before mounting CVMFS"
+    contents = config.read_text()
+    assert "CVMFS_USE_GEOAPI=no" in contents
+    assert _configured_server_urls(contents) == [f"{fast_server}/cvmfs/@fqrn@"]
 
 
 def test_faster_server_ranked_first(tmp_path, fast_server, slow_server):

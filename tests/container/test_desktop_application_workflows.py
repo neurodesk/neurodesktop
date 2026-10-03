@@ -22,15 +22,23 @@ def _require_cvmfs():
 
 def _module_command(module, arguments, *, cwd, timeout=600, env=None):
     _require_cvmfs()
-    result = subprocess.run(
+    process = subprocess.Popen(
         ["bash", "-c", "source /opt/neurodesktop/environment_variables.sh && "
          "source /usr/share/lmod/lmod/init/bash && "
          f"module load {shlex.quote(module)} && " + shlex.join(arguments)],
         cwd=cwd, env={**os.environ, **(env or {})},
-        capture_output=True, text=True, timeout=timeout,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        start_new_session=True,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    return result
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        stdout, stderr = process.communicate()
+        raise AssertionError(
+            f"{arguments[0]} did not finish within {timeout}s\n{stdout}{stderr}"
+        ) from None
+    assert process.returncode == 0, stdout + stderr
 
 
 def test_libreoffice_document_roundtrip_preserves_text(tmp_path):
@@ -119,7 +127,19 @@ def test_itksnap_opens_and_exports_the_selected_segmentation(tmp_path, desktop):
             desktop.focus("Layout Preference Reminder", process)
             desktop.chord(0xFF0D)
             desktop.focus("phantom.nii.gz", process)
-            desktop.screenshot(tmp_path / "itksnap-opened.png")
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                assert process.poll() is None, "ITK-SNAP exited before rendering the segmentation"
+                desktop.screenshot(tmp_path / "itksnap-opened.png")
+                pixels = np.asarray(Image.open(tmp_path / "itksnap-opened.png").convert("RGB"), dtype=int)
+                red = ((pixels[:, :, 0] > 200)
+                       & (pixels[:, :, 0] > pixels[:, :, 1] + 50)
+                       & (pixels[:, :, 0] > pixels[:, :, 2] + 50))
+                if np.count_nonzero(red) > 1000:
+                    break
+                time.sleep(0.1)
+            else:
+                raise AssertionError("ITK-SNAP did not render the selected segmentation")
             desktop.click(125, 10)
             for _ in range(5):
                 desktop.chord(0xFF54)
@@ -138,6 +158,9 @@ def test_itksnap_opens_and_exports_the_selected_segmentation(tmp_path, desktop):
             exported = nib.load(output)
             np.testing.assert_array_equal(exported.get_fdata(), labels)
             np.testing.assert_allclose(exported.affine, affine)
+        except Exception as error:
+            error.add_note((tmp_path / "itksnap.log").read_text(errors="replace"))
+            raise
         finally:
             if process.poll() is None:
                 os.killpg(process.pid, signal.SIGTERM)

@@ -137,6 +137,9 @@ Desktop acceptance in
 checks document
 content after LibreOffice format conversions, saved VS Code editor content,
 a segmentation exported from ITK-SNAP, and FSLeyes pixels from a known volume.
+Timed-out module commands terminate their process groups and report captured
+output. ITK-SNAP waits for the selected segmentation to render before using its
+save menu; failures include the application's log.
 `NEURODESKTOP_REQUIRE_APPLICATIONS=1` prevents the required science profile
 from silently skipping when CVMFS is disabled.
 
@@ -163,6 +166,10 @@ run SHA on disposable native amd64 and arm64 GitHub runners. Its token has only
 local to each runner, and the workflow neither publishes nor promotes tags.
 Both architectures run the package-only sudo and foreign-UID HPC suites.
 The amd64 runner also provisions CVMFS and runs the `acceptance` profile.
+Before mounting, it uses the image's server-selection CLI to verify and rank
+mirrors from the runner's network. No verified mirror fails this setup step.
+The workflow reports the active CVMFS host and mount statistics after acceptance,
+including failed runs.
 
 ```bash
 bash .github/scripts/validate_image_runtime.sh IMAGE acceptance
