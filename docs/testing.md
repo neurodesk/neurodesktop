@@ -150,6 +150,12 @@ Desktop acceptance in
 checks document
 content after LibreOffice format conversions, saved VS Code editor content,
 a segmentation exported from ITK-SNAP, and FSLeyes pixels from a known volume.
+The FSLeyes batch check uses the upstream `fsleyes_unfiltered render` entrypoint
+so captured output remains available. The default `fsleyes` output filter has
+a shutdown race that can close standard streams and return 120 after rendering;
+[issue #1012](https://github.com/NeuroDesk/neurodesktop/issues/1012) tracks that
+upstream defect. The batch check requires exit status zero and the expected
+image pixels; it does not establish that the default filtered wrapper is fixed.
 Timed-out module commands terminate their process groups and report captured
 output. ITK-SNAP waits for the selected segmentation to render before using its
 save menu; failures include the application's log. Native window discovery and

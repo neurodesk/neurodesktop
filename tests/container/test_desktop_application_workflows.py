@@ -83,7 +83,7 @@ def test_fsleyes_renders_image_voxels_in_the_selected_colour(tmp_path, desktop):
     nib.save(nib.Nifti1Image(volume, np.eye(4)), source)
     rendered = tmp_path / "phantom.png"
     _module_command(
-        "fsl", ["fsleyes", "render", "-of", str(rendered), "-sz", "300", "300",
+        "fsl", ["fsleyes_unfiltered", "render", "-of", str(rendered), "-sz", "300", "300",
                 "-hc", "-hl", "-vl", "16", "16", "16", str(source),
                 "-cm", "red", "-dr", "0", "100"],
         cwd=tmp_path, env={"DISPLAY": desktop.name, "LIBGL_ALWAYS_SOFTWARE": "1"},
