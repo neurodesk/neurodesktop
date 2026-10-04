@@ -1,7 +1,7 @@
 ---
 title: Test behavior audit, 3 October 2026
 description: Core workflow coverage, false-positive tests, replacements,
-  and remaining acceptance gaps
+  and installed application acceptance
 parent: index.md
 status: applied
 last-reviewed: "2026-10-03"
@@ -10,10 +10,9 @@ last-reviewed: "2026-10-03"
 # Test behavior audit, 3 October 2026
 
 The suite exercises several complete application paths. It does not establish
-that every shipped application works for an end user. Checkout tests run on
-pull requests. Installed-image tests run in the separate candidate-image
-workflows before tag promotion. A green checkout suite alone is not image
-acceptance.
+that every shipped application works for an end user. Checkout tests and native candidate-image validation run on
+pull requests. Release workflows also test candidates before tag promotion.
+A green checkout suite alone is not image acceptance.
 
 The audit examined the checkout and container tiers, shared fixtures, and CI
 execution. The agreed test boundaries were shipped commands and generated
@@ -74,28 +73,43 @@ frames. That version passed with valid credentials and failed with deliberately
 incorrect backend credentials. ASTRA mutation checks used temporary copies of
 the subject. No deliberate fault was retained in the repository.
 
-## Remaining acceptance gaps
+## Follow-up acceptance coverage
 
-1. The nightly `notebook_(FSL_bet)_workflow.yml` treats terminal output
-   as command success and searches whole notebook JSON, including cell source.
-   This can accept echoed commands instead of executed results. It needs command
-   completion with an explicit exit status, followed by Contents API retrieval
-   of cell outputs and numerical checks on the brain and mask. Its live
-   JupyterHub credentials and external dataset are outside this local audit's
-   runtime verification.
-2. ASTRA's file-browser document plugin still has source-based checks for run
-   discovery, refresh, retry, and disposal. The new renderer and HTTP cases
-   cover those components independently. They do not replace a browser journey
-   that opens `astra.yaml`, selects evidence, saves changes, and refreshes.
-3. The widget browser test omits NiiVue cells when WebGL2 is unavailable. A
-   designated graphics-capable validation profile should require volume
-   rendering rather than accepting the portable widget subset alone.
-4. Office associations, VS Code readiness, and imaging-tool packaging do not
-   establish an open/edit/save workflow for LibreOffice, VS Code, ITK-SNAP, or
-   FSLeyes. These need representative document or image workflows.
-5. Runtime-affecting PRs need candidate-image validation in addition to checkout
-   CI. Existing image workflows protect release promotion, but they are not
-   automatically triggered by every pull request.
+The five gaps identified in the initial audit now have executable coverage and
+an automatic candidate-image route.
+
+| Gap | Replacement |
+| --- | --- |
+| FSL terminal echo and whole-notebook grep | Authenticated kernel execution requires its matching successful reply and idle state. Contents retrieval checks executed cells; the numerical validator checks finite, shape/affine-compatible brain and binary mask outputs against the input. Both modern and legacy binary WebSocket frames are exercised against real Jupyter. |
+| ASTRA source assertions for discovery, save, refresh, retry, and disposal | Ten document cases use real JupyterLab and Lumino objects. The installed browser opens `astra.yaml`, chooses a universe and evidence, saves changed files through Contents, and refreshes the rendered result. |
+| NiiVue silently omitted without WebGL | Required graphics acceptance starts a private software-rendered display. It verifies volume pixels and reads changed crosshair coordinates back from the kernel after a browser drag. Missing WebGL, an empty viewer, and disabled scene synchronization fail. |
+| Desktop packaging or readiness counted as application success | LibreOffice converts and recovers exact text, VS Code edits and saves through authenticated Jupyter, ITK-SNAP exports expected segmentation voxels and affine, and FSLeyes renders the expected phantom color. |
+| No automatic PR image acceptance | A read-only PR workflow builds native amd64 and arm64 candidates from the run SHA on disposable hosted runners. Both run package-only sudo and HPC profiles; amd64 additionally requires CVMFS application and graphics acceptance. It publishes no image tags. |
+
+The document lifecycle regression found a product bug. Closing an ASTRA tab
+while its first load was pending could attach a save listener after disposal.
+The fix checks disposal before attaching that listener. The original behavior
+failed the regression; the corrected launcher passed after a rebuild against
+the image's JupyterLab dependencies.
+
+The audit also removed six browser-test source assertions. Running the graphics
+path exposed an invalid trait observer: NiiVue intentionally suppresses scene
+trait notifications for incoming browser updates. The new acceptance reads
+its public scene state; the portable replay test uses the public location
+callback. Runtime readiness tests now reject timeout fallthrough and multiline
+failed-curl output instead of preserving those false-success behaviors.
+
+The follow-up checkout suite passed **1,182 tests**. Focused installed-image
+checks passed seven ASTRA cases, four desktop workflows, the BET anatomy oracle,
+the required NiiVue rendering/state test, and the full widget replay journey
+with WebGL enabled. Wrong saved notebook outputs, a one-voxel BET mask, missing
+volume rendering, disabled scene synchronization, and incorrect application
+outputs were rejected.
+
+The local follow-up used the existing amd64 image identified above, with the
+ASTRA launcher rebuilt for its disposal fix. Localhost protocol tests do not establish the live external JupyterHub
+service outcome. Native arm64 runtime validation belongs to the new candidate
+workflow; the local image evidence above covers amd64.
 
 Current commands and runtime prerequisites are in [Testing](../testing.md).
 The earlier [suite audit](test-suite-audit.md) records the tier split and is

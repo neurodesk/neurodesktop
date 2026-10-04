@@ -12,6 +12,7 @@ const WORKFLOWS = new Set([
   "Build neurodesktop-dev",
   "Backfill neurodesktop history",
   "Unit tests",
+  "PR image acceptance",
   "Codespell",
   "Test Objectstorage",
   "Test cvmfs",

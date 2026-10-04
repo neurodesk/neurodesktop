@@ -7,6 +7,10 @@ these tests need no network access and no root privileges.
 
 import functools
 import hashlib
+import json
+import math
+import shutil
+import sys
 import sqlite3
 import zlib
 import http.server
@@ -19,8 +23,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
+import yaml
 
-from testlib import resolve_source
+from testlib import repo_path, resolve_source
 
 
 REPO = "neurodesk.ardc.edu.au"
@@ -59,19 +64,6 @@ def _build_mock_repo(root: Path):
 
 
 
-class _SlowHandler(http.server.SimpleHTTPRequestHandler):
-    """Serves the mock repo with an artificial delay on every request."""
-
-    delay = 0.5
-
-    def do_GET(self):
-        time.sleep(self.delay)
-        super().do_GET()
-
-    def log_message(self, *args):
-        pass
-
-
 class _QuietHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -100,8 +92,8 @@ def fast_server(mock_repo):
 
 
 @pytest.fixture(scope="module")
-def slow_server(mock_repo):
-    server, base = _start_server(mock_repo, _SlowHandler)
+def second_server(mock_repo):
+    server, base = _start_server(mock_repo, _QuietHandler)
     yield base
     server.shutdown()
 
@@ -146,6 +138,53 @@ def _configured_server_urls(config):
     return server_line.split('"')[1].split(";")
 
 
+@pytest.fixture
+def transfer_times(tmp_path, monkeypatch):
+    """Set per-origin (catalog/manifest, chunk) seconds for real curl transfers."""
+    real_curl = shutil.which("curl")
+    assert real_curl is not None
+    timings = tmp_path / "transfer-times.json"
+    fixture_error = tmp_path / "curl-fixture-error"
+    bin_dir = tmp_path / "timed-curl"
+    bin_dir.mkdir()
+    wrapper = bin_dir / "curl"
+    wrapper.write_text(
+        f"#!{sys.executable}\n"
+        "import json, subprocess, sys\n"
+        "from pathlib import Path\n"
+        "from urllib.parse import urlsplit\n"
+        "def report_error(kind, error, traceback):\n"
+        f"    Path({str(fixture_error)!r}).write_text(f'{{kind.__name__}}: {{error}}')\n"
+        "    sys.__excepthook__(kind, error, traceback)\n"
+        "sys.excepthook = report_error\n"
+        f"result = subprocess.run([{real_curl!r}, *sys.argv[1:]], capture_output=True)\n"
+        "sys.stderr.buffer.write(result.stderr)\n"
+        "if result.returncode:\n"
+        "    sys.stdout.buffer.write(result.stdout)\n"
+        "    sys.exit(result.returncode)\n"
+        "status, elapsed, address = result.stdout.decode().split()\n"
+        "url = urlsplit(sys.argv[-1])\n"
+        f"timings = json.loads(Path({str(timings)!r}).read_text())\n"
+        "origin = f'{url.scheme}://{url.netloc}'\n"
+        "catalog, chunk = timings[origin]\n"
+        "elapsed = chunk if url.path.endswith('P') else catalog\n"
+        "print(status, elapsed, address, end='')\n"
+    )
+    wrapper.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
+    def set_times(per_host):
+        for durations in per_host.values():
+            assert len(durations) == 2, "Supply catalog and chunk transfer times"
+            assert all(
+                type(seconds) in (int, float) and math.isfinite(seconds) and seconds > 0
+                for seconds in durations
+            ), "Transfer times must be finite positive numbers"
+        timings.write_text(json.dumps(per_host))
+
+    yield set_times
+    assert not fixture_error.exists(), fixture_error.read_text()
+
+
 def test_root_cache_write_restores_notebook_home_ownership(tmp_path, fast_server):
     """Execute the ownership repair without needing root on the test host."""
     home = tmp_path / "home"
@@ -188,8 +227,35 @@ def test_ranked_config_written(tmp_path, fast_server):
     assert "CACHED_TIMESTAMP=" in cache
 
 
-def test_faster_server_ranked_first(tmp_path, fast_server, slow_server):
-    proc, config = run_select(tmp_path, f"{slow_server} {fast_server}")
+@pytest.mark.parametrize(("workflow_name", "job"), [
+    ("pr-image-validation.yml", "image"),
+    ("build-neurodesktop.yml", "test-image"),
+])
+def test_host_generates_a_verified_mount_configuration(
+    tmp_path, fast_server, dead_server_url, workflow_name, job,
+):
+    workflow = yaml.safe_load(repo_path(f".github/workflows/{workflow_name}").read_text())
+    steps = workflow["jobs"][job]["steps"]
+    for step in steps:
+        if "cvmfs_server_select.sh" not in step.get("run", ""):
+            continue
+        result = subprocess.run(
+            ["bash", "-e", "-c", step["run"]], cwd=repo_path("."),
+            env={**os.environ, "RUNNER_TEMP": str(tmp_path),
+                 "NEURODESKTOP_CVMFS_HOST_POOL": f"{dead_server_url} {fast_server}"},
+            capture_output=True, text=True, timeout=120,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    config = tmp_path / "neurodesk-cvmfs.conf"
+    assert config.is_file(), "The test host must select verified mirrors before mounting CVMFS"
+    contents = config.read_text()
+    assert "CVMFS_USE_GEOAPI=no" in contents
+    assert _configured_server_urls(contents) == [f"{fast_server}/cvmfs/@fqrn@"]
+
+
+def test_faster_server_ranked_first(tmp_path, fast_server, second_server, transfer_times):
+    transfer_times({fast_server: (0.01, 0.1), second_server: (0.1, 1.0)})
+    proc, config = run_select(tmp_path, f"{second_server} {fast_server}")
 
     assert proc.returncode == 0, proc.stdout
     server_line = next(
@@ -200,7 +266,7 @@ def test_faster_server_ranked_first(tmp_path, fast_server, slow_server):
         f"Expected the fast server first, got: {server_line}\n{proc.stdout}"
     )
     # The slow server is still listed as a fallback.
-    assert f"{slow_server}/cvmfs/@fqrn@" in servers
+    assert f"{second_server}/cvmfs/@fqrn@" in servers
 
 
 def test_unreachable_host_excluded(tmp_path, fast_server, dead_server_url):
@@ -222,7 +288,8 @@ def test_all_unreachable_writes_fallback(tmp_path, dead_server_url):
     assert not (tmp_path / "selection.env").is_file()
 
 
-def test_cached_selection_reused(tmp_path, fast_server):
+def test_cached_selection_reused(tmp_path, fast_server, transfer_times):
+    transfer_times({fast_server: (0.01, 0.1)})
     proc1, config1 = run_select(tmp_path, fast_server)
     assert proc1.returncode == 0, proc1.stdout
 
@@ -233,7 +300,8 @@ def test_cached_selection_reused(tmp_path, fast_server):
     assert config2 == config1
 
 
-def test_expired_cache_triggers_reprobe(tmp_path, fast_server):
+def test_expired_cache_triggers_reprobe(tmp_path, fast_server, transfer_times):
+    transfer_times({fast_server: (0.01, 0.1)})
     proc1, _ = run_select(tmp_path, fast_server)
     assert proc1.returncode == 0, proc1.stdout
 
@@ -246,7 +314,8 @@ def test_expired_cache_triggers_reprobe(tmp_path, fast_server):
     assert "Stage 1" in proc2.stdout
 
 
-def test_force_probe_ignores_cache(tmp_path, fast_server):
+def test_force_probe_ignores_cache(tmp_path, fast_server, transfer_times):
+    transfer_times({fast_server: (0.01, 0.1)})
     proc1, _ = run_select(tmp_path, fast_server)
     assert proc1.returncode == 0, proc1.stdout
 
@@ -304,7 +373,7 @@ def test_unhealthy_cached_primary_triggers_reprobe(tmp_path, mock_repo, fast_ser
     assert f"{fast_server}/cvmfs/@fqrn@" in config2
 
 
-def test_incomplete_http_200_never_beats_complete_server(tmp_path, mock_repo, slow_server):
+def test_incomplete_http_200_never_beats_complete_server(tmp_path, mock_repo, second_server):
     class Truncated(_QuietHandler):
         def do_GET(self):
             if "/data/" in self.path:
@@ -318,9 +387,9 @@ def test_incomplete_http_200_never_beats_complete_server(tmp_path, mock_repo, sl
 
     server, base = _start_server(mock_repo, Truncated)
     try:
-        proc, config = run_select(tmp_path, f"{base} {slow_server}")
+        proc, config = run_select(tmp_path, f"{base} {second_server}")
         assert proc.returncode == 0, proc.stdout
-        assert _configured_server_urls(config)[0].startswith(slow_server + "/")
+        assert _configured_server_urls(config)[0].startswith(second_server + "/")
         assert base not in config
     finally:
         server.shutdown()
@@ -376,21 +445,10 @@ def test_direct_aliases_do_not_occupy_multiple_slots(tmp_path, fast_server):
     assert "duplicate destination" in proc.stdout
 
 
-def test_chunk_performance_overrides_catalog_ranking(tmp_path, mock_repo):
-    class FastCatalog(_QuietHandler):
-        def do_GET(self):
-            if urlparse(self.path).path.endswith("P"):
-                time.sleep(0.2)
-            super().do_GET()
-
-    class FastChunks(_QuietHandler):
-        def do_GET(self):
-            if urlparse(self.path).path.endswith("C"):
-                time.sleep(0.05)
-            super().do_GET()
-
-    slow, slow_base = _start_server(mock_repo, FastCatalog)
-    fast, fast_base = _start_server(mock_repo, FastChunks)
+def test_chunk_performance_overrides_catalog_ranking(tmp_path, mock_repo, transfer_times):
+    slow, slow_base = _start_server(mock_repo, _QuietHandler)
+    fast, fast_base = _start_server(mock_repo, _QuietHandler)
+    transfer_times({slow_base: (0.01, 1.0), fast_base: (0.1, 0.1)})
     try:
         proc, config = run_select(tmp_path, f"{slow_base} {fast_base}")
         assert proc.returncode == 0, proc.stdout
@@ -422,7 +480,7 @@ def test_corrupt_complete_body_excluded(tmp_path, mock_repo, fast_server):
         server.server_close()
 
 
-def test_one_failed_chunk_disqualifies_fast_finalist(tmp_path, mock_repo, slow_server):
+def test_one_failed_chunk_disqualifies_finalist(tmp_path, mock_repo, second_server):
     class Intermittent(_QuietHandler):
         def do_GET(self):
             if hashlib.sha1(CHUNKS[1]).hexdigest()[2:] in self.path:
@@ -432,29 +490,22 @@ def test_one_failed_chunk_disqualifies_fast_finalist(tmp_path, mock_repo, slow_s
 
     server, base = _start_server(mock_repo, Intermittent)
     try:
-        proc, config = run_select(tmp_path, f"{base} {slow_server}")
+        proc, config = run_select(tmp_path, f"{base} {second_server}")
         assert proc.returncode == 0, proc.stdout
         assert base not in config
-        assert _configured_server_urls(config)[0].startswith(slow_server + "/")
+        assert _configured_server_urls(config)[0].startswith(second_server + "/")
     finally:
         server.shutdown()
         server.server_close()
 
 
-def test_cached_primary_slowdown_triggers_reprobe(tmp_path, mock_repo):
-    class Variable(_QuietHandler):
-        delay = 0
-
-        def do_GET(self):
-            if "/data/" in self.path:
-                time.sleep(self.delay)
-            super().do_GET()
-
-    server, base = _start_server(mock_repo, Variable)
+def test_cached_primary_slowdown_triggers_reprobe(tmp_path, mock_repo, transfer_times):
+    server, base = _start_server(mock_repo, _QuietHandler)
+    transfer_times({base: (0.01, 0.1)})
     try:
         proc, _ = run_select(tmp_path, base)
         assert proc.returncode == 0, proc.stdout
-        Variable.delay = 0.1
+        transfer_times({base: (0.01, 1.0)})
         proc, _ = run_select(tmp_path, base)
         assert proc.returncode == 0, proc.stdout
         assert "below half" in proc.stdout
@@ -464,12 +515,13 @@ def test_cached_primary_slowdown_triggers_reprobe(tmp_path, mock_repo):
         server.server_close()
 
 
-def test_cached_fallback_chunk_failure_triggers_reprobe(tmp_path, mock_repo, fast_server):
+def test_cached_fallback_chunk_failure_triggers_reprobe(
+    tmp_path, mock_repo, fast_server, transfer_times,
+):
     class Fallback(_QuietHandler):
         fail_chunks = False
 
         def do_GET(self):
-            time.sleep(0.02)
             if self.fail_chunks and urlparse(self.path).path.endswith("P"):
                 self.send_error(503)
             else:
@@ -477,6 +529,7 @@ def test_cached_fallback_chunk_failure_triggers_reprobe(tmp_path, mock_repo, fas
 
     server, base = _start_server(mock_repo, Fallback)
     try:
+        transfer_times({fast_server: (0.01, 0.1), base: (0.1, 1.0)})
         pool = f"{fast_server} {base}"
         proc, config = run_select(tmp_path, pool)
         assert proc.returncode == 0, proc.stdout
@@ -486,9 +539,9 @@ def test_cached_fallback_chunk_failure_triggers_reprobe(tmp_path, mock_repo, fas
         Fallback.fail_chunks = True
         proc, config = run_select(tmp_path, pool)
         assert proc.returncode == 0, proc.stdout
+        assert _configured_server_urls(config) == [fast_server + "/cvmfs/@fqrn@"]
         assert "Cached fallback failed its transfer check" in proc.stdout
         assert "Stage 1" in proc.stdout
-        assert _configured_server_urls(config) == [fast_server + "/cvmfs/@fqrn@"]
     finally:
         server.shutdown()
         server.server_close()
@@ -537,40 +590,28 @@ def test_cdn_virtual_hosts_remain_distinct():
     assert selector.destination(first) != selector.destination(second)
 
 
-def test_faster_cached_challenger_triggers_ranking(tmp_path, mock_repo):
-    class Primary(_QuietHandler):
-        def do_GET(self):
-            if "/data/" in self.path:
-                time.sleep(0.02)
-            super().do_GET()
-
-    class Challenger(_QuietHandler):
-        delay = 0.1
-
-        def do_GET(self):
-            if "/data/" in self.path:
-                time.sleep(self.delay)
-            super().do_GET()
-
-    first, first_base = _start_server(mock_repo, Primary)
-    second, second_base = _start_server(mock_repo, Challenger)
+def test_faster_cached_challenger_triggers_ranking(tmp_path, mock_repo, transfer_times):
+    first, first_base = _start_server(mock_repo, _QuietHandler)
+    second, second_base = _start_server(mock_repo, _QuietHandler)
+    transfer_times({first_base: (0.01, 0.1), second_base: (0.1, 1.0)})
     try:
         pool = f"{first_base} {second_base}"
         proc, config = run_select(tmp_path, pool)
         assert proc.returncode == 0, proc.stdout
         assert _configured_server_urls(config)[0].startswith(first_base + "/")
-        Challenger.delay = 0
+        transfer_times({first_base: (0.01, 0.1), second_base: (0.01, 0.01)})
         proc, config = run_select(tmp_path, pool)
         assert proc.returncode == 0, proc.stdout
-        assert "Cached fallback is over 20% faster" in proc.stdout
         assert _configured_server_urls(config)[0].startswith(second_base + "/")
+        assert "Cached fallback is over 20% faster" in proc.stdout
     finally:
         for server in [first, second]:
             server.shutdown()
             server.server_close()
 
 
-def test_one_day_default_expires_previous_days_ranking(tmp_path, fast_server):
+def test_one_day_default_expires_previous_days_ranking(tmp_path, fast_server, transfer_times):
+    transfer_times({fast_server: (0.01, 0.1)})
     proc, _ = run_select(tmp_path, fast_server)
     assert proc.returncode == 0, proc.stdout
     cache = tmp_path / "selection.env"
@@ -607,7 +648,9 @@ def test_catalog_only_repository_can_still_be_ranked(tmp_path):
         server.server_close()
 
 
-def test_failed_finalists_are_replaced_by_remaining_measured_mirrors(tmp_path, mock_repo):
+def test_failed_finalists_are_replaced_by_remaining_measured_mirrors(
+    tmp_path, mock_repo, transfer_times,
+):
     class BrokenChunks(_QuietHandler):
         def do_GET(self):
             if urlparse(self.path).path.endswith("P"):
@@ -615,14 +658,12 @@ def test_failed_finalists_are_replaced_by_remaining_measured_mirrors(tmp_path, m
             else:
                 super().do_GET()
 
-    class Working(_QuietHandler):
-        def do_GET(self):
-            if urlparse(self.path).path.endswith("C"):
-                time.sleep(0.05)
-            super().do_GET()
-
     servers = [_start_server(mock_repo, BrokenChunks) for _ in range(5)]
-    servers.append(_start_server(mock_repo, Working))
+    servers.append(_start_server(mock_repo, _QuietHandler))
+    transfer_times({
+        **{base: (0.01, 0.1) for _, base in servers[:-1]},
+        servers[-1][1]: (0.1, 0.1),
+    })
     try:
         proc, config = run_select(tmp_path, " ".join(base for _, base in servers))
         assert proc.returncode == 0, proc.stdout

@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import inspect
 import os
 import pwd
@@ -9,6 +10,7 @@ import json
 import socket
 import shutil
 import tempfile
+from pathlib import Path
 import time
 import urllib.error
 import urllib.parse
@@ -683,6 +685,38 @@ def test_desktop_smoke_cleanup_does_not_use_global_process_kills():
         assert pattern not in cleanup_source
 
 
+def test_native_desktop_driver_reports_x_errors_instead_of_exiting(tmp_path):
+    if not os.path.exists("/usr/local/bin/Xtigervnc"):
+        pytest.skip("The native desktop driver needs the image's Xtigervnc")
+    script = f"""
+import os, signal
+from pathlib import Path
+from native_desktop_driver import Desktop
+desktop = Desktop(Path({str(tmp_path)!r}))
+try:
+    desktop.x.XSetInputFocus(desktop.connection, 0x7FFFFFF, 1, 0)
+    try:
+        desktop.chord(0xFF0D)
+    except AssertionError as error:
+        print("rejected:", str(error).splitlines()[0])
+    os.killpg(desktop.process.pid, signal.SIGKILL)
+    desktop.process.wait()
+    try:
+        desktop.click(1, 1)
+    except AssertionError as error:
+        print("lost:", str(error).splitlines()[0])
+finally:
+    desktop.close()
+print("driver survived")
+"""
+    result = subprocess.run([sys.executable, "-c", script], cwd=os.path.dirname(os.path.abspath(__file__)),
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert re.search(r"^rejected: .*BadWindow.*X_SetInputFocus|^rejected: .*BadWindow.*request 42", result.stdout, re.M), result.stdout
+    assert re.search(r"^lost: X display :\d+ closed its connection", result.stdout, re.M), result.stdout
+    assert "driver survived" in result.stdout
+
+
 def test_init_secrets_generates_per_user_mapping(tmp_path):
     """init_secrets.sh must seed a per-user user-mapping.xml with NON-default
     credentials. This is the load-bearing check for the HPC cross-user leak:
@@ -1206,10 +1240,10 @@ def test_guac_rdp_tunnel():
         key(65471, False)
         key(65513, False)
         _collect_guacamole_desktop_frames(tunnel, timeout_seconds=10)
-        # The RDP session user owns home_dir; a root pytest tmp_path is private.
-        output = os.path.join(home_dir, "rdp-command.txt")
+        output = Path(home_dir) / "rdp-command.txt"
+        assert not output.exists(), "RDP command output must be new for this session"
         command = "sh -c " + shlex.quote(
-            "printf desktop-ready > " + shlex.quote(output)
+            "printf desktop-ready > " + shlex.quote(str(output))
         )
         for character in command:
             key(ord(character), True)
@@ -1217,11 +1251,10 @@ def test_guac_rdp_tunnel():
         key(65293, True)
         key(65293, False)
         deadline = time.monotonic() + 20
-        while not os.path.exists(output) and time.monotonic() < deadline:
+        while not output.exists() and time.monotonic() < deadline:
             time.sleep(0.1)
-        assert os.path.isfile(output), "RDP desktop did not execute the keyboard-launched command"
-        with open(output) as output_file:
-            assert output_file.read() == "desktop-ready"
+        assert output.is_file(), "RDP desktop did not execute the keyboard-launched command"
+        assert output.read_text() == "desktop-ready"
 
         if root_cmds_available:
             xrdp_log = _read_xrdp_log()
