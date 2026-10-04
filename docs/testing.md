@@ -551,6 +551,11 @@ second-client replay. Missing-model recovery also requires ``restoredStatus``;
 it will not start a competing restore while the initial restore remains
 pending.
 
+Two kernel-connection regressions run against the installed server. One opens
+a second kernel WebSocket and requires the first to keep receiving replies. The
+other opens a notebook on a fresh kernel, which rejects widget restoration, and
+requires the manager's retries to keep the notebook's kernel WebSocket open.
+
 The browser test requires the bulk control-state reply to survive a five-second
 scheduled kernel delay without entering the per-model fallback. The delay does
 not block the kernel event loop, so concurrent manager requests cannot serialize
