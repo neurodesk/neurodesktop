@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import inspect
 import os
 import pwd
@@ -682,6 +683,38 @@ def test_desktop_smoke_cleanup_does_not_use_global_process_kills():
     ]
     for pattern in forbidden:
         assert pattern not in cleanup_source
+
+
+def test_native_desktop_driver_reports_x_errors_instead_of_exiting(tmp_path):
+    if not os.path.exists("/usr/local/bin/Xtigervnc"):
+        pytest.skip("The native desktop driver needs the image's Xtigervnc")
+    script = f"""
+import os, signal
+from pathlib import Path
+from native_desktop_driver import Desktop
+desktop = Desktop(Path({str(tmp_path)!r}))
+try:
+    desktop.x.XSetInputFocus(desktop.connection, 0x7FFFFFF, 1, 0)
+    try:
+        desktop.chord(0xFF0D)
+    except AssertionError as error:
+        print("rejected:", str(error).splitlines()[0])
+    os.killpg(desktop.process.pid, signal.SIGKILL)
+    desktop.process.wait()
+    try:
+        desktop.click(1, 1)
+    except AssertionError as error:
+        print("lost:", str(error).splitlines()[0])
+finally:
+    desktop.close()
+print("driver survived")
+"""
+    result = subprocess.run([sys.executable, "-c", script], cwd=os.path.dirname(os.path.abspath(__file__)),
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert re.search(r"^rejected: .*BadWindow.*X_SetInputFocus|^rejected: .*BadWindow.*request 42", result.stdout, re.M), result.stdout
+    assert re.search(r"^lost: X display :\d+ closed its connection", result.stdout, re.M), result.stdout
+    assert "driver survived" in result.stdout
 
 
 def test_init_secrets_generates_per_user_mapping(tmp_path):

@@ -146,7 +146,10 @@ Timed-out module commands terminate their process groups and report captured
 output. ITK-SNAP waits for the selected segmentation to render before using its
 save menu; failures include the application's log. Native window discovery and
 focus run in one bounded X server grab so closing application dialogs cannot
-terminate pytest through Xlib's default error handler.
+race the focus request. The driver also replaces Xlib's default error and I/O
+error handlers, which would otherwise end pytest with exit status 1 and no
+report; a rejected request or a lost display fails the test with the display
+log. `test_desktops.py` checks that contract by provoking both faults.
 `NEURODESKTOP_REQUIRE_APPLICATIONS=1` prevents the required science profile
 from silently skipping when CVMFS is disabled.
 

@@ -25,9 +25,25 @@ class _WindowAttributes(ctypes.Structure):
     ]
 
 
+class _XErrorEvent(ctypes.Structure):
+    _fields_ = [
+        ("type", ctypes.c_int), ("display", ctypes.c_void_p), ("resourceid", ctypes.c_ulong),
+        ("serial", ctypes.c_ulong), ("error_code", ctypes.c_ubyte),
+        ("request_code", ctypes.c_ubyte), ("minor_code", ctypes.c_ubyte),
+    ]
+
+
+_ERROR_HANDLER = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(_XErrorEvent))
+_IO_ERROR_HANDLER = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
+_IO_ERROR_EXIT_HANDLER = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p)
+
+
 class Desktop:
     def __init__(self, directory):
+        self.directory = directory
         self.log = (directory / "display.log").open("w")
+        self.errors = []
+        self.lost = False
         self.display_reader = self.process = self.connection = None
         try:
             reader, writer = os.pipe()
@@ -57,6 +73,18 @@ class Desktop:
         self.x.XOpenDisplay.argtypes = [ctypes.c_char_p]
         self.x.XOpenDisplay.restype = ctypes.c_void_p
         self.x.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        self.x.XGetErrorText.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+        self.x.XSetErrorHandler.argtypes = [ctypes.c_void_p]
+        self.x.XSetErrorHandler.restype = ctypes.c_void_p
+        self.x.XSetIOErrorHandler.argtypes = [ctypes.c_void_p]
+        self.x.XSetIOErrorHandler.restype = ctypes.c_void_p
+        self.x.XSetIOErrorExitHandler.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+        # Xlib's default handlers call exit(1), which ends pytest without a report.
+        self._handlers = (_ERROR_HANDLER(self._record_error),
+                          _IO_ERROR_HANDLER(self._record_lost_connection),
+                          _IO_ERROR_EXIT_HANDLER(lambda display, data: None))
+        self.x.XSetErrorHandler(ctypes.cast(self._handlers[0], ctypes.c_void_p))
+        self.x.XSetIOErrorHandler(ctypes.cast(self._handlers[1], ctypes.c_void_p))
         deadline = time.monotonic() + 20
         self.connection = None
         while not self.connection and self.process.poll() is None and time.monotonic() < deadline:
@@ -64,6 +92,8 @@ class Desktop:
             if not self.connection:
                 time.sleep(0.1)
         assert self.connection, "Cannot connect to the virtual display"
+        self.x.XSetIOErrorExitHandler(self.connection, ctypes.cast(self._handlers[2], ctypes.c_void_p), None)
+        self.x.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
         self.x.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
         self.x.XDefaultRootWindow.restype = ctypes.c_ulong
         self.x.XQueryTree.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
@@ -81,6 +111,27 @@ class Desktop:
         self.xtest.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
         self.xtest.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
         self.xtest.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+
+    def _record_error(self, display, event):
+        text = ctypes.create_string_buffer(256)
+        self.x.XGetErrorText(display, event.contents.error_code, text, len(text))
+        self.errors.append(f"{text.value.decode()} for request {event.contents.request_code}"
+                           f" on resource {event.contents.resourceid:#x}")
+        return 0
+
+    def _record_lost_connection(self, display):
+        self.lost = True
+        return 0
+
+    def _check(self):
+        # Protocol errors arrive asynchronously, so collect them after a round trip.
+        if not self.lost:
+            self.x.XSync(self.connection, 0)
+        if self.lost or self.errors:
+            raise AssertionError(
+                f"X display {self.name} "
+                + ("closed its connection" if self.lost else f"rejected requests: {self.errors}")
+                + "\n" + (self.directory / "display.log").read_text(errors="replace"))
 
     def _windows(self):
         root = self.x.XDefaultRootWindow(self.connection)
@@ -123,7 +174,7 @@ class Desktop:
                         return
             finally:
                 self.x.XUngrabServer(self.connection)
-                self.x.XFlush(self.connection)
+                self._check()
             time.sleep(0.1)
         raise AssertionError(f"No window containing {title!r}; visible titles were {windows}")
 
@@ -134,7 +185,7 @@ class Desktop:
             self.xtest.XTestFakeKeyEvent(self.connection, code, 1, 0)
         for code in reversed(codes):
             self.xtest.XTestFakeKeyEvent(self.connection, code, 0, 0)
-        self.x.XFlush(self.connection)
+        self._check()
 
     def text(self, value):
         for character in value:
@@ -148,10 +199,10 @@ class Desktop:
         self.xtest.XTestFakeMotionEvent(self.connection, -1, x, y, 0)
         self.xtest.XTestFakeButtonEvent(self.connection, 1, 1, 0)
         self.xtest.XTestFakeButtonEvent(self.connection, 1, 0, 0)
-        self.x.XFlush(self.connection)
+        self._check()
 
     def close(self):
-        if self.connection:
+        if self.connection and not self.lost:
             self.x.XCloseDisplay(self.connection)
         if self.process is not None and self.process.poll() is None:
             os.killpg(self.process.pid, signal.SIGTERM)
