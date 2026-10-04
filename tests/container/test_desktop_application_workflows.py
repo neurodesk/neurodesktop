@@ -20,7 +20,11 @@ def _require_cvmfs():
         pytest.skip("CVMFS is explicitly disabled")
 
 
-def _module_command(module, arguments, *, cwd, timeout=600, env=None):
+# Budget for a module's first launch, which can fetch its container from CVMFS.
+MODULE_LAUNCH_TIMEOUT = 600
+
+
+def _module_command(module, arguments, *, cwd, timeout=MODULE_LAUNCH_TIMEOUT, env=None):
     _require_cvmfs()
     process = subprocess.Popen(
         ["bash", "-c", "source /opt/neurodesktop/environment_variables.sh && "
@@ -124,7 +128,7 @@ def test_itksnap_opens_and_exports_the_selected_segmentation(tmp_path, desktop):
             stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
         )
         try:
-            desktop.focus("Layout Preference Reminder", process)
+            desktop.focus("Layout Preference Reminder", process, timeout=MODULE_LAUNCH_TIMEOUT)
             desktop.chord(0xFF0D)
             desktop.focus("phantom.nii.gz", process)
             deadline = time.monotonic() + 60
