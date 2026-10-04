@@ -101,6 +101,7 @@ display(widgets.VBox([read, label, viewer]))
                 "[...document.querySelectorAll('[role=menuitem]')].find(n => n.textContent.trim().startsWith('Run Selected Cell'))")
             _wait_for_expression(bidi, context,
                 "document.querySelectorAll('.jp-OutputArea canvas').length === 1", timeout=60, log_paths=logs)
+            bidi.request("browsingContext.setViewport", {"context": context, "viewport": {"width": 1152, "height": 560}})
             canvas = "document.querySelector('.jp-OutputArea canvas')"
             bidi.evaluate(context, canvas + ".scrollIntoView({block: 'center'}); true")
             rectangle = json.loads(bidi.evaluate(context, "JSON.stringify((() => {const c = " + canvas + ";"
