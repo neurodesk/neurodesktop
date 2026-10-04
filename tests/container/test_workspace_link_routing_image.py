@@ -181,6 +181,13 @@ def test_clicking_workspace_links_opens_rendered_documents(tmp_path, base):
                 queue = json.load(response)
             assert queue["success"] and queue["data"]["rows"] == [], queue
             assert queue["responseMessage"].startswith("Success: /usr/bin/true "), queue
+            with urllib.request.urlopen(
+                prefix + "notebook-intelligence/capabilities?token=" + token, timeout=10
+            ) as response:
+                capabilities = json.load(response)
+            assert capabilities["tour_overrides"] == json.loads(
+                Path("/opt/jovyan_defaults/.jupyter/nbi/tour_config.json").read_text()
+            ), "Browser server must use the image's disabled first-run tour"
             bidi = _BidiSession(f"ws://127.0.0.1:{browser_port}/session", browser)
             bidi.request("session.new", {"capabilities": {}})
             context = bidi.request("browsingContext.create", {"type": "tab"})["context"]
