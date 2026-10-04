@@ -106,6 +106,11 @@ The widget patch CLI uses frozen excerpts from the pinned upstream wheel under
 `tests/fixtures/widget-manager/`; changing its search constants cannot silently
 change those fixtures too.
 
+CVMFS ranking fixtures download real payloads from local HTTP servers. A curl
+wrapper controls only reported transfer times for speed-dependent cases, keeping
+HTTP status, remote addresses, transfer failures, and body validation real. These
+cases verify ranking decisions, not host network performance.
+
 The ASTRA renderer cases run its shipped ESM in jsdom. They cover filtering,
 layout ordering, warnings, selection, scroll retention, and shared-model
 cleanup. The ASTRA HTTP cases start real token-authenticated Jupyter servers at
