@@ -149,7 +149,11 @@ def test_clicking_workspace_links_opens_rendered_documents(tmp_path, base):
     server_port, browser_port = _unused_port(), _unused_port()
     prefix = f"http://127.0.0.1:{server_port}{base}"
     token = "workspace-links-test"
-    environment = {**os.environ, "HOME": str(tmp_path)}
+    environment = {
+        **os.environ,
+        "HOME": str(tmp_path),
+        "NBI_TOUR_CONFIG_PATH": "/opt/jovyan_defaults/.jupyter/nbi/tour_config.json",
+    }
     # Slurm initialization overwrites flat Tornado settings from this traitlet.
     # Keep this browser test independent of a host controller in HPC mode.
     server_config = tmp_path / "jupyter_server_config.py"

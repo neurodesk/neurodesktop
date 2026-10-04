@@ -59,6 +59,11 @@ Git, curl, `jq`, and `ssh-keygen` (`openssh-client`); see
 `.github/workflows/unit-tests.yml`. The terminal-creation
 tests stub `curl` but use the real `jq` to parse responses.
 
+The installed workspace-link browser test starts Jupyter directly with a fresh
+home. It sets `NBI_TOUR_CONFIG_PATH` to the image's installed default and checks
+the authenticated capabilities response before clicking launcher tiles. This
+preserves the normal startup configuration that disables NBI's first-run tour.
+
 The launcher DOM regressions, including T3 iframe file-link capture, reloads,
 disposal, and the T3 Connect panel, also require jsdom and TypeScript.
 ASTRA document tests additionally load the
