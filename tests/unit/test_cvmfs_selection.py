@@ -7,6 +7,8 @@ these tests need no network access and no root privileges.
 
 import functools
 import hashlib
+import json
+import shlex
 import sqlite3
 import zlib
 import http.server
@@ -252,6 +254,16 @@ def test_all_unreachable_writes_fallback(tmp_path, dead_server_url):
 def test_cached_selection_reused(tmp_path, fast_server):
     proc1, config1 = run_select(tmp_path, fast_server)
     assert proc1.returncode == 0, proc1.stdout
+
+    # Reuse requires a healthy speed baseline; localhost timings vary with load.
+    cache = tmp_path / "selection.env"
+    lines = cache.read_text().splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith("CACHED_METADATA="):
+            metadata = json.loads(shlex.split(line.split("=", 1)[1])[0])
+            metadata["baseline"] = 1  # bytes/second, safely below a completed local transfer.
+            lines[index] = "CACHED_METADATA=" + shlex.quote(json.dumps(metadata))
+    cache.write_text("\n".join(lines) + "\n")
 
     proc2, config2 = run_select(tmp_path, fast_server)
     assert proc2.returncode == 0, proc2.stdout
