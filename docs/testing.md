@@ -185,9 +185,11 @@ by [test_niivue_rendering_image.py](../tests/container/test_niivue_rendering_ima
 with `NEURODESKTOP_REQUIRE_WEBGL=1`.
 The graphics test starts a private Xtigervnc display without network listeners
 and uses Mesa software rendering in Firefox. It requires volume pixels and
-browser-to-kernel scene updates in a compact viewport. It scrolls each control
-into view and measures the canvas again before dragging, so notebook toolbars
-cannot intercept clicks intended for the widget. Missing WebGL is a failure. The portable
+browser-to-kernel scene updates in a compact viewport. It measures the canvas
+again before dragging and reads scene coordinates from the active notebook's
+kernel through JupyterLab's authenticated execution API. The test requires a
+successful kernel reply and idle state, then checks the initial and changed
+coordinates. Missing WebGL is a failure. The portable
 widget suite remains available on displayless runners.
 
 The validator installs cleanup before startup, rejects a readiness timeout or

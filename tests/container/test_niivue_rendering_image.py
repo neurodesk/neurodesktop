@@ -18,6 +18,40 @@ from test_widget_compatibility_image import (
 )
 
 
+def _kernel_crosshair(bidi, context):
+    reply = json.loads(bidi.evaluate(context, """(async () => {
+        const panel = window.jupyterapp.shell.currentWidget;
+        if (panel?.context?.path !== 'volume.ipynb') {
+            return JSON.stringify({error: 'The volume notebook is not active'});
+        }
+        const kernel = panel.sessionContext.session?.kernel;
+        if (kernel?.connectionStatus !== 'connected') {
+            return JSON.stringify({error: 'The volume kernel is not connected'});
+        }
+        const future = kernel.requestExecute({
+            code: '', silent: true, store_history: false,
+            user_expressions: {crosshair: '[float(value) for value in viewer.scene.crosshair_pos]'},
+        });
+        let timer;
+        try {
+            const message = await Promise.race([
+                future.done,
+                new Promise(resolve => {
+                    timer = setTimeout(() => resolve(null), 10000);
+                }),
+            ]);
+            return JSON.stringify(message?.content ?? {error: 'Kernel read timed out'});
+        } finally {
+            clearTimeout(timer);
+            future.dispose();
+        }
+    })()"""))
+    assert reply.get('status') == 'ok', reply
+    expression = reply['user_expressions']['crosshair']
+    assert expression.get('status') == 'ok', expression
+    return json.loads(expression['data']['text/plain'])
+
+
 @pytest.fixture
 def graphics_display(tmp_path, monkeypatch):
     display_number = next(
@@ -51,22 +85,15 @@ def graphics_display(tmp_path, monkeypatch):
 def test_niivue_renders_volume_and_synchronizes_interactions(tmp_path, graphics_display):
     port = _unused_port()
     token = "niivue-acceptance"
-    source = """import json
-import nibabel as nib
+    source = """import nibabel as nib
 import numpy as np
-import ipywidgets as widgets
 from ipyniivue import NiiVue
 from IPython.display import display
 volume = np.random.default_rng(0).normal(size=(48, 48, 48)).astype('float32')
 nib.save(nib.Nifti1Image(volume, np.eye(4)), 'volume.nii.gz')
 viewer = NiiVue(height=400)
 viewer.load_volumes([{'path': 'volume.nii.gz'}])
-label = widgets.Label(value='crosshair:unread')
-read = widgets.Button(description='Read crosshair')
-def read_scene(button):
-    label.value = 'crosshair:' + json.dumps(list(viewer.scene.crosshair_pos))
-read.on_click(read_scene)
-display(widgets.VBox([read, label, viewer]))
+display(viewer)
 """
     notebook = nbformat.v4.new_notebook(
         cells=[nbformat.v4.new_code_cell(source)],
@@ -121,13 +148,8 @@ display(widgets.VBox([read, label, viewer]))
                 assert time.monotonic() < deadline, (
                     "NiiVue did not render volume intensities", grays.size, np.unique(grays).size)
                 time.sleep(0.2)
-            label_expression = "[...document.querySelectorAll('.widget-label')].find(n => n.textContent.startsWith('crosshair:')).textContent"
-            read_button = "[...document.querySelectorAll('.jupyter-button')].find(n => n.textContent === 'Read crosshair')"
-            bidi.evaluate(context, read_button + ".scrollIntoView({block: 'center'}); true")
-            _click_dom_element(bidi, context, read_button)
-            _wait_for_expression(bidi, context, label_expression + " !== 'crosshair:unread'", log_paths=logs)
-            before = bidi.evaluate(context, label_expression)
-            assert json.loads(before.split(':', 1)[1]) == [0.5, 0.5, 0.5]
+            before = _kernel_crosshair(bidi, context)
+            assert before == [0.5, 0.5, 0.5]
             rectangle = json.loads(bidi.evaluate(context, canvas_rectangle))
             x = round(rectangle["x"] + rectangle["width"] * 0.5)
             y = round(rectangle["y"] + rectangle["height"] * 0.5)
@@ -140,12 +162,14 @@ display(widgets.VBox([read, label, viewer]))
                     {"type": "pointerUp", "button": 0},
                 ],
             }]})
-            bidi.evaluate(context, read_button + ".scrollIntoView({block: 'center'}); true")
-            _click_dom_element(bidi, context, read_button)
-            _wait_for_expression(bidi, context, label_expression + " !== " + json.dumps(before), log_paths=logs)
-            after = json.loads(bidi.evaluate(context, label_expression).split(':', 1)[1])
-            assert all(0 <= coordinate <= 1 for coordinate in after), after
-            assert max(abs(coordinate - 0.5) for coordinate in after) > 0.05, after
+            deadline = time.monotonic() + 30
+            while True:
+                after = _kernel_crosshair(bidi, context)
+                assert len(after) == 3 and all(0 <= coordinate <= 1 for coordinate in after), after
+                if max(abs(coordinate - 0.5) for coordinate in after) > 0.05:
+                    break
+                assert time.monotonic() < deadline, ("NiiVue did not synchronize the drag", after)
+                time.sleep(0.1)
         finally:
             if browser is not None:
                 browser.close()
