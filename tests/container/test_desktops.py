@@ -5,6 +5,7 @@ import os
 import pwd
 import re
 import signal
+import select
 import shlex
 import json
 import socket
@@ -715,6 +716,78 @@ print("driver survived")
     assert re.search(r"^rejected: .*BadWindow.*X_SetInputFocus|^rejected: .*BadWindow.*request 42", result.stdout, re.M), result.stdout
     assert re.search(r"^lost: X display :\d+ closed its connection", result.stdout, re.M), result.stdout
     assert "driver survived" in result.stdout
+
+
+@pytest.mark.parametrize("fault", ["protocol", "connection"])
+def test_native_desktop_driver_restores_x_handlers(tmp_path, fault):
+    if not os.path.exists("/usr/local/bin/Xtigervnc"):
+        pytest.skip("The native desktop driver needs the image's Xtigervnc")
+    script = f"""
+import ctypes, ctypes.util, gc, os, socket
+from pathlib import Path
+from native_desktop_driver import Desktop, _ERROR_HANDLER, _IO_ERROR_HANDLER, _IO_ERROR_EXIT_HANDLER
+x = ctypes.CDLL(ctypes.util.find_library("X11"))
+x.XSetErrorHandler.argtypes = x.XSetIOErrorHandler.argtypes = [ctypes.c_void_p]
+received = []
+error_handler = _ERROR_HANDLER(lambda display, event: received.append(event.contents.error_code) or 0)
+io_handler = _IO_ERROR_HANDLER(lambda display: received.append("lost") or 0)
+exit_handler = _IO_ERROR_EXIT_HANDLER(lambda display, data: None)
+x.XSetErrorHandler(ctypes.cast(error_handler, ctypes.c_void_p))
+x.XSetIOErrorHandler(ctypes.cast(io_handler, ctypes.c_void_p))
+desktop = Desktop(Path({str(tmp_path)!r}))
+try:
+    desktop.chord(0xFF0D)
+finally:
+    desktop.close()
+del desktop
+gc.collect()
+x.XOpenDisplay.argtypes = [ctypes.c_char_p]
+x.XOpenDisplay.restype = ctypes.c_void_p
+x.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+x.XCloseDisplay.argtypes = [ctypes.c_void_p]
+x.XSetInputFocus.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+x.XSetIOErrorExitHandler.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+connection = x.XOpenDisplay(os.environ["TEST_DISPLAY"].encode())
+assert connection, "Cannot open the independent test display"
+x.XSetIOErrorExitHandler(connection, ctypes.cast(exit_handler, ctypes.c_void_p), None)
+if {fault!r} == "protocol":
+    x.XSetInputFocus(connection, 0x7FFFFFF, 1, 0)
+    x.XSync(connection, 0)
+    assert received == [3], received
+    x.XCloseDisplay(connection)
+else:
+    x.XConnectionNumber.argtypes = [ctypes.c_void_p]
+    transport = socket.socket(fileno=x.XConnectionNumber(connection))
+    transport.shutdown(socket.SHUT_RDWR)
+    transport.detach()
+    x.XSync(connection, 0)
+    assert received == ["lost"], received
+print("previous handler received the error")
+"""
+    reader, writer = os.pipe()
+    with (tmp_path / "independent-display.log").open("w") as log:
+        server = subprocess.Popen(
+            ["/usr/local/bin/Xtigervnc", "-displayfd", str(writer),
+             "-geometry", "100x100", "-SecurityTypes", "None",
+             "-rfbport", "-1", "-nolisten", "tcp"],
+            pass_fds=(writer,), stdout=log, stderr=subprocess.STDOUT,
+        )
+        os.close(writer)
+        try:
+            assert select.select([reader], [], [], 20)[0], "Independent display did not start"
+            display = ":" + os.read(reader, 100).decode().strip()
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=os.path.dirname(os.path.abspath(__file__)),
+                env={**os.environ, "TEST_DISPLAY": display},
+                capture_output=True, text=True, timeout=120,
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert "previous handler received the error" in result.stdout
+        finally:
+            os.close(reader)
+            server.terminate()
+            server.wait(timeout=10)
 
 
 def test_init_secrets_generates_per_user_mapping(tmp_path):
