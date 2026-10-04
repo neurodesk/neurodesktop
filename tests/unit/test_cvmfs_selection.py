@@ -8,6 +8,7 @@ these tests need no network access and no root privileges.
 import functools
 import hashlib
 import json
+import math
 import shutil
 import sys
 import sqlite3
@@ -171,7 +172,16 @@ def transfer_times(tmp_path, monkeypatch):
     )
     wrapper.chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
-    yield lambda per_host: timings.write_text(json.dumps(per_host))
+    def set_times(per_host):
+        for durations in per_host.values():
+            assert len(durations) == 2, "Supply catalog and chunk transfer times"
+            assert all(
+                type(seconds) in (int, float) and math.isfinite(seconds) and seconds > 0
+                for seconds in durations
+            ), "Transfer times must be finite positive numbers"
+        timings.write_text(json.dumps(per_host))
+
+    yield set_times
     assert not fixture_error.exists(), fixture_error.read_text()
 
 
