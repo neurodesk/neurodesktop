@@ -95,7 +95,7 @@ def test_patch_cli_packages_frozen_upstream_assets_under_new_hashes(tmp_path):
             "neurodesktop-widget-model-retry",
             "neurodesktop-widget-missing-model-restore-lifecycle",
             "neurodesktop-widget-control-timeout-staged-retry",
-            "neurodesktop-widget-control-retry-reconnect",
+            "neurodesktop-widget-control-retry-probe",
             "neurodesktop-widget-kernel-connection-reconnect",
         )),
         (renderer_text, (
@@ -258,6 +258,30 @@ def test_patch_upgrades_the_existing_two_retry_workaround(tmp_path):
     renderer_text, _ = active_bundle_text(tmp_path, package_json, 160)
     assert patcher.RENDERER_OUTPUT_WATCH_MARKER in renderer_text
     assert patcher.RENDERER_RECOVERY_RERENDER_MARKER in renderer_text
+    assert not patcher.patch_labextension(tmp_path)
+
+
+def test_patch_upgrades_the_unconditional_retry_reconnect(tmp_path):
+    patcher = load_patcher_module()
+    _, _, package_json = write_labextension_fixture(
+        tmp_path,
+        patcher.MODEL_RETRY_AFTER
+        + patcher.CONTROL_TIMEOUT_AFTER
+        + patcher.CONTROL_RETRY_V3_AFTER
+        + patcher.CONNECTION_WAIT_AFTER,
+        renderer_source=(
+            patcher.RENDERER_OUTPUT_WATCH_AFTER
+            + patcher.RENDERER_RECOVERY_RERENDER_BEFORE
+            + patcher.RENDERER_RERENDER_SINGLE_FLIGHT_BEFORE
+            + patcher.MODEL_REGISTRATION_RERENDER_BEFORE
+        ),
+    )
+
+    assert patcher.patch_labextension(tmp_path)
+
+    patched_text, _ = active_bundle_text(tmp_path, package_json, 32)
+    assert patcher.CONTROL_RETRY_AFTER in patched_text
+    assert patcher.CONTROL_RETRY_V3_AFTER not in patched_text
     assert not patcher.patch_labextension(tmp_path)
 
 

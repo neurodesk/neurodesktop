@@ -17,7 +17,11 @@ seconds and falls back to individual model requests that can be stranded by a
 late bulk response. A control comm opened while a second client's kernel
 connection is settling can also be lost before it reaches ipykernel. Wait for
 that connection, probe it, and reconnect a stale channel before opening or
-retrying the bulk request. Make up to two retries before falling back.
+retrying the bulk request. Before each retry, probe that connection and
+reconnect only if the probe fails: a fresh kernel that has not imported
+ipywidgets never answers the first request, and replacing its healthy
+connection discards replies to every request still in flight on it. Make up to
+two retries before falling back.
 
 During manager setup, watch code-cell output changes and attach the manager to
 any manager-less widget renderer that appears outside the normal factory path.
@@ -49,7 +53,8 @@ CONTROL_TIMEOUT_V1_MARKER = "neurodesktop-widget-control-timeout"
 CONTROL_TIMEOUT_MARKER = "neurodesktop-widget-control-timeout-staged-retry"
 CONTROL_RETRY_V1_MARKER = "neurodesktop-widget-control-retry"
 CONTROL_RETRY_V2_MARKER = "neurodesktop-widget-control-retry-v2"
-CONTROL_RETRY_MARKER = "neurodesktop-widget-control-retry-reconnect"
+CONTROL_RETRY_V3_MARKER = "neurodesktop-widget-control-retry-reconnect"
+CONTROL_RETRY_MARKER = "neurodesktop-widget-control-retry-probe"
 CONNECTION_WAIT_V1_MARKER = "neurodesktop-widget-kernel-connection-wait"
 CONNECTION_WAIT_MARKER = "neurodesktop-widget-kernel-connection-reconnect"
 LEGACY_RENDERER_MANAGER_ORDER_MARKER = (
@@ -185,6 +190,23 @@ CONTROL_RETRY_V2_AFTER = (
     "return this._loadFromKernelModels()}let o=e.states"
 )
 
+CONTROL_RETRY_V3_AFTER = (
+    "}catch(e){let neurodeskRetries="
+    "this.__neurodesktopControlRetryCount||0;"
+    "if(neurodeskRetries<2){"
+    f"/*{CONTROL_RETRY_V3_MARKER}*/"
+    "this.__neurodesktopControlRetryCount=neurodeskRetries+1;"
+    "this.__neurodesktopControlRetry=!0;"
+    "try{let neurodeskRetryKernel=this.kernel;"
+    "if(neurodeskRetryKernel&&neurodeskRetryKernel.reconnect)try{"
+    "await Promise.race([neurodeskRetryKernel.reconnect(),"
+    "new Promise(e=>setTimeout(e,1e4))])}catch(e){}"
+    "return await this._loadFromKernel()}finally{"
+    "this.__neurodesktopControlRetryCount=neurodeskRetries;"
+    "this.__neurodesktopControlRetry=neurodeskRetries>0}}"
+    "return this._loadFromKernelModels()}let o=e.states"
+)
+
 CONTROL_RETRY_AFTER = (
     "}catch(e){let neurodeskRetries="
     "this.__neurodesktopControlRetryCount||0;"
@@ -193,9 +215,19 @@ CONTROL_RETRY_AFTER = (
     "this.__neurodesktopControlRetryCount=neurodeskRetries+1;"
     "this.__neurodesktopControlRetry=!0;"
     "try{let neurodeskRetryKernel=this.kernel;"
-    "if(neurodeskRetryKernel&&neurodeskRetryKernel.reconnect)try{"
+    "if(neurodeskRetryKernel&&neurodeskRetryKernel.reconnect){"
+    "let neurodeskRetryHealthy=!1;"
+    "if(neurodeskRetryKernel.requestKernelInfo)try{"
+    "await new Promise((e,t)=>{"
+    "let neurodeskRetryProbeTimer=setTimeout(()=>t(Error("
+    '"Kernel connection did not answer its retry probe")),3e3);'
+    "neurodeskRetryKernel.requestKernelInfo().then(i=>{"
+    "clearTimeout(neurodeskRetryProbeTimer),e(i)},i=>{"
+    "clearTimeout(neurodeskRetryProbeTimer),t(i)})}),"
+    "neurodeskRetryHealthy=!0}catch(e){}"
+    "if(!neurodeskRetryHealthy)try{"
     "await Promise.race([neurodeskRetryKernel.reconnect(),"
-    "new Promise(e=>setTimeout(e,1e4))])}catch(e){}"
+    "new Promise(e=>setTimeout(e,1e4))])}catch(e){}}"
     "return await this._loadFromKernel()}finally{"
     "this.__neurodesktopControlRetryCount=neurodeskRetries;"
     "this.__neurodesktopControlRetry=neurodeskRetries>0}}"
@@ -549,12 +581,16 @@ def patch_labextension(labextension_dir: Path) -> bool:
         add_replacement(
             model_bundle,
             (
-                CONTROL_RETRY_V2_AFTER
-                if CONTROL_RETRY_V2_MARKER in model_text
+                CONTROL_RETRY_V3_AFTER
+                if CONTROL_RETRY_V3_MARKER in model_text
                 else (
-                    CONTROL_RETRY_V1_AFTER
-                    if CONTROL_RETRY_V1_MARKER in model_text
-                    else CONTROL_RETRY_BEFORE
+                    CONTROL_RETRY_V2_AFTER
+                    if CONTROL_RETRY_V2_MARKER in model_text
+                    else (
+                        CONTROL_RETRY_V1_AFTER
+                        if CONTROL_RETRY_V1_MARKER in model_text
+                        else CONTROL_RETRY_BEFORE
+                    )
                 )
             ),
             CONTROL_RETRY_AFTER,

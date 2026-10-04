@@ -131,12 +131,16 @@ kernel-info probe before the control comm opens. JupyterLab marks the browser
 WebSocket connected before the kernel bridge is necessarily ready, and its own
 initial kernel-info request documents that it can be lost during this interval.
 If the readiness probe times out, the manager asks JupyterLab to reconnect that
-browser's kernel channel before continuing. It also reconnects before each
-bulk retry, which replaces a WebSocket that reports `connected` but no longer
-delivers comm traffic. Each reconnect is bounded at ten seconds; restoration
-continues into its bounded control-state request if reconnecting cannot finish.
-The retry bypasses the one-time readiness probe after reconnecting so probe
-timeouts cannot consume the retry's rendering window.
+browser's kernel channel before continuing. Before each bulk retry, the manager
+probes the channel again and reconnects only if that probe also times out. This
+still replaces a WebSocket that reports `connected` but no longer delivers
+traffic. A kernel that has not imported ipywidgets rejects every bulk request,
+so retrying is routine on a fresh kernel. Reconnecting a healthy channel there
+would discard replies to every request still in flight on it. Each reconnect
+is bounded at ten seconds; restoration continues into its bounded
+control-state request if reconnecting cannot finish. A retry skips the initial
+connection wait and readiness probe, so its own three-second probe is the only
+delay it adds before the retry's rendering window.
 
 JupyterLab 4.6 assigns the manager to existing renderers and replaces the
 panel's shared renderer factory in adjacent synchronous operations. The

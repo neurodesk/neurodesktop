@@ -981,7 +981,8 @@ def test_widget_manager_waits_for_a_late_model_registration():
     assert "Date.now()-neurodeskRecoveredAt<30e3" in bundles
     assert "neurodesktop-widget-control-timeout-staged-retry" in bundles
     assert "this.__neurodesktopControlRetry?3e4:1e4" in bundles
-    assert "neurodesktop-widget-control-retry-reconnect" in bundles
+    assert "neurodesktop-widget-control-retry-probe" in bundles
+    assert "neurodeskRetryKernel.requestKernelInfo()" in bundles
     assert "neurodeskRetryKernel.reconnect()" in bundles
     assert "return await this._loadFromKernel()" in bundles
     assert "neurodeskRetries<2" in bundles
