@@ -76,11 +76,13 @@ class Desktop:
         self.x.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
         self.x.XKeysymToKeycode.restype = ctypes.c_uint
         self.x.XFlush.argtypes = [ctypes.c_void_p]
+        self.x.XGrabServer.argtypes = [ctypes.c_void_p]
+        self.x.XUngrabServer.argtypes = [ctypes.c_void_p]
         self.xtest.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
         self.xtest.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
         self.xtest.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
 
-    def windows(self):
+    def _windows(self):
         root = self.x.XDefaultRootWindow(self.connection)
         parent = ctypes.c_ulong()
         returned_root = ctypes.c_ulong()
@@ -111,12 +113,17 @@ class Desktop:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             assert process.poll() is None, "Application exited before its document window appeared"
-            windows = self.windows()
-            for window, name in windows.items():
-                if title in name:
-                    self.x.XSetInputFocus(self.connection, window, 1, 0)
-                    self.x.XFlush(self.connection)
-                    return
+            # A client can destroy its window between the tree snapshot and focus.
+            self.x.XGrabServer(self.connection)
+            try:
+                windows = self._windows()
+                for window, name in windows.items():
+                    if title in name:
+                        self.x.XSetInputFocus(self.connection, window, 1, 0)
+                        return
+            finally:
+                self.x.XUngrabServer(self.connection)
+                self.x.XFlush(self.connection)
             time.sleep(0.1)
         raise AssertionError(f"No window containing {title!r}; visible titles were {windows}")
 
