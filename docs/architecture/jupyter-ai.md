@@ -164,6 +164,17 @@ after which the connection proceeds with the old behavior. The logic lives in
 `jupyter_server_documents/_neurodesktop_kernel_nudge.py`; the frontend probe,
 reconnect, and retry bounds above remain as defense in depth.
 
+The same bridge also built every connection's kernel client from the kernel
+manager's shared session. A client's session id is its ZMQ identity, and
+ipykernel hands an identity on its shell, control, and stdin sockets to
+whichever socket connected last. JupyterLab opens several connections to one
+kernel, so the newest bridge silently cut off the notebook's own connection.
+That connection's requests then never reached the kernel, with no error
+anywhere. The anchored backend patch builds each client from the connection's
+own session, whose id is the browser's `session_id`, as upstream
+jupyter_server does. A reconnecting browser reuses its `session_id`, so its new
+bridge still takes over its own identity.
+
 The ipywidgets backend also stores only the most recently opened widget control
 comm. When two JupyterLab clients restore the same kernel concurrently, a state
 request received from one client can therefore send its response to the other.
@@ -342,6 +353,7 @@ bugs. Retirement conditions per seam:
 | Late SyncStep2, per-client futures, `handshake_timeout`, frontend divergent repair (same patcher) | the [#305](https://github.com/jupyter-ai-contrib/jupyter-server-documents/issues/305) PRs (albertmichaelj's `darden/fixes` design) | frontend half is minified-anchored |
 | CRDT stream outputs + `neurodesktop_stream_output.py` (same patcher) | fix for [#306](https://github.com/jupyter-ai-contrib/jupyter-server-documents/issues/306) | silent-case risk: check release notes for any other output-path change |
 | Server-execution cell trust, frontend (same patcher) | fix for [#307](https://github.com/jupyter-ai-contrib/jupyter-server-documents/issues/307) | |
+| Kernel WebSocket per-connection session identity (same patcher) | jupyter-server-documents building its bridge client from the connection's session | `test_a_new_kernel_websocket_leaves_earlier_connections_answered` fails if a second kernel WebSocket cuts off the first |
 | Kernel WebSocket nudge + `neurodesktop_kernel_nudge.py` (same patcher) | the nudge issue/PR on jupyter-server-documents | once merged, re-evaluate the frontend probe/reconnect/retry bounds for removal — they masked this transport hole |
 | Widget late-model retry, restore-lifecycle recovery, and failed-render rerender (`patch_jupyterlab_widgets.py`) | ipywidgets event-driven `get_model` ([#4026](https://github.com/jupyter-widgets/ipywidgets/issues/4026)) plus recovery after a lost `comm_open` | a `get_model_timeout` setting replaces only the bounded-wait half; retire the rerender seams when upstream keeps failed MIME models, wakes them on registration, and makes rerender single-flight |
 | Widget renderer output watch (same patcher) | an upstream insertion API guarantees that extensions and collaboration cannot bypass the panel's manager-backed factory | the browser test injects a manager-less renderer and requires the watch to repair it |

@@ -1564,7 +1564,9 @@ RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_proxy.py,target
 # divergent-history repair, server execution leaves cells untrusted, notebook
 # rooms append non-CRDT outputs, and its per-connection kernel WebSocket
 # bridge skips upstream jupyter_server's connection nudge, silently losing
-# IOPub messages published before a fresh subscription joins. Frontend
+# IOPub messages published before a fresh subscription joins. That bridge also
+# gives every connection the kernel manager's ZMQ identity, so each new kernel
+# WebSocket silently cuts off the previous one. Frontend
 # workarounds publish new content-hashed assets because Jupyter serves bundles
 # as immutable. Keep these anchored workarounds until a fixed release is
 # pinned. The stream-coalescing and kernel-nudge logic live in

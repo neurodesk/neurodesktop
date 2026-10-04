@@ -1046,6 +1046,8 @@ def test_server_documents_installs_reconnect_data_loss_guards() -> None:
     assert "neurodesktop-kernel-ws-nudge" in websocket_source
     assert "from . import _neurodesktop_kernel_nudge" in websocket_source
     assert "await _neurodesktop_kernel_nudge.nudge(self)" in websocket_source
+    assert "neurodesktop-kernel-ws-session-identity" in websocket_source
+    assert "self.kernel_manager.client(session=self.session)" in websocket_source
     assert websocket_source.index("start_channels(hb=False)") < (
         websocket_source.index("await _neurodesktop_kernel_nudge.nudge(self)")
     ) < websocket_source.index("asyncio.create_task(self._listen(ch))")
