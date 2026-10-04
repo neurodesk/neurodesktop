@@ -103,10 +103,10 @@ display(widgets.VBox([read, label, viewer]))
                 "document.querySelectorAll('.jp-OutputArea canvas').length === 1", timeout=60, log_paths=logs)
             bidi.request("browsingContext.setViewport", {"context": context, "viewport": {"width": 1152, "height": 560}})
             canvas = "document.querySelector('.jp-OutputArea canvas')"
-            bidi.evaluate(context, canvas + ".scrollIntoView({block: 'center'}); true")
-            rectangle = json.loads(bidi.evaluate(context, "JSON.stringify((() => {const c = " + canvas + ";"
+            canvas_rectangle = ("JSON.stringify((() => {const c = " + canvas + ";"
                 "c.scrollIntoView({block: 'center'}); const r = c.getBoundingClientRect();"
-                "return {type:'box', x:r.x, y:r.y, width:r.width, height:r.height};})())"))
+                "return {type:'box', x:r.x, y:r.y, width:r.width, height:r.height};})())")
+            rectangle = json.loads(bidi.evaluate(context, canvas_rectangle))
             deadline = time.monotonic() + 30
             while True:
                 screenshot = bidi.request("browsingContext.captureScreenshot", {
@@ -123,10 +123,12 @@ display(widgets.VBox([read, label, viewer]))
                 time.sleep(0.2)
             label_expression = "[...document.querySelectorAll('.widget-label')].find(n => n.textContent.startsWith('crosshair:')).textContent"
             read_button = "[...document.querySelectorAll('.jupyter-button')].find(n => n.textContent === 'Read crosshair')"
+            bidi.evaluate(context, read_button + ".scrollIntoView({block: 'center'}); true")
             _click_dom_element(bidi, context, read_button)
             _wait_for_expression(bidi, context, label_expression + " !== 'crosshair:unread'", log_paths=logs)
             before = bidi.evaluate(context, label_expression)
             assert json.loads(before.split(':', 1)[1]) == [0.5, 0.5, 0.5]
+            rectangle = json.loads(bidi.evaluate(context, canvas_rectangle))
             x = round(rectangle["x"] + rectangle["width"] * 0.5)
             y = round(rectangle["y"] + rectangle["height"] * 0.5)
             bidi.request("input.performActions", {"context": context, "actions": [{
@@ -138,6 +140,7 @@ display(widgets.VBox([read, label, viewer]))
                     {"type": "pointerUp", "button": 0},
                 ],
             }]})
+            bidi.evaluate(context, read_button + ".scrollIntoView({block: 'center'}); true")
             _click_dom_element(bidi, context, read_button)
             _wait_for_expression(bidi, context, label_expression + " !== " + json.dumps(before), log_paths=logs)
             after = json.loads(bidi.evaluate(context, label_expression).split(':', 1)[1])
