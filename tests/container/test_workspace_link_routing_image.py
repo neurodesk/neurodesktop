@@ -101,7 +101,6 @@ def check_slurm_launcher(bidi, context):
         target = bidi.request("script.evaluate", {
             "expression": f"""(async () => {{
                 const node = {tile};
-                node.scrollIntoView({{block: 'center', behavior: 'instant'}});
                 for (let index = 0; index < 40; index++) {{
                     window.jupyterapp.shell.currentWidget.content.model.add({{
                         command: 'filebrowser:create-new-directory',
@@ -113,6 +112,7 @@ def check_slurm_launcher(bidi, context):
                 let stableFrames = 0;
                 while (performance.now() < deadline) {{
                     await new Promise(requestAnimationFrame);
+                    node.scrollIntoView({{block: 'center', behavior: 'instant'}});
                     const rect = node.getBoundingClientRect();
                     const geometry = JSON.stringify([rect.x, rect.y, rect.width, rect.height]);
                     const hit = document.elementFromPoint(
