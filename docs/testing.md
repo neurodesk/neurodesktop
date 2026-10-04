@@ -214,7 +214,10 @@ requires WebGL2 on amd64 through the image's software-rendered display.
 Each test step runs [the runtime validation command](../.github/scripts/validate_image_runtime.sh)
 with the candidate image and the `regular`, `hpc`, or `acceptance` profile. The command
 owns startup, readiness polling, security-policy checks, pytest, and cleanup.
-The workflows own candidate pulls and host CVMFS provisioning.
+The workflows own candidate pulls and host CVMFS provisioning. Production
+CVMFS jobs run the same verified mirror selection as PR acceptance before
+mounting the generated configuration. They fail setup if no mirror passes and
+report the active CVMFS host and mount statistics even after a failed test.
 The steps use `exec` so the command retains the workflow shell's cancellation
 boundary. On its disposable Ubuntu 24.04 runner, PR scientific acceptance
 temporarily disables AppArmor's restriction on unprivileged user namespaces,
