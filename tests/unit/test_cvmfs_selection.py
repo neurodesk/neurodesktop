@@ -149,6 +149,17 @@ def _configured_server_urls(config):
     return server_line.split('"')[1].split(";")
 
 
+def _set_healthy_cached_primary(tmp_path):
+    """Keep localhost timing noise from invalidating an otherwise healthy primary."""
+    cache = tmp_path / "selection.env"
+    lines = cache.read_text().splitlines()
+    index = next(i for i, line in enumerate(lines) if line.startswith("CACHED_METADATA="))
+    metadata = json.loads(shlex.split(lines[index].split("=", 1)[1])[0])
+    metadata["baseline"] = 1  # bytes/second, below a completed local transfer.
+    lines[index] = "CACHED_METADATA=" + shlex.quote(json.dumps(metadata))
+    cache.write_text("\n".join(lines) + "\n")
+
+
 def test_root_cache_write_restores_notebook_home_ownership(tmp_path, fast_server):
     """Execute the ownership repair without needing root on the test host."""
     home = tmp_path / "home"
@@ -255,15 +266,7 @@ def test_cached_selection_reused(tmp_path, fast_server):
     proc1, config1 = run_select(tmp_path, fast_server)
     assert proc1.returncode == 0, proc1.stdout
 
-    # Reuse requires a healthy speed baseline; localhost timings vary with load.
-    cache = tmp_path / "selection.env"
-    lines = cache.read_text().splitlines()
-    for index, line in enumerate(lines):
-        if line.startswith("CACHED_METADATA="):
-            metadata = json.loads(shlex.split(line.split("=", 1)[1])[0])
-            metadata["baseline"] = 1  # bytes/second, safely below a completed local transfer.
-            lines[index] = "CACHED_METADATA=" + shlex.quote(json.dumps(metadata))
-    cache.write_text("\n".join(lines) + "\n")
+    _set_healthy_cached_primary(tmp_path)
 
     proc2, config2 = run_select(tmp_path, fast_server)
     assert proc2.returncode == 0, proc2.stdout
@@ -275,6 +278,7 @@ def test_cached_selection_reused(tmp_path, fast_server):
 def test_expired_cache_triggers_reprobe(tmp_path, fast_server):
     proc1, _ = run_select(tmp_path, fast_server)
     assert proc1.returncode == 0, proc1.stdout
+    _set_healthy_cached_primary(tmp_path)
 
     proc2, _ = run_select(
         tmp_path,
@@ -288,6 +292,7 @@ def test_expired_cache_triggers_reprobe(tmp_path, fast_server):
 def test_force_probe_ignores_cache(tmp_path, fast_server):
     proc1, _ = run_select(tmp_path, fast_server)
     assert proc1.returncode == 0, proc1.stdout
+    _set_healthy_cached_primary(tmp_path)
 
     proc2, _ = run_select(tmp_path, fast_server, args=("--force-probe",))
     assert proc2.returncode == 0, proc2.stdout
@@ -522,12 +527,13 @@ def test_cached_fallback_chunk_failure_triggers_reprobe(tmp_path, mock_repo, fas
         assert _configured_server_urls(config) == [
             fast_server + "/cvmfs/@fqrn@", base + "/cvmfs/@fqrn@",
         ]
+        _set_healthy_cached_primary(tmp_path)
         Fallback.fail_chunks = True
         proc, config = run_select(tmp_path, pool)
         assert proc.returncode == 0, proc.stdout
+        assert _configured_server_urls(config) == [fast_server + "/cvmfs/@fqrn@"]
         assert "Cached fallback failed its transfer check" in proc.stdout
         assert "Stage 1" in proc.stdout
-        assert _configured_server_urls(config) == [fast_server + "/cvmfs/@fqrn@"]
     finally:
         server.shutdown()
         server.server_close()
@@ -598,6 +604,7 @@ def test_faster_cached_challenger_triggers_ranking(tmp_path, mock_repo):
         proc, config = run_select(tmp_path, pool)
         assert proc.returncode == 0, proc.stdout
         assert _configured_server_urls(config)[0].startswith(first_base + "/")
+        _set_healthy_cached_primary(tmp_path)
         Challenger.delay = 0
         proc, config = run_select(tmp_path, pool)
         assert proc.returncode == 0, proc.stdout
@@ -612,6 +619,7 @@ def test_faster_cached_challenger_triggers_ranking(tmp_path, mock_repo):
 def test_one_day_default_expires_previous_days_ranking(tmp_path, fast_server):
     proc, _ = run_select(tmp_path, fast_server)
     assert proc.returncode == 0, proc.stdout
+    _set_healthy_cached_primary(tmp_path)
     cache = tmp_path / "selection.env"
     lines = cache.read_text().splitlines()
     cache.write_text("\n".join(
