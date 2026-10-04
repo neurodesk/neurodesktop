@@ -102,6 +102,12 @@ def check_slurm_launcher(bidi, context):
             "expression": f"""(async () => {{
                 const node = {tile};
                 node.scrollIntoView({{block: 'center', behavior: 'instant'}});
+                for (let index = 0; index < 40; index++) {{
+                    window.jupyterapp.shell.currentWidget.content.model.add({{
+                        command: 'filebrowser:create-new-directory',
+                        category: 'Neurodesk', rank: -1000, args: {{probe: index}}
+                    }});
+                }}
                 const deadline = performance.now() + 20000;
                 let previous = null;
                 let stableFrames = 0;
