@@ -43,6 +43,7 @@ class Desktop:
         self.directory = directory
         self.log = (directory / "display.log").open("w")
         self.errors = []
+        self._previous_handlers = None
         self.lost = False
         self.display_reader = self.process = self.connection = None
         try:
@@ -83,8 +84,10 @@ class Desktop:
         self._handlers = (_ERROR_HANDLER(self._record_error),
                           _IO_ERROR_HANDLER(self._record_lost_connection),
                           _IO_ERROR_EXIT_HANDLER(lambda display, data: None))
-        self.x.XSetErrorHandler(ctypes.cast(self._handlers[0], ctypes.c_void_p))
-        self.x.XSetIOErrorHandler(ctypes.cast(self._handlers[1], ctypes.c_void_p))
+        self._previous_handlers = (
+            self.x.XSetErrorHandler(ctypes.cast(self._handlers[0], ctypes.c_void_p)),
+            self.x.XSetIOErrorHandler(ctypes.cast(self._handlers[1], ctypes.c_void_p)),
+        )
         deadline = time.monotonic() + 20
         self.connection = None
         while not self.connection and self.process.poll() is None and time.monotonic() < deadline:
@@ -204,6 +207,10 @@ class Desktop:
     def close(self):
         if self.connection and not self.lost:
             self.x.XCloseDisplay(self.connection)
+        if self._previous_handlers is not None:
+            self.x.XSetErrorHandler(self._previous_handlers[0])
+            self.x.XSetIOErrorHandler(self._previous_handlers[1])
+            self._previous_handlers = None
         if self.process is not None and self.process.poll() is None:
             os.killpg(self.process.pid, signal.SIGTERM)
             try:
