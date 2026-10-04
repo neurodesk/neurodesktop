@@ -1,4 +1,8 @@
 import json
+import os
+import subprocess
+
+import pytest
 
 from testlib import repo_path, resolve_source
 
@@ -32,17 +36,29 @@ def test_nbi_tour_config_disables_all_known_steps():
         assert step_config == {"enabled": False}, step_id
 
 
-def test_nbi_tour_config_path_is_exported():
+@pytest.mark.parametrize("override, expected", [
+    (None, "/opt/jovyan_defaults/.jupyter/nbi/tour_config.json"),
+    ("", "/opt/jovyan_defaults/.jupyter/nbi/tour_config.json"),
+    ("/tmp/custom-tour.json", "/tmp/custom-tour.json"),
+])
+def test_nbi_tour_config_default_and_override_are_exported(tmp_path, override, expected):
     env_script = resolve_source(
         "/opt/neurodesktop/environment_variables.sh",
         "config/jupyter/environment_variables.sh",
     )
-    expected_export = (
-        f'export NBI_TOUR_CONFIG_PATH="${{NBI_TOUR_CONFIG_PATH:-'
-        f'{NBI_TOUR_CONFIG_PATH}}}"'
+    environment = {
+        "PATH": os.environ["PATH"], "HOME": str(tmp_path),
+        "USER": "test-user", "NEURODESKTOP_ENV_SOURCED": "1",
+    }
+    if override is not None:
+        environment["NBI_TOUR_CONFIG_PATH"] = override
+    result = subprocess.run(
+        ["bash", "-c", 'source "$1" >/dev/null 2>&1 && '
+         'bash -c \'printf "%s" "$NBI_TOUR_CONFIG_PATH"\'', "test", str(env_script)],
+        env=environment, capture_output=True, text=True, timeout=30,
     )
-
-    assert expected_export in env_script.read_text(encoding="utf-8")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == expected
 
 
 def test_dockerfile_installs_nbi_tour_config():
