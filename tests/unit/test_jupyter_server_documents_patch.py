@@ -359,6 +359,9 @@ def test_patch_applies_backend_guards_and_crdt_outputs_and_is_idempotent(tmp_pat
     assert websocket.index("start_channels(hb=False)") < websocket.index(
         "await _neurodesktop_kernel_nudge.nudge(self)"
     ) < websocket.index("asyncio.create_task(self._listen(ch))")
+    assert patcher.KERNEL_IDENTITY_MARKER in websocket
+    assert "self.kernel_manager.client(session=self.session)" in websocket
+    assert "self.kernel_manager.client()" not in websocket
     nudge_module_path = tmp_path / "_neurodesktop_kernel_nudge.py"
     nudge_module = nudge_module_path.read_text(encoding="utf-8")
     assert nudge_module == patcher.nudge_module_source()
@@ -420,6 +423,43 @@ def test_patch_refuses_websocket_nudge_anchor_drift(tmp_path):
     ).read_text(encoding="utf-8") == CLIENTS_SOURCE
     assert not (tmp_path / "_neurodesktop_kernel_nudge.py").exists()
     assert not (tmp_path / "outputs/_neurodesktop_stream.py").exists()
+
+
+def test_patch_adds_session_identity_to_a_previously_nudged_bridge(tmp_path):
+    patcher = load_patcher_module()
+    write_upstream_fixture(tmp_path)
+    assert patcher.patch_package(tmp_path)
+    websocket_path = tmp_path / "websocket_connection.py"
+    websocket_path.write_text(
+        websocket_path.read_text(encoding="utf-8").replace(
+            patcher.KERNEL_IDENTITY_AFTER, patcher.KERNEL_IDENTITY_BEFORE
+        ),
+        encoding="utf-8",
+    )
+
+    assert patcher.patch_package(tmp_path)
+
+    websocket = websocket_path.read_text(encoding="utf-8")
+    assert websocket.count(patcher.KERNEL_IDENTITY_AFTER) == 1
+    assert websocket.count(patcher.KERNEL_NUDGE_MARKER) == 1
+    assert not patcher.patch_package(tmp_path)
+
+
+def test_patch_refuses_session_identity_anchor_drift(tmp_path):
+    patcher = load_patcher_module()
+    write_upstream_fixture(tmp_path)
+    websocket_path = tmp_path / "websocket_connection.py"
+    drifted = websocket_path.read_text(encoding="utf-8").replace(
+        patcher.KERNEL_IDENTITY_BEFORE,
+        "        self._client = self.kernel_manager.client(ssl=True)\n",
+    )
+    websocket_path.write_text(drifted, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="session identity anchor"):
+        patcher.patch_package(tmp_path)
+
+    assert websocket_path.read_text(encoding="utf-8") == drifted
+    assert not (tmp_path / "_neurodesktop_kernel_nudge.py").exists()
 
 
 def test_patch_refuses_a_missing_stream_module_as_partial(tmp_path):

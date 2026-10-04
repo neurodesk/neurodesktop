@@ -1,14 +1,17 @@
 import subprocess
+import sys
 import inspect
 import os
 import pwd
 import re
 import signal
+import select
 import shlex
 import json
 import socket
 import shutil
 import tempfile
+from pathlib import Path
 import time
 import urllib.error
 import urllib.parse
@@ -683,6 +686,110 @@ def test_desktop_smoke_cleanup_does_not_use_global_process_kills():
         assert pattern not in cleanup_source
 
 
+def test_native_desktop_driver_reports_x_errors_instead_of_exiting(tmp_path):
+    if not os.path.exists("/usr/local/bin/Xtigervnc"):
+        pytest.skip("The native desktop driver needs the image's Xtigervnc")
+    script = f"""
+import os, signal
+from pathlib import Path
+from native_desktop_driver import Desktop
+desktop = Desktop(Path({str(tmp_path)!r}))
+try:
+    desktop.x.XSetInputFocus(desktop.connection, 0x7FFFFFF, 1, 0)
+    try:
+        desktop.chord(0xFF0D)
+    except AssertionError as error:
+        print("rejected:", str(error).splitlines()[0])
+    os.killpg(desktop.process.pid, signal.SIGKILL)
+    desktop.process.wait()
+    try:
+        desktop.click(1, 1)
+    except AssertionError as error:
+        print("lost:", str(error).splitlines()[0])
+finally:
+    desktop.close()
+print("driver survived")
+"""
+    result = subprocess.run([sys.executable, "-c", script], cwd=os.path.dirname(os.path.abspath(__file__)),
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert re.search(r"^rejected: .*BadWindow.*X_SetInputFocus|^rejected: .*BadWindow.*request 42", result.stdout, re.M), result.stdout
+    assert re.search(r"^lost: X display :\d+ closed its connection", result.stdout, re.M), result.stdout
+    assert "driver survived" in result.stdout
+
+
+@pytest.mark.parametrize("fault", ["protocol", "connection"])
+def test_native_desktop_driver_restores_x_handlers(tmp_path, fault):
+    if not os.path.exists("/usr/local/bin/Xtigervnc"):
+        pytest.skip("The native desktop driver needs the image's Xtigervnc")
+    script = f"""
+import ctypes, ctypes.util, gc, os, socket
+from pathlib import Path
+from native_desktop_driver import Desktop, _ERROR_HANDLER, _IO_ERROR_HANDLER, _IO_ERROR_EXIT_HANDLER
+x = ctypes.CDLL(ctypes.util.find_library("X11"))
+x.XSetErrorHandler.argtypes = x.XSetIOErrorHandler.argtypes = [ctypes.c_void_p]
+received = []
+error_handler = _ERROR_HANDLER(lambda display, event: received.append(event.contents.error_code) or 0)
+io_handler = _IO_ERROR_HANDLER(lambda display: received.append("lost") or 0)
+exit_handler = _IO_ERROR_EXIT_HANDLER(lambda display, data: None)
+x.XSetErrorHandler(ctypes.cast(error_handler, ctypes.c_void_p))
+x.XSetIOErrorHandler(ctypes.cast(io_handler, ctypes.c_void_p))
+desktop = Desktop(Path({str(tmp_path)!r}))
+try:
+    desktop.chord(0xFF0D)
+finally:
+    desktop.close()
+del desktop
+gc.collect()
+x.XOpenDisplay.argtypes = [ctypes.c_char_p]
+x.XOpenDisplay.restype = ctypes.c_void_p
+x.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+x.XCloseDisplay.argtypes = [ctypes.c_void_p]
+x.XSetInputFocus.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+x.XSetIOErrorExitHandler.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+connection = x.XOpenDisplay(os.environ["TEST_DISPLAY"].encode())
+assert connection, "Cannot open the independent test display"
+x.XSetIOErrorExitHandler(connection, ctypes.cast(exit_handler, ctypes.c_void_p), None)
+if {fault!r} == "protocol":
+    x.XSetInputFocus(connection, 0x7FFFFFF, 1, 0)
+    x.XSync(connection, 0)
+    assert received == [3], received
+    x.XCloseDisplay(connection)
+else:
+    x.XConnectionNumber.argtypes = [ctypes.c_void_p]
+    transport = socket.socket(fileno=x.XConnectionNumber(connection))
+    transport.shutdown(socket.SHUT_RDWR)
+    transport.detach()
+    x.XSync(connection, 0)
+    assert received == ["lost"], received
+print("previous handler received the error")
+"""
+    reader, writer = os.pipe()
+    with (tmp_path / "independent-display.log").open("w") as log:
+        server = subprocess.Popen(
+            ["/usr/local/bin/Xtigervnc", "-displayfd", str(writer),
+             "-geometry", "100x100", "-SecurityTypes", "None",
+             "-rfbport", "-1", "-nolisten", "tcp"],
+            pass_fds=(writer,), stdout=log, stderr=subprocess.STDOUT,
+        )
+        os.close(writer)
+        try:
+            assert select.select([reader], [], [], 20)[0], "Independent display did not start"
+            display = ":" + os.read(reader, 100).decode().strip()
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=os.path.dirname(os.path.abspath(__file__)),
+                env={**os.environ, "TEST_DISPLAY": display},
+                capture_output=True, text=True, timeout=120,
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert "previous handler received the error" in result.stdout
+        finally:
+            os.close(reader)
+            server.terminate()
+            server.wait(timeout=10)
+
+
 def test_init_secrets_generates_per_user_mapping(tmp_path):
     """init_secrets.sh must seed a per-user user-mapping.xml with NON-default
     credentials. This is the load-bearing check for the HPC cross-user leak:
@@ -1206,10 +1313,10 @@ def test_guac_rdp_tunnel():
         key(65471, False)
         key(65513, False)
         _collect_guacamole_desktop_frames(tunnel, timeout_seconds=10)
-        # The RDP session user owns home_dir; a root pytest tmp_path is private.
-        output = os.path.join(home_dir, "rdp-command.txt")
+        output = Path(home_dir) / "rdp-command.txt"
+        assert not output.exists(), "RDP command output must be new for this session"
         command = "sh -c " + shlex.quote(
-            "printf desktop-ready > " + shlex.quote(output)
+            "printf desktop-ready > " + shlex.quote(str(output))
         )
         for character in command:
             key(ord(character), True)
@@ -1217,11 +1324,10 @@ def test_guac_rdp_tunnel():
         key(65293, True)
         key(65293, False)
         deadline = time.monotonic() + 20
-        while not os.path.exists(output) and time.monotonic() < deadline:
+        while not output.exists() and time.monotonic() < deadline:
             time.sleep(0.1)
-        assert os.path.isfile(output), "RDP desktop did not execute the keyboard-launched command"
-        with open(output) as output_file:
-            assert output_file.read() == "desktop-ready"
+        assert output.is_file(), "RDP desktop did not execute the keyboard-launched command"
+        assert output.read_text() == "desktop-ready"
 
         if root_cmds_available:
             xrdp_log = _read_xrdp_log()

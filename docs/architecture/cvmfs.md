@@ -108,7 +108,8 @@ The active repository configuration is generated at startup by
 `cvmfs_server_select.sh` (see above). The image bakes in
 [`config/cvmfs/neurodesk.ardc.edu.au.conf`](../../config/cvmfs/neurodesk.ardc.edu.au.conf)
 as a static default so mounts that happen before the selection ran still work;
-CI jobs that configure CVMFS on the build host copy the same file.
+PR acceptance and production image tests generate a verified mirror ranking
+on the host before mounting. Other CVMFS host jobs can use the static default.
 
 ## Neurocommand
 
