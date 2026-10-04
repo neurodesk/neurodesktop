@@ -77,7 +77,8 @@ downloads.
 
 The Dockerfile clones neurocommand, copies its `neurodesk/webapps.json`, applies
 [`config/jupyter/webapp_links.json`](../../config/jupyter/webapp_links.json), and
-generates `jupyter_notebook_config.py` using a template system. It also writes
+generates `jupyter_notebook_config.py` using a template system. Webapp metadata,
+including quotes and backslashes, is preserved as literal values. It also writes
 the merged webapp configuration back to `/opt/neurodesktop/webapps.json`, which
 is what the webapp wrapper reads at launch time. To add new container-backed
 webapps, update the source `webapps.json`. To change the catalog link or local
