@@ -633,6 +633,12 @@ build rather than reaching a user. The image tier is otherwise intentionally
 small — the installed package and pins, the real vendored frontend, and the
 file-browser server extension.
 
+The document browser test checks the refreshed title, trust badge, selected
+universe, Evidence mode, and SVG nodes together in one DOM evaluation. A save
+can deliver a delayed document notification after the manual refresh completes,
+so the viewer can briefly show its loading state again. The test polls for the
+complete result within its existing deadline and sends the Refresh click once.
+
 ### Nightly JupyterHub probe
 
 `.github/workflows/jupyter_test_main.yml` drives each live instance over the

@@ -250,26 +250,14 @@ def test_file_browser_astra_document_refreshes_saved_spec_and_run(tmp_path):
             wait_for(
                 bidi,
                 context,
-                "document.querySelector('.nd-astra-document').textContent.includes('Refreshed BET analysis')",
-            )
-            wait_for(
-                bidi,
-                context,
-                "document.querySelector('.astra-trust')?.textContent==='Executed, unverified'",
-            )
-            assert (
-                evaluate(bidi, context, picker + ".value")
-                == "analysis/universes/bet-f-0-5.yaml"
-            )
-            assert evaluate(
-                bidi,
-                context,
-                "document.querySelector('[data-mode=\"evidence\"]').classList.contains('active')",
-            )
-            assert evaluate(
-                bidi,
-                context,
-                "Boolean(document.querySelector('.nd-astra-document svg .astra-node'))",
+                """(() => {
+                    const documentView = document.querySelector('.nd-astra-document');
+                    return documentView?.textContent.includes('Refreshed BET analysis')
+                        && documentView.querySelector('.astra-trust')?.textContent === 'Executed, unverified'
+                        && documentView.querySelector('.nd-astra-universe-bar select')?.value === 'analysis/universes/bet-f-0-5.yaml'
+                        && documentView.querySelector('[data-mode="evidence"]')?.classList.contains('active')
+                        && Boolean(documentView.querySelector('svg .astra-node'));
+                })()""",
             )
         finally:
             if bidi:
