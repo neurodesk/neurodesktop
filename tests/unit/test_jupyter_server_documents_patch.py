@@ -359,7 +359,6 @@ def test_patch_applies_backend_guards_and_crdt_outputs_and_is_idempotent(tmp_pat
     assert websocket.index("start_channels(hb=False)") < websocket.index(
         "await _neurodesktop_kernel_nudge.nudge(self)"
     ) < websocket.index("asyncio.create_task(self._listen(ch))")
-    # Each bridge identifies itself to the kernel with its browser session.
     assert patcher.KERNEL_IDENTITY_MARKER in websocket
     assert "self.kernel_manager.client(session=self.session)" in websocket
     assert "self.kernel_manager.client()" not in websocket
