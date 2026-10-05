@@ -1,0 +1,28 @@
+#!/bin/bash
+set -euo pipefail
+
+if [ "${1:-}" = --help ] || [ "${1:-}" = -h ]; then
+    echo 'Usage: neurodesktop-gpu-check [EGL_DEVICE]'
+    echo 'Check NVIDIA EGL rendering in the current desktop DISPLAY.'
+    echo 'EGL_DEVICE defaults to VGL_DISPLAY, or egl0 when unset.'
+    exit 0
+fi
+if [ "$#" -gt 1 ]; then
+    echo 'Usage: neurodesktop-gpu-check [EGL_DEVICE]' >&2
+    exit 2
+fi
+if [ -z "${DISPLAY:-}" ]; then
+    echo 'Open a desktop terminal or set DISPLAY to your authenticated desktop display.' >&2
+    exit 1
+fi
+
+device="${1:-${VGL_DISPLAY:-egl0}}"
+echo "Checking EGL device ${device} on display ${DISPLAY}"
+vgl-eglinfo "$device"
+result="$(vglrun -d "$device" -c proxy glxinfo -B)"
+printf '%s\n' "$result"
+if ! grep -Eq '^OpenGL vendor string: NVIDIA Corporation[[:space:]]*$' <<< "$result"; then
+    echo 'The rendering probe did not report the NVIDIA OpenGL vendor.' >&2
+    exit 1
+fi
+echo 'NVIDIA rendering probe passed. Nested tool-container rendering needs its own check.'

@@ -822,6 +822,35 @@ docker rm -f neurodesktop-hpc   # or neurodesktop-hpctest
 rm -rf /tmp/neurodesktop-hpc-home.* /tmp/neurodesktop-hpc-passwd.* /tmp/neurodesktop-hpc-group.*
 ```
 
+## VirtualGL and GPU rendering
+
+Run checkout diagnostics and packaging checks with:
+
+```bash
+pytest tests/unit/test_virtualgl.py tests/unit/test_audit_image_versions.py
+```
+
+The installed checks in `tests/container/test_virtualgl.py` execute the shipped
+VirtualGL version command, diagnostic help, and Mesa rendering in a real
+TigerVNC display. Ordinary CI does not require a GPU. For a GPU worker, run:
+
+```bash
+docker exec -e NEURODESKTOP_REQUIRE_GPU=1 -e VGL_DISPLAY=egl0 \
+  -u jovyan YOUR_RUNNING_GPU_CONTAINER \
+  pytest /opt/tests/test_virtualgl.py -v
+```
+
+The container must already have an allocated NVIDIA GPU and injected graphics
+libraries. `NEURODESKTOP_REQUIRE_GPU=1` selects the hardware acceptance test;
+missing devices, failed EGL, or a software renderer fail rather than skip.
+The test creates its own virtual display and uses the requested EGL device.
+It proves image-local rendering only. Repeat rendering and application checks
+inside the rebuilt FreeSurfer container after the
+[tool integration changes](designs/gpu-tool-integration.md), and verify
+assigned-device isolation on a multi-GPU worker. See the
+[assessment](designs/gpu-desktop-sessions.md#proposed-acceptance-gates) for
+application, transport, performance, and platform coverage.
+
 ## Startup performance regressions
 
 Run the startup checks on a checkout:

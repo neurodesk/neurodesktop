@@ -894,6 +894,27 @@ RUN --mount=type=bind,source=config/cvmfs,target=/tmp/cvmfs,ro \
     && chmod 0644 /etc/cvmfs/config.d/neurodesk.ardc.edu.au.conf* \
     && install -m 0644 /tmp/cvmfs/default.local /etc/cvmfs/default.local
 
+# Install VirtualGL for opt-in application rendering through headless EGL.
+ARG VIRTUALGL_VERSION="3.1.5"
+ARG VIRTUALGL_AMD64_SHA256="df3f7788ce41b182a47c0d298e5cd6d2d63579522cb41825970b7726e825485e"
+ARG VIRTUALGL_ARM64_SHA256="9ac238e8a18c06d84ef65444a591a7a5bb4c4ce9e8cfdd92f8a2aea35edbb5d7"
+RUN set -eu; \
+    virtualgl_arch="$(dpkg --print-architecture)"; \
+    case "${virtualgl_arch}" in \
+        amd64) virtualgl_sha256="${VIRTUALGL_AMD64_SHA256}" ;; \
+        arm64) virtualgl_sha256="${VIRTUALGL_ARM64_SHA256}" ;; \
+        *) echo "Unsupported VirtualGL architecture: ${virtualgl_arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 300 \
+        "https://github.com/VirtualGL/virtualgl/releases/download/${VIRTUALGL_VERSION}/virtualgl_${VIRTUALGL_VERSION}_${virtualgl_arch}.deb" \
+        -o /tmp/virtualgl.deb; \
+    printf '%s  %s\n' "${virtualgl_sha256}" /tmp/virtualgl.deb | sha256sum -c -; \
+    apt-install-retry /tmp/virtualgl.deb mesa-utils mesa-utils-extra; \
+    test "$(dpkg-query -W -f='${Version}' virtualgl | cut -d- -f1)" = "${VIRTUALGL_VERSION}"; \
+    rm -f /tmp/virtualgl.deb; \
+    apt-get clean; rm -rf /var/lib/apt/lists/*
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display
+
 # Install neurocommand
 ARG NEUROCOMMAND_REF=main
 RUN echo "Installing neurocommand ref ${NEUROCOMMAND_REF}" \
@@ -1483,6 +1504,8 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -d -m 0755 /opt/config/jupyter/webapp_icons \
     && cp -a /tmp/jupyter/webapp_icons/. /opt/config/jupyter/webapp_icons/ \
     && install -D -m 0644 /tmp/lxde/background.png /usr/share/lxde/wallpapers/desktop_wallpaper.png \
+    && install -m 0755 /tmp/lxde/neurodesktop-gpu-check /usr/local/bin/neurodesktop-gpu-check \
+    && ln -sf /opt/VirtualGL/bin/eglinfo /usr/local/bin/vgl-eglinfo \
     # Debian's TigerVNC Perl launcher searches its own directory before PATH
     # when locating Xtigervnc. Invoke it through /usr/local/bin so it selects
     # the adjacent Mesa-confined X-server wrapper below.
