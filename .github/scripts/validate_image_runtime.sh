@@ -99,7 +99,7 @@ if [ "$mode" != hpc ]; then
     -u jovyan neurodesktop-test pytest /opt/tests/ -v
   if [ "$mode" = acceptance ]; then
     docker exec -e NEURODESKTOP_REQUIRE_WEBGL=1 -u jovyan neurodesktop-test \
-      pytest /opt/tests/test_niivue_rendering_image.py -v
+      pytest /opt/tests/test_niivue_rendering_image.py /opt/tests/test_freebrowse_image.py -v
   fi
 else
   hpc_user=sciget

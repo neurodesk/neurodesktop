@@ -839,3 +839,18 @@ time, so scheduling delay cannot decide whether the helper probes at all.
 See the [startup flow](architecture.md#container-initialization-flow) for
 runtime behavior. Built-image service checks remain in
 `tests/container/test_startup_modes.py`.
+
+## FreeBrowse document viewer
+
+`pytest tests/unit/test_freebrowse.py` patches frozen upstream integration
+fixtures and executes the document factory and context menu. It checks default
+viewer registration, NIfTI and NiiVue document routing, and special filenames
+under standalone and JupyterHub base paths. Real Jupyter HTTP tests verify
+viewer assets require authentication, GET/HEAD work, and traversal is rejected.
+The fixtures come from the `FREEBROWSE_REF` commit in the Dockerfile.
+
+The graphics acceptance profile also runs
+[`test_freebrowse_image.py`](../tests/container/test_freebrowse_image.py).
+It double-clicks a generated volume with special characters in its filename,
+checks the default factory opens a new FreeBrowse tab, and checks rendered
+image pixels under `/` and `/user/alice/`.

@@ -94,3 +94,26 @@ BuildKit to make unauthenticated GitHub API requests from inside the Dockerfile.
 The Dockerfile resets the local neurocommand `main` branch to that ref and keeps
 it tracking `origin/main` so the runtime Update launcher can use
 `git pull --rebase --autostash`.
+
+## Default neuroimaging viewer
+
+The image builds [FreeBrowse's Jupyter integration](https://github.com/freesurfer/freebrowse#jupyter-integration)
+from the commit pinned by `FREEBROWSE_REF` in the Dockerfile. Double-clicking
+`.nii`, `.nii.gz`, or `.nvd` files opens FreeBrowse in a new browser tab.
+The file browser also offers **Open in FreeBrowse** in its context menu.
+FreeBrowse replaces `jupyterlab-niivue` as the default document viewer;
+`ipyniivue` remains available in notebooks.
+
+The serverless frontend is built with upstream's `build:jupyter` target and
+packaged with its federated JupyterLab extension. It runs without a separate
+backend, Pixi environment, or external data service. Local volumes load through
+Jupyter's authenticated `/files/` endpoint. Both viewer assets and file URLs
+respect the single-user server's base path, including JupyterHub paths such
+as `/user/alice/`.
+
+[`patch_freebrowse.py`](../../config/jupyter/patch_freebrowse.py) adds Jupyter
+authentication to the viewer asset handler and escapes paths and query values
+so filenames containing spaces, `#`, `&`, or Unicode reach the correct file.
+Its anchored replacements fail the build if the upstream integration changes.
+The serverless build supports viewing and browser downloads; upstream's
+backend-dependent save and AI annotation services are not configured.
