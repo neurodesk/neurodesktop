@@ -312,12 +312,18 @@ jobs:
       - name: Initialize CVMFS
         if: matrix.profile.needs_cvmfs
         uses: cvmfs-contrib/github-action-cvmfs@10197e000cc0add8e54ac4fb73d3ed44e2de72b4 # v5.5
+      - name: Select scientific tool mirrors
+        if: matrix.profile.needs_cvmfs
+        run: |
+          NEURODESKTOP_CVMFS_TARGET_CONFIG="$RUNNER_TEMP/neurodesk-cvmfs.conf" \
+          NEURODESKTOP_CVMFS_CACHE_FILE="$RUNNER_TEMP/neurodesk-cvmfs-selection.env" \
+            bash config/jupyter/cvmfs_server_select.sh --force-probe
       - name: Configure Neurodesk CVMFS
         if: matrix.profile.needs_cvmfs
         run: |
           sudo mkdir -p /etc/cvmfs/keys/ardc.edu.au
           sudo cp config/cvmfs/neurodesk.ardc.edu.au.pub /etc/cvmfs/keys/ardc.edu.au/neurodesk.ardc.edu.au.pub
-          sudo cp config/cvmfs/neurodesk.ardc.edu.au.conf /etc/cvmfs/config.d/neurodesk.ardc.edu.au.conf
+          sudo cp "$RUNNER_TEMP/neurodesk-cvmfs.conf" /etc/cvmfs/config.d/neurodesk.ardc.edu.au.conf
           sudo cp config/cvmfs/default.local /etc/cvmfs/default.local
           sudo cvmfs_config setup
           sudo ls /cvmfs/neurodesk.ardc.edu.au
@@ -334,6 +340,13 @@ jobs:
         if: ${{ matrix.profile.hpc_mode }}
         run: |
           exec bash .github/scripts/validate_image_runtime.sh "$IMAGE_REF" hpc
+      - name: Report scientific mount status
+        if: always() && matrix.profile.needs_cvmfs
+        run: |
+          if command -v cvmfs_config >/dev/null 2>&1; then
+            sudo timeout 20 cvmfs_talk -i neurodesk.ardc.edu.au host info || true
+            sudo timeout 20 cvmfs_config stat -v neurodesk.ardc.edu.au || true
+          fi
 
   scan-image:
     needs: build-image
