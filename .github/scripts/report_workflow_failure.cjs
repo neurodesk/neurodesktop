@@ -63,22 +63,26 @@ async function reportWorkflowFailure({ github, context, core, repairEnabled = tr
     throw new Error("Repository default branch is missing");
   }
 
+  const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, {
+    owner, repo, run_id: run.id, attempt_number: run.run_attempt, per_page: 100,
+  });
+  const failedJobs = jobs.filter((job) => FAILED.has(job.conclusion));
+  // Without a failed job, cancelled jobs explain the run; GitHub cancels jobs it cannot assign a runner.
+  const cancelledJobs = failedJobs.length ? [] : jobs.filter((job) => job.conclusion === "cancelled");
+  const runnerUnavailable = cancelledJobs.length > 0 && cancelledJobs.every((job) => !job.steps?.length);
   const operational = OPERATIONAL_WORKFLOWS.has(run.name);
   const trustedHead = run.head_repository?.full_name?.toLowerCase() === repository.toLowerCase();
   const defaultBranchRun = run.head_branch === ref;
   let repairNote = "The completed run's failing jobs are recorded below. Automatic issue repair is dispatched explicitly because GITHUB_TOKEN-created issues do not trigger issue-opened workflows.";
   if (!repairEnabled) repairNote = "Automatic repair is not enabled. After runner setup, manually dispatch repair for this issue.";
   if (!trustedHead) repairNote = "This failure came from an untrusted or unavailable head repository. A maintainer must add agentic-approved or manually dispatch repair.";
+  if (runnerUnavailable) repairNote = "No job started because GitHub did not assign a runner. Automatic repair is skipped; re-run the workflow once runners are available.";
   if (!defaultBranchRun) repairNote = "This feature-branch failure is recorded without automatic repair because issue repair edits the default branch.";
   if (operational) repairNote = "Agent infrastructure needs attention. Automatic repair is disabled for this report to prevent recursive agent runs.";
   const issueMarker = `<!-- neurodesktop-workflow-failure: run=${run.id} -->`;
   const attemptMarker = `<!-- neurodesktop-workflow-failure-attempt: run=${run.id} attempt=${run.run_attempt} -->`;
   const dispatchMarker = `<!-- neurodesktop-workflow-failure-dispatched: run=${run.id} attempt=${run.run_attempt} -->`;
   const runUrl = `${context.serverUrl || "https://github.com"}/${repository}/actions/runs/${run.id}`;
-  const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, {
-    owner, repo, run_id: run.id, attempt_number: run.run_attempt, per_page: 100,
-  });
-  const failedJobs = jobs.filter((job) => FAILED.has(job.conclusion));
   const issues = await github.paginate(github.rest.issues.listForRepo, {
     owner, repo, state: "all", creator: BOT, per_page: 100,
   });
@@ -112,10 +116,12 @@ async function reportWorkflowFailure({ github, context, core, repairEnabled = tr
     owner, repo, issue_number: issue.number, per_page: 100,
   });
   if (!comments.some((comment) => ownsMarker(comment, attemptMarker))) {
-    const jobLines = failedJobs.map((job) => {
+    const jobLines = [...failedJobs, ...cancelledJobs].map((job) => {
       const steps = (job.steps || []).filter((step) => FAILED.has(step.conclusion))
         .map((step) => inline(step.name)).join(", ");
-      return `- [${inline(job.name)}](${runUrl}/job/${job.id}): \`${job.conclusion}\`${steps ? `; steps: ${steps}` : ""}`;
+      const notStarted = job.conclusion === "cancelled" && !job.steps?.length;
+      const detail = steps ? `; steps: ${steps}` : notStarted ? "; never started" : "";
+      return `- [${inline(job.name)}](${runUrl}/job/${job.id}): \`${job.conclusion}\`${detail}`;
     });
     let details = jobLines.join("\n");
     if (details.length > 50000) {
@@ -125,14 +131,16 @@ async function reportWorkflowFailure({ github, context, core, repairEnabled = tr
       owner, repo, issue_number: issue.number,
       body: [
         attemptMarker,
-        `Attempt ${run.run_attempt}: ${failedJobs.length} failed or timed-out jobs.`,
+        cancelledJobs.length
+          ? `Attempt ${run.run_attempt}: no job failed; ${cancelledJobs.length} cancelled jobs.`
+          : `Attempt ${run.run_attempt}: ${failedJobs.length} failed or timed-out jobs.`,
         `${runUrl}/attempts/${run.run_attempt}`, "",
         details || "No failed job details are available. Inspect the workflow-level failure in the run summary.",
       ].join("\n"),
     });
   }
 
-  if (operational || !repairEnabled || !trustedHead || !defaultBranchRun || comments.some((comment) => ownsMarker(comment, dispatchMarker))) {
+  if (operational || runnerUnavailable || !repairEnabled || !trustedHead || !defaultBranchRun || comments.some((comment) => ownsMarker(comment, dispatchMarker))) {
     return { issue: issue.number, dispatched: false, operational };
   }
 

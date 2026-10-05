@@ -215,7 +215,8 @@ There is no separate report-only package radar that stops before an update PR.
 
 ## Review and validation
 
-CodeRabbit can review generated drafts. Its review activity triggers
+CodeRabbit does not review automatically, so the publisher requests a review
+with `@coderabbitai review` on each generated PR. Its review activity triggers
 [`agentic-review.yml`](../.github/workflows/agentic-review.yml), which collects
 feedback for the existing PR. The worker checks each finding against the
 current head, applies accepted fixes together, validates them, and updates the
