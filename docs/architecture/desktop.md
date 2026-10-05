@@ -4,7 +4,7 @@ description: LXDE desktop over VNC/RDP through Guacamole, clipboard sync,
   per-display Firefox profiles, and office file associations
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-02"
+last-reviewed: "2026-10-05"
 ---
 
 # Desktop Environment
@@ -37,6 +37,39 @@ The image puts a small `Xtigervnc` launcher beside a link to the distribution's
 server child to Mesa's EGL vendor so NVIDIA Container Toolkit driver injection
 cannot make it load an incompatible host NVIDIA EGL library. The parent launcher
 and LXDE applications retain the deployment's normal EGL vendor selection.
+
+## GPU rendering prerequisites
+
+The image installs checksum-pinned VirtualGL 3.1.5 packages on amd64 and
+arm64, plus Mesa's graphics diagnostics. `vglrun` is available on `PATH`;
+`vgl-eglinfo` selects VirtualGL's EGL diagnostic rather than Mesa's similarly
+named tool. The image requests NVIDIA runtime capabilities
+`compute,utility,graphics,display` by default. Operators still provide the
+host driver, NVIDIA Container Toolkit integration, and an assigned GPU.
+An explicit deployment capability setting overrides the image default.
+
+The existing LXDE, TigerVNC, and Guacamole services retain their launch paths.
+Applications use VirtualGL only when explicitly launched through it. From a
+desktop terminal, run:
+
+```bash
+neurodesktop-gpu-check egl0
+vglrun -d egl0 -c proxy YOUR_IMAGE_LOCAL_OPENGL_APPLICATION
+```
+
+The diagnostic runs EGL initialization and a GLX rendering probe in the
+current `DISPLAY`, prints the renderer, and fails unless it reports NVIDIA's
+OpenGL vendor. Its optional device argument overrides `VGL_DISPLAY`, which
+otherwise defaults to `egl0`. Select the device after checking the allocation
+inside the container; an EGL index is not a scheduler GPU UUID.
+
+These are image prerequisites, not automatic acceleration for scientific tools.
+FreeView runs in a nested Apptainer image whose `--cleanenv` boundary needs
+explicit integration. The [tool integration checklist](../designs/gpu-tool-integration.md)
+lists the required FreeSurfer and Neurocommand changes. Run the hardware
+[acceptance profile](../testing.md#virtualgl-and-gpu-rendering) before claiming
+GPU rendering support. NVIDIA/amd64 is the initial target; arm64 hardware,
+RDP rendering, and Kasm platform GPU sessions remain unverified.
 
 ## Credentials and service access
 

@@ -133,6 +133,13 @@ for RDP initialization and VS Code isolation.
 
 ## Desktop (VNC/RDP, Guacamole, Firefox)
 
+- `NVIDIA_DRIVER_CAPABILITIES`: NVIDIA Container Toolkit's driver-library
+  capabilities. The image defaults to `compute,utility,graphics,display` so
+  an allocated GPU has OpenGL/EGL libraries as well as CUDA and diagnostics.
+  Override at deployment if needed; this setting does not allocate a GPU.
+- `VGL_DISPLAY`: VirtualGL rendering device. `neurodesktop-gpu-check` uses
+  this value, or `egl0` when unset/empty; its device argument takes precedence.
+  It does not change the desktop's X11 `DISPLAY` or enable nested tool rendering.
 - `NEURODESKTOP_DESKTOP_BACKEND`: desktop backend started by `guacamole.sh`;
   supported values are `rdp`, `vnc`, and `both`. The Jupyter launcher sets this
   automatically for the separate RDP and VNC desktop entries
@@ -370,6 +377,10 @@ reviewed; the Dockerfile itself is authoritative.
 - `GUACAMOLE_VERSION`, `TOMCAT_REL`, `TOMCAT_VERSION`,
   `TOMCAT_MIGRATION_VERSION`: Guacamole release (`1.6.0`) and the Tomcat
   major/exact/migration-tool versions serving it (`11`, `11.0.26`, `1.0.12`)
+- `VIRTUALGL_VERSION`, `VIRTUALGL_AMD64_SHA256`, `VIRTUALGL_ARM64_SHA256`:
+  VirtualGL release and architecture-specific Debian package checksums.
+  The version defaults to `3.1.5`; update its verified checksums together with
+  the version. GPU rendering remains an explicit application launch choice.
 - `CODE_SERVER_VERSION`: code-server release; defaults to `4.138.0`
 - `NEUROCOMMAND_REF`: neurocommand git ref cloned during the build; CI passes
   a resolved `main` SHA so neurocommand changes invalidate the install layer

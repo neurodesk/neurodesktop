@@ -17,6 +17,7 @@ current behavior see [Architecture](../architecture.md),
 
 | Record | Status | What it decided |
 | --- | --- | --- |
+| [GPU tool integration checklist](gpu-tool-integration.md) | proposed | Install VirtualGL in the FreeSurfer image, preserve injected driver libraries, and explicitly forward rendering controls through Neurocommand's clean environment |
 | [GPU desktop session assessment](gpu-desktop-sessions.md) | proposed | Assess VirtualGL EGL with existing VNC/Guacamole, nested Apptainer launch requirements, GPU allocation, and hardware acceptance gates |
 | [Kasm workspace assessment](kasm-workspace-assessment.md) | research | Compare a native Neurodesktop Kasm image with an external VNC connection, and identify startup, profile, CVMFS, and Apptainer validation needs |
 | [Image dependency audit, 20 September 2026](image-dependency-audit-2026-09-20.md) | assessment | Live release results, update candidates, dependency conflicts, and coverage limits |
