@@ -157,7 +157,9 @@ a shutdown race that can close standard streams and return 120 after rendering;
 upstream defect. The batch check requires exit status zero and the expected
 image pixels; it does not establish that the default filtered wrapper is fixed.
 Timed-out module commands terminate their process groups and report captured
-output. ITK-SNAP waits for the selected segmentation to render before using its
+output. Module commands and ITK-SNAP's first window share a 600-second launch
+budget because a cold CVMFS cache must fetch the application container first.
+ITK-SNAP waits for the selected segmentation to render before using its
 save menu; failures include the application's log. Native window discovery and
 focus run in one bounded X server grab so closing application dialogs cannot
 race the focus request. The driver also replaces Xlib's default error and I/O
