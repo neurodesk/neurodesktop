@@ -18,8 +18,7 @@ from test_widget_compatibility_image import (
 )
 
 
-def _kernel_crosshair(bidi, context):
-    reply = json.loads(bidi.evaluate(context, """(async () => {
+_KERNEL_READ = """(async () => {
         const panel = window.jupyterapp.shell.currentWidget;
         if (panel?.context?.path !== 'volume.ipynb') {
             return JSON.stringify({error: 'The volume notebook is not active'});
@@ -37,15 +36,29 @@ def _kernel_crosshair(bidi, context):
             const message = await Promise.race([
                 future.done,
                 new Promise(resolve => {
-                    timer = setTimeout(() => resolve(null), 10000);
+                    timer = setTimeout(() => resolve(null), 20000);
                 }),
             ]);
-            return JSON.stringify(message?.content ?? {error: 'Kernel read timed out'});
+            return JSON.stringify(message?.content ?? {
+                error: 'Kernel read timed out',
+                kernelStatus: kernel.status,
+                connectionStatus: kernel.connectionStatus,
+            });
         } finally {
             clearTimeout(timer);
             future.dispose();
         }
-    })()"""))
+    })()"""
+
+
+def _kernel_crosshair(bidi, context, timeout=90):
+    # Execute requests queue behind the widget's comm traffic after the first
+    # render, so a busy kernel gets more time while a stalled one still fails.
+    deadline = time.monotonic() + timeout
+    while True:
+        reply = json.loads(bidi.evaluate(context, _KERNEL_READ))
+        if reply.get('error') != 'Kernel read timed out' or time.monotonic() >= deadline:
+            break
     assert reply.get('status') == 'ok', reply
     expression = reply['user_expressions']['crosshair']
     assert expression.get('status') == 'ok', expression
