@@ -13,6 +13,80 @@ def replace_once(path: Path, before: str, after: str) -> None:
 
 
 def patch(root: Path) -> None:
+    source = root / "src/index.ts"
+    replace_once(
+        source,
+        '''/**
+ * Minimal content widget used for double-click handling.
+ * Opens FreeBrowse in a new browser tab, then auto-closes the JupyterLab tab.
+ */
+class FreeBrowseRedirect extends Widget {
+  constructor(context: DocumentRegistry.IContext<DocumentRegistry.IModel>) {
+    super();
+    window.open(freebrowseUrl(context.path), "_blank");
+  }
+}
+
+class FreeBrowseFactory extends ABCWidgetFactory<
+  DocumentWidget<FreeBrowseRedirect>,
+  DocumentRegistry.IModel
+> {
+  protected createNewWidget(
+    context: DocumentRegistry.IContext<DocumentRegistry.IModel>
+  ): DocumentWidget<FreeBrowseRedirect> {
+    const content = new FreeBrowseRedirect(context);
+    const widget = new DocumentWidget({ content, context });
+    // Auto-close the JupyterLab tab since the viewer opened in a new browser tab
+    setTimeout(() => widget.close(), 500);
+    return widget;
+  }
+}
+''',
+        '''class FreeBrowseWidget extends Widget {
+  private readonly frame: HTMLIFrameElement;
+
+  constructor(private readonly context: DocumentRegistry.IContext<DocumentRegistry.IModel>) {
+    super();
+    this.frame = document.createElement("iframe");
+    this.frame.title = "FreeBrowse";
+    this.frame.style.cssText = "width:100%;height:100%;border:0;display:block";
+    this.node.appendChild(this.frame);
+    this.updateUrl();
+    context.pathChanged.connect(this.updateUrl, this);
+  }
+
+  private updateUrl(): void {
+    this.frame.src = freebrowseUrl(this.context.path);
+  }
+
+  dispose(): void {
+    if (this.isDisposed) return;
+    this.context.pathChanged.disconnect(this.updateUrl, this);
+    this.frame.src = "about:blank";
+    super.dispose();
+  }
+}
+
+class FreeBrowseFactory extends ABCWidgetFactory<
+  DocumentWidget<FreeBrowseWidget>,
+  DocumentRegistry.IModel
+> {
+  protected createNewWidget(
+    context: DocumentRegistry.IContext<DocumentRegistry.IModel>
+  ): DocumentWidget<FreeBrowseWidget> {
+    return new DocumentWidget({ content: new FreeBrowseWidget(context), context });
+  }
+}
+''',
+    )
+    replace_once(
+        source,
+        '        window.open(freebrowseUrl(item.value.path), "_blank");',
+        '''        return app.commands.execute("docmanager:open", {
+          path: item.value.path,
+          factory: "FreeBrowse",
+        });''',
+    )
     replace_once(
         root / "src/index.ts",
         '''  const fileUrl = `${baseUrl}files/${filePath}`;

@@ -48,14 +48,20 @@ const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert/strict');
 const ts = require('typescript');
+const { JSDOM } = require('jsdom');
+const { Signal } = require('@lumino/signaling');
 const source = ts.transpileModule(fs.readFileSync(process.argv[1], 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2018 }
 }).outputText;
-for (const base of ['/', '/user/alice/', 'https://hub.example/user/alice/']) {
+for (const base of ['/', '/user/alice/', 'https://mgh.neurodesk.org/user/stebo85/']) {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', {url: 'https://mgh.neurodesk.org'});
   const opened = [], types = [], factories = [], menus = [];
   let selected;
   const commands = new Map();
-  class Widget {}
+  class Widget {
+    constructor() { this.node = dom.window.document.createElement('div'); this.isDisposed = false; }
+    dispose() { this.isDisposed = true; }
+  }
   class Factory { constructor(options) { this.options = options; } }
   class DocumentWidget { constructor(options) { Object.assign(this, options); } close() {} }
   const modules = {
@@ -66,10 +72,13 @@ for (const base of ['/', '/user/alice/', 'https://hub.example/user/alice/']) {
     '@lumino/widgets': { Widget }
   };
   const sandbox = { exports: {}, require: name => modules[name], console,
-    window: { open: url => opened.push(url) }, setTimeout: callback => callback() };
+    document: dom.window.document,
+    window: { open: () => { throw Error('Unexpected external browser tab'); } },
+    setTimeout: () => { throw Error('Unexpected auto-close'); } };
   vm.runInNewContext(source, sandbox);
   sandbox.exports.default.activate({
-    commands: { addCommand: (id, command) => commands.set(id, command) },
+    commands: { addCommand: (id, command) => commands.set(id, command),
+      execute: (id, args) => { assert.equal(id, 'docmanager:open'); opened.push(args); } },
     contextMenu: { addItem: item => menus.push(item) },
     docRegistry: { addFileType: type => types.push(type), addWidgetFactory: f => factories.push(f) }
   }, { tracker: { currentWidget: { selectedItems: function* () { if (selected) yield selected; } } } });
@@ -82,8 +91,15 @@ for (const base of ['/', '/user/alice/', 'https://hub.example/user/alice/']) {
     selected = { name, path };
     assert.equal(command.isVisible(), true);
     command.execute();
-    factories[0].createNewWidget({ path });
-    for (const value of opened.splice(0)) {
+    const request = opened.pop();
+    assert.equal(request.path, path);
+    assert.equal(request.factory, 'FreeBrowse');
+    const context = { path };
+    context.pathChanged = new Signal(context);
+    const widget = factories[0].createNewWidget(context);
+    const frame = widget.content.node.querySelector('iframe');
+    assert.equal(frame.title, 'FreeBrowse');
+    for (const value of [frame.src]) {
       const url = new URL(value, 'https://hub.example');
       assert.equal(url.pathname, new URL(`${base}freebrowse/`, 'https://hub.example').pathname);
       assert.equal(url.hash, '');
@@ -94,6 +110,19 @@ for (const base of ['/', '/user/alice/', 'https://hub.example/user/alice/']) {
       assert.equal(file.search, '');
       assert.equal(file.hash, '');
     }
+    const secondContext = { path: 'another.nii' };
+    secondContext.pathChanged = new Signal(secondContext);
+    const second = factories[0].createNewWidget(secondContext);
+    context.path = 'renamed #.nii.gz';
+    context.pathChanged.emit(context.path);
+    assert.equal(new URL(frame.src).searchParams.get('vol'), `${base}files/renamed%20%23.nii.gz`);
+    assert.ok(second.content.node.querySelector('iframe').src.includes('another.nii'));
+    widget.content.dispose();
+    assert.equal(frame.src, 'about:blank');
+    context.path = 'after-close.nii';
+    context.pathChanged.emit(context.path);
+    assert.equal(frame.src, 'about:blank');
+    second.content.dispose();
   }
   selected = { name: 'notes.txt', path: 'notes.txt' };
   assert.equal(command.isVisible(), false);
