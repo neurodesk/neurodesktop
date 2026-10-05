@@ -361,6 +361,8 @@ reviewed; the Dockerfile itself is authoritative.
   the multi-architecture `2026-09-18` release
 - `NPM_VERSION`: npm release installed with the runtime Node.js distribution;
   defaults to `12.0.2`
+- `FREEBROWSE_REF`: exact FreeBrowse source commit used to build the default
+  neuroimaging viewer and its upstream JupyterLab/JupyterHub integration.
 - `JUPYTER_BUILDER_VERSION`, `JUPYTERLAB_SLURM_REF`: current Jupyter Builder
   release and exact `jupyterlab-slurm` source revision used to build its
   JupyterLab 4 extension; defaults to `1.2.3` and

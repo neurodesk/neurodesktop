@@ -649,7 +649,6 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     # need the scoped YDoc 4 rebuild below before JupyterLab 4.6 accepts them.
     jupyter-collaboration==${JUPYTER_COLLABORATION_VERSION} \
     jupyterlab_rise \
-    jupyterlab-niivue==0.2.7 \
     jupyterlab_myst==2.7.0 \
     jupyter-sshd-proxy \
     papermill \
@@ -1072,6 +1071,26 @@ RUN --mount=type=bind,source=config/agents/patch_lightcone_cli.py,target=/tmp/pa
     "import importlib.metadata as m; assert m.version('astra-tools') == '${ASTRA_TOOLS_VERSION}'; assert m.version('astra-spec') == '${ASTRA_SPEC_VERSION}'; assert m.version('snakemake') == '${SNAKEMAKE_VERSION}'; assert m.version('packaging') == '25.0'" \
     && PATH=/opt/uv/tools/lightcone-cli/bin:${PATH} dask --version \
     && rm -rf /tmp/lightcone-cli-src /tmp/lightcone-cli.tar.gz
+
+# FreeBrowse's upstream Jupyter integration supplies the default image viewer.
+# Build both the serverless app and federated extension from the same source.
+ARG FREEBROWSE_REF="a42a7ea2e6768fccdabbd39813299a099cd586e4"
+RUN --mount=type=bind,source=config/jupyter/patch_freebrowse.py,target=/tmp/patch_freebrowse.py,ro \
+    retry git clone https://github.com/freesurfer/freebrowse.git /tmp/freebrowse \
+    && git -C /tmp/freebrowse checkout --detach "${FREEBROWSE_REF}" \
+    && test "$(git -C /tmp/freebrowse rev-parse HEAD)" = "${FREEBROWSE_REF}" \
+    && /opt/conda/bin/python /tmp/patch_freebrowse.py /tmp/freebrowse/jupyter \
+    && cd /tmp/freebrowse/frontend \
+    && npm_config_cache=/tmp/freebrowse-npm-cache retry npm install --no-audit --no-fund \
+    && npm run build:jupyter \
+    && cd /tmp/freebrowse/jupyter \
+    && YARN_ENABLE_IMMUTABLE_INSTALLS=0 retry /opt/conda/bin/jlpm install \
+    && /opt/conda/bin/jlpm build:prod \
+    && /opt/conda/bin/pip install --no-deps . \
+    && /opt/conda/bin/jupyter server extension enable jupyterlab_freebrowse --sys-prefix \
+    && /opt/conda/bin/python -c "from pathlib import Path; import jupyterlab_freebrowse as f; assert (Path(f.__file__).parent / 'static/freebrowse/index.html').is_file()" \
+    && find /opt/conda/share/jupyter/labextensions/jupyterlab-freebrowse -name '*.map' -delete \
+    && rm -rf /tmp/freebrowse /tmp/freebrowse-npm-cache /root/.cache /root/.npm /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
 
 # Build the local JupyterLab extensions here: their sources are the most
 # frequently edited build inputs in the repository, so everything above this

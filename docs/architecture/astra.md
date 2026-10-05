@@ -241,7 +241,7 @@ for their own analysis.
 
 Double-clicking an `astra.yaml` (or `*.astra.yaml`) in the JupyterLab file
 browser renders the same viewer without a kernel, the way NIfTI volumes open
-in NiiVue. The `neurodesk_astra_view.serverext` Jupyter server extension
+in FreeBrowse. The `neurodesk_astra_view.serverext` Jupyter server extension
 answers `GET <Jupyter Server base URL>/neurodesk-astra-view/graph?spec=…[&universe=…][&run=…]`
 by running `build_graph()` server-side — request paths are workspace-relative
 and rejected with a 404 before any read when absolute, traversing, or resolving

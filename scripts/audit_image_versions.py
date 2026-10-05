@@ -125,7 +125,6 @@ CATALOG = (
     CatalogEntry("requirement:pypi:jupyterlab-commands-toolkit", "pypi:jupyterlab-commands-toolkit", "pypi",
                  ">=0.2.0,<0.3.0", "Jupyter AI 3.2 requires jupyterlab-commands-toolkit>=0.2.0,<0.3.0."),
     CatalogEntry("requirement:pypi:jupyterlab-notebook-awareness", "pypi:jupyterlab-notebook-awareness", "pypi"),
-    CatalogEntry("requirement:pypi:jupyterlab-niivue", "pypi:jupyterlab-niivue", "pypi"),
     CatalogEntry("requirement:pypi:jupyterlab-myst", "pypi:jupyterlab-myst", "pypi"),
     CatalogEntry(
         "requirement:pypi:ipykernel",
