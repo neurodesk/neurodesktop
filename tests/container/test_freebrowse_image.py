@@ -6,7 +6,7 @@ import json
 import os
 import subprocess
 import time
-from urllib.parse import unquote, urlsplit, parse_qs
+from urllib.parse import urlsplit, parse_qs
 
 import nibabel as nib
 import numpy as np
@@ -16,7 +16,7 @@ from PIL import Image
 from test_niivue_rendering_image import graphics_display
 from test_widget_compatibility_image import (
     _stop, _unused_port, _wait_for_server, _start_firefox_with_webgl_probe,
-    _wait_for_expression,
+    _wait_for_expression, _click_dom_element,
 )
 
 
@@ -68,6 +68,8 @@ def test_default_freebrowse_opens_and_renders_local_volume(tmp_path, graphics_di
                 log_paths=logs)
             bidi.evaluate(context, "(() => { const open = window.open; window.__opened = [];"
                 "window.open = function(...args) { window.__opened.push(args[0]); return open.apply(this, args); }; return true; })()")
+            original_tabs = {tab["context"] for tab in
+                             bidi.request("browsingContext.getTree", {})["contexts"]}
             point = json.loads(bidi.evaluate(context,
                 f"JSON.stringify((() => {{const r = ({file_node}).getBoundingClientRect();"
                 "return {x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2)};})())"))
@@ -80,23 +82,22 @@ def test_default_freebrowse_opens_and_renders_local_volume(tmp_path, graphics_di
                     {"type": "pointerDown", "button": 0}, {"type": "pointerUp", "button": 0},
                 ],
             }]})
-            deadline = time.monotonic() + 30
-            while True:
-                contexts = bidi.request("browsingContext.getTree", {})["contexts"]
-                viewer = next((tab for tab in contexts if f"{base_path}freebrowse/" in tab["url"]), None)
-                if viewer:
-                    break
-                assert time.monotonic() < deadline, (contexts, bidi.evaluate(context,
-                    "JSON.stringify({opened: window.__opened, text: document.body.innerText.slice(-1000)})"))
-                time.sleep(0.1)
-            query = parse_qs(urlsplit(viewer["url"]).query)
-            assert unquote(urlsplit(query["vol"][0]).path) == f"{base_path}files/{filename}"
-            context = viewer["context"]
-            _wait_for_expression(bidi, context, "Boolean(document.querySelector('canvas'))", log_paths=logs)
-            canvas = "document.querySelector('canvas')"
+            frame = "document.querySelector('iframe[title=\"FreeBrowse\"]')"
+            _wait_for_expression(bidi, context, f"Boolean({frame})", log_paths=logs)
+            contexts = bidi.request("browsingContext.getTree", {})["contexts"]
+            assert {tab["context"] for tab in contexts} == original_tabs, "FreeBrowse opened an external browser tab"
+            assert bidi.evaluate(context, "window.__opened.length") == 0
+            viewer_url = bidi.evaluate(context, f"{frame}.src")
+            query = parse_qs(urlsplit(viewer_url).query)
+            assert query["vol"][0].startswith(f"blob:{origin}/")
+            assert query["filename"] == [filename]
+            assert token not in viewer_url
+            canvas = f"{frame}?.contentDocument?.querySelector('canvas')"
+            _wait_for_expression(bidi, context, f"Boolean({canvas})", log_paths=logs)
             rectangle = json.loads(bidi.evaluate(context,
                 f"JSON.stringify((() => {{ const r = {canvas}.getBoundingClientRect();"
-                "return {type:'box', x:r.x, y:r.y, width:r.width, height:r.height}; })())"))
+                f"const f = {frame}.getBoundingClientRect();"
+                "return {type:'box', x:f.x+r.x, y:f.y+r.y, width:r.width, height:r.height}; })())"))
             deadline = time.monotonic() + 60
             while True:
                 screenshot = bidi.request("browsingContext.captureScreenshot", {
@@ -110,6 +111,11 @@ def test_default_freebrowse_opens_and_renders_local_volume(tmp_path, graphics_di
                     break
                 assert time.monotonic() < deadline, "FreeBrowse did not render the local image"
                 time.sleep(0.2)
+            _wait_for_expression(bidi, context,
+                f"{frame}.contentDocument.body.innerText.includes({json.dumps(filename)})", log_paths=logs)
+            _click_dom_element(bidi, context,
+                "document.querySelector('.lm-TabBar-tab.lm-mod-current .lm-TabBar-tabCloseIcon')")
+            _wait_for_expression(bidi, context, f"!({frame})", log_paths=logs)
         finally:
             if browser is not None:
                 browser.close()

@@ -99,21 +99,28 @@ it tracking `origin/main` so the runtime Update launcher can use
 
 The image builds [FreeBrowse's Jupyter integration](https://github.com/freesurfer/freebrowse#jupyter-integration)
 from the commit pinned by `FREEBROWSE_REF` in the Dockerfile. Double-clicking
-`.nii`, `.nii.gz`, or `.nvd` files opens FreeBrowse in a new browser tab.
+`.nii`, `.nii.gz`, or `.nvd` files opens FreeBrowse in a JupyterLab document tab.
 The file browser also offers **Open in FreeBrowse** in its context menu.
 FreeBrowse replaces `jupyterlab-niivue` as the default document viewer;
 `ipyniivue` remains available in notebooks.
 
 The serverless frontend is built with upstream's `build:jupyter` target and
 packaged with its federated JupyterLab extension. It runs without a separate
-backend, Pixi environment, or external data service. Local volumes load through
-Jupyter's authenticated `/files/` endpoint. Both viewer assets and file URLs
+backend, Pixi environment, or external data service. The parent JupyterLab tab resolves downloads through the contents service and
+fetches bytes with Jupyter's authenticated `ServerConnection`, matching the
+previous NiiVue viewer. FreeBrowse receives a temporary blob URL and the
+original filename; server credentials stay in the parent tab. Both viewer assets and file URLs
 respect the single-user server's base path, including JupyterHub paths such
 as `/user/alice/`.
 
 [`patch_freebrowse.py`](../../config/jupyter/patch_freebrowse.py) adds Jupyter
 authentication to the viewer asset handler and escapes paths and query values
-so filenames containing spaces, `#`, `&`, or Unicode reach the correct file.
+so filenames containing spaces, `#`, `&`, or Unicode keep their original names.
+The viewer embeds the authenticated frontend in an iframe, uses the document
+manager for context-menu opens, and follows file renames. Closing the tab
+aborts pending downloads, revokes the blob URL, unloads the iframe, and
+disconnects its path listener. A rename cancels the earlier download before
+loading the new path.
 Its anchored replacements fail the build if the upstream integration changes.
 The serverless build supports viewing and browser downloads; upstream's
 backend-dependent save and AI annotation services are not configured.
