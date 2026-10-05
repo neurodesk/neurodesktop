@@ -210,9 +210,10 @@ The graphics test starts a private Xtigervnc display without network listeners
 and uses Mesa software rendering in Firefox. It requires volume pixels and
 browser-to-kernel scene updates in a compact viewport. It measures the canvas
 again before dragging and reads scene coordinates from the active notebook's
-kernel through JupyterLab's authenticated execution API. The test requires a
-successful kernel reply and idle state, then checks the initial and changed
-coordinates. Missing WebGL is a failure. The portable
+kernel through JupyterLab's authenticated execution API. Reads queue behind
+the widget's first-render comm traffic, so the test waits up to 90 seconds for
+a successful kernel reply and idle state, then checks the initial and changed
+coordinates. A kernel that stays busy fails with its reported status. Missing WebGL is a failure. The portable
 widget suite remains available on displayless runners.
 
 The validator installs cleanup before startup, rejects a readiness timeout or
