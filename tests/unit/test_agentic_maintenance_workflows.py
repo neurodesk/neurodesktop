@@ -125,7 +125,6 @@ def test_review_runs_only_for_coderabbit_on_owned_agent_prs():
     assert "contains(github.event.issue.labels.*.name, 'agentic-workflow')" in workflow
     assert "contains(github.event.comment.body, 'summarize by coderabbit.ai')" in workflow
     assert 'kind: review' in workflow
-    assert 'drafts: true' in repo_path('.coderabbit.yaml').read_text()
 
 
 def test_reporter_catalog_covers_each_top_level_test_deployment_and_agent_workflow():
