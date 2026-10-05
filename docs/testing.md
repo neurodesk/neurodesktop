@@ -832,7 +832,8 @@ pytest tests/unit/test_virtualgl.py tests/unit/test_audit_image_versions.py
 
 The installed checks in `tests/container/test_virtualgl.py` execute the shipped
 VirtualGL version command, diagnostic help, and Mesa rendering in a real
-TigerVNC display. Ordinary CI does not require a GPU. For a GPU worker, run:
+TigerVNC display, both directly and through VirtualGL's EGL interposer.
+Ordinary CI does not require a GPU. For a GPU worker, run:
 
 ```bash
 docker exec -e NEURODESKTOP_REQUIRE_GPU=1 -e VGL_DISPLAY=egl0 \

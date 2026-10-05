@@ -17,12 +17,17 @@ def test_installed_virtualgl_and_diagnostics():
     assert "EGL_DEVICE" in result.stdout
 
 
-def test_virtualgl_install_preserves_software_desktop(tmp_path):
+@pytest.mark.parametrize("command", [
+    ["glxinfo", "-B"],
+    ["vglrun", "-d", "egl0", "-c", "proxy", "glxinfo", "-B"],
+])
+def test_virtualgl_install_preserves_software_desktop(tmp_path, command):
     desktop = Desktop(tmp_path)
     try:
         result = subprocess.run(
-            ["glxinfo", "-B"],
-            env={**os.environ, "DISPLAY": desktop.name, "LIBGL_ALWAYS_SOFTWARE": "1"},
+            command,
+            env={**os.environ, "DISPLAY": desktop.name, "LIBGL_ALWAYS_SOFTWARE": "1",
+                 "__EGL_VENDOR_LIBRARY_FILENAMES": "/usr/share/glvnd/egl_vendor.d/50_mesa.json"},
             capture_output=True, text=True, timeout=30,
         )
         assert result.returncode == 0, result.stdout + result.stderr
