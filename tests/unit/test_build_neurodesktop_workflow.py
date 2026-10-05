@@ -281,3 +281,30 @@ fi
 
             assert result.returncode == 0, (path.name, job, result.stderr)
             assert calls.read_text() == "pull ghcr.io/neurodesk/candidate:run-123-1-amd64\n" * 2
+
+
+def test_cvmfs_image_tests_report_the_active_mirror_after_a_failure(tmp_path):
+    calls = tmp_path / "calls"
+    for name in ("sudo", "cvmfs_config"):
+        shim = tmp_path / name
+        shim.write_text('#!/usr/bin/env bash\nprintf \'%s\\n\' "$*" >> "$CALLS"\n')
+        shim.chmod(0o755)
+    for path in IMAGE_TEST_WORKFLOWS:
+        steps = yaml.safe_load(path.read_text())["jobs"]["test-image"]["steps"]
+        names = [step.get("name") for step in steps]
+        report = steps[names.index("Report scientific mount status")]
+        assert names.index("Report scientific mount status") > names.index(
+            "Test container (HPC Apptainer simulation)"), path.name
+        assert report["if"] == "always() && matrix.profile.needs_cvmfs", path.name
+        calls.unlink(missing_ok=True)
+        result = subprocess.run(
+            ["bash", "-e", "-c", report["run"]],
+            env={**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
+                 "CALLS": str(calls)},
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert calls.read_text().splitlines() == [
+            "timeout 20 cvmfs_talk -i neurodesk.ardc.edu.au host info",
+            "timeout 20 cvmfs_config stat -v neurodesk.ardc.edu.au",
+        ], path.name

@@ -247,9 +247,12 @@ requires WebGL2 on amd64 through the image's software-rendered display.
 Each test step runs [the runtime validation command](../.github/scripts/validate_image_runtime.sh)
 with the candidate image and the `regular`, `hpc`, or `acceptance` profile. The command
 owns startup, readiness polling, security-policy checks, pytest, and cleanup.
-The workflows own candidate pulls and host CVMFS provisioning. Production
-CVMFS jobs run the same verified mirror selection as PR acceptance before
-mounting the generated configuration. They fail setup if no mirror passes and
+The workflows own candidate pulls and host CVMFS provisioning. CVMFS jobs in
+the production, scheduled test, and development image workflows run the same
+verified mirror selection as PR acceptance before mounting the generated
+configuration. Mounting the static GeoAPI list instead left cold application
+launches at the mercy of whichever mirror it picked; see
+[issue #1021](https://github.com/NeuroDesk/neurodesktop/issues/1021). They fail setup if no mirror passes and
 report the active CVMFS host and mount statistics even after a failed test.
 The steps use `exec` so the command retains the workflow shell's cancellation
 boundary. On its disposable Ubuntu 24.04 runner, PR scientific acceptance

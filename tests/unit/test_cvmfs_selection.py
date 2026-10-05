@@ -230,6 +230,8 @@ def test_ranked_config_written(tmp_path, fast_server):
 @pytest.mark.parametrize(("workflow_name", "job"), [
     ("pr-image-validation.yml", "image"),
     ("build-neurodesktop.yml", "test-image"),
+    ("build-neurodesktop-test.yml", "test-image"),
+    ("build-neurodesktop-dev.yml", "test-image"),
 ])
 def test_host_generates_a_verified_mount_configuration(
     tmp_path, fast_server, dead_server_url, workflow_name, job,
