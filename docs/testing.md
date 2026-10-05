@@ -878,7 +878,8 @@ runtime behavior. Built-image service checks remain in
 `pytest tests/unit/test_freebrowse.py` patches frozen upstream integration
 fixtures and executes the document factory and context menu. It checks default
 viewer registration, embedded document tabs, rename/disposal behavior,
-NIfTI and NiiVue document routing, and special filenames
+authenticated contents-service downloads, temporary blob URLs, NIfTI and
+NiiVue document routing, and special filenames
 under standalone and JupyterHub base paths. Real Jupyter HTTP tests verify
 viewer assets require authentication, GET/HEAD work, and traversal is rejected.
 The fixtures come from the `FREEBROWSE_REF` commit in the Dockerfile.

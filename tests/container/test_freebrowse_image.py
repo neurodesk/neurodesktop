@@ -6,7 +6,7 @@ import json
 import os
 import subprocess
 import time
-from urllib.parse import unquote, urlsplit, parse_qs
+from urllib.parse import urlsplit, parse_qs
 
 import nibabel as nib
 import numpy as np
@@ -89,7 +89,9 @@ def test_default_freebrowse_opens_and_renders_local_volume(tmp_path, graphics_di
             assert bidi.evaluate(context, "window.__opened.length") == 0
             viewer_url = bidi.evaluate(context, f"{frame}.src")
             query = parse_qs(urlsplit(viewer_url).query)
-            assert unquote(urlsplit(query["vol"][0]).path) == f"{base_path}files/{filename}"
+            assert query["vol"][0].startswith(f"blob:{origin}/")
+            assert query["filename"] == [filename]
+            assert token not in viewer_url
             canvas = f"{frame}?.contentDocument?.querySelector('canvas')"
             _wait_for_expression(bidi, context, f"Boolean({canvas})", log_paths=logs)
             rectangle = json.loads(bidi.evaluate(context,
@@ -109,6 +111,8 @@ def test_default_freebrowse_opens_and_renders_local_volume(tmp_path, graphics_di
                     break
                 assert time.monotonic() < deadline, "FreeBrowse did not render the local image"
                 time.sleep(0.2)
+            _wait_for_expression(bidi, context,
+                f"{frame}.contentDocument.body.innerText.includes({json.dumps(filename)})", log_paths=logs)
             _click_dom_element(bidi, context,
                 "document.querySelector('.lm-TabBar-tab.lm-mod-current .lm-TabBar-tabCloseIcon')")
             _wait_for_expression(bidi, context, f"!({frame})", log_paths=logs)
