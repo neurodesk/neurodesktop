@@ -4,11 +4,6 @@ reviews:
   review_status: false
   in_progress_fortune: false
   auto_review:
-    enabled: true
-    # Agentic workflows open draft pull requests so review must start before
-    # they are marked ready and merged.
-    drafts: true
-    # Review pull requests targeting any branch, not only the default branch
-    # (feature branches stacking on other feature branches still get reviews).
-    base_branches:
-      - ".*"
+    # Only review when explicitly requested with "@coderabbitai review".
+    enabled: false
+    auto_incremental_review: false
