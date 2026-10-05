@@ -142,15 +142,23 @@ def test_completed_run_aggregates_matrix_failures_and_dispatches_default_branch(
     assert any(call.get("attempt_number") == 1 for call in output["calls"])
 
 
-def test_runner_outage_is_reported_as_unstarted_jobs_without_repair():
-    output = run_reporter(jobs=[
+@pytest.mark.parametrize("successful_jobs", [[], [
+    {"id": 9, "name": "setup", "conclusion": "success", "steps": [
+        {"name": "Prepare runner", "conclusion": "success"},
+    ]},
+]])
+def test_cancelled_jobs_without_steps_are_reported_without_guessing_cause(successful_jobs):
+    output = run_reporter(jobs=successful_jobs + [
         {"id": 7, "name": "Check for spelling errors", "conclusion": "cancelled", "steps": []},
         {"id": 8, "name": "lint", "conclusion": "skipped", "steps": []},
     ])
-    assert "GitHub did not assign a runner" in output["issues"][0]["body"]
+    body = output["issues"][0]["body"]
+    assert "Cancelled jobs have no recorded steps" in body
+    assert "did not assign a runner" not in body
+    assert "No job started" not in body
     comment = output["comments"][0]["body"]
     assert "no job failed; 1 cancelled jobs" in comment
-    assert "/actions/runs/1234/job/7): `cancelled`; never started" in comment
+    assert "/actions/runs/1234/job/7): `cancelled`; no steps recorded" in comment
     assert "lint" not in comment
     assert not calls_of(output, "dispatch")
     assert output["results"][0]["dispatched"] is False
