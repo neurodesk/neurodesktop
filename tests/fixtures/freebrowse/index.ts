@@ -10,6 +10,7 @@ import {
 import { IFileBrowserFactory } from "@jupyterlab/filebrowser";
 import { PageConfig } from "@jupyterlab/coreutils";
 import { Widget } from "@lumino/widgets";
+import { ServerConnection } from "@jupyterlab/services";
 
 const COMMAND_ID = "freebrowse:open";
 
@@ -26,38 +27,85 @@ function isFreeBrowseFile(name: string): boolean {
   return isNiftiFile(name) || isNvdFile(name);
 }
 
-function freebrowseUrl(filePath: string): string {
+function freebrowseUrl(filePath: string, fileUrl: string): string {
   const baseUrl = PageConfig.getBaseUrl();
-  const fileUrl = `${baseUrl}files/${filePath}`;
-  if (filePath.toLowerCase().endsWith(".nvd")) {
-    return `${baseUrl}freebrowse/?nvd=${fileUrl}`;
-  }
-  return `${baseUrl}freebrowse/?vol=${fileUrl}`;
+  const parameter = filePath.toLowerCase().endsWith(".nvd") ? "nvd" : "vol";
+  const filename = filePath.split("/").pop() || filePath;
+  return `${baseUrl}freebrowse/?${parameter}=${encodeURIComponent(fileUrl)}&filename=${encodeURIComponent(filename)}`;
 }
 
-/**
- * Minimal content widget used for double-click handling.
- * Opens FreeBrowse in a new browser tab, then auto-closes the JupyterLab tab.
- */
-class FreeBrowseRedirect extends Widget {
-  constructor(context: DocumentRegistry.IContext<DocumentRegistry.IModel>) {
+class FreeBrowseWidget extends Widget {
+  private readonly frame: HTMLIFrameElement;
+  private request = new AbortController();
+  private objectUrl: string | undefined;
+
+  constructor(
+    private readonly context: DocumentRegistry.IContext<DocumentRegistry.IModel>,
+    private readonly services: JupyterFrontEnd["serviceManager"]
+  ) {
     super();
-    window.open(freebrowseUrl(context.path), "_blank");
+    this.frame = document.createElement("iframe");
+    this.frame.title = "FreeBrowse";
+    this.frame.style.cssText = "width:100%;height:100%;border:0;display:block";
+    this.node.appendChild(this.frame);
+    void this.updateUrl();
+    context.pathChanged.connect(this.updateUrl, this);
+  }
+
+  private async updateUrl(): Promise<void> {
+    this.request.abort();
+    const request = this.request = new AbortController();
+    const path = this.context.path;
+    try {
+      const url = await this.services.contents.getDownloadUrl(path);
+      if (request.signal.aborted) return;
+      const response = await ServerConnection.makeRequest(
+        url, { method: "GET", signal: request.signal }, this.services.serverSettings
+      );
+      if (!response.ok || response.headers.get("content-type")?.includes("text/html")) {
+        throw new Error("File download failed");
+      }
+      const blob = await response.blob();
+      if (request.signal.aborted) return;
+      const previous = this.objectUrl;
+      this.objectUrl = URL.createObjectURL(blob);
+      this.node.replaceChildren(this.frame);
+      this.frame.src = freebrowseUrl(path, this.objectUrl);
+      if (previous) URL.revokeObjectURL(previous);
+    } catch {
+      if (request.signal.aborted) return;
+      this.frame.src = "about:blank";
+      if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
+      this.objectUrl = undefined;
+      this.node.textContent = "FreeBrowse could not load this file through Jupyter.";
+    }
+  }
+
+  dispose(): void {
+    if (this.isDisposed) return;
+    this.context.pathChanged.disconnect(this.updateUrl, this);
+    this.request.abort();
+    this.frame.src = "about:blank";
+    if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
+    super.dispose();
   }
 }
 
 class FreeBrowseFactory extends ABCWidgetFactory<
-  DocumentWidget<FreeBrowseRedirect>,
+  DocumentWidget<FreeBrowseWidget>,
   DocumentRegistry.IModel
 > {
+  constructor(
+    options: DocumentRegistry.IWidgetFactoryOptions<DocumentWidget<FreeBrowseWidget>>,
+    private readonly services: JupyterFrontEnd["serviceManager"]
+  ) {
+    super(options);
+  }
+
   protected createNewWidget(
     context: DocumentRegistry.IContext<DocumentRegistry.IModel>
-  ): DocumentWidget<FreeBrowseRedirect> {
-    const content = new FreeBrowseRedirect(context);
-    const widget = new DocumentWidget({ content, context });
-    // Auto-close the JupyterLab tab since the viewer opened in a new browser tab
-    setTimeout(() => widget.close(), 500);
-    return widget;
+  ): DocumentWidget<FreeBrowseWidget> {
+    return new DocumentWidget({ content: new FreeBrowseWidget(context, this.services), context });
   }
 }
 
@@ -76,7 +124,10 @@ const plugin: JupyterFrontEndPlugin<void> = {
         const item = browser.selectedItems().next();
         if (item.done) return;
 
-        window.open(freebrowseUrl(item.value.path), "_blank");
+        return app.commands.execute("docmanager:open", {
+          path: item.value.path,
+          factory: "FreeBrowse",
+        });
       },
       isVisible: () => {
         const browser = fileBrowserFactory.tracker.currentWidget;
@@ -122,7 +173,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
       fileTypes: ["nifti", "nifti-gz", "nvd"],
       defaultFor: ["nifti", "nifti-gz", "nvd"],
       readOnly: true,
-    });
+    }, app.serviceManager);
     app.docRegistry.addWidgetFactory(factory);
 
     console.log("jupyterlab-freebrowse extension activated");

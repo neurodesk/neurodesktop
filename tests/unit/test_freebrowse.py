@@ -1,6 +1,5 @@
 """Exercise the pinned FreeBrowse integration, including JupyterHub routes."""
 
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -20,30 +19,27 @@ TOKEN = "freebrowse-test-token"
 FIXTURES = repo_path("tests/fixtures/freebrowse")
 
 
-def patched_integration(root):
+def copied_integration(root):
     (root / "src").mkdir(parents=True)
     package = root / "jupyterlab_freebrowse"
     package.mkdir()
     shutil.copy(FIXTURES / "index.ts", root / "src/index.ts")
     shutil.copy(FIXTURES / "package.json", root / "package.json")
     shutil.copy(FIXTURES / "handlers.py", package / "handlers.py")
-    spec = importlib.util.spec_from_file_location(
-        "patch_freebrowse", repo_path("config/jupyter/patch_freebrowse.py")
+
+
+def test_hub_cookie_authentication(tmp_path):
+    copied_integration(tmp_path)
+    shutil.copy(FIXTURES / "test_handlers.py", tmp_path / "test_handlers.py")
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(tmp_path / "test_handlers.py")],
+        env=dict(os.environ, PYTHONPATH=str(tmp_path)), capture_output=True, text=True,
     )
-    patcher = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(patcher)
-    patcher.patch(root)
-    return patcher
-
-
-def test_patch_rejects_changed_upstream(tmp_path):
-    patcher = patched_integration(tmp_path)
-    with pytest.raises(ValueError, match="upstream seam changed"):
-        patcher.patch(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_default_factory_and_context_menu_open_encoded_local_files(tmp_path):
-    patched_integration(tmp_path)
+    copied_integration(tmp_path)
     script = r'''
 const fs = require('fs');
 const vm = require('vm');
@@ -210,12 +206,11 @@ for (const base of ['/', '/user/alice/', 'https://mgh.neurodesk.org/user/stebo85
 
 
 def test_frontend_preserves_filename_when_loading_a_blob(tmp_path):
-    patcher = patched_integration(tmp_path)
+    copied_integration(tmp_path)
     frontend = tmp_path / "frontend"
     loader = frontend / "src/hooks/use-file-loading.ts"
     loader.parent.mkdir(parents=True)
     shutil.copy(FIXTURES / "use-file-loading.ts", loader)
-    patcher.patch_frontend(frontend)
     script = r'''
 const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
 const ts = require('typescript');
@@ -257,7 +252,7 @@ const source = ts.transpileModule(fs.readFileSync(process.argv[1], 'utf8').repla
 @pytest.fixture(scope="module", params=["/", "/user/alice/", "/user/a.b/"])
 def viewer_http(request, tmp_path_factory):
     root = tmp_path_factory.mktemp("freebrowse-http")
-    patched_integration(root)
+    copied_integration(root)
     package = root / "jupyterlab_freebrowse"
     (package / "__init__.py").write_text(
         "from .handlers import setup_handlers\n"
@@ -342,7 +337,10 @@ def test_static_route_rejects_traversal(viewer_http):
 def test_image_build_replaces_niivue_with_both_freebrowse_bundles():
     dockerfile = repo_path("Dockerfile").read_text()
     assert "jupyterlab-niivue==" not in dockerfile
-    assert 'ARG FREEBROWSE_REF="a42a7ea2e6768fccdabbd39813299a099cd586e4"' in dockerfile
+    ref = (FIXTURES / "REF").read_text().strip()
+    assert f'ARG FREEBROWSE_REF="{ref}"' in dockerfile
+    assert "https://github.com/neurodesk/freebrowse.git" in dockerfile
+    assert "patch_freebrowse.py" not in dockerfile
     assert "npm run build:jupyter" in dockerfile
     assert "jlpm build:prod" in dockerfile
     assert "jupyter server extension enable jupyterlab_freebrowse --sys-prefix" in dockerfile

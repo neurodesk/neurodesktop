@@ -1,13 +1,13 @@
 # FreeBrowse integration fixtures
 
-`index.ts`, `handlers.py`, and `package.json` are unmodified Jupyter files from
-[freesurfer/freebrowse](https://github.com/freesurfer/freebrowse/tree/a42a7ea2e6768fccdabbd39813299a099cd586e4/jupyter),
-commit `a42a7ea2e6768fccdabbd39813299a099cd586e4`, the source pinned in the
-Dockerfile. The upstream project distributes them under the BSD 2-Clause
+The integration files and `test_handlers.py` are unmodified copies from
+[neurodesk/freebrowse](https://github.com/neurodesk/freebrowse/tree/5f64059c81b7b9eb01ca6a0d261aeb17d27053d2/jupyter),
+commit `5f64059c81b7b9eb01ca6a0d261aeb17d27053d2`, pinned by `FREEBROWSE_REF` in the Dockerfile.
+The original upstream project distributes the source under the BSD 2-Clause
 license reproduced in `LICENSE`.
 
-`use-file-loading.ts` is the frontend hook from the same commit.
-
-Tests copy these files into a temporary integration, apply Neurodesktop's
-build-time patch, and execute the patched frontend and HTTP handler. Update
-these fixtures from upstream when changing `FREEBROWSE_REF`.
+`use-file-loading.ts` is the frontend hook from the same fork commit.
+Tests execute these frozen frontend and HTTP sources directly, without a local
+build-time patch. The Hub regression executes JupyterHub's cookie and XSRF
+implementation and replaces only the Hub API token lookup.
+Update these fixtures and `REF` from the fork when changing `FREEBROWSE_REF`.

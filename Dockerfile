@@ -1097,16 +1097,14 @@ RUN --mount=type=bind,source=config/agents/patch_lightcone_cli.py,target=/tmp/pa
     && PATH=/opt/uv/tools/lightcone-cli/bin:${PATH} dask --version \
     && rm -rf /tmp/lightcone-cli-src /tmp/lightcone-cli.tar.gz
 
-# FreeBrowse's upstream Jupyter integration supplies the default image viewer.
+# Neurodesk's FreeBrowse fork supplies the authenticated document viewer.
 # Build both the serverless app and federated extension from the same source.
-ARG FREEBROWSE_REF="a42a7ea2e6768fccdabbd39813299a099cd586e4"
-RUN --mount=type=bind,source=config/jupyter/patch_freebrowse.py,target=/tmp/patch_freebrowse.py,ro \
-    retry git clone https://github.com/freesurfer/freebrowse.git /tmp/freebrowse \
+ARG FREEBROWSE_REF="5f64059c81b7b9eb01ca6a0d261aeb17d27053d2"
+RUN retry git clone https://github.com/neurodesk/freebrowse.git /tmp/freebrowse \
     && git -C /tmp/freebrowse checkout --detach "${FREEBROWSE_REF}" \
     && test "$(git -C /tmp/freebrowse rev-parse HEAD)" = "${FREEBROWSE_REF}" \
-    && /opt/conda/bin/python /tmp/patch_freebrowse.py /tmp/freebrowse/jupyter \
     && cd /tmp/freebrowse/frontend \
-    && npm_config_cache=/tmp/freebrowse-npm-cache retry npm install --no-audit --no-fund \
+    && npm_config_cache=/tmp/freebrowse-npm-cache retry npm ci --no-audit --no-fund \
     && npm run build:jupyter \
     && cd /tmp/freebrowse/jupyter \
     && YARN_ENABLE_IMMUTABLE_INSTALLS=0 retry /opt/conda/bin/jlpm install \
