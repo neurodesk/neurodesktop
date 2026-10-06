@@ -187,6 +187,21 @@ version check nor a passing checkout suite proves every shipped application work
 [behavior audit](designs/test-behavior-audit-2026-10-03.md) records the coverage
 and remaining acceptance gaps.
 
+## Bundled code-server security regressions
+
+`tests/unit/test_code_server_dependency_security.py` checks the builder's
+security version floors, installed paths, version assertions, and package
+cleanup. `tests/unit/test_audit_image_versions.py` checks npm release reporting
+for both build arguments without network access.
+
+`tests/container/test_code_server_dependency_security.py` loads the installed
+packages through Node.js. The shell-quote cases require a `TypeError` for
+LF, CR, U+2028, and U+2029 after a comment, and execute safe quoted arguments
+through `/bin/sh` to check literal preservation. The proxy-addr cases reject
+trust bypass through a malformed IPv4-mapped IPv6 CIDR. Ordinary IPv4 and
+correctly mapped CIDRs must still resolve forwarded clients only through
+trusted proxies.
+
 ## Pull request image acceptance
 
 [PR image acceptance](../.github/workflows/pr-image-validation.yml) builds the
