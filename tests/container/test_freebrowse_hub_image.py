@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 
 from jupyter_server.auth import IdentityProvider, User
+from jupyter_server.base.handlers import JupyterHandler
 from jupyterhub.services.auth import HubOAuth
 from tornado.testing import AsyncHTTPTestCase
 from tornado.web import Application, create_signed_value
@@ -38,6 +39,10 @@ class HubAssetTests(AsyncHTTPTestCase):
     base_url = "/user/alice/"
 
     def get_app(self):
+        # HubOAuth patches the Jupyter base class. Restore it after every case
+        # so the installed-image suite's other HTTP handlers keep their policy.
+        names = ("_xsrf_token_id", "xsrf_token", "check_xsrf_cookie")
+        self.original_xsrf = {name: JupyterHandler.__dict__.get(name) for name in names}
         self.files = tempfile.TemporaryDirectory()
         root = Path(self.files.name)
         (root / "index.html").write_text("<html>FreeBrowse viewer</html>")
@@ -55,9 +60,17 @@ class HubAssetTests(AsyncHTTPTestCase):
         return app
 
     def tearDown(self):
-        super().tearDown()
-        handlers.STATIC_DIR = self.original_static_dir
-        self.files.cleanup()
+        try:
+            super().tearDown()
+        finally:
+            for name, value in self.original_xsrf.items():
+                if value is None:
+                    if name in JupyterHandler.__dict__:
+                        delattr(JupyterHandler, name)
+                else:
+                    setattr(JupyterHandler, name, value)
+            handlers.STATIC_DIR = self.original_static_dir
+            self.files.cleanup()
 
     def headers(self, site="same-origin", mode="cors", cookie=True):
         result = {"Sec-Fetch-Site": site, "Sec-Fetch-Mode": mode}
