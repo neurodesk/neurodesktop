@@ -382,6 +382,10 @@ reviewed; the Dockerfile itself is authoritative.
   The version defaults to `3.1.5`; update its verified checksums together with
   the version. GPU rendering remains an explicit application launch choice.
 - `CODE_SERVER_VERSION`: code-server release; defaults to `4.138.0`
+- `SHELL_QUOTE_VERSION`: shell-quote release for VS Code's nested package;
+  defaults to `1.12.0`
+- `PROXY_ADDR_VERSION`: proxy-addr release for code-server's npm dependency
+  tree; defaults to `2.0.8`
 - `NEUROCOMMAND_REF`: neurocommand git ref cloned during the build; CI passes
   a resolved `main` SHA so neurocommand changes invalidate the install layer
 - `NODE_TAR_VERSION`: patched `node-tar` version applied to every bundled

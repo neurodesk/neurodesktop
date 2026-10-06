@@ -23,6 +23,20 @@ candidates for a specific run and attempt, test and scan them, and then promote
 the same candidates to release tags. Native runtime checks cover both image
 architectures. A date tag never substitutes for building the run's source SHA.
 
+## Bundled code-server dependencies
+
+The builder replaces VS Code's nested `shell-quote` package at
+`/opt/code-server/lib/vscode/node_modules/shell-quote` with the
+`SHELL_QUOTE_VERSION` release. The package has no runtime dependencies.
+It also installs `PROXY_ADDR_VERSION` into code-server's npm dependency tree,
+updating the manifest and shrinkwrap together. Both installed versions are
+checked before code-server is copied into the runtime image.
+
+The [version audit](../../scripts/audit_image_versions.py) reads both pins
+from the Dockerfile and checks releases against npm. The
+[installed-package tests](../testing.md#bundled-code-server-security-regressions)
+exercise quoting and proxy trust behavior at the shipped paths.
+
 ## Layer Ordering and Cache
 
 The pip install layer runs

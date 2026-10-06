@@ -55,6 +55,8 @@ CATALOG = (
     CatalogEntry("arg:GUACAMOLE_VERSION", "github:apache/guacamole-server", "github-tags"),
     CatalogEntry("arg:VIRTUALGL_VERSION", "github:VirtualGL/virtualgl", "github-releases"),
     CatalogEntry("arg:CODE_SERVER_VERSION", "github:coder/code-server", "github-releases"),
+    CatalogEntry("arg:SHELL_QUOTE_VERSION", "npm:shell-quote", "npm"),
+    CatalogEntry("arg:PROXY_ADDR_VERSION", "npm:proxy-addr", "npm"),
     CatalogEntry("arg:TOMCAT_VERSION", "apache:tomcat/tomcat-11", "apache-dist", "<12"),
     CatalogEntry("arg:TOMCAT_MIGRATION_VERSION", "github:apache/tomcat-jakartaee-migration", "github-tags"),
     CatalogEntry("arg:UV_VERSION", "pypi:uv", "pypi"),

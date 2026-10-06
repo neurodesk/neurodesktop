@@ -110,6 +110,8 @@ USER root
 ARG BUILD_ONLY_APT_PACKAGES="build-essential libcairo2-dev libjpeg-turbo8-dev libpng-dev libtool-bin freerdp2-dev libvncserver-dev libssl-dev libwebp-dev libssh2-1-dev libpango1.0-dev"
 ARG GUACAMOLE_VERSION="1.6.0"
 ARG CODE_SERVER_VERSION="4.138.0"
+ARG SHELL_QUOTE_VERSION="1.12.0"
+ARG PROXY_ADDR_VERSION="2.0.8"
 
 COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
 
@@ -164,14 +166,16 @@ RUN set -eux; \
     npm update --no-audit --no-fund basic-ftp; \
     # Normalize code-server's bundled tar to the current audited release.
     npm update --no-audit --no-fund tar; \
+    npm install --save-exact --ignore-scripts --no-audit --no-fund "proxy-addr@${PROXY_ADDR_VERSION}"; \
+    test "$(node -p 'require("/opt/code-server/node_modules/proxy-addr/package.json").version')" = "${PROXY_ADDR_VERSION}"; \
     # Keep VS Code's nested shell-quote copy on the current audited release.
-    shell_quote_tar="$(npm pack --silent shell-quote@1.10.0)"; \
+    shell_quote_tar="$(npm pack --silent "shell-quote@${SHELL_QUOTE_VERSION}")"; \
     shell_quote_dir="/opt/code-server/lib/vscode/node_modules/shell-quote"; \
     rm -rf "${shell_quote_dir}"; \
     mkdir -p "${shell_quote_dir}"; \
     tar -xzf "${shell_quote_tar}" -C "${shell_quote_dir}" --strip-components=1; \
     rm -f "${shell_quote_tar}"; \
-    test "$(node -p 'require("/opt/code-server/lib/vscode/node_modules/shell-quote/package.json").version')" = "1.10.0"; \
+    test "$(node -p 'require("/opt/code-server/lib/vscode/node_modules/shell-quote/package.json").version')" = "${SHELL_QUOTE_VERSION}"; \
     # Strip bundled sourcemaps in the stage that unpacks them so the runtime
     # copy layer never carries them; they only serve devtools debugging.
     find /opt/code-server -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete; \
