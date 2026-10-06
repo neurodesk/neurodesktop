@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-03"
+last-reviewed: "2026-10-04"
 ---
 
 # Testing
@@ -151,11 +151,12 @@ checks document
 content after LibreOffice format conversions, saved VS Code editor content,
 a segmentation exported from ITK-SNAP, and FSLeyes pixels from a known volume.
 The FSLeyes batch check uses the upstream `fsleyes_unfiltered render` entrypoint
-so captured output remains available. The default `fsleyes` output filter has
-a shutdown race that can close standard streams and return 120 after rendering;
-[issue #1012](https://github.com/NeuroDesk/neurodesktop/issues/1012) tracks that
-upstream defect. The batch check requires exit status zero and the expected
-image pixels; it does not establish that the default filtered wrapper is fixed.
+so captured output remains available. It requires exit status zero and the
+expected image pixels. The FSL image build repairs the default `fsleyes` filter's
+stream cleanup. Its [release tests](https://github.com/neurodesk/neurocontainers/blob/main/recipes/fsl/fulltest.yaml)
+check filtering, stdout/stderr restoration, application exit codes, and rendering
+without an X display. [Issue #1012](https://github.com/NeuroDesk/neurodesktop/issues/1012)
+records the shutdown race in older builds that could return 120 after rendering.
 Timed-out module commands terminate their process groups and report captured
 output. Module commands and ITK-SNAP's first window share a 600-second launch
 budget because a cold CVMFS cache must fetch the application container first.
