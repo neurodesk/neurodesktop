@@ -4,7 +4,7 @@ description: LXDE desktop over VNC/RDP through Guacamole, clipboard sync,
   per-display Firefox profiles, and office file associations
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-05"
+last-reviewed: "2026-10-07"
 ---
 
 # Desktop Environment
@@ -90,6 +90,11 @@ still start when their launcher opens. Local Slurm and CVMFS retain their root
 startup worker. Guacamole web and VNC credentials remain separate per-user
 secrets. See [startup privileges](../environment-variables.md#startup-privileges)
 for the package-only sudo policy.
+
+The Neurodesk menu's **Update** entry updates the notebook-owned
+`/neurocommand` checkout without sudo. Root startup repairs checkout ownership
+after notebook UID or GID changes, without executing its scripts. See
+[Neurocommand](cvmfs.md#neurocommand) for update behavior and HPC restrictions.
 
 Failure to start the optional xrdp service leaves Jupyter and VNC available.
 Failure to provision credentials or validate sudo policy stops startup.

@@ -1525,6 +1525,8 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/jupyter/start_notebook.sh /usr/local/bin/start-notebook.d/start_notebook.sh \
     && install -m 0755 /tmp/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/before_notebook.sh \
     && install -m 0755 /tmp/jupyter/startup_security.py /opt/neurodesktop/startup_security.py \
+    && install -m 0755 -o root -g root /tmp/jupyter/neurodesk_update.py /usr/local/bin/neurodesk-update \
+    && /usr/bin/python3 -I -c 'import runpy; runpy.run_path("/usr/local/bin/neurodesk-update")["install_update_launcher"]()' \
     && install -m 0755 /tmp/jupyter/code_server_ready.py /opt/neurodesktop/code_server_ready.py \
     && install -m 0755 /tmp/jupyter/prepare_cpuinfo.sh /opt/neurodesktop/prepare_cpuinfo.sh \
     && install -m 0755 /tmp/jupyter/neurodesktop_apt.py /usr/local/bin/apt \
@@ -1592,7 +1594,8 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && chown -R root:users /opt/config /opt/neurodesktop /opt/tests \
     # Git checkout modes depend on the builder's umask. The examples and test
     # tier are read-only image assets, so normalize them for the jovyan user.
-    && chmod -R a+rX /opt/neurodesktop/examples /opt/tests
+    && chmod -R a+rX /opt/neurodesktop/examples /opt/tests \
+    && chown -R -h "${NB_UID}:${NB_GID}" /neurocommand
 
 
 # jupyter-server-proxy 4.5.0 constructs SimpleAsyncHTTPClient directly for

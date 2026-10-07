@@ -102,6 +102,25 @@ def test_root_is_refused_before_checkout_code_runs(updater, monkeypatch):
     assert not (checkout / "build-ran").exists()
 
 
+def test_cli_rejects_arguments_without_running_build(updater, monkeypatch, capsys):
+    module, _, checkout = updater
+    monkeypatch.setattr(module.sys, "argv", ["neurodesk-update", "--checkout=/tmp/other"])
+    assert module.main() == 2
+    assert capsys.readouterr().err == "Usage: neurodesk-update\n"
+    assert not (checkout / "build-ran").exists()
+
+
+def test_cli_reports_root_refusal_without_traceback(updater, monkeypatch, capsys):
+    module, _, checkout = updater
+    monkeypatch.setattr(module.sys, "argv", ["neurodesk-update"])
+    monkeypatch.setattr(module.os, "geteuid", lambda: 0)
+    assert module.main() == 1
+    error = capsys.readouterr().err
+    assert "not root" in error
+    assert "Traceback" not in error
+    assert not (checkout / "build-ran").exists()
+
+
 def test_read_only_checkout_is_refused_before_build(updater):
     module, _, checkout = updater
     if os.getuid() == 0:

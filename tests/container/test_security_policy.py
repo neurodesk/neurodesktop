@@ -32,11 +32,50 @@ def test_restricted_sudo_rejects_shells_and_apt_overrides():
     assert allowed.returncode == 0, allowed.stderr.decode()
     for arguments in (
         ["/bin/sh", "-c", "true"], ["/usr/bin/apt-get", "update"],
+        ["/bin/bash", "-c", "true"], ["/usr/bin/git", "--version"],
+        ["-l", "/opt/neurodesktop/startup_security.py"],
         ["/usr/local/bin/apt", "install", "-o", "APT::Update::Pre-Invoke::=/bin/sh"],
         ["/usr/local/bin/apt", "install", "/tmp/package.deb"],
     ):
         result = subprocess.run(notebook_command("sudo", "-n", *arguments), capture_output=True)
         assert result.returncode != 0, arguments
+
+
+def test_neurodesk_update_launcher_and_checkout_permissions():
+    helper = Path("/usr/local/bin/neurodesk-update")
+    assert helper.stat().st_uid == 0
+    assert helper.stat().st_mode & 0o022 == 0
+    assert helper.read_text().splitlines()[0] == "#!/usr/bin/python3 -I"
+    checkout = Path("/neurocommand")
+    launcher = checkout / "local/bin/update.sh"
+    assert "/usr/local/bin/neurodesk-update" in launcher.read_text()
+    assert os.access(launcher, os.X_OK)
+    desktop = Path("/usr/share/applications/neurodesk/update.desktop")
+    assert "/bin/bash /neurocommand/local/bin/update.sh" in desktop.read_text()
+    # Foreign-UID HPC startup cannot change ownership of the image checkout.
+    if any(os.environ.get(name) for name in (
+        "APPTAINER_CONTAINER", "SINGULARITY_CONTAINER", "APPTAINER_NAME", "SINGULARITY_NAME",
+    )) or Path("/.apptainer.d").exists() or Path("/.singularity.d").exists():
+        return
+    account = pwd.getpwnam(os.environ.get("NB_USER", "jovyan"))
+    for path in (checkout, checkout / ".git", checkout / "build.sh", launcher):
+        assert (path.stat().st_uid, path.stat().st_gid) == (account.pw_uid, account.pw_gid)
+    writable = subprocess.run(notebook_command(
+        "/usr/bin/python3", "-I", "-c",
+        "import os; assert all(os.access(p, os.W_OK) for p in "
+        "('/neurocommand', '/neurocommand/.git', '/neurocommand/local/bin'))",
+    ), capture_output=True, text=True)
+    assert writable.returncode == 0, writable.stderr
+
+
+def test_neurodesk_update_rejects_root():
+    if os.geteuid() != 0:
+        pytest.skip("Root refusal is checked by the root image profile")
+    result = subprocess.run(["/usr/local/bin/neurodesk-update"],
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 1
+    assert "not root" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_code_server_private_socket_serves_owner_and_rejects_other_uid():

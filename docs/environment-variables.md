@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-09-20"
+last-reviewed: "2026-10-07"
 ---
 
 # Environment Variables
@@ -77,6 +77,10 @@ packages still execute maintainer scripts as root, so it is not a boundary
 against a determined user or a compromised repository. Container capabilities,
 mounts, and host isolation still determine the consequences of root access.
 Unprivileged Apptainer startup cannot grant sudo rights or change host passwords.
+
+The Neurodesk menu's **Update** entry runs as the notebook user and needs no sudo grant.
+It requires a writable `/neurocommand` checkout. See
+[Neurocommand](architecture/cvmfs.md#neurocommand).
 
 See [desktop credentials and service access](architecture/desktop.md#credentials-and-service-access)
 for RDP initialization and VS Code isolation.
