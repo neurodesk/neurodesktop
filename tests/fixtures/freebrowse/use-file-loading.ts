@@ -371,7 +371,7 @@ export function useFileLoading(
     if (nvdParam) {
       console.log("Loading NVD from URL parameter:", nvdParam);
       const nvdFromUrl: FileItem = {
-        filename: nvdParam.split("/").pop() || nvdParam,
+        filename: urlParams.get("filename") || nvdParam.split("/").pop() || nvdParam,
         url: nvdParam,
       };
       handleNvdFileSelect(nvdFromUrl);
@@ -385,7 +385,7 @@ export function useFileLoading(
 
     if (volParam) {
       console.log("Loading volume from URL parameter:", volParam);
-      const filename = volParam.split("/").pop() || volParam;
+      const filename = urlParams.get("filename") || volParam.split("/").pop() || volParam;
       const fileItem: FileItem = { filename, url: volParam };
       handleImagingFileSelect(fileItem);
     }
