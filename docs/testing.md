@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-04"
+last-reviewed: "2026-10-07"
 ---
 
 # Testing
@@ -886,6 +886,18 @@ assigned-device isolation on a multi-GPU worker. See the
 application, transport, performance, and platform coverage.
 
 ## Startup performance regressions
+
+The menu-update and startup-ownership checks run with:
+
+```bash
+pytest tests/unit/test_neurodesk_update.py tests/unit/test_startup_security.py
+```
+
+They execute consecutive updates against a local Git origin, check launcher
+restoration after success and failure, reject root and read-only updates, and
+cover ownership migration without following symbolic or hard links.
+`tests/container/test_security_policy.py` checks the installed menu entry,
+checkout ownership, root refusal, and package-only sudo restrictions.
 
 Run the startup checks on a checkout:
 

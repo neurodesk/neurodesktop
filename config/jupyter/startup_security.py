@@ -1,12 +1,14 @@
 #!/usr/bin/python3 -I
 """Root startup policy. Never grant users sudo access to this program."""
 
+import errno
 import json
 import os
 from pathlib import Path
 import pwd
 import re
 import secrets
+import stat
 import subprocess
 import sys
 import tempfile
@@ -17,6 +19,7 @@ STATE = Path("/var/lib/neurodesktop/rdp")
 RUNTIME = Path("/run/neurodesktop/rdp")
 XRDP_CONFIG = Path("/etc/xrdp/xrdp.ini")
 ROOT_STORAGE = Path("/neurodesktop-storage")
+NEUROCOMMAND = Path("/neurocommand")
 ROOT_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "HOME": "/root", "LC_ALL": "C"}
 
 
@@ -122,12 +125,44 @@ def prepare_storage(home):
         print("[WARN] Existing root storage was preserved; it could not be linked to the home directory.", file=sys.stderr)
 
 
+def prepare_neurocommand(account):
+    metadata = NEUROCOMMAND.lstat()
+    if not stat.S_ISDIR(metadata.st_mode):
+        return
+    if (metadata.st_uid, metadata.st_gid) == (account.pw_uid, account.pw_gid):
+        return
+    descriptor = os.open(NEUROCOMMAND, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for _, _, files, directory in os.fwalk(".", topdown=False, follow_symlinks=False, dir_fd=descriptor):
+            for name in files:
+                metadata = os.stat(name, dir_fd=directory, follow_symlinks=False)
+                if stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1:
+                    try:
+                        file_descriptor = os.open(
+                            name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory,
+                        )
+                    except OSError as error:
+                        if error.errno == errno.ELOOP:
+                            continue
+                        raise
+                    try:
+                        metadata = os.fstat(file_descriptor)
+                        if stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1:
+                            os.fchown(file_descriptor, account.pw_uid, account.pw_gid)
+                    finally:
+                        os.close(file_descriptor)
+            os.fchown(directory, account.pw_uid, account.pw_gid)
+    finally:
+        os.close(descriptor)
+
+
 def main():
     if os.geteuid() != 0:
         raise PermissionError("Security initialization requires root")
     account = pwd.getpwnam(os.environ.get("NB_USER", "jovyan"))
     configure_sudo(account, os.environ.get("GRANT_SUDO", "packages"))
     prepare_storage(account.pw_dir)
+    prepare_neurocommand(account)
     Path("/run/sshd").mkdir(mode=0o755, exist_ok=True)
     configure_rdp(account, os.environ.get("NEURODESKTOP_RDP_PORT", "3389"))
 

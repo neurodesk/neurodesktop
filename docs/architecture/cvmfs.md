@@ -4,7 +4,7 @@ description: CVMFS server selection and mount configuration, and the
   neurocommand CLI/module system for neuroimaging tools
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-30"
+last-reviewed: "2026-10-07"
 ---
 
 # CVMFS and Neurocommand
@@ -118,3 +118,15 @@ Neurocommand is cloned from
 build. It provides the CLI and module system for neuroimaging tools, uses Lmod
 for module management, and stores containers in
 `/neurodesktop-storage/containers`.
+
+The notebook user owns `/neurocommand`. The Neurodesk menu's **Update**
+entry runs `/usr/local/bin/neurodesk-update`, which invokes
+`bash build.sh --update` in that checkout as the current user. The helper
+restores the generated `local/bin/update.sh` launcher after each rebuild,
+including failed builds. The terminal waits for Enter and preserves the update's
+exit status. Menu updates require no sudo access.
+
+Root startup repairs checkout ownership when the notebook UID or GID changes.
+It does not execute checkout code or traverse symbolic links, and skips files
+with multiple hard links. Read-only or foreign-owned HPC checkouts refuse the
+update with a permission error. The helper also refuses root execution.
