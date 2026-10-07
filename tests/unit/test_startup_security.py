@@ -213,3 +213,69 @@ def test_apt_exec_discards_untrusted_environment(apt, monkeypatch):
     assert executable == "/usr/bin/apt-get"
     assert environment == {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "HOME": "/root",
                            "LC_ALL": "C", "DEBIAN_FRONTEND": "noninteractive"}
+
+
+def test_neurocommand_ownership_migration_does_not_follow_links(security, tmp_path, monkeypatch):
+    module, calls = security
+    checkout = tmp_path / "neurocommand"
+    generated = checkout / "local/bin"
+    generated.mkdir(parents=True)
+    build = checkout / "build.sh"
+    build.write_text("exit 99\n")
+    launcher = generated / "update.sh"
+    launcher.write_text("untouched\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "sentinel"
+    sentinel.write_text("private\n")
+    (checkout / "local/containers").symlink_to(outside, target_is_directory=True)
+    (checkout / "file-link").symlink_to(sentinel)
+    os.link(sentinel, checkout / "hard-link")
+    monkeypatch.setattr(module, "NEUROCOMMAND", checkout)
+    target = SimpleNamespace(pw_uid=os.getuid() + 1, pw_gid=os.getgid() + 1)
+    changed = set()
+
+    def record_chown(path, uid, gid, *, dir_fd=None, follow_symlinks=True):
+        assert (uid, gid) == (target.pw_uid, target.pw_gid)
+        assert not follow_symlinks
+        metadata = os.stat(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+        changed.add(metadata.st_ino)
+
+    monkeypatch.setattr(module.os, "chown", record_chown)
+    module.prepare_neurocommand(target)
+    assert changed == {
+        path.stat().st_ino for path in (checkout, checkout / "local", generated, build, launcher)
+    }
+    assert sentinel.read_text() == "private\n"
+    assert launcher.read_text() == "untouched\n"
+    assert calls == []
+
+
+def test_neurocommand_matching_owner_needs_no_repair(security, tmp_path, monkeypatch):
+    module, calls = security
+    checkout = tmp_path / "neurocommand"
+    checkout.mkdir()
+    monkeypatch.setattr(module, "NEUROCOMMAND", checkout)
+
+    def unexpected_chown(*args, **kwargs):
+        pytest.fail("An already migrated checkout must not be chowned again")
+
+    monkeypatch.setattr(module.os, "chown", unexpected_chown)
+    module.prepare_neurocommand(SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid()))
+    assert calls == []
+
+
+def test_neurocommand_root_symlink_is_not_traversed(security, tmp_path, monkeypatch):
+    module, calls = security
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    checkout = tmp_path / "neurocommand"
+    checkout.symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(module, "NEUROCOMMAND", checkout)
+
+    def unexpected_chown(*args, **kwargs):
+        pytest.fail("Checkout root symlink must not change outside ownership")
+
+    monkeypatch.setattr(module.os, "chown", unexpected_chown)
+    module.prepare_neurocommand(SimpleNamespace(pw_uid=os.getuid() + 1, pw_gid=os.getgid() + 1))
+    assert calls == []
