@@ -52,6 +52,8 @@ jobs:
             VCS_REF=${{ github.sha }}
             NEURODESKTOP_VERSION=pr-${{ github.event.pull_request.number || github.run_id }}
           cache-from: type=registry,ref=ghcr.io/neurodesk/neurodesktop:latest
+      - name: Validate Slurm under default Docker permissions
+        run: exec bash scripts/verify_slurm_image.sh "$IMAGE_REF"
       - name: Validate package-only sudo and portable applications
         run: exec bash .github/scripts/validate_image_runtime.sh "$IMAGE_REF" regular true packages false
       - name: Validate foreign UID and HPC startup
