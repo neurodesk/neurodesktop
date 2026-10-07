@@ -65,10 +65,11 @@ class Desktop:
             raise
 
     def _connect(self, reader):
-        assert select.select([reader], [], [], 20)[0], "Virtual display did not start"
-        number = os.read(reader, 100).decode().splitlines()[0]
-        assert number.isdecimal(), "Virtual display did not announce its display number"
-        self.name = ":" + number
+        assert select.select([reader], [], [], 20)[0], self._startup_failure("did not start")
+        announced = os.read(reader, 100).decode().splitlines()
+        assert announced and announced[0].isdecimal(), self._startup_failure(
+            "did not announce its display number")
+        self.name = ":" + announced[0]
         self.x = ctypes.CDLL(ctypes.util.find_library("X11"))
         self.xtest = ctypes.CDLL(ctypes.util.find_library("Xtst"))
         self.x.XOpenDisplay.argtypes = [ctypes.c_char_p]
@@ -121,6 +122,10 @@ class Desktop:
         self.errors.append(f"{text.value.decode()} for request {event.contents.request_code}"
                            f" on resource {event.contents.resourceid:#x}")
         return 0
+
+    def _startup_failure(self, problem):
+        return (f"Virtual display {problem} (exit status {self.process.poll()})\n"
+                + (self.directory / "display.log").read_text(errors="replace"))
 
     def _record_lost_connection(self, display):
         self.lost = True

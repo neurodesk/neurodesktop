@@ -224,11 +224,19 @@ def test_opencode_finds_every_reproduction_skill_in_a_restored_home(tmp_path):
     # particular, the Lightcone adapter runs its session-start hook while it
     # loads, which makes this read-only assertion depend on unrelated external
     # work. The adapter itself is exercised by the focused test below.
+    # OpenCode also discovers skills from the working directory, so run it from
+    # an empty project. It truncates piped output at 64 KiB; read a file instead.
+    project = tmp_path / "project"
+    project.mkdir()
+    listing = tmp_path / "skills.json"
     code, output = run_cmd(
-        "/usr/bin/opencode debug skill --pure", env={"HOME": str(home)}, timeout=30
+        f"/usr/bin/opencode debug skill --pure > {listing}",
+        cwd=project,
+        env={"HOME": str(home)},
+        timeout=30,
     )
     assert code == 0, output
-    discovered = {skill["name"] for skill in json.loads(output)}
+    discovered = {skill["name"] for skill in json.loads(listing.read_text())}
     assert skill_names <= discovered
 
 
