@@ -725,6 +725,20 @@ The Slurm batch test waits for successful job completion and verifies a file
 written by the job. A 180-second deadline bounds queueing and execution, and
 cleanup cancels the submitted job if needed.
 
+The Slurm environment-retrieval regression completes a small job, submits a
+larger job with an `afterok` dependency, then completes another small job on
+the same worker. It covers `--export=NONE`, selected-variable exports, and
+explicit `--get-user-env`, checks job ID, hostname, process identity and supplied
+variables in the output, and fails immediately if the worker exits. Requests
+use 1 CPU/1 GB followed by 4 CPUs/12 GB when the configured node has capacity;
+smaller test nodes use their configured limits. Run it in a Docker container
+without `CAP_SYS_ADMIN` under the default seccomp policy to cover the denied
+PID-namespace path. Privileged image checks alone cannot exercise that denial.
+`bash scripts/verify_slurm_image.sh IMAGE` creates a disposable container with
+default Docker permissions, bootstraps local Slurm as root, runs the Slurm tests
+as the notebook user, and removes the container on success or failure. PR image
+acceptance runs this check on both amd64 and native arm64 candidates.
+
 Both `/home/jovyan` and `/neurodesktop-storage` are required writable directories
 in the Docker and HPC simulation profiles. Each receives one complete CRUD test
 inside a unique temporary directory. A missing directory fails instead of
