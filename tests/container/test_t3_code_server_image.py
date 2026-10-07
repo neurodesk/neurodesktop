@@ -58,7 +58,8 @@ def test_t3_code_runtime_and_native_terminal_support_are_installed():
 def test_t3_code_image_ships_one_platform_build_and_no_build_leftovers():
     build = platform_package()
     # A prebuilt, bundled tree: nothing is compiled and no source maps ship.
-    assert not Path.home().joinpath(".cache/node-gyp").exists()
+    # The image ships pty.node prebuilt; a local node-gyp build leaves objects.
+    assert not (build / "node_modules/node-pty/build/Release/obj.target").exists()
     assert not list(Path("/opt/t3-code").rglob("*.js.map"))
     assert (build / "node_modules/node-pty/build/Release/pty.node").is_file()
     assert os.access("/opt/neurodesktop/t3-provider-bin/codex", os.X_OK)
