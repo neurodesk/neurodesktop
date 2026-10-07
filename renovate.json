@@ -1,0 +1,1130 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    "helpers:pinGitHubActionDigests",
+    ":semanticCommitsDisabled"
+  ],
+  "timezone": "Australia/Brisbane",
+  "schedule": [
+    "before 6am on monday"
+  ],
+  "prConcurrentLimit": 5,
+  "labels": [
+    "dependencies"
+  ],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "tests/fixtures/**",
+    "tests/container/fixtures/**",
+    "docs/designs/**",
+    ".audit/**"
+  ],
+  "pip_requirements": {
+    "managerFilePatterns": [
+      "/(^|/)[\\w-]*requirements([-._]\\w+)?\\.(txt|pip)$/",
+      "/^config/jupyter/build-constraints\\.txt$/"
+    ]
+  },
+  "packageRules": [
+    {
+      "description": "Workflow actions, grouped into one review (as in neurodesk.github.io).",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchDepTypes": [
+        "action"
+      ],
+      "groupName": "github actions"
+    },
+    {
+      "description": "Toolchain versions set through setup-* actions.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchDepTypes": [
+        "uses-with"
+      ],
+      "groupName": "workflow runtimes"
+    },
+    {
+      "description": "A runner OS upgrade changes Docker, cgroups and FUSE for the privileged image builds; approve deliberately.",
+      "matchDatasources": [
+        "github-runners"
+      ],
+      "groupName": "github runner images",
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "The org's reusable workflow intentionally follows main; do not pin it to a digest.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchDepNames": [
+        "NeuroDesk/neurodesk.github.io"
+      ],
+      "pinDigests": false
+    },
+    {
+      "description": "False positive: the heredoc line `from pathlib import Path` parses as a FROM instruction.",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchDepNames": [
+        "pathlib"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "The dockerfile manager cannot rewrite the partial-tag APPTAINER_GO_VERSION ARG; the regex manager owns it.",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchDepNames": [
+        "golang"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Kasm is built FROM ghcr.io/neurodesk/neurodesktop:amd64, an architecture alias rather than a version.",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchDepNames": [
+        "ghcr.io/neurodesk/neurodesktop"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Not dependencies: the local viewer package and Notebook Intelligence, held at 5.3.1 because 5.4.0 conflicts with the ACP client (scripts/audit_image_versions.py).",
+      "matchDepNames": [
+        "neurodesk-astra-view",
+        "notebook-intelligence"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "jupyter/base-notebook tags are dates (YYYY-MM-DD).",
+      "matchDepNames": [
+        "quay.io/jupyter/base-notebook"
+      ],
+      "versioning": "regex:^(?<major>\\d{4})-(?<minor>\\d{2})-(?<patch>\\d{2})$"
+    },
+    {
+      "description": "Hold: Tomcat 11 line (TOMCAT_REL=11).",
+      "matchDepNames": [
+        "org.apache.tomcat:tomcat"
+      ],
+      "allowedVersions": "/^11\\./"
+    },
+    {
+      "description": "Hold: Jupyter AI 3.2 requires jupyter-collaboration below 5.",
+      "matchDepNames": [
+        "jupyterlab/jupyter-collaboration"
+      ],
+      "allowedVersions": "<5"
+    },
+    {
+      "description": "Hold: the MyST source build uses its pnpm 11 lockfile/toolchain.",
+      "matchDepNames": [
+        "pnpm"
+      ],
+      "allowedVersions": "<12"
+    },
+    {
+      "description": "Hold: Jupyter AI 3.2 requires jupyter-server-mcp>=0.3.0,<0.4.0.",
+      "matchDepNames": [
+        "jupyter-server-mcp"
+      ],
+      "allowedVersions": "<0.4.0"
+    },
+    {
+      "description": "Hold: Jupyter AI 3.2 requires jupyterlab-commands-toolkit>=0.2.0,<0.3.0.",
+      "matchDepNames": [
+        "jupyterlab-commands-toolkit"
+      ],
+      "allowedVersions": "<0.3.0"
+    },
+    {
+      "description": "Hold: stable comm behaviour is required until per-target subshells are production-ready.",
+      "matchDepNames": [
+        "ipykernel"
+      ],
+      "allowedVersions": "<7"
+    },
+    {
+      "description": "Hold: the pinned Snakemake release requires packaging below 26.",
+      "matchDepNames": [
+        "packaging"
+      ],
+      "allowedVersions": "<26"
+    },
+    {
+      "description": "The image follows Pydra's 1.0 prerelease line.",
+      "matchDepNames": [
+        "pydra"
+      ],
+      "allowedVersions": ">=1.0a0,<1.0rc0",
+      "ignoreUnstable": false
+    },
+    {
+      "description": "Apptainer and the Go modules it is rebuilt against move together.",
+      "matchDepNames": [
+        "apptainer/apptainer",
+        "golang",
+        "google.golang.org/grpc",
+        "golang.org/x/crypto"
+      ],
+      "groupName": "apptainer build"
+    },
+    {
+      "description": "Guacamole, the Tomcat that serves it and the WAR migration tool.",
+      "matchDepNames": [
+        "apache/guacamole-server",
+        "org.apache.tomcat:tomcat",
+        "org.apache.tomcat:jakartaee-migration"
+      ],
+      "groupName": "remote desktop stack"
+    },
+    {
+      "description": "code-server and the npm packages patched into its tree.",
+      "matchDepNames": [
+        "coder/code-server",
+        "shell-quote",
+        "proxy-addr",
+        "tar"
+      ],
+      "groupName": "code-server"
+    },
+    {
+      "description": "Coding agent CLIs and their ACP adapters are validated together by the T3 and ACP probes.",
+      "matchFileNames": [
+        "Dockerfile",
+        "tests/**"
+      ],
+      "matchDepNames": [
+        "@openai/codex",
+        "@anthropic-ai/claude-code",
+        "anomalyco/opencode",
+        "@agentclientprotocol/codex-acp",
+        "@agentclientprotocol/claude-agent-acp"
+      ],
+      "groupName": "coding agents"
+    },
+    {
+      "description": "The agentic maintenance worker image is CI tooling, reviewed apart from the user image.",
+      "matchFileNames": [
+        "config/agentic/Dockerfile",
+        ".github/workflows/agentic-*.yml",
+        ".github/scripts/agentic_worker.py",
+        "docs/agentic-maintenance.md",
+        "docs/architecture/agentic-workflows.md"
+      ],
+      "matchDepNames": [
+        "@openai/codex",
+        "node",
+        "python",
+        "pytest",
+        "httpx",
+        "traitlets",
+        "pyyaml",
+        "jupyter-server"
+      ],
+      "groupName": "agentic worker image"
+    },
+    {
+      "description": "Jupyter AI pins its pre-1.0 extensions and the collaboration frontends next to the metapackage.",
+      "matchDepNames": [
+        "jupyter-ai",
+        "jupyter-ai-acp-client",
+        "jupyter-ai-chat-commands",
+        "jupyter-ai-persona-manager",
+        "jupyter-ai-router",
+        "jupyter-ai-tools",
+        "jupyter-server-documents",
+        "jupyter-server-mcp",
+        "jupyterlab-chat",
+        "jupyterlab-commands-toolkit",
+        "jupyterlab-notebook-awareness",
+        "jupyterlab/jupyter-collaboration"
+      ],
+      "groupName": "jupyter ai stack"
+    },
+    {
+      "description": "ipywidgets and jupyterlab_widgets are a matched pair; ipykernel carries the comm behaviour they rely on.",
+      "matchDepNames": [
+        "ipywidgets",
+        "jupyterlab-widgets",
+        "ipykernel"
+      ],
+      "groupName": "jupyter widgets"
+    },
+    {
+      "description": "The viewer's exact ASTRA and anywidget requirements must match both Dockerfiles (a unit test guards this).",
+      "matchDepNames": [
+        "astra-spec",
+        "astra-tools",
+        "anywidget"
+      ],
+      "groupName": "astra"
+    },
+    {
+      "description": "MyST/RISE and collaboration frontend rebuild toolchain.",
+      "matchDepNames": [
+        "jupyterlab-myst",
+        "pnpm",
+        "@jupyter/ydoc"
+      ],
+      "groupName": "jupyterlab frontend rebuilds"
+    },
+    {
+      "description": "Build backend pins shared by the launcher pyproject, its hatch hook and build-constraints.txt.",
+      "matchDepNames": [
+        "hatchling",
+        "hatch-jupyter-builder"
+      ],
+      "groupName": "jupyterlab extension build backend"
+    },
+    {
+      "description": "neurodesk-launcher JupyterLab extension (npm).",
+      "matchFileNames": [
+        "extensions/neurodesk-launcher/package.json"
+      ],
+      "groupName": "neurodesk-launcher extension"
+    },
+    {
+      "description": "T3 Code server manifest, Dockerfile ARG and tests move together.",
+      "matchDepNames": [
+        "t3"
+      ],
+      "groupName": "t3 code"
+    },
+    {
+      "description": "Tools used only by CI workflows.",
+      "matchFileNames": [
+        ".github/workflows/**",
+        "docs/testing.md"
+      ],
+      "matchDepNames": [
+        "google/go-containerregistry",
+        "alpine",
+        "jupyterhub"
+      ],
+      "groupName": "workflow tools"
+    },
+    {
+      "description": "The unit tests' DOM harness should stay aligned with the JupyterLab shipped in the image.",
+      "matchFileNames": [
+        ".github/workflows/unit-tests.yml",
+        "docs/testing.md"
+      ],
+      "matchDatasources": [
+        "npm"
+      ],
+      "groupName": "unit test DOM harness",
+      "prBodyNotes": [
+        "> [!WARNING]\n> Keep `@jupyterlab/*` and `@lumino/*` aligned with the JupyterLab version in the image."
+      ]
+    },
+    {
+      "description": "Checksum-gated downloads: Renovate bumps the version, the SHA256 values must be refreshed by hand.",
+      "matchDepNames": [
+        "tailscale/tailscale",
+        "cloudflare/cloudflared",
+        "lightcone-cli",
+        "cvmfs-release",
+        "JuliaBinaryWrappers/strace_jll.jl"
+      ],
+      "dependencyDashboardApproval": true,
+      "addLabels": [
+        "manual-completion"
+      ],
+      "prBodyNotes": [
+        "> [!WARNING]\n> Manual completion required: update the pinned SHA256 values (and any URL build suffix) for every architecture before this PR can build. Do not merge on a version bump alone."
+      ]
+    },
+    {
+      "description": "Upstream source commits with anchored patches and copied fixtures.",
+      "matchDepNames": [
+        "NERSC/jupyterlab-slurm"
+      ],
+      "dependencyDashboardApproval": true,
+      "addLabels": [
+        "manual-completion"
+      ],
+      "prBodyNotes": [
+        "> [!WARNING]\n> Manual completion required: re-verify config/jupyter/patch_jupyterlab_slurm.py, update JUPYTER_BUILDER_VERSION to the new package.json devDependency and refresh tests/fixtures/slurm-user-handler.py."
+      ]
+    },
+    {
+      "description": "The Kasm donor image also names the published Kasm release tags.",
+      "matchDepNames": [
+        "kasmweb/core-ubuntu-noble"
+      ],
+      "dependencyDashboardApproval": true,
+      "addLabels": [
+        "manual-completion"
+      ],
+      "prBodyNotes": [
+        "> [!WARNING]\n> Manual completion required: update the Kasm release tag scheme in .github/workflows/release-kasm.yml, scripts/prepare_kasm_submission.py, the Kasm tests and config/kasm/publishing, then run scripts/verify_kasm_image.sh."
+      ]
+    },
+    {
+      "description": "A new ASTRA schema release also needs the viewer's schema contract reviewed.",
+      "matchDepNames": [
+        "astra-spec"
+      ],
+      "dependencyDashboardApproval": true,
+      "addLabels": [
+        "manual-completion"
+      ],
+      "prBodyNotes": [
+        "> [!WARNING]\n> Manual completion required: review ASTRA_SPEC_VERSION in extensions/astra-viewer/neurodesk_astra_view/adapter.py and the spec fixtures."
+      ]
+    },
+    {
+      "description": "A Node.js major changes the runtime for every bundled agent and extension build.",
+      "matchDepNames": [
+        "node"
+      ],
+      "matchFileNames": [
+        "Dockerfile"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Packages patched at build time: a new release can move the patch anchors.",
+      "matchDepNames": [
+        "ipyniivue",
+        "jupyter-server-proxy",
+        "jupyter-server-documents",
+        "jupyter-server-mcp",
+        "jupyter-ai-acp-client",
+        "ipywidgets",
+        "jupyterlab-widgets"
+      ],
+      "prBodyNotes": [
+        "> [!WARNING]\n> This package is patched during the image build (config/jupyter/patch_*.py). The build fails loudly if an anchor moved; re-verify the patch before merging."
+      ]
+    },
+    {
+      "description": "User-facing Neurodesktop version recommendation (same rule as neurodesk.github.io).",
+      "matchDepNames": [
+        "neurodesk/neurodesktop"
+      ],
+      "groupName": "neurodesktop release pins",
+      "separateMajorMinor": false,
+      "addLabels": [
+        "enhancement"
+      ],
+      "prBodyNotes": [
+        "> [!WARNING]\n> This update changes a user-facing recommendation and requires manual testing before merging."
+      ]
+    },
+    {
+      "description": "Supply-chain guard: let new npm and PyPI releases age three days before proposing them.",
+      "matchDatasources": [
+        "npm",
+        "pypi"
+      ],
+      "minimumReleaseAge": "3 days"
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "Apptainer source release built in the apptainer stage.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG APPTAINER_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "apptainer/apptainer",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "description": "Go toolchain image for the Apptainer stage (FROM golang:${APPTAINER_GO_VERSION}-bookworm). The built-in dockerfile manager cannot rewrite a partial-tag ARG, so the ARG is matched here.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG APPTAINER_GO_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "golang",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    },
+    {
+      "description": "grpc module override applied to the Apptainer build.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG APPTAINER_GRPC_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "google.golang.org/grpc",
+      "datasourceTemplate": "go",
+      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "description": "x/crypto module override applied to Apptainer and its vendored gocryptfs.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG APPTAINER_CRYPTO_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "golang.org/x/crypto",
+      "datasourceTemplate": "go",
+      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "description": "CVMFS client packages, looked up in CERN's noble-prod apt index (the only versions apt can install).",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG CVMFS_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "cvmfs",
+      "datasourceTemplate": "deb",
+      "registryUrlTemplate": "https://cvmrepo.s3.cern.ch/cvmrepo/apt?suite=noble-prod&components=main&binaryArch=amd64",
+      "versioningTemplate": "deb"
+    },
+    {
+      "description": "CVMFS apt bootstrap package. Its SHA256 (CVMFS_RELEASE_SHA256) must be refreshed by hand.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG CVMFS_RELEASE_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "cvmfs-release",
+      "datasourceTemplate": "deb",
+      "registryUrlTemplate": "https://cvmrepo.s3.cern.ch/cvmrepo/apt?suite=noble-prod&components=main&binaryArch=amd64",
+      "versioningTemplate": "deb"
+    },
+    {
+      "description": "Node.js major installed from NodeSource in the builder and runtime stages.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "deb\\.nodesource\\.com/setup_(?<currentValue>\\d+)\\.x"
+      ],
+      "depNameTemplate": "node",
+      "datasourceTemplate": "node-version",
+      "versioningTemplate": "node"
+    },
+    {
+      "description": "npm release installed over the NodeSource npm.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG NPM_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "npm",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "description": "code-server prebuilt release.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG CODE_SERVER_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "coder/code-server",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "description": "shell-quote copy patched into VS Code's nested node_modules.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG SHELL_QUOTE_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "shell-quote",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "description": "proxy-addr pinned into code-server's dependency tree.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG PROXY_ADDR_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "proxy-addr",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "description": "node-tar copy patched into code-server and the global npm; the unit and container tests pin the same version.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/",
+        "/^tests/unit/test_node_tar_security\\.py$/",
+        "/^tests/container/test_node_tar_runtime\\.py$/"
+      ],
+      "matchStrings": [
+        "ARG NODE_TAR_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?",
+        "PATCHED_TAR_VERSION = \"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "tar",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "description": "Guacamole server source and WAR (declared in both the builder and runtime stages).",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG GUACAMOLE_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "apache/guacamole-server",
+      "datasourceTemplate": "github-tags"
+    },
+    {
+      "description": "Apache Tomcat serving Guacamole (major line held by TOMCAT_REL).",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG TOMCAT_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "org.apache.tomcat:tomcat",
+      "datasourceTemplate": "maven"
+    },
+    {
+      "description": "Jakarta EE migration tool that converts the Guacamole WAR for Tomcat 11.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG TOMCAT_MIGRATION_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "org.apache.tomcat:jakartaee-migration",
+      "datasourceTemplate": "maven"
+    },
+    {
+      "description": "VirtualGL release line plus one dependency per architecture digest, in the Dockerfile and in its unit test. Each digest line is its own dependency with its own currentDigest, so github-release-attachments recomputes the sha256 of the same-named .deb in the new release.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/",
+        "/^tests/unit/test_virtualgl\\.py$/"
+      ],
+      "matchStrings": [
+        "ARG VIRTUALGL_VERSION=\"(?<currentValue>[^\"]+)\"[^\\n]*\\n[^\\n]*ARG VIRTUALGL_AMD64_SHA256=\"[0-9a-f]{64}\"[^\\n]*\\n[^\\n]*ARG VIRTUALGL_ARM64_SHA256=\"[0-9a-f]{64}\"",
+        "VIRTUALGL_VERSION=\"[^\"]+\"|VIRTUALGL_(?:AMD64|ARM64)_SHA256=\"(?<currentDigest>[0-9a-f]{64})\""
+      ],
+      "depNameTemplate": "VirtualGL/virtualgl",
+      "datasourceTemplate": "github-release-attachments",
+      "matchStringsStrategy": "recursive"
+    },
+    {
+      "description": "VirtualGL version reported by the installed image.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^tests/container/test_virtualgl\\.py$/"
+      ],
+      "matchStrings": [
+        "VirtualGL v(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "depNameTemplate": "VirtualGL/virtualgl",
+      "datasourceTemplate": "github-release-attachments"
+    },
+    {
+      "description": "uv release (pip-installed) and the version the container test expects.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/",
+        "/^tests/container/test_astra_agent_skills_image\\.py$/"
+      ],
+      "matchStrings": [
+        "ARG UV_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?",
+        "output\\.startswith\\(\"uv (?<currentValue>[^\"]+)\"\\)"
+      ],
+      "depNameTemplate": "uv",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "Jupyter AI metapackage.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG JUPYTER_AI_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "jupyter-ai",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "Jupyter Collaboration release: Dockerfile ARG, its unit-test assertion, and the rebuilt extension versions the container test reads back.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/",
+        "/^tests/unit/test_astra_jupyter_ai_tooling\\.py$/",
+        "/^tests/container/test_astra_jupyter_ai_image\\.py$/"
+      ],
+      "matchStrings": [
+        "ARG JUPYTER_COLLABORATION_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?",
+        "@jupyter/(?:collaboration|docprovider)-extension v(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "depNameTemplate": "jupyterlab/jupyter-collaboration",
+      "datasourceTemplate": "github-tags",
+      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "description": "Commit of the Jupyter Collaboration release tag (the build asserts git rev-parse HEAD). Only the REF line is replaced; currentValue gets the tag's v prefix so the digest lookup finds tag vX.Y.Z.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG JUPYTER_COLLABORATION_VERSION=\"(?<currentValue>[^\"]+)\"\\nARG JUPYTER_COLLABORATION_REF=\"[0-9a-f]{40}\"",
+        "ARG JUPYTER_COLLABORATION_REF=\"(?<currentDigest>[0-9a-f]{40})\""
+      ],
+      "depNameTemplate": "jupyterlab/jupyter-collaboration",
+      "datasourceTemplate": "github-tags",
+      "matchStringsStrategy": "recursive",
+      "currentValueTemplate": "v{{{currentValue}}}"
+    },
+    {
+      "description": "ASTRA schema package.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG ASTRA_SPEC_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "astra-spec",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "ASTRA CLI: Dockerfile ARG, the container test's expectation, and the viewer's install hint.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/",
+        "/^tests/container/test_astra_agent_skills_image\\.py$/",
+        "/^extensions/astra-viewer/neurodesk_astra_view/adapter\\.py$/"
+      ],
+      "matchStrings": [
+        "ARG ASTRA_TOOLS_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?",
+        "ASTRA_TOOLS_VERSION = \"(?<currentValue>[^\"]+)\"",
+        "requires astra-tools==(?<currentValue>[^\"\\s]+)\""
+      ],
+      "depNameTemplate": "astra-tools",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "anywidget runtime for the ASTRA viewer.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG ANYWIDGET_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "anywidget",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "ipyniivue (patched at build time by config/jupyter/patch_ipyniivue.py).",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/",
+        "/^tests/unit/test_ipyniivue_patch\\.py$/"
+      ],
+      "matchStrings": [
+        "ARG IPYNIIVUE_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "ipyniivue",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "Snakemake in the main and Lightcone environments.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG SNAKEMAKE_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "snakemake",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "PyJWT security floor pinned exactly.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG PYJWT_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "pyjwt",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "Lightcone CLI sdist (checksum LIGHTCONE_CLI_SHA256 and the anchored patch need manual refresh).",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG LIGHTCONE_CLI_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "lightcone-cli",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "Exact pip pins inside the Dockerfiles' pip/uv install lists (ARG-driven pins use ${...} and are matched above).",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/",
+        "/^config/agentic/Dockerfile$/"
+      ],
+      "matchStrings": [
+        "(?<depName>[A-Za-z][A-Za-z0-9._-]*)==(?<currentValue>\\d[^\\s\\\"'\\\\]*)"
+      ],
+      "depNameTemplate": "{{{replace '[-_.]+' '-' (lowercase depName)}}}",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "Unit tests that locate a Dockerfile pip pin by its exact text.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^tests/unit/test_ipywidgets_control_comm_patch\\.py$/",
+        "/^tests/unit/test_jupyter_ai_acp_client_patch\\.py$/",
+        "/^tests/unit/test_jupyter_server_documents_patch\\.py$/",
+        "/^tests/unit/test_jupyter_server_mcp_patch\\.py$/",
+        "/^tests/unit/test_jupyter_server_proxy_limits\\.py$/",
+        "/^tests/unit/test_jupyterlab_widgets_patch\\.py$/",
+        "/^tests/unit/test_myst_build_workaround\\.py$/"
+      ],
+      "matchStrings": [
+        "dockerfile\\.index\\(\"(?<depName>[A-Za-z][A-Za-z0-9._-]*)==(?<currentValue>[^\"]+)\"\\)",
+        "\"(?<depName>[A-Za-z][A-Za-z0-9._-]*)==(?<currentValue>[^\"]+)\" in (?:dockerfile|DOCKERFILE)"
+      ],
+      "depNameTemplate": "{{{replace '[-_.]+' '-' (lowercase depName)}}}",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "Installed-version assertions in the container tests (version-only expectations).",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^tests/container/test_astra_view_image\\.py$/",
+        "/^tests/container/test_astra_jupyter_ai_image\\.py$/",
+        "/^tests/container/test_widget_compatibility_image\\.py$/"
+      ],
+      "matchStrings": [
+        "metadata\\.version\\(\"(?<depName>[^\"]+)\"\\) == \"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "{{{replace '[-_.]+' '-' (lowercase depName)}}}",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "Isolated hatch hook dependency, kept equal to the build-system pin.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^extensions/neurodesk-launcher/pyproject\\.toml$/"
+      ],
+      "matchStrings": [
+        "dependencies = \\[\"hatch-jupyter-builder==(?<currentValue>[^\"]+)\"\\]"
+      ],
+      "depNameTemplate": "hatch-jupyter-builder",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "pnpm used for the MyST source build (held below 12 for its lockfile).",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/",
+        "/^tests/unit/test_myst_build_workaround\\.py$/"
+      ],
+      "matchStrings": [
+        "ARG MYST_PNPM_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "pnpm",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "description": "@jupyter/ydoc compiled into the MyST and collaboration rebuilds.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/",
+        "/^tests/unit/test_myst_build_workaround\\.py$/"
+      ],
+      "matchStrings": [
+        "ARG MYST_YDOC_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "@jupyter/ydoc",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "description": "jupyterlab-slurm source commit on upstream main (anchored patch, builder pin and fixture copy need review).",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG JUPYTERLAB_SLURM_REF=\"(?<currentDigest>[0-9a-f]{40})\""
+      ],
+      "depNameTemplate": "NERSC/jupyterlab-slurm",
+      "datasourceTemplate": "git-refs",
+      "packageNameTemplate": "https://github.com/NERSC/jupyterlab-slurm",
+      "currentValueTemplate": "main"
+    },
+    {
+      "description": "Codex CLI installed globally in the image.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG CODEX_CLI_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "@openai/codex",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "description": "Claude Code native release (the npm stream is the machine-readable authority).",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/",
+        "/^tests/unit/test_coding_agents\\.py$/"
+      ],
+      "matchStrings": [
+        "ARG CLAUDE_CODE_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "@anthropic-ai/claude-code",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "description": "OpenCode CLI release (CLI tags only; the repo also carries vscode-v* tags).",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG OPENCODE_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "anomalyco/opencode",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "description": "Codex ACP adapter for Jupyter AI.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG CODEX_ACP_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "@agentclientprotocol/codex-acp",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "description": "Claude ACP adapter for Jupyter AI.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG CLAUDE_AGENT_ACP_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "@agentclientprotocol/claude-agent-acp",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "description": "T3 Code server: Dockerfile ARG plus the unit and container tests that read it back (config/agents/t3-code/package.json is handled by the npm manager).",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/",
+        "/^tests/unit/test_t3_code_server\\.py$/",
+        "/^tests/container/test_t3_code_server_image\\.py$/"
+      ],
+      "matchStrings": [
+        "ARG T3_CODE_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?",
+        "package\\[\"dependencies\"\\]\\[\"t3\"\\] == \"(?<currentValue>[^\"]+)\"",
+        "== \"t3 v(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "t3",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "description": "Tailscale static CLI and daemon (both architecture SHA256 ARGs need a manual refresh).",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/",
+        "/^tests/container/test_tailscale_image\\.py$/"
+      ],
+      "matchStrings": [
+        "ARG TAILSCALE_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?",
+        "daemon\\.splitlines\\(\\)\\[0\\] == \"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "tailscale/tailscale",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "description": "cloudflared relay client for T3 Connect (both inline relay_sha values need a manual refresh).",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/",
+        "/^tests/container/test_t3_code_server_image\\.py$/"
+      ],
+      "matchStrings": [
+        "ARG T3_CLOUDFLARED_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?",
+        "assert \"(?<currentValue>[^\"]+)\" in subprocess\\.check_output\\(\\[\"cloudflared\""
+      ],
+      "depNameTemplate": "cloudflare/cloudflared",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "description": "nf-test version passed to its installer script.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "get\\.nf-test\\.com \\| bash -s (?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "askimed/nf-test",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "description": "Static strace from JuliaBinaryWrappers (the +N build suffix in the URL needs a manual check).",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "strace_jll\\.jl/releases/download/strace-v[0-9.]+%2B\\d+/strace\\.v(?<currentValue>\\d+\\.\\d+\\.\\d+)\\."
+      ],
+      "depNameTemplate": "JuliaBinaryWrappers/strace_jll.jl",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^strace-v(?<version>\\d+\\.\\d+\\.\\d+)\\+\\d+$"
+    },
+    {
+      "description": "crane (go-containerregistry) downloaded by the build workflows.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/[^/]+\\.yml$/"
+      ],
+      "matchStrings": [
+        "go-containerregistry/releases/download/v(?<currentValue>\\d+\\.\\d+\\.\\d+)/"
+      ],
+      "depNameTemplate": "google/go-containerregistry",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "description": "alpine images run inside workflow steps.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/[^/]+\\.yml$/"
+      ],
+      "matchStrings": [
+        "\\balpine:(?<currentValue>\\d+\\.\\d+)\\b"
+      ],
+      "depNameTemplate": "alpine",
+      "datasourceTemplate": "docker"
+    },
+    {
+      "description": "JupyterHub used by the unit tests, mirrored in docs/testing.md.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/unit-tests\\.yml$/",
+        "/^docs/testing\\.md$/"
+      ],
+      "matchStrings": [
+        "jupyterhub==(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "jupyterhub",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "npm packages for the unit tests' DOM harness, mirrored in docs/testing.md.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/unit-tests\\.yml$/",
+        "/^docs/testing\\.md$/"
+      ],
+      "matchStrings": [
+        "npm install --prefix (?:[^\\n\\\\]|\\\\[^\\n])*(?:\\\\\\n(?:[^\\n\\\\]|\\\\[^\\n])*)*",
+        "(?<depName>(?:@[\\w.-]+/)?[\\w.-]+)@(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "{{{depName}}}",
+      "datasourceTemplate": "npm",
+      "matchStringsStrategy": "recursive"
+    },
+    {
+      "description": "Codex CLI in the agentic worker image, its image tag in workflows/scripts, and the docs that name it.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^config/agentic/Dockerfile$/",
+        "/^\\.github/workflows/agentic-readiness\\.yml$/",
+        "/^\\.github/workflows/agentic-worker\\.yml$/",
+        "/^\\.github/scripts/agentic_worker\\.py$/",
+        "/^docs/agentic-maintenance\\.md$/",
+        "/^docs/architecture/agentic-workflows\\.md$/"
+      ],
+      "matchStrings": [
+        "@openai/codex@(?<currentValue>\\d+\\.\\d+\\.\\d+)",
+        "neurodesktop-agentic:codex-(?<currentValue>\\d+\\.\\d+\\.\\d+)",
+        "pins Codex CLI `(?<currentValue>\\d+\\.\\d+\\.\\d+)`"
+      ],
+      "depNameTemplate": "@openai/codex",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "description": "Neurodesktop image in the TinyRange config, tracked to stable GitHub releases like the website does.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^neurodesk\\.yml$/"
+      ],
+      "matchStrings": [
+        "oci_image: vnmd/neurodesktop:(?<currentValue>\\d{4}-\\d{2}-\\d{2})"
+      ],
+      "depNameTemplate": "neurodesk/neurodesktop",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "regex:^(?<major>\\d{4})-(?<minor>\\d{2})-(?<patch>\\d{2})$"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "schedule": [
+      "at any time"
+    ],
+    "labels": [
+      "security"
+    ]
+  }
+}
