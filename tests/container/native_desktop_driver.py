@@ -5,6 +5,7 @@ import select
 import signal
 import subprocess
 import time
+from pathlib import Path
 
 from PIL import ImageGrab
 
@@ -38,6 +39,39 @@ _IO_ERROR_HANDLER = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
 _IO_ERROR_EXIT_HANDLER = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p)
 
 
+def start_display(log, geometry="1280x1024"):
+    """Start Xtigervnc on a free display and return the process and display name."""
+    # With -displayfd, the server skips every display where any listener fails.
+    # Some sandboxes refuse abstract Unix sockets (Xtrans "local"), so no display
+    # qualifies; retry with the file socket alone. Keep the abstract listener
+    # otherwise, so a host-network container cannot reuse a host display's name.
+    for disabled in (("tcp",), ("tcp", "local")):
+        reader, writer = os.pipe()
+        try:
+            process = subprocess.Popen(
+                ["/usr/local/bin/Xtigervnc", "-displayfd", str(writer),
+                 "-geometry", geometry, "-depth", "24", "-SecurityTypes", "None",
+                 "-rfbport", "-1"] + [arg for name in disabled for arg in ("-nolisten", name)],
+                pass_fds=(writer,), stdout=log, stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        finally:
+            os.close(writer)
+        try:
+            ready = select.select([reader], [], [], 20)[0]
+            announced = os.read(reader, 100).decode().split() if ready else []
+        finally:
+            os.close(reader)
+        if announced and announced[0].isdecimal():
+            return process, ":" + announced[0]
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+    log.flush()
+    raise AssertionError("Virtual display did not announce its display number\n"
+                         + Path(log.name).read_text(errors="replace"))
+
+
 class Desktop:
     def __init__(self, directory):
         self.directory = directory
@@ -45,31 +79,15 @@ class Desktop:
         self.errors = []
         self._previous_handlers = None
         self.lost = False
-        self.display_reader = self.process = self.connection = None
+        self.process = self.connection = None
         try:
-            reader, writer = os.pipe()
-            self.display_reader = reader
-            try:
-                self.process = subprocess.Popen(
-                    ["/usr/local/bin/Xtigervnc", "-displayfd", str(writer),
-                     "-geometry", "1280x1024", "-depth", "24", "-SecurityTypes", "None",
-                     "-rfbport", "-1", "-nolisten", "tcp"],
-                    pass_fds=(writer,), stdout=self.log, stderr=subprocess.STDOUT,
-                    start_new_session=True,
-                )
-            finally:
-                os.close(writer)
-            self._connect(reader)
+            self.process, self.name = start_display(self.log)
+            self._connect()
         except BaseException:
             self.close()
             raise
 
-    def _connect(self, reader):
-        assert select.select([reader], [], [], 20)[0], self._startup_failure("did not start")
-        announced = os.read(reader, 100).decode().splitlines()
-        assert announced and announced[0].isdecimal(), self._startup_failure(
-            "did not announce its display number")
-        self.name = ":" + announced[0]
+    def _connect(self):
         self.x = ctypes.CDLL(ctypes.util.find_library("X11"))
         self.xtest = ctypes.CDLL(ctypes.util.find_library("Xtst"))
         self.x.XOpenDisplay.argtypes = [ctypes.c_char_p]
@@ -122,10 +140,6 @@ class Desktop:
         self.errors.append(f"{text.value.decode()} for request {event.contents.request_code}"
                            f" on resource {event.contents.resourceid:#x}")
         return 0
-
-    def _startup_failure(self, problem):
-        return (f"Virtual display {problem} (exit status {self.process.poll()})\n"
-                + (self.directory / "display.log").read_text(errors="replace"))
 
     def _record_lost_connection(self, display):
         self.lost = True
@@ -223,6 +237,4 @@ class Desktop:
             except subprocess.TimeoutExpired:
                 os.killpg(self.process.pid, signal.SIGKILL)
                 self.process.wait(timeout=5)
-        if self.display_reader is not None:
-            os.close(self.display_reader)
         self.log.close()
