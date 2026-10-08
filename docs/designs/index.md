@@ -4,7 +4,7 @@ description: Assessments, implementation plans, and audits kept as the record
   of why the tree is shaped the way it is
 parent: ../index.md
 status: current
-last-reviewed: "2026-09-20"
+last-reviewed: "2026-10-08"
 ---
 
 # Design records
@@ -20,6 +20,7 @@ current behavior see [Architecture](../architecture.md),
 | [GPU tool integration checklist](gpu-tool-integration.md) | proposed | Install VirtualGL in the FreeSurfer image, preserve injected driver libraries, and explicitly forward rendering controls through Neurocommand's clean environment |
 | [GPU desktop session assessment](gpu-desktop-sessions.md) | proposed | Assess VirtualGL EGL with existing VNC/Guacamole, nested Apptainer launch requirements, GPU allocation, and hardware acceptance gates |
 | [Kasm workspace assessment](kasm-workspace-assessment.md) | research | Compare a native Neurodesktop Kasm image with an external VNC connection, and identify startup, profile, CVMFS, and Apptainer validation needs |
+| [Dependency dashboard upgrades, 8 October 2026](dependency-dashboard-upgrades-2026-10-08.md) | implemented | Select Claude-reviewed build and utility upgrades, preserve compatibility holds, and defer coupled runtime migrations |
 | [Image dependency audit, 20 September 2026](image-dependency-audit-2026-09-20.md) | assessment | Live release results, update candidates, dependency conflicts, and coverage limits |
 | [Image security audit](image-security-audit.md) | assessed | Identify credential, shared-host isolation, privilege, and release-gating improvements |
 | [Image packaging and Lightcone environment audit](image-packaging-and-lightcone.md) | implemented | Remove payloads before layer commits, update selected releases, and test whether Lightcone can share the main dependency set |
