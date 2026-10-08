@@ -15,7 +15,7 @@ IMAGE_TEST_WORKFLOWS = (
 )
 CVMFS_ACTION = (
     "cvmfs-contrib/github-action-cvmfs@"
-    "10197e000cc0add8e54ac4fb73d3ed44e2de72b4 # v5.5"
+    "72f2a8d366043978d6aebee154bc9ed321c2f2a8 # v5.6"
 )
 
 

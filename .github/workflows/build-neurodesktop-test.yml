@@ -72,7 +72,7 @@ jobs:
           esac
           echo "GITHUB_RATE_REMAINING=$GITHUB_RATE_REMAINING" >> "$GITHUB_ENV"
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.sha }}
       - name: Set environment variables
@@ -98,7 +98,7 @@ jobs:
       # No `Set up QEMU` step — amd64 builds natively on the x86 ARC pool and
       # arm64 builds natively on a Blacksmith arm runner. Nothing is emulated.
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         # this is for testing the arc runners.
         with:
           driver-opts: |
@@ -112,12 +112,12 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Login to DockerHub
         if: ${{ env.DOCKERHUB_ORG != '' }}
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
       - name: Build and push arch image
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: ${{ matrix.platform.docker_platform }}
@@ -246,11 +246,11 @@ jobs:
             echo "PUSH_IMAGES=$PUSH_IMAGES"
           } >> "$GITHUB_ENV"
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.sha }}
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Login to GHCR
         uses: ./.github/actions/docker-login-retry
         with:
@@ -259,7 +259,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Login to DockerHub
         if: ${{ env.DOCKERHUB_ORG != '' }}
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
@@ -268,7 +268,7 @@ jobs:
       # mirroring DOCKERHUB_ORG — forks without it set simply skip Quay.
       - name: Login to Quay
         if: ${{ env.QUAY_ORG != '' }}
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: quay.io
           username: ${{ secrets.QUAY_USERNAME }}
@@ -422,7 +422,7 @@ jobs:
           sudo docker image prune --all --force || true
           sudo docker builder prune --force || true
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.sha }}
       - name: Login to GHCR
@@ -435,7 +435,7 @@ jobs:
         run: bash scripts/retry.sh docker pull "$IMAGE_REF"
       - name: Initialize CVMFS
         if: matrix.profile.needs_cvmfs
-        uses: cvmfs-contrib/github-action-cvmfs@10197e000cc0add8e54ac4fb73d3ed44e2de72b4 # v5.5
+        uses: cvmfs-contrib/github-action-cvmfs@72f2a8d366043978d6aebee154bc9ed321c2f2a8 # v5.6
       - name: Select scientific tool mirrors
         if: matrix.profile.needs_cvmfs
         run: |
@@ -499,7 +499,7 @@ jobs:
           sudo docker image prune --all --force
           sudo docker builder prune --force
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.sha }}
       - name: Login to GHCR

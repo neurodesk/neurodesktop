@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-10-07"
+last-reviewed: "2026-10-08"
 ---
 
 # Environment Variables
@@ -312,16 +312,16 @@ reviewed; the Dockerfile itself is authoritative.
 - `UV_VERSION`, `ASTRA_TOOLS_VERSION`, `ASTRA_SPEC_VERSION`,
   `ANYWIDGET_VERSION`, `LIGHTCONE_CLI_VERSION`, `LIGHTCONE_CLI_SHA256`: exact `uv`,
   ASTRA CLI/schema, viewer runtime, and isolated Lightcone CLI releases
-  installed in the image; defaults to `0.12.17`, `0.2.17`, `0.0.14`, `0.11.0`,
+  installed in the image; defaults to `0.12.23`, `0.2.17`, `0.0.14`, `0.11.0`,
   `0.4.2`, and the verified SHA-256 of that Lightcone source archive
 - `SNAKEMAKE_VERSION`: user-facing Snakemake workflow release; defaults to
   `9.27.0` in the main and isolated Lightcone environments. Its current
   metadata requires `packaging<26`, so the image holds that infrastructure
   library at the newest compatible release, `25.0`
 - `PYJWT_VERSION`: exact PyJWT release installed into the main Python
-  environment; defaults to `2.14.0`, the first release that rejects
-  non-canonical public-key PEM encodings before they can be reused as HMAC
-  secrets (CVE-2026-102268)
+  environment; defaults to `2.15.1`. It retains the rejection of non-canonical
+  public-key PEM encodings introduced in `2.14.0`, preventing their reuse as
+  HMAC secrets (CVE-2026-102268)
 - `AGENT_SKILLS_REF`: exact commit of
   `LightconeResearch/agent-skills` used for the Codex and Claude reproduction
   plugin and OpenCode's copied skills and hook adapter;
@@ -362,16 +362,16 @@ reviewed; the Dockerfile itself is authoritative.
   `3bf11cb7b271b554998105a11e6c9b8c3e376615`
 - `MYST_PNPM_VERSION`, `MYST_YDOC_VERSION`: pnpm and Jupyter
   YDoc releases used for the MyST/RISE compatibility rebuild; defaults to
-  `11.27.0` and `4.1.1`
+  `11.28.4` and `4.1.1`
 - `APPTAINER_VERSION`, `APPTAINER_GO_VERSION`, `APPTAINER_GRPC_VERSION`,
   `APPTAINER_CRYPTO_VERSION`: Apptainer source release and the Go
   toolchain/grpc/crypto module versions used in its dedicated build stage;
-  defaults to `1.5.3`, `1.27.1`, `1.84.0`, and `0.57.0`. The crypto override
+  defaults to `1.5.4`, `1.27.1`, `1.84.0`, and `0.57.0`. The crypto override
   also updates the separately vendored gocryptfs build.
 - `BASE_IMAGE_TAG`: tag of the upstream Jupyter Docker base image; defaults to
   the multi-architecture `2026-09-18` release
 - `NPM_VERSION`: npm release installed with the runtime Node.js distribution;
-  defaults to `12.0.2`
+  defaults to `12.2.0`
 - `FREEBROWSE_REF`: exact FreeBrowse source commit used to build the default
   neuroimaging viewer from `neurodesk/freebrowse`, including its authenticated
   JupyterLab/JupyterHub integration.
@@ -381,7 +381,7 @@ reviewed; the Dockerfile itself is authoritative.
   `8dccb39808f8a1b77712a9a5773a7d2601a56683`
 - `GUACAMOLE_VERSION`, `TOMCAT_REL`, `TOMCAT_VERSION`,
   `TOMCAT_MIGRATION_VERSION`: Guacamole release (`1.6.0`) and the Tomcat
-  major/exact/migration-tool versions serving it (`11`, `11.0.26`, `1.0.12`)
+  major/exact/migration-tool versions serving it (`11`, `11.0.26`, `1.0.13`)
 - `VIRTUALGL_VERSION`, `VIRTUALGL_AMD64_SHA256`, `VIRTUALGL_ARM64_SHA256`:
   VirtualGL release and architecture-specific Debian package checksums.
   The version defaults to `3.1.5`; update its verified checksums together with

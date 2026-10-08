@@ -21,14 +21,14 @@ jobs:
   test_cvmfs_origin:
     runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
     - name: check if the authoritative CVMFS repository is online and complete
       run: /bin/bash .github/workflows/test_cvmfs.sh stratum0.neurodesk.cloud.edu.au
   test_cvmfs_1_2_3:
     needs: test_cvmfs_origin
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
     - name: check if cvmfs setup with multiple entries works
       run: /bin/bash .github/workflows/test_cvmfs_1_2_3.sh
   test_cvmfs:
@@ -54,6 +54,6 @@ jobs:
                         # not yet active:
                           # "cvmfs-s1.hpc.swin.edu.au",
     steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
     - name: check if ${{ matrix.cvmfs-servers }} is online and up-to-date
       run: /bin/bash .github/workflows/test_cvmfs.sh  ${{ matrix.cvmfs-servers }}
