@@ -150,6 +150,10 @@ Desktop acceptance in
 checks document
 content after LibreOffice format conversions, saved VS Code editor content,
 a segmentation exported from ITK-SNAP, and FSLeyes pixels from a known volume.
+These tests start their own Xtigervnc display through
+[native_desktop_driver.py](../tests/container/native_desktop_driver.py), so they
+need no running desktop. If the container refuses abstract Unix sockets, the
+driver retries with only the `/tmp/.X11-unix` file socket.
 The FSLeyes batch check uses the upstream `fsleyes_unfiltered render` entrypoint
 so captured output remains available. It requires exit status zero and the
 expected image pixels. The FSL image build repairs the default `fsleyes` filter's

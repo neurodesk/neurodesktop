@@ -5,7 +5,6 @@ import os
 import pwd
 import re
 import signal
-import select
 import shlex
 import json
 import socket
@@ -18,6 +17,7 @@ import urllib.parse
 import urllib.request
 import pytest
 import websocket
+from native_desktop_driver import start_display
 
 
 def run_cmd(cmd):
@@ -764,18 +764,9 @@ else:
     assert received == ["lost"], received
 print("previous handler received the error")
 """
-    reader, writer = os.pipe()
     with (tmp_path / "independent-display.log").open("w") as log:
-        server = subprocess.Popen(
-            ["/usr/local/bin/Xtigervnc", "-displayfd", str(writer),
-             "-geometry", "100x100", "-SecurityTypes", "None",
-             "-rfbport", "-1", "-nolisten", "tcp"],
-            pass_fds=(writer,), stdout=log, stderr=subprocess.STDOUT,
-        )
-        os.close(writer)
+        server, display = start_display(log, "100x100")
         try:
-            assert select.select([reader], [], [], 20)[0], "Independent display did not start"
-            display = ":" + os.read(reader, 100).decode().strip()
             result = subprocess.run(
                 [sys.executable, "-c", script],
                 cwd=os.path.dirname(os.path.abspath(__file__)),
@@ -785,7 +776,6 @@ print("previous handler received the error")
             assert result.returncode == 0, result.stdout + result.stderr
             assert "previous handler received the error" in result.stdout
         finally:
-            os.close(reader)
             server.terminate()
             server.wait(timeout=10)
 
