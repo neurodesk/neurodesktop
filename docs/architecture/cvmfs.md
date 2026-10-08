@@ -4,7 +4,7 @@ description: CVMFS server selection and mount configuration, and the
   neurocommand CLI/module system for neuroimaging tools
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-07"
+last-reviewed: "2026-10-08"
 ---
 
 # CVMFS and Neurocommand
@@ -95,12 +95,17 @@ jobs use
 which fails unavailable or empty inventory downloads and reports every missing
 container in the snapshot before failing. When the first comparison finds a
 mismatch, the checker synchronously asks the mounted client to remount the
-latest catalog and repeats the complete comparison once against the same
-downloaded inventory. The refresh has a 45-second timeout and a five-second
-kill grace period, uses noninteractive sudo when needed, and records catalog
-status before and after. A refresh failure or timeout still checks and reports
-all missing entries. This lets a stale mount catch up without hiding
-persistent replica omissions.
+latest catalog and repeats the complete comparison against the same downloaded
+inventory. The Stratum 0 job fails if that comparison still finds missing
+entries. Replica jobs set `CVMFS_INVENTORY_REPLICA_RETRY=true` to allow one
+further refresh after a 240-second propagation grace period. This wait does not
+guarantee that replication finishes. Persistent omissions still fail the job.
+The default is `false`, and complete inventories return without waiting. Every comparison checks all
+entries from the original snapshot, including entries that were present earlier.
+Each refresh has a 45-second timeout and a five-second kill grace period, uses
+noninteractive sudo when needed, and records catalog status before and after.
+A refresh failure or timeout still checks the inventory. After the final
+comparison, the checker reports every remaining omission and exits with code 2.
 
 ## Build-time CVMFS setup
 

@@ -26,6 +26,8 @@ jobs:
       run: /bin/bash .github/workflows/test_cvmfs.sh stratum0.neurodesk.cloud.edu.au
   test_cvmfs_1_2_3:
     needs: test_cvmfs_origin
+    env:
+      CVMFS_INVENTORY_REPLICA_RETRY: "true"
     runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -33,6 +35,8 @@ jobs:
       run: /bin/bash .github/workflows/test_cvmfs_1_2_3.sh
   test_cvmfs:
     needs: test_cvmfs_origin
+    env:
+      CVMFS_INVENTORY_REPLICA_RETRY: "true"
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
