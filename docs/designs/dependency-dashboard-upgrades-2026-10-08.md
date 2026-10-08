@@ -46,21 +46,29 @@ The final selection preserves every hold in
 
 The [Apptainer 1.5.4 release](https://github.com/apptainer/apptainer/releases/tag/v1.5.4)
 fixes a high-severity local privilege escalation in setuid mode.
-The image builds with `--with-suid`, so this update has a direct security benefit.
+The image builds with `--with-suid` but sets `allow setuid = no` by default.
+That default already prevents use of the affected setuid mode. The update
+protects deployments that explicitly enable it while preserving the default.
 Its [go.mod](https://github.com/apptainer/apptainer/blob/v1.5.4/go.mod)
 requests Go 1.25.7, crypto 0.51.0, and gRPC 1.81.1.
 The existing image overrides, Go 1.27.1, crypto 0.57.0, and gRPC 1.84.0,
 remain newer than those requirements.
 The source build produced Apptainer 1.5.4 with those overrides.
-A harmless non-root probe using an empty CDI directory reached device lookup
-in the published 1.5.3 image. The rebuilt binary instead exited with code 255
-and rejected `--cdi-dirs` in setuid mode before device lookup.
+A harmless non-root probe enabled setuid only inside disposable old and new
+image containers, using an empty CDI directory and a nonexistent device.
+The published 1.5.3 image reached device lookup. The final rebuilt 1.5.4 image
+instead exited with code 255 and rejected `--cdi-dirs` before device lookup.
+Both probes used the same setuid configuration. The earlier comparison of
+the published image and source-build stage used different defaults and is
+superseded by this final-image comparison. With its normal setuid-disabled
+configuration, the new image still permits the directory override.
 Nested scientific-container acceptance remains a separate required check.
 
 [npm 12.2.0 metadata](https://registry.npmjs.org/npm/12.2.0)
 requires Node `^22.22.2 || ^24.15.0 || >=26.0.0` and node-tar `^7.5.22`.
 The image retains Node 24 and its patched node-tar 7.5.22.
 The rebuild must establish the installed Node version satisfies that range.
+The completed candidate contains Node 24.21.0 and npm 12.2.0.
 
 All updated Actions retain immutable commit pins.
 [checkout 6.1.0](https://github.com/actions/checkout/releases/tag/v6.1.0)
@@ -106,6 +114,42 @@ The [Codex ACP dependency range](https://registry.npmjs.org/@agentclientprotocol
 comes from the published npm package. A pre-1.0 caret range limits the minor
 version. The image deliberately uses its own CLI rather than the adapter's
 bundled binary, so initialization tests must justify any range exception.
+
+## Unpinned requirements in the rebuilt image
+
+The installed inventory also found seven newer packages resolved by existing,
+unchanged requirements. Compared with the immutable 7 October image, these are:
+
+| Package | Previous | Rebuilt |
+| --- | --- | --- |
+| [anthropic](https://pypi.org/pypi/anthropic/1.12.0/json) | 1.11.0 | 1.12.0 |
+| [boto3](https://pypi.org/pypi/boto3/1.43.109/json) | 1.43.108 | 1.43.109 |
+| [botocore](https://pypi.org/pypi/botocore/1.43.109/json) | 1.43.108 | 1.43.109 |
+| [jupyterlab-git](https://pypi.org/pypi/jupyterlab-git/0.55.0/json) | 0.54.1 | 0.55.0 |
+| [jupyterlab-git-core](https://pypi.org/pypi/jupyterlab-git-core/0.55.0/json) | 0.54.1 | 0.55.0 |
+| [litellm](https://pypi.org/pypi/litellm/1.104.1/json) | 1.104.0 | 1.104.1 |
+| [tenacity](https://pypi.org/pypi/tenacity/9.2.1/json) | 9.1.4 | 9.2.1 |
+
+An independent Codex review recommended retaining these resolutions. Published
+requirements support the unchanged Python 3.13 and JupyterLab 4 environment;
+the boto3/botocore pair satisfies its version range, and both images retain
+httpx2 2.13.1. The rebuilt image passes `pip check`, and its frontend and server
+extensions report enabled and healthy.
+
+The same local probes passed in both images: repository initialization, status,
+staging, commits and history through JupyterLab Git's exported core; Anthropic
+request serialization and response parsing with a mock transport; modeled S3
+requests with botocore's Stubber; Tenacity retry results and exception
+propagation; and LiteLLM completion structure with a mock response. These do
+not establish browser Git interaction, remote authentication, live provider
+requests, streaming, or compatibility of unused optional extras. In particular,
+LiteLLM's optional `proxy-runtime` extra requires Anthropic below 1; that extra
+is not approved by this assessment.
+
+Claude's plan, code and correction reviews completed before this inventory.
+An additional Claude review of these resolutions could not run because the
+account reached its weekly usage limit. The independent assessment and
+installed checks above are separate evidence, not a completed Claude review.
 
 ## Validation and remaining limits
 
