@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-21"
+last-reviewed: "2026-10-08"
 ---
 
 # Build-Time Behaviors
@@ -95,7 +95,7 @@ declared builder range against the image's builder pin before producing the
 wheel; the previous package-rename workaround is no longer needed.
 
 Both Jupyter source builds use [build constraints](../../config/jupyter/build-constraints.txt)
-for the isolated Python build environment. The toolchain pins Hatchling 1.32.3
+for the isolated Python build environment. The toolchain pins Hatchling 1.32.4
 and hatch-jupyter-builder 0.10.0. The launcher also declares that pair in its
 own build metadata. Use pip's `--build-constraint`, not `-c`: ordinary runtime
 constraints do not constrain isolated build dependencies. Changes to these

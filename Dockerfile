@@ -1,16 +1,16 @@
-# syntax=docker/dockerfile:1.25
+# syntax=docker/dockerfile:1.27
 
 # Pin to a specific jupyter/base-notebook date for reproducibility.
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
 ARG BASE_IMAGE_TAG=2026-09-18
-ARG APPTAINER_VERSION=1.5.3
+ARG APPTAINER_VERSION=1.5.4
 ARG APPTAINER_GO_VERSION=1.27.1
 ARG APPTAINER_GRPC_VERSION=1.84.0
 ARG APPTAINER_CRYPTO_VERSION=0.57.0
 ARG CVMFS_VERSION=2.14.1+ubuntu24.04
 ARG CVMFS_RELEASE_VERSION=4.9
 ARG CVMFS_RELEASE_SHA256=88f4bb658c2c85e77aec39181f61dea8ab641b3481a0db2b00f453beabb05395
-ARG NPM_VERSION=12.0.2
+ARG NPM_VERSION=12.2.0
 ARG JUPYTER_BUILDER_VERSION=1.2.3
 
 FROM golang:${APPTAINER_GO_VERSION}-bookworm AS apptainer
@@ -259,7 +259,7 @@ RUN mkdir -p /opt/strace \
 
 ARG TOMCAT_REL="11"
 ARG TOMCAT_VERSION="11.0.26"
-ARG TOMCAT_MIGRATION_VERSION="1.0.12"
+ARG TOMCAT_MIGRATION_VERSION="1.0.13"
 ARG GUACAMOLE_VERSION="1.6.0"
 ENV LANG=""
 ENV LANGUAGE=""
@@ -584,7 +584,7 @@ RUN retry conda install -c conda-forge nb_conda_kernels \
 # `env PATH=` restores the conda-first PATH that runuser resets (the
 # jupyterlab-slurm source build needs jlpm and node on PATH).
 ARG BUST_CACHE_PIP=4
-ARG UV_VERSION="0.12.17"
+ARG UV_VERSION="0.12.23"
 ARG JUPYTER_AI_VERSION="3.2.0"
 ARG JUPYTER_COLLABORATION_VERSION="4.4.2"
 ARG JUPYTER_COLLABORATION_REF="3bf11cb7b271b554998105a11e6c9b8c3e376615"
@@ -593,7 +593,7 @@ ARG ASTRA_TOOLS_VERSION="0.2.17"
 ARG ANYWIDGET_VERSION="0.11.0"
 ARG IPYNIIVUE_VERSION="2.4.4"
 ARG SNAKEMAKE_VERSION="9.27.0"
-ARG PYJWT_VERSION="2.14.0"
+ARG PYJWT_VERSION="2.15.1"
 ARG JUPYTER_BUILDER_VERSION
 ARG JUPYTERLAB_SLURM_REF="8dccb39808f8a1b77712a9a5773a7d2601a56683"
 USER root
@@ -803,7 +803,7 @@ RUN --mount=type=bind,source=config/jupyter/notebook-intelligence-5.3.1.yarn.loc
 # MyST 2.7.0 uses pnpm. Its published metadata requests @jupyter/ydoc 3.x,
 # while JupyterLab 4.6 provides 4.x, so compile against an exact current YDoc
 # and retain that exact version in both the manifest and lockfile.
-ARG MYST_PNPM_VERSION="11.27.0"
+ARG MYST_PNPM_VERSION="11.28.4"
 ARG MYST_YDOC_VERSION="4.1.1"
 RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
     && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
