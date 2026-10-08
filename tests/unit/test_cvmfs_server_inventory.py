@@ -28,7 +28,10 @@ def test_ihep_stratum_one_uses_its_published_service_port_everywhere():
 
 def test_replica_checks_wait_for_a_complete_authoritative_repository():
     """An unpublished desired artifact must produce one actionable failure."""
-    jobs = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))["jobs"]
+    workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+    jobs = workflow["jobs"]
+    retry_setting = "CVMFS_INVENTORY_REPLICA_RETRY"
+    assert retry_setting not in workflow.get("env", {})
     origin_job = jobs["test_cvmfs_origin"]
     origin_step = next(
         step
@@ -39,11 +42,14 @@ def test_replica_checks_wait_for_a_complete_authoritative_repository():
 
     assert origin_step["run"].split()[-1] == ORIGIN
     assert "strategy" not in origin_job
+    assert retry_setting not in origin_job.get("env", {})
+    assert retry_setting not in origin_step.get("env", {})
     assert not origin_job.get("continue-on-error", False)
     assert not origin_step.get("continue-on-error", False)
     for job_name in ("test_cvmfs", "test_cvmfs_1_2_3"):
         job = jobs[job_name]
         assert job["needs"] == "test_cvmfs_origin"
+        assert job["env"][retry_setting] == "true"
         assert job.get("if", "success()") == "success()"
 
     replicas = jobs["test_cvmfs"]["strategy"]["matrix"]["cvmfs-servers"]
