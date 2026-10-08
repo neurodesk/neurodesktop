@@ -7,8 +7,6 @@ import subprocess
 import time
 from pathlib import Path
 
-from PIL import ImageGrab
-
 
 class _WindowAttributes(ctypes.Structure):
     _fields_ = [
@@ -58,12 +56,22 @@ def start_display(log, geometry="1280x1024"):
         finally:
             os.close(writer)
         try:
-            ready = select.select([reader], [], [], 20)[0]
-            announced = os.read(reader, 100).decode().split() if ready else []
+            deadline = time.monotonic() + 20
+            announced = b""
+            # X servers can write the digits and newline separately. Closing the
+            # reader after the digits makes the server's final write fail.
+            while b"\n" not in announced and len(announced) < 100:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not select.select([reader], [], [], remaining)[0]:
+                    break
+                chunk = os.read(reader, 100 - len(announced))
+                if not chunk:
+                    break
+                announced += chunk
         finally:
             os.close(reader)
-        if announced and announced[0].isdecimal():
-            return process, ":" + announced[0]
+        if announced.endswith(b"\n") and announced[:-1].isdigit():
+            return process, ":" + announced[:-1].decode("ascii")
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGKILL)
         process.wait()
@@ -215,6 +223,8 @@ class Desktop:
             self.chord(*modifiers, ord(character))
 
     def screenshot(self, path):
+        from PIL import ImageGrab
+
         ImageGrab.grab(xdisplay=self.name).save(path)
 
     def click(self, x, y):

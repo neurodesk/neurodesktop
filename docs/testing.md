@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-07"
+last-reviewed: "2026-10-08"
 ---
 
 # Testing
@@ -153,7 +153,10 @@ a segmentation exported from ITK-SNAP, and FSLeyes pixels from a known volume.
 These tests start their own Xtigervnc display through
 [native_desktop_driver.py](../tests/container/native_desktop_driver.py), so they
 need no running desktop. If the container refuses abstract Unix sockets, the
-driver retries with only the `/tmp/.X11-unix` file socket.
+driver retries with only the `/tmp/.X11-unix` file socket. It waits for the
+complete newline-terminated `-displayfd` announcement before closing the pipe;
+closing after the digits alone can make Xtigervnc abort its final write.
+Checkout tests cover fragmented announcements, invalid replies, and early EOF.
 The FSLeyes batch check uses the upstream `fsleyes_unfiltered render` entrypoint
 so captured output remains available. It requires exit status zero and the
 expected image pixels. The FSL image build repairs the default `fsleyes` filter's
