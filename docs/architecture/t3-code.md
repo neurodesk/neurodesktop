@@ -4,7 +4,7 @@ description: T3 Code in JupyterLab, server lifecycle, provider paths, persistent
   state, and desktop connection procedures
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-03"
+last-reviewed: "2026-10-09"
 ---
 
 # T3 Code remote access
@@ -384,8 +384,10 @@ than using T3's systemd service installer or self-update flow.
 
 ## Build and architecture limits
 
-T3 0.0.42 publishes one self-contained executable per platform, with its web
-client, its `node-pty` build and its other native modules bundled beside it.
+T3 0.0.45 publishes one self-contained executable per platform, with its web
+client, its `node-pty` prebuild and its other native modules bundled beside it.
+The PTY binding lives under `node_modules/node-pty/prebuilds/linux-x64/pty.node`
+on amd64 and `node_modules/node-pty/prebuilds/linux-arm64/pty.node` on arm64.
 The Dockerfile installs the manifest under `config/agents/t3-code` into
 `/opt/t3-code`, so the layer compiles nothing, runs no install script, and
 keeps exactly one `@t3code/t3-linux-<arch>` build. The executable links
@@ -401,6 +403,6 @@ same guarantee instead — the manifest pins `t3`, `t3` pins each
 its own tarball.
 
 Both amd64 and arm64 images must pass the installed server and PTY checks.
-0.0.42 ships a resource monitor for both Linux architectures, so arm64 no
+0.0.45 ships a resource monitor for both Linux architectures, so arm64 no
 longer omits resource telemetry; server, terminal, pairing, and provider
 behavior must still pass.

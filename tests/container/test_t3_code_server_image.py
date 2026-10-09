@@ -27,7 +27,7 @@ def platform_package():
 
 
 def test_t3_code_runtime_and_native_terminal_support_are_installed():
-    assert subprocess.check_output(["t3", "--version"], text=True).strip() == "t3 v0.0.42"
+    assert subprocess.check_output(["t3", "--version"], text=True).strip() == "t3 v0.0.45"
     major, minor, *_ = map(int, subprocess.check_output(["node", "--version"], text=True).strip()[1:].split("."))
     assert (major, minor) >= (24, 10)
     assert shutil.which("codex")
@@ -61,7 +61,8 @@ def test_t3_code_image_ships_one_platform_build_and_no_build_leftovers():
     # The image ships pty.node prebuilt; a local node-gyp build leaves objects.
     assert not (build / "node_modules/node-pty/build/Release/obj.target").exists()
     assert not list(Path("/opt/t3-code").rglob("*.js.map"))
-    assert (build / "node_modules/node-pty/build/Release/pty.node").is_file()
+    machine = {"x86_64": "x64", "aarch64": "arm64"}[os.uname().machine]
+    assert (build / f"node_modules/node-pty/prebuilds/linux-{machine}/pty.node").is_file()
     assert os.access("/opt/neurodesktop/t3-provider-bin/codex", os.X_OK)
     assert os.access("/opt/neurodesktop/t3-provider-bin/claude", os.X_OK)
     assert os.access("/opt/neurodesktop/t3-provider-bin/opencode", os.X_OK)

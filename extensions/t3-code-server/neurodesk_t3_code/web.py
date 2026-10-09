@@ -1,6 +1,6 @@
 """Authenticated, fixed-target proxy for the pinned T3 web client.
 
-T3 0.0.42 has no base-path option. Adapt only responses under this route;
+T3 0.0.45 has no base-path option. Adapt only responses under this route;
 never modify the installed client or claim root-level Jupyter routes.
 """
 from __future__ import annotations

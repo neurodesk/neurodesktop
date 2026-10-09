@@ -3,6 +3,6 @@
   "private": true,
   "version": "0.0.0",
   "dependencies": {
-    "t3": "0.0.42"
+    "t3": "0.0.45"
   }
 }

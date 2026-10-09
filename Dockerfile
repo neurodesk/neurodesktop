@@ -1010,7 +1010,7 @@ RUN set -eu; \
     cloudflared --version; \
     rm /tmp/t3-cloudflared
 
-ARG T3_CODE_VERSION="0.0.42"
+ARG T3_CODE_VERSION="0.0.45"
 RUN --mount=type=bind,source=config/agents/t3-code/package.json,target=/tmp/t3-code/package.json,ro \
     --mount=type=bind,source=config/agents/t3-provider-bin,target=/tmp/t3-provider-bin,ro \
     set -eux; \
@@ -1028,7 +1028,7 @@ RUN --mount=type=bind,source=config/agents/t3-code/package.json,target=/tmp/t3-c
     test "$(node -p "require(\"${t3_platform}/package.json\").version")" = "${T3_CODE_VERSION}"; \
     test -x "${t3_platform}/t3"; \
     test -f "${t3_platform}/client/index.html"; \
-    test -f "${t3_platform}/node_modules/node-pty/build/Release/pty.node"; \
+    test -f "${t3_platform}/node_modules/node-pty/prebuilds/linux-$(node -p process.arch)/pty.node"; \
     find /opt/t3-code -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete; \
     test "$(/opt/t3-code/node_modules/.bin/t3 --version)" = "t3 v${T3_CODE_VERSION}"; \
     install -m 0755 /tmp/t3-provider-bin/codex /tmp/t3-provider-bin/claude \
