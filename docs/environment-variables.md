@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-10-08"
+last-reviewed: "2026-10-09"
 ---
 
 # Environment Variables
@@ -348,7 +348,7 @@ reviewed; the Dockerfile itself is authoritative.
   linking; defaults to `2026.9.1` and uses T3's supported executable override. Update
   both architecture SHA-256 values in `Dockerfile` whenever this version changes.
 - `T3_CODE_VERSION`: the headless T3 Code server release installed from the
-  checked manifest; defaults to `0.0.42`. The release ships one self-contained
+  checked manifest; defaults to `0.0.45`. The release ships one self-contained
   executable per platform, so the layer installs no lockfile and compiles
   nothing
 - `TAILSCALE_VERSION`: static Tailscale CLI and daemon release; defaults to
