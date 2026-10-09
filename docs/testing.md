@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-08"
+last-reviewed: "2026-10-09"
 ---
 
 # Testing
@@ -331,7 +331,7 @@ non-obvious tiers protect.
 | ghapi public credential examples | `pytest tests/unit/test_ghapi_examples.py tests/unit/test_image_packaging_layers.py` | `pytest /opt/tests/test_image_size_hygiene.py` and unchanged image secret scan |
 | CVMFS mirror selection | `pytest tests/unit/test_cvmfs_selection.py tests/unit/test_cvmfs_server_inventory.py` | Run the selector with temporary config/cache paths, then verify a mounted read; see [CVMFS](architecture/cvmfs.md) |
 | CVMFS inventory health | `pytest tests/unit/test_cvmfs_inventory_check.py` | Live mirror workflow |
-| Nightly JupyterHub probe (terminal creation, FSL commands) | `pytest tests/unit/test_jupyter_terminal_creation.py tests/unit/test_github_workflows.py` | Live `JupyterHub API Testing` workflow |
+| Nightly JupyterHub probe (terminal creation, FSL commands) | `pytest tests/unit/test_jupyter_terminal_creation.py tests/unit/test_github_workflows.py tests/unit/test_fsl_terminal_probe.py` | Live `JupyterHub API Testing` workflow |
 | Lmod extension listing default | `pytest tests/unit/test_lmod_extensions.py` | `pytest /opt/tests/test_lmod_avail_extensions.py` |
 | Interactive module banner | `pytest tests/unit/test_module_banner.py` | — |
 | Apptainer NVIDIA auto-configuration | `pytest tests/unit/test_apptainer_nv.py` | — |
@@ -688,6 +688,18 @@ carry no terminal name, and it fails immediately on a rejection that will not
 change, such as HTTP 403. `TERMINAL_CREATE_ATTEMPTS` and
 `TERMINAL_CREATE_DELAY` bound the wait. The unit tier drives the helper
 against a stubbed `curl`, so it needs no network and no listening socket.
+
+The valid-image FSL operation is submitted by
+`.github/workflows/run_fsl_terminal_probe.sh`. It keeps the original WebSocket
+stream, waits for an explicit completion marker, and takes its authoritative
+output snapshot only after the socket and input writer have stopped. This
+preserves a final stdout frame delivered as the socket closes and reports an
+explicit remote exit status when image creation or `fslmaths` fails. Checkout
+tests drive the helper and workflow with a fake WebSocket client, including
+split markers and output delivered during shutdown. JSON decoding preserves
+escaped text and joins stdout frames. Both the success and completion markers
+are required; an echoed command, another channel, or an incomplete response
+cannot satisfy the check.
 
 The start and cleanup steps read the default server's state through
 `.github/workflows/jupyterhub_server_state.sh`, which parses the Hub's user
