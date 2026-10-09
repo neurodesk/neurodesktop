@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-08"
+last-reviewed: "2026-10-09"
 ---
 
 # Testing
@@ -688,6 +688,20 @@ carry no terminal name, and it fails immediately on a rejection that will not
 change, such as HTTP 403. `TERMINAL_CREATE_ATTEMPTS` and
 `TERMINAL_CREATE_DELAY` bound the wait. The unit tier drives the helper
 against a stubbed `curl`, so it needs no network and no listening socket.
+
+The valid-image FSL operation is submitted by
+`.github/workflows/run_fsl_terminal_probe.sh`. It keeps the original WebSocket
+stream, waits for an explicit completion marker, and takes its authoritative
+output snapshot only after the socket and input writer have stopped. This
+preserves a final stdout frame delivered as the socket closes and reports an
+explicit remote exit status when image creation or `fslmaths` fails. Checkout
+tests drive the helper with a fake WebSocket client, including completion in
+the connection's final frames, echoed input, failures, timeouts, and process
+cleanup. Run `pytest tests/unit/test_github_workflows.py` for these regressions.
+The default wait remains 24 polls at five seconds with a 120-second input
+hold-open; `FSL_PROBE_ATTEMPTS`, `FSL_PROBE_DELAY`, and `FSL_PROBE_HOLD_OPEN`
+allow shorter waits in checkout tests. Both success and completion markers
+are required. These tests do not establish live Hub or FSL runtime health.
 
 The start and cleanup steps read the default server's state through
 `.github/workflows/jupyterhub_server_state.sh`, which parses the Hub's user
