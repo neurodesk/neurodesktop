@@ -1,3 +1,4 @@
+#!/bin/bash
 # set -e
 
 SERVERADDRESS=$1
@@ -8,11 +9,9 @@ mapfile -t arr < log.txt
 for LINE in "${arr[@]}";
 do
     echo "LINE: $LINE"
-    IMAGENAME_BUILDDATE="$(cut -d' ' -f1 <<< ${LINE})"
+    IMAGENAME_BUILDDATE="$(cut -d' ' -f1 <<< "${LINE}")"
     echo "IMAGENAME_BUILDDATE: $IMAGENAME_BUILDDATE"
 
-    IMAGENAME="$(cut -d'_' -f1,2 <<< ${IMAGENAME_BUILDDATE})"
-    BUILDDATE="$(cut -d'_' -f3 <<< ${IMAGENAME_BUILDDATE})"
     
     if curl --output /dev/null --silent --head --fail "${SERVERADDRESS}${IMAGENAME_BUILDDATE}.simg"; then
             echo "[DEBUG] ${IMAGENAME_BUILDDATE}.simg exists in ${SERVERADDRESS}"

@@ -184,13 +184,15 @@ export function installWorkspaceLinks(
         factory && docManager.registry.getWidgetFactory(factory)
           ? factory
           : 'default';
-      await docManager.openOrReveal(path, widgetName);
+      docManager.openOrReveal(path, widgetName);
     } catch (reason) {
       // Report what was clicked, not the rewritten candidate.
       void showErrorMessage(
         'Cannot open file',
         `${requested} could not be opened: ${reason}`
-      );
+      ).catch(error => {
+        console.warn('neurodesk-launcher: could not show file-open error', error);
+      });
     }
   };
 

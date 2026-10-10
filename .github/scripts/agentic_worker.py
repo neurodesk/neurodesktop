@@ -2,7 +2,7 @@
 
 import argparse
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 import fcntl
 import hashlib
 import json
@@ -313,7 +313,7 @@ def prepare(kind, subject, repo, run_id, output):
                 "failure_evidence": failure_context(repo, issue.get("body") or ""),
             }
     elif kind == "maintenance":
-        week = datetime.now(timezone.utc).strftime("%G-W%V")
+        week = datetime.now(UTC).strftime("%G-W%V")
         task["branch"] = f"agentic/maintenance-{subject}-{week}"
         task["skip"] = any(p["head"]["ref"].startswith(f"agentic/maintenance-{subject}-") for p in owned)
         # A manual retry in the same week must not recreate a closed proposal.

@@ -1344,7 +1344,7 @@ def test_claude_adds_mcp_config_when_br_token_in_bashrc(tmp_path):
     )
 
     assert result.returncode == 0, f"Wrapper execution failed: {result.stdout}"
-    assert f"ARG:--mcp-config" in result.stdout
+    assert "ARG:--mcp-config" in result.stdout
     assert f"ARG:{mcp_config_file}" in result.stdout
 
 

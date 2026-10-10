@@ -36,7 +36,7 @@ emit_lines() {
 # watcher can run as root while the server runs as ${NB_USER}, so check both
 # HOME-derived locations.
 newest_server_info() {
-    local dir candidate
+    local dir candidate newest=""
     local -a candidates=()
     for dir in \
         "${JUPYTER_RUNTIME_DIR:-}" \
@@ -56,7 +56,13 @@ newest_server_info() {
     if [ "${#candidates[@]}" -eq 0 ]; then
         return 1
     fi
-    ls -1t "${candidates[@]}" 2>/dev/null | head -n 1
+    for candidate in "${candidates[@]}"; do
+        if [ -f "${candidate}" ] && { [ -z "${newest}" ] || [ "${candidate}" -nt "${newest}" ]; }; then
+            newest="${candidate}"
+        fi
+    done
+    [ -n "${newest}" ] || return 1
+    printf '%s\n' "${newest}"
 }
 
 # Emit two lines from the info file: a 127.0.0.1 probe URL and the

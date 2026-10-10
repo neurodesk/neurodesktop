@@ -10,6 +10,8 @@ jpserver-<pid>.json runtime info file) as the last thing in the startup log.
 import http.server
 import json
 import os
+
+import pytest
 import threading
 
 from testlib import resolve_source, run_cmd
@@ -89,10 +91,11 @@ def test_prints_plain_url_without_token_and_honours_base_url(tmp_path):
         server.shutdown()
 
 
-def test_uses_newest_server_info_file(tmp_path):
+@pytest.mark.parametrize("runtime_name", ["runtime", "runtime with spaces\nand newline"])
+def test_uses_newest_server_info_file(tmp_path, runtime_name):
     server, port = _serve_on_free_port()
     try:
-        runtime_dir = tmp_path / "runtime"
+        runtime_dir = tmp_path / runtime_name
         _write_server_info(runtime_dir, port, token="staletoken", pid=100)
         stale = runtime_dir / "jpserver-100.json"
         # Backdate the stale file so the fresh one wins the mtime ordering.

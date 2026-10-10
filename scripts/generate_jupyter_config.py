@@ -13,7 +13,7 @@ import urllib.request
 import urllib.error
 from copy import deepcopy
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
 from urllib.parse import urlparse
 
 # Directory to store downloaded webapp icons
@@ -48,7 +48,7 @@ def download_icon(url: str, name: str) -> str:
         return default_icon
 
 
-def generate_server_proxy_entries(webapps: Dict[str, Any]) -> str:
+def generate_server_proxy_entries(webapps: dict[str, Any]) -> str:
     """
     Generate Python code for ServerProxy.servers webapp entries.
 
@@ -137,7 +137,7 @@ def generate_server_proxy_entries(webapps: Dict[str, Any]) -> str:
     return ",\n".join(f"  {name!r}: {entry!r}" for name, entry in entries)
 
 
-def merge_webapp_configs(base_config: Dict[str, Any], overlay_config: Dict[str, Any]) -> Dict[str, Any]:
+def merge_webapp_configs(base_config: dict[str, Any], overlay_config: dict[str, Any]) -> dict[str, Any]:
     """
     Merge a local webapp overlay into the fetched webapps config.
 
@@ -167,14 +167,14 @@ def merge_webapp_configs(base_config: Dict[str, Any], overlay_config: Dict[str, 
     return merged
 
 
-def load_webapps_config(webapps_json_path: Path, overlay_paths: list[Path] | None = None) -> Dict[str, Any]:
+def load_webapps_config(webapps_json_path: Path, overlay_paths: list[Path] | None = None) -> dict[str, Any]:
     print(f"Loading webapps from: {webapps_json_path}")
-    with open(webapps_json_path, 'r') as f:
+    with open(webapps_json_path) as f:
         data = json.load(f)
 
     for overlay_path in overlay_paths or []:
         print(f"Applying webapp overlay: {overlay_path}")
-        with open(overlay_path, 'r') as f:
+        with open(overlay_path) as f:
             overlay_data = json.load(f)
         data = merge_webapp_configs(data, overlay_data)
 
@@ -205,7 +205,7 @@ def generate_config(
 
     # Load template
     print(f"Loading template from: {template_path}")
-    with open(template_path, 'r') as f:
+    with open(template_path) as f:
         template = f.read()
 
     # Generate webapp entries

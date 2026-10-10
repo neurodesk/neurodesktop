@@ -1,6 +1,6 @@
 """Exercise agent task boundaries and publication against real Git repositories."""
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 import hashlib
 import json
 import subprocess
@@ -116,7 +116,7 @@ def test_maintenance_uses_stable_iso_week(worker, github, monkeypatch, tmp_path,
     class FrozenDate:
         @staticmethod
         def now(tz):
-            return datetime(2027, 1, 1, tzinfo=timezone.utc)
+            return datetime(2027, 1, 1, tzinfo=UTC)
     monkeypatch.setattr(worker, "datetime", FrozenDate)
     first = worker.prepare("maintenance", category, "owner/repo", "100", tmp_path)
     second = worker.prepare("maintenance", category, "owner/repo", "101", tmp_path)

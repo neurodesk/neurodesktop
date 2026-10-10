@@ -17,7 +17,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from collections.abc import Iterable
 
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version

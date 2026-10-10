@@ -13,7 +13,7 @@ NOTEBOOK_TEST_WORKFLOW = repo_path(".github/workflows/notebook_(FSL_bet)_workflo
 CODESPELL_WORKFLOW = repo_path(".github/workflows/codespell.yml")
 
 
-def test_codespell_skips_vendored_cytoscape_bundle():
+def test_codespell_skips_generated_dependency_locks():
     workflow = CODESPELL_WORKFLOW.read_text()
     skip_line = next(
         line.strip() for line in workflow.splitlines() if line.strip().startswith("skip:")
@@ -22,10 +22,10 @@ def test_codespell_skips_vendored_cytoscape_bundle():
         path.strip() for path in skip_line.removeprefix("skip:").split(",")
     }
 
-    assert (
-        "./extensions/astra-viewer/neurodesk_astra_view/static/vendor/"
-        "cytoscape.min.js"
-    ) in skipped
+    assert skipped == {
+        "./extensions/neurodesk-launcher/package-lock.json",
+        "./config/jupyter/notebook-intelligence-*.yarn.lock",
+    }
 
 
 def _fsl_probe_command(workflow: str) -> str:

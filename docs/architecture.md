@@ -38,7 +38,9 @@ The startup sequence follows this order (per
 1. [`config/jupyter/start_notebook.sh`](../config/jupyter/start_notebook.sh)
    sets ownership permissions for the home directory.
 2. [`config/jupyter/before_notebook.sh`](../config/jupyter/before_notebook.sh)
-   configures the environment and launches the deferred worker for lazy
+   configures the environment, sources
+   [`guard_ollama_host.sh`](../config/jupyter/guard_ollama_host.sh) to bound the
+   Ollama availability check, and launches the deferred worker for lazy
    CVMFS and Slurm startup, the default. Eager mode runs each selected service
    synchronously. The worker reads the live Jupyter server's runtime file and
    probes its local HTTP endpoint, including its configured port and base path.

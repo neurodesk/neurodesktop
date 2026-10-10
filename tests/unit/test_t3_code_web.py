@@ -317,7 +317,7 @@ def test_timed_out_pairing_cli_is_reaped(monkeypatch):
 
         async def communicate(self):
             if self.returncode is None:
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
             self.reaped = True
             return b"", None
 

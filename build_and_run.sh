@@ -447,7 +447,12 @@ if [ "${1:-}" = "fulltest" ]; then
         kind="${KINDS[$i]}"
         logfile="${LOGDIR}/${name}.log"
 
-        wait "${PIDS[$i]}" && status="PASSED" || { status="FAILED"; FAILED=1; }
+        if wait "${PIDS[$i]}"; then
+            status="PASSED"
+        else
+            status="FAILED"
+            FAILED=1
+        fi
 
         echo ""
         echo "============================================================"
@@ -667,7 +672,7 @@ fi
 docker volume create neurodesk-home
 
 # Mount local test webapp containers if they exist
-TEST_WEBAPP_MOUNT=""
+TEST_WEBAPP_MOUNT=()
 NEUROCONTAINERS_SIFS_DIR="../neurocontainers/sifs"
 if [ -d "$NEUROCONTAINERS_SIFS_DIR" ]; then
     for sif_file in "$NEUROCONTAINERS_SIFS_DIR"/*.sif; do
@@ -676,7 +681,7 @@ if [ -d "$NEUROCONTAINERS_SIFS_DIR" ]; then
             filename=$(basename "$sif_file")
             app_name="${filename%%_*}"
             echo "Mounting local test container: $app_name"
-            TEST_WEBAPP_MOUNT="$TEST_WEBAPP_MOUNT -v $(realpath "$sif_file"):/opt/neurodesktop-test-webapps/$app_name/$app_name.sif:ro"
+            TEST_WEBAPP_MOUNT+=(-v "$(realpath "$sif_file"):/opt/neurodesktop-test-webapps/$app_name/$app_name.sif:ro")
         fi
     done
 fi
@@ -693,7 +698,7 @@ docker run --shm-size=1gb -it --privileged --user=root \
     -e NEURODESKTOP_T3_CODE_HOST=0.0.0.0 \
     --cpus=10 --memory=32g \
     -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
-    $TEST_WEBAPP_MOUNT \
+    "${TEST_WEBAPP_MOUNT[@]}" \
     neurodesktop:latest
 
 

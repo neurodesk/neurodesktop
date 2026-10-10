@@ -105,6 +105,48 @@ run there:
 - `tests/unit/test_astra_view_filebrowser.py` needs `jupyter-server` to drive
   the file-browser server extension.
 
+## Code quality checks
+
+The [code quality workflow](../.github/workflows/code-quality.yml) runs on every
+pull request and push to `main`, independently of unit tests and image acceptance.
+Run the same checks locally from a checkout with Python 3.12 and Node.js 24:
+
+```bash
+python3 -m venv .venv-quality
+. .venv-quality/bin/activate
+python -m pip install -r requirements-quality.txt
+bash scripts/install_quality_tools.sh "$VIRTUAL_ENV/bin"
+npm ci --prefix extensions/neurodesk-launcher --no-audit --no-fund
+bash scripts/check_quality.sh all
+```
+
+The binary installer supports Linux amd64 and arm64 and verifies pinned
+SHA-256 checksums. The Dockerfile check also requires Docker with Buildx and
+access to its daemon. Individual gates are available as `python`, `shell`,
+`workflow`, `javascript`, `frontend`, `format`, and `docker` arguments to
+`scripts/check_quality.sh`. Checks report failures without changing source files.
+
+Ruff checks owned Python, including tests and the extensionless provenance CLI.
+Its configuration excludes frozen upstream Python fixtures. ShellCheck discovers
+shell files by extension or shebang, including extensionless launchers.
+Actionlint checks workflow expressions and embedded shell commands. JavaScript
+syntax checks cover owned scripts and DOM test drivers; generated bundles and
+frozen upstream snippets are excluded. The frontend gate compiles the launcher
+against its locked dependencies and checks typed promise handling with ESLint.
+Compilation runs without the Python-side JupyterLab bundling step.
+
+Formatting and Python typing start with explicit, small scopes. The formatter
+scope is declared in `scripts/check_quality.py`; strict Python typing is declared
+in `mypy.ini`. Expand these scopes in reviewed changes rather than reformatting
+unrelated files to fix a correctness finding. Python embedded in shell heredocs
+is not covered by Ruff and continues to rely on execution tests. Keep exceptions
+local and explain external runtime dependencies such as Jupyter-injected globals.
+
+The workflow uses stable job names so repository rules can require each check.
+Adding the workflow does not itself change branch protection. Unit and installed
+image tests remain necessary for authentication, startup ordering, filesystem
+permissions, UI disposal, and installed application behavior.
+
 ## Behavioral coverage
 
 Checkout tests execute scripts, HTTP handlers, and DOM interactions. Source

@@ -132,7 +132,8 @@ _neurodesk_init_secrets() {
 
     # Only root startup provisions the OS account. Shared-host sessions must
     # never reuse a template password or change a host account's credentials.
-    local rdp_credentials="/run/neurodesktop/rdp/$(id -u)"
+    local rdp_credentials
+    rdp_credentials="/run/neurodesktop/rdp/$(id -u)"
     python3 - "${MAPPING_FILE}" "${rdp_credentials}" <<'PY' || return 1
 import os
 from pathlib import Path
@@ -242,5 +243,6 @@ _neurodesk_init_secrets_status=$?
 # decide what to do with the non-zero return.
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     exit "${_neurodesk_init_secrets_status}"
+else
+    return "${_neurodesk_init_secrets_status}"
 fi
-return "${_neurodesk_init_secrets_status}" 2>/dev/null || true

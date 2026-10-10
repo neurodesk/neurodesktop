@@ -107,7 +107,7 @@ def test_busy_actions_and_cancellation(manager):
 def test_errors_expiry_and_success_clear_code(manager):
     async def scenario():
         manager.code = 'ABCD-EFGH'
-        await manager._run(AsyncMock(side_effect=asyncio.TimeoutError()))
+        await manager._run(AsyncMock(side_effect=TimeoutError()))
         assert manager.state == 'expired' and manager.code is None
         await manager._run(AsyncMock(side_effect=ValueError('secret-token')))
         assert manager.state == 'error' and 'secret-token' not in manager.message

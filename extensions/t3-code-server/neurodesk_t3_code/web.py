@@ -106,8 +106,7 @@ class T3SessionHandler(APIHandler):
                     if self.request.protocol == "https":
                         cookie += "; Secure"
                     self.add_header("Set-Cookie", cookie)
-        except (OSError, ValueError, KeyError, TypeError, AttributeError, asyncio.TimeoutError,
-                httpclient.HTTPClientError):
+        except (TimeoutError, OSError, ValueError, KeyError, TypeError, AttributeError, httpclient.HTTPClientError):
             # Neither CLI output nor upstream error bodies belong in diagnostics.
             raise web.HTTPError(
                 503, reason="Could not connect to T3 Code. Wait a moment and reopen it."

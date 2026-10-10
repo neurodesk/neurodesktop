@@ -19,7 +19,7 @@ import re
 from pathlib import Path
 import signal
 import socket
-from typing import Mapping
+from collections.abc import Mapping
 
 
 DEFAULT_EXECUTABLE = Path("/opt/t3-code/node_modules/.bin/t3")
@@ -493,7 +493,7 @@ class T3Supervisor:
                 asyncio.open_connection(self.policy.readiness_host, self.policy.port),
                 timeout=0.25,
             )
-        except (OSError, asyncio.TimeoutError):
+        except (TimeoutError, OSError):
             return False
         writer.close()
         with suppress(OSError):
@@ -510,7 +510,7 @@ class T3Supervisor:
             os.killpg(process.pid, signal.SIGTERM)
         try:
             await asyncio.wait_for(process.wait(), timeout=10)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             with suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
             await process.wait()

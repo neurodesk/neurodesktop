@@ -1,3 +1,4 @@
+# shellcheck shell=sh
 # Sourced by agent launchers, including POSIX sh protocol wrappers.
 # Defer initialization to tool shells so agent protocol streams stay quiet.
 if [ "${BASH_ENV:-}" != /opt/neurodesktop/agent_bash_env.sh ]; then

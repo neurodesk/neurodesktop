@@ -8,5 +8,7 @@ fi
 
 /dockerstartup/kasm_default_profile.sh /bin/true
 sudo -E /usr/local/bin/before-notebook.d/before_notebook.sh
+# Image-installed or user-selected dependency is unavailable in the checkout.
+# shellcheck source=/dev/null
 source /opt/neurodesktop/environment_variables.sh
 exec /dockerstartup/vnc_startup.sh "$@"

@@ -250,7 +250,8 @@ Connect procedures.
 - `OLLAMA_HOST`: Ollama endpoint used by the AI tools; defaults to
   `http://host.docker.internal:11434` (an Ollama server on the Docker host —
   the image does not bundle Ollama itself). At container startup,
-  `before_notebook.sh` probes the endpoint (1s connect timeout) and repoints
+  `before_notebook.sh` sources `guard_ollama_host.sh` to probe the endpoint
+  (1s connect timeout) and repoints
   the Jupyter server process at `http://127.0.0.1:11434` when it is
   unreachable, so a black-holed host cannot block server startup while
   Notebook Intelligence enumerates Ollama models
