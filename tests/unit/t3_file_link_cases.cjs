@@ -9,7 +9,7 @@ const compiled = ts.transpileModule(fs.readFileSync(process.argv[2], 'utf8'), {
 const errors = [], opened = [], commands = [];
 const modules = {
   '@jupyterlab/application': {},
-  '@jupyterlab/apputils': { showErrorMessage: (...args) => errors.push(args) },
+  '@jupyterlab/apputils': { showErrorMessage: async (...args) => errors.push(args) },
   '@jupyterlab/coreutils': { PageConfig: { getOption: () => '/home/alice' } },
   '@jupyterlab/docmanager': { IDocumentManager: {} }
 };

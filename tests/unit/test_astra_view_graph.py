@@ -465,7 +465,7 @@ def _synthetic_project(inputs, outputs):
         }
     ]
     edges = []
-    for index, local in enumerate(inputs):
+    for _index, local in enumerate(inputs):
         nodes.append(
             {
                 "id": f"input:root/{local}",

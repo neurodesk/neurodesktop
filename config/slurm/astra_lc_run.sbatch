@@ -51,6 +51,8 @@ project="${NEURODESK_ASTRA_PROJECT:-${SLURM_SUBMIT_DIR:-${PWD}}}"
 universe="${NEURODESK_ASTRA_UNIVERSE:-}"
 jobs="${NEURODESK_ASTRA_JOBS:-1}"
 
+# Image-installed dependency is unavailable in the checkout.
+# shellcheck source=/dev/null
 source /opt/neurodesktop/agent_bash_env.sh
 module purge
 for spec in ${NEURODESK_ASTRA_MODULES:-}; do

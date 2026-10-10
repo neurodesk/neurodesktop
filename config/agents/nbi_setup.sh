@@ -13,7 +13,8 @@
 
 set -u
 umask 077
-export PYTHONPATH="$(dirname "${BASH_SOURCE[0]}")${PYTHONPATH:+:${PYTHONPATH}}"
+PYTHONPATH="$(dirname "${BASH_SOURCE[0]}")${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTHONPATH
 
 case "${1:-}" in
     ""|--no-refresh) ;;

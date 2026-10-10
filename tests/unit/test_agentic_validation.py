@@ -1,6 +1,5 @@
 """Regression tests for the frozen agentic validation baseline."""
 
-from pathlib import Path
 import shutil
 import subprocess
 import sys

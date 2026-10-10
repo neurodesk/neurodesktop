@@ -3,7 +3,7 @@
 from urllib.parse import urlsplit
 
 
-def is_neurodesk_endpoint(value):
+def is_neurodesk_endpoint(value: object) -> bool:
     if not isinstance(value, str) or any(character.isspace() for character in value):
         return False
     try:

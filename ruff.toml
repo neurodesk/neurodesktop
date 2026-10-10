@@ -1,0 +1,15 @@
+target-version = "py312"
+include = ["*.py", "*.pyi", "config/agents/neurodesk-astra-provenance"]
+extend-exclude = [
+  # Frozen upstream excerpts used to test patches against independent inputs.
+  "tests/fixtures/freebrowse/handlers.py",
+  "tests/fixtures/freebrowse/test_handlers.py",
+  "tests/fixtures/slurm-user-handler.py",
+]
+
+[lint]
+select = ["E4", "E7", "E9", "F", "B", "UP"]
+
+[lint.per-file-ignores]
+# Jupyter supplies its configuration object when it executes this file.
+"config/jupyter/jupyter_server_config_extra.py" = ["F821"]

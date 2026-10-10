@@ -121,6 +121,8 @@ handle_bashrc_append() {
         local tmp_append
         tmp_append="$(mktemp)" || return 1
         { echo ""; echo "$marker"; cat "$append_file"; } > "$tmp_append"
+        # The current user owns tmp_append; only the destination write needs sudo.
+        # shellcheck disable=SC2024
         if sudo tee -a "$bashrc" < "$tmp_append" >/dev/null 2>&1; then
             rm -f "$tmp_append"
             return 0
@@ -212,7 +214,7 @@ restore_defaults() {
         fi
 
         # Calculate relative path and destination
-        rel_path="${src_file#${DEFAULTS_DIR}/}"
+        rel_path="${src_file#"${DEFAULTS_DIR}/"}"
         dest_file="${HOME_DIR}/${rel_path}"
 
         log_info "Processing: $rel_path"

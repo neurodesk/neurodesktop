@@ -10,18 +10,28 @@ neurodesk_initialize_tool_shell() {
        [ "${NEURODESKTOP_PREVIOUS_BASH_ENV}" != "${BASH_SOURCE[0]}" ] &&
        [ "${_NEURODESKTOP_PREVIOUS_BASH_ENV_PID:-}" != "$BASHPID" ]; then
         _NEURODESKTOP_PREVIOUS_BASH_ENV_PID=$BASHPID
+        # Image-installed or user-selected dependency is unavailable in the checkout.
+        # shellcheck source=/dev/null
         . "${NEURODESKTOP_PREVIOUS_BASH_ENV}" || status=$?
     fi
 
     if [ "$status" -eq 0 ]; then
+        # Image-installed or user-selected dependency is unavailable in the checkout.
+        # shellcheck source=/dev/null
         . /opt/neurodesktop/environment_variables.sh >/dev/null 2>&1 || status=$?
     fi
     if [ "$status" -eq 0 ]; then
         if [ -r /etc/profile.d/lmod.sh ]; then
+            # Image-installed or user-selected dependency is unavailable in the checkout.
+            # shellcheck source=/dev/null
             . /etc/profile.d/lmod.sh || status=$?
         elif [ -r /usr/share/module.sh ]; then
+            # Image-installed or user-selected dependency is unavailable in the checkout.
+            # shellcheck source=/dev/null
             . /usr/share/module.sh || status=$?
         else
+            # Image-installed or user-selected dependency is unavailable in the checkout.
+            # shellcheck source=/dev/null
             . /usr/share/lmod/lmod/init/bash || status=$?
         fi
     fi

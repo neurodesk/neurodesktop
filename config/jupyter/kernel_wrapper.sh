@@ -8,5 +8,7 @@
 # local containers. Wrapping the kernel lets each new kernel pick up the
 # CVMFS MODULEPATH once the deferred worker has mounted it - mirroring what
 # a freshly opened terminal gets via /etc/bash.bashrc.
+# Image-installed or user-selected dependency is unavailable in the checkout.
+# shellcheck source=/dev/null
 source /opt/neurodesktop/environment_variables.sh >/dev/null 2>&1
 exec "$@"

@@ -124,6 +124,8 @@ start_cvmfs() {
     # Unset the guard so the script re-evaluates paths with CVMFS now mounted.
     if [ -f /opt/neurodesktop/environment_variables.sh ]; then
         unset NEURODESKTOP_ENV_SOURCED
+        # Image-installed or user-selected dependency is unavailable in the checkout.
+        # shellcheck source=/dev/null
         source /opt/neurodesktop/environment_variables.sh > /dev/null 2>&1
     fi
 

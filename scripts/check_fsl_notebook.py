@@ -153,7 +153,7 @@ def validate_notebook(notebook, expected):
     if len(cells) != len(expected['cells']):
         raise AcceptanceError('saved notebook cell count differs')
     counts = []
-    for index, (cell, original) in enumerate(zip(cells, expected['cells']), 1):
+    for index, (cell, original) in enumerate(zip(cells, expected['cells'], strict=True), 1):
         if cell.get('cell_type') != original['cell_type'] or ''.join(cell.get('source', [])) != ''.join(original['source']):
             raise AcceptanceError(f'saved notebook cell {index} differs')
         if cell['cell_type'] == 'code':

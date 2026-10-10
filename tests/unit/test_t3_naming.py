@@ -1,7 +1,6 @@
 """Hub display names never alter identity, DNS or user connection aliases."""
 import asyncio
 import os
-from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace

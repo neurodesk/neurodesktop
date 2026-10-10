@@ -27,7 +27,7 @@ import shutil
 import socket
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 SCHEMA = "neurodesk-astra-provenance/1"
@@ -47,7 +47,7 @@ IMAGE_PATH = re.compile(r"[\w./+-]+\.(?:simg|sif)")
 
 
 def _utc_now():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _sha256(path):

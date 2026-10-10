@@ -163,7 +163,7 @@ class ConnectManager:
                     os.killpg(process.pid, signal.SIGTERM)
                 try:
                     await asyncio.wait_for(process.wait(), 3)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     with suppress(ProcessLookupError):
                         os.killpg(process.pid, signal.SIGKILL)
                     await process.wait()
@@ -336,7 +336,7 @@ class ConnectManager:
             await operation()
         except asyncio.CancelledError:
             raise
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self.set_state('expired', 'The request timed out or the code expired. Choose Retry for a new attempt.')
         except ConnectError as error:
             self.set_state('error', str(error))

@@ -261,6 +261,12 @@ class AstraDocumentContent extends Widget {
       if (!this.isDisposed) {
         context.fileChanged.connect(this._onFileChanged, this);
       }
+    }).catch(error => {
+      if (!this.isDisposed) {
+        this._host.textContent = `The ASTRA document could not load: ${
+          error instanceof Error ? error.message : error
+        }`;
+      }
     });
   }
 
