@@ -9,6 +9,7 @@ on:
       - Build neurodesktop-dev
       - Backfill neurodesktop history
       - Unit tests
+      - Code quality
       - PR image acceptance
       - Codespell
       - Test Objectstorage
