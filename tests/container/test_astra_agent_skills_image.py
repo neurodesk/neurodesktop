@@ -18,7 +18,7 @@ from pathlib import Path
 from testlib import run_cmd
 
 
-ASTRA_TOOLS_VERSION = "0.2.17"
+ASTRA_TOOLS_VERSION = "0.2.18"
 
 SKILLS_CHECKOUT = Path("/opt/neurodesktop/agent-skills")
 HOOK_SCRIPTS = SKILLS_CHECKOUT / "plugins/reproduction/hooks/scripts"

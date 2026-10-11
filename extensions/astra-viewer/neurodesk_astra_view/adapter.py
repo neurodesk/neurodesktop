@@ -26,7 +26,7 @@ def _astra_api():
         )
     except ImportError as error:  # pragma: no cover - packaging failure in the image
         raise AdapterError(
-            "astra-tools is unavailable; Neurodesktop requires astra-tools==0.2.17"
+            "astra-tools is unavailable; Neurodesktop requires astra-tools==0.2.18"
         ) from error
     return (
         load_yaml,
