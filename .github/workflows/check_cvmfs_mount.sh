@@ -7,7 +7,7 @@ repository_name="${CVMFS_REPOSITORY_NAME:-neurodesk.ardc.edu.au}"
 
 # Access triggers autofs; an ordinary directory or autofs trigger is not a CVMFS mount.
 if timeout --kill-after=5s 45s ls "$repository_root" >/dev/null &&
-    timeout --kill-after=5s 10s findmnt --noheadings --mountpoint "$repository_root" --types fuse.cvmfs; then
+    timeout --kill-after=5s 10s findmnt --noheadings --mountpoint "$repository_root" --types fuse,fuse.cvmfs --source cvmfs2; then
     exit 0
 fi
 
@@ -15,7 +15,7 @@ echo "::error title=CVMFS mount unavailable::Cannot read a mounted CVMFS reposit
 
 diagnostic() {
     echo "[DEBUG]: $*"
-    timeout --kill-after=5s 10s sudo -n "$@" || true
+    sudo -n timeout --kill-after=5s 10s "$@" || true
 }
 
 diagnostic cvmfs_config showconfig "$repository_name"
