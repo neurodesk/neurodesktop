@@ -2,6 +2,8 @@
 set -eu
 
 if [ -r /opt/neurodesktop/agent_shell_setup.sh ]; then
+    # Image-installed dependency is unavailable in the checkout.
+    # shellcheck source=/dev/null
     . /opt/neurodesktop/agent_shell_setup.sh
 fi
 

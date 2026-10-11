@@ -3,7 +3,7 @@
 Covers:
 - ensure_ssh_keys.sh: pre-generated SSH keypairs for the Guacamole SFTP
   side-channel (valid, idempotent, safe under concurrent invocation).
-- before_notebook.sh: the OLLAMA_HOST guard repoints an unreachable endpoint
+- guard_ollama_host.sh: the OLLAMA_HOST guard repoints an unreachable endpoint
   at 127.0.0.1 quickly instead of letting notebook_intelligence block Jupyter
   startup on it.
 
@@ -14,13 +14,14 @@ tests/container/test_startup_performance_fixes.py.
 
 import http.server
 import os
+import shlex
 import subprocess
 import threading
 import time
 
 import pytest
 
-from testlib import resolve_source
+from testlib import repo_path, resolve_source
 
 ENSURE_SSH_KEYS = resolve_source(
     "/opt/neurodesktop/ensure_ssh_keys.sh", "config/ssh/ensure_ssh_keys.sh"
@@ -28,6 +29,10 @@ ENSURE_SSH_KEYS = resolve_source(
 BEFORE_NOTEBOOK = resolve_source(
     "/usr/local/bin/before-notebook.d/before_notebook.sh",
     "config/jupyter/before_notebook.sh",
+)
+
+OLLAMA_GUARD = resolve_source(
+    "/opt/neurodesktop/guard_ollama_host.sh", "config/jupyter/guard_ollama_host.sh"
 )
 
 
@@ -209,27 +214,31 @@ def test_ensure_ssh_keys_failed_pub_publish_is_retryable(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# before_notebook.sh OLLAMA_HOST guard
+# guard_ollama_host.sh endpoint readiness
 # ---------------------------------------------------------------------------
 
 
+def test_ollama_guard_is_installed_and_sourced_by_startup():
+    dockerfile = repo_path("Dockerfile").read_text()
+    assert (
+        "install -m 0755 /tmp/jupyter/guard_ollama_host.sh "
+        "/opt/neurodesktop/guard_ollama_host.sh"
+    ) in dockerfile
+    assert "source /opt/neurodesktop/guard_ollama_host.sh" in BEFORE_NOTEBOOK.read_text()
+
+
 def _run_ollama_guard(tmp_path, ollama_host):
-    """Extract and run just the OLLAMA_HOST guard block from before_notebook.sh."""
-    guard_block = tmp_path / "guard_block.sh"
+    """Source the installed helper and read the endpoint inherited by Jupyter."""
     driver = tmp_path / "driver.sh"
     driver.write_text(
-        "sed -n '/Guard against a black-holed OLLAMA_HOST/,/^fi$/p' "
-        f"{BEFORE_NOTEBOOK} > {guard_block}\n"
-        f"grep -q 'OLLAMA_HOST' {guard_block} || exit 90\n"
-        f"source {guard_block}\n"
+        f"source {shlex.quote(str(OLLAMA_GUARD))}\n"
         'echo "RESULT_OLLAMA_HOST=${OLLAMA_HOST}"\n'
     )
     start = time.time()
     code, output = run_cmd(
-        f"bash {driver}", env={"OLLAMA_HOST": ollama_host}, timeout=60
+        f"bash {shlex.quote(str(driver))}", env={"OLLAMA_HOST": ollama_host}, timeout=60
     )
     elapsed = time.time() - start
-    assert code != 90, "OLLAMA_HOST guard block not found in before_notebook.sh"
     assert code == 0, output
     return output, elapsed
 
@@ -240,6 +249,11 @@ def test_ollama_guard_repoints_unreachable_host(tmp_path):
     output, elapsed = _run_ollama_guard(tmp_path, "http://10.255.255.1:11434")
     assert "RESULT_OLLAMA_HOST=http://127.0.0.1:11434" in output, output
     assert elapsed < 10, f"guard took {elapsed:.1f}s; must fail fast"
+
+
+def test_ollama_guard_leaves_empty_host_unset(tmp_path):
+    output, _ = _run_ollama_guard(tmp_path, "")
+    assert output == "RESULT_OLLAMA_HOST="
 
 
 def test_ollama_guard_keeps_reachable_host(tmp_path):

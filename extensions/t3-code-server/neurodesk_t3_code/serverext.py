@@ -51,7 +51,7 @@ class NeurodeskT3CodeApp(ExtensionApp):
         try:
             await self._supervisor.wait_ready()
             await self._connect.restore()
-        except (RuntimeError, asyncio.TimeoutError) as error:
+        except (TimeoutError, RuntimeError) as error:
             self.log.warning("T3 Code sidecar startup did not complete: %s", error)
 
     async def stop_extension(self) -> None:

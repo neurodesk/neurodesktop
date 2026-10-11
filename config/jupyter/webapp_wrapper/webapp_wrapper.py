@@ -246,7 +246,7 @@ def check_app_ready():
             f"dynamic port {config.target_port} — container likely needs rebuild "
             f"to support NEURODESK_WEBAPP_PORT")
         config.target_port = config.default_port
-        for i, (prefix, port) in enumerate(config.routes):
+        for i, (prefix, _port) in enumerate(config.routes):
             if prefix == f"/{config.app_name}":
                 config.routes[i] = (prefix, config.default_port)
                 break
@@ -627,7 +627,7 @@ def start_container():
 
         # Update config to use the dynamic port
         config.target_port = dynamic_port
-        for i, (prefix, port) in enumerate(config.routes):
+        for i, (prefix, _port) in enumerate(config.routes):
             if prefix == f"/{config.app_name}":
                 config.routes[i] = (prefix, dynamic_port)
                 break
@@ -733,7 +733,7 @@ def start_container():
 def render_splash_template():
     """Render the splash page template with app-specific values."""
     try:
-        with open(SPLASH_TEMPLATE_PATH, 'r') as f:
+        with open(SPLASH_TEMPLATE_PATH) as f:
             template = Template(f.read())
 
         return template.safe_substitute(
@@ -751,7 +751,7 @@ def render_splash_template():
 <h1>{config.title}</h1>
 <p>Loading...</p>
 <script>setTimeout(() => location.reload(), 3000)</script>
-</div></body></html>""".encode('utf-8')
+</div></body></html>""".encode()
 
 
 class WebappHandler(http.server.BaseHTTPRequestHandler):
@@ -1322,7 +1322,7 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
             {"client": {"roots": roots}},
             separators=(",", ":"),
         )
-        return f"window.config = {payload}".encode("utf-8")
+        return f"window.config = {payload}".encode()
 
     def _send_jamovi_config_response(self, response, target_port):
         content = self._build_jamovi_config_js()

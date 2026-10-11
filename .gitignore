@@ -10,3 +10,6 @@ extensions/neurodesk-launcher/node_modules/
 extensions/neurodesk-launcher/neurodesk_launcher/labextension/
 extensions/neurodesk-launcher/tsconfig.tsbuildinfo
 *.pyc
+
+# Local code-quality tool environment
+.venv-quality/

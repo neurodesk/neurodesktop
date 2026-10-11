@@ -119,8 +119,9 @@ def marker_comment(kind, user="github-actions[bot]", issue=42):
     }
 
 
-def test_completed_run_aggregates_matrix_failures_and_dispatches_default_branch():
-    output = run_reporter(jobs=[
+@pytest.mark.parametrize("workflow", ["Unit tests", "Code quality"])
+def test_completed_run_aggregates_matrix_failures_and_dispatches_default_branch(workflow):
+    output = run_reporter(runs=[{"name": workflow}], jobs=[
         {"id": 1, "name": "amd64", "conclusion": "failure", "steps": [
             {"name": "pytest", "conclusion": "failure"},
             {"name": "checkout", "conclusion": "success"},

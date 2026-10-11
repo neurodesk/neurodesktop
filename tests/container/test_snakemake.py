@@ -40,7 +40,7 @@ def _fsl_available():
 
 def test_snakemake_version():
     """Verify snakemake is installed and functioning."""
-    cmd = f"snakemake --version"
+    cmd = "snakemake --version"
     code, output = run_cmd(cmd)
     assert code == 0, f"Snakemake version check failed: {output}"
     assert output and len(output.split(".")) >= 2, f"Unexpected Snakemake output: {output}"

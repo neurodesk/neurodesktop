@@ -8,6 +8,8 @@
    and required subsystem checks; test fixes before reporting success. Default
    to `tests/unit/`, using `tests/container/` for checks that need a running image.
    Execute the subject; reserve source assertions for packaging contracts.
+   Run `bash scripts/check_quality.sh all` with the dependencies described in
+   [code quality checks](docs/testing.md#code-quality-checks) before delivery.
 3. Commit and push a branch, then open or update its PR with the change summary
    and validation results. Stay with it until review and CI finish.
 4. After each push, read all bot review summaries and inline comments. Fix and

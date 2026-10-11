@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from test_niivue_rendering_image import graphics_display
+from test_niivue_rendering_image import graphics_display as graphics_display
 from test_widget_compatibility_image import (
     _stop, _unused_port, _wait_for_server, _start_firefox_with_webgl_probe,
     _wait_for_expression, _click_dom_element,
@@ -25,7 +25,8 @@ from test_widget_compatibility_image import (
     reason="Run the graphics acceptance profile to provision a display",
 )
 @pytest.mark.parametrize("base_path", ["/", "/user/alice/"])
-def test_default_freebrowse_opens_and_renders_local_volume(tmp_path, graphics_display, base_path):
+# Pytest registers the imported fixture and injects its value by parameter name.
+def test_default_freebrowse_opens_and_renders_local_volume(tmp_path, graphics_display, base_path):  # noqa: F811
     filename = "brain # & ü.nii.gz"
     volume = np.random.default_rng(0).normal(size=(48, 48, 48)).astype("float32")
     nib.save(nib.Nifti1Image(volume, np.eye(4)), tmp_path / filename)

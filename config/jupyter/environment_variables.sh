@@ -51,7 +51,7 @@ ls "$CVMFS_MODULES" >/dev/null 2>&1 || true
 # entry so Lmod presents modules as `<tool>/<version>` rather than
 # `<category>/<tool>/<version>`.
 if [ -d "$CVMFS_MODULES" ]; then
-        cvmfs_expanded=`echo ${CVMFS_MODULES}* | sed 's/ /:/g'`
+        cvmfs_expanded=$(echo "${CVMFS_MODULES}"* | sed 's/ /:/g')
         if [ -d "$OFFLINE_MODULES" ]; then
                 export MODULEPATH=${OFFLINE_MODULES}:${cvmfs_expanded}
         else
@@ -327,7 +327,8 @@ if [[ -z "${NEURODESKTOP_SLURM_MODE}" ]]; then
                 export NEURODESKTOP_SLURM_MODE=local
         fi
 else
-        export NEURODESKTOP_SLURM_MODE="$(printf '%s' "${NEURODESKTOP_SLURM_MODE}" | tr '[:upper:]' '[:lower:]')"
+        NEURODESKTOP_SLURM_MODE="$(printf '%s' "${NEURODESKTOP_SLURM_MODE}" | tr '[:upper:]' '[:lower:]')"
+        export NEURODESKTOP_SLURM_MODE
 fi
 
 case "${NEURODESKTOP_SLURM_MODE}" in

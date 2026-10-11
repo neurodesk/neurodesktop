@@ -270,6 +270,21 @@ function select(widget, value) {
     assert.equal(contentsReads.includes("project"), false);
     current.documentContext.dispose();
     current.registry.dispose();
+    for (const disposed of [false, true]) {
+      let rejectReady;
+      const ready = new Promise((resolve, reject) => { rejectReady = reject; });
+      const failedContext = new Proxy(current.documentContext, {
+        get: (target, key) => key === "ready" ? ready : Reflect.get(target, key),
+      });
+      const failed = new current.widget.content.constructor(failedContext, contents);
+      const host = failed.node.querySelector(".nd-astra-host");
+      if (disposed) failed.dispose();
+      rejectReady(new Error("document initialization failed"));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      if (disposed) assert.equal(host.textContent, "");
+      else assert.match(host.textContent, /document initialization failed/);
+      failed.dispose();
+    }
   } else if (test === "registry") {
     const registry = new framework.DocumentRegistry();
     subject.namespace.default.activate({

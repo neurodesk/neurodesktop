@@ -11,6 +11,8 @@
     "style/**/*.css"
   ],
   "scripts": {
+    "typecheck": "tsc --noEmit --incremental false --composite false",
+    "lint": "eslint --max-warnings 0 src --ext .ts",
     "build": "tsc --build --force && node build_ext.js",
     "build:prod": "tsc --build --force && node build_ext.js",
     "clean": "rimraf lib tsconfig.tsbuildinfo"
@@ -28,6 +30,9 @@
   },
   "devDependencies": {
     "@jupyterlab/builder": "^4.0.0",
+    "@typescript-eslint/eslint-plugin": "7.18.0",
+    "@typescript-eslint/parser": "7.18.0",
+    "eslint": "8.57.1",
     "rimraf": "~5.0.0",
     "typescript": "~5.2.0"
   },

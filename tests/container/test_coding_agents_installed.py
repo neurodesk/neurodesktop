@@ -117,7 +117,7 @@ def test_coding_agent_acp_bootstraps_without_credentials(
                 os.killpg(process.pid, signal.SIGTERM)
                 try:
                     await asyncio.wait_for(process.wait(), timeout=5)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     os.killpg(process.pid, signal.SIGKILL)
                     await process.wait()
     asyncio.run(probe())

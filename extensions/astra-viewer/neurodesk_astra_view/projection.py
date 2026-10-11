@@ -301,7 +301,7 @@ def _project_outputs(view: _Projection, outputs: list[dict[str, Any]]):
             (entry for entry in candidates.items() if len(entry[1]) > 1),
             key=lambda entry: -len(entry[1]),
         )
-        for (_, category), batch_list in mergeable:
+        for (_, _category), batch_list in mergeable:
             if len(batches) <= MAX_OUTPUT_NODES:
                 break
             merged = [item for batch in batch_list for item in batch]

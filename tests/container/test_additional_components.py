@@ -76,7 +76,7 @@ def test_tomcat_header_size():
     server_xml_path = "/usr/local/tomcat/conf/server.xml"
     assert os.path.exists(server_xml_path), "Tomcat server.xml missing"
 
-    with open(server_xml_path, "r", encoding="utf-8") as server_xml_file:
+    with open(server_xml_path, encoding="utf-8") as server_xml_file:
         server_xml = server_xml_file.read()
 
     match = re.search(r'maxHttpRequestHeaderSize="(\d+)"', server_xml)
@@ -89,7 +89,7 @@ def test_tomcat_cookie_path():
     context_xml_path = "/usr/local/tomcat/conf/context.xml"
     assert os.path.exists(context_xml_path), "Tomcat context.xml missing"
 
-    with open(context_xml_path, "r", encoding="utf-8") as f:
+    with open(context_xml_path, encoding="utf-8") as f:
         context_xml = f.read()
 
     assert 'sessionCookiePath="/"' in context_xml, \
@@ -106,7 +106,7 @@ def test_tomcat_cookie_max_age():
     assert os.path.exists(guac_web_xml_path), \
         "Guacamole web.xml missing - ROOT.war should be extracted during build"
 
-    with open(guac_web_xml_path, "r", encoding="utf-8") as f:
+    with open(guac_web_xml_path, encoding="utf-8") as f:
         web_xml = f.read()
 
     assert "<cookie-config>" in web_xml, \

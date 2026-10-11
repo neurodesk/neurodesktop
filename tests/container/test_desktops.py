@@ -1217,7 +1217,7 @@ def test_guac_vnc_tunnel():
             vnc_connection_id,
         )
         try:
-            frames = _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30)
+            _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30)
         except AssertionError as exc:
             # Pull the Guacamole log so we can see whether the failure was an
             # auth rejection, a connection refused, or something downstream.
@@ -1239,7 +1239,7 @@ def test_guac_vnc_tunnel():
                 f"{exc}\n--- catalina.out tail ---\n{extra}\n"
                 f"--- latest Xvnc log ---\n{vnc_tail}\n"
                 f"--- mapping VNC entry ---\n{vnc_block}"
-            )
+            ) from exc
     finally:
         if tunnel is not None:
             try:
@@ -1356,6 +1356,6 @@ def test_vnc_startup(tmp_path):
         code, output = run_cmd("ps auxww | grep -v grep | grep -E 'Xtigervnc.*:99'")
         if code != 0:
             _, log_content = run_cmd(f"cat {tmp_path}/.vnc/*:99.log || true")
-            assert False, f"Xtigervnc :99 process is not running. VNC startup crashed.\\nLog:\\n{log_content}\\n\\nPS Output:\\n{output}"
+            raise AssertionError(f"Xtigervnc :99 process is not running. VNC startup crashed.\\nLog:\\n{log_content}\\n\\nPS Output:\\n{output}")
     finally:
         run_cmd(f"USER=jovyan HOME={tmp_path} vncserver -kill :99")

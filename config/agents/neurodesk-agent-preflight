@@ -1,6 +1,8 @@
 #!/bin/bash
 set -eo pipefail
 
+# Image-installed dependency is unavailable in the checkout.
+# shellcheck source=/dev/null
 source /opt/neurodesktop/agent_bash_env.sh
 
 guidance=/opt/AGENTS.md

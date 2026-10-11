@@ -86,6 +86,26 @@ def test_defaults_restore_missing_migrate_newer_and_preserve_current(tmp_path):
     assert (home / "custom").read_text() == "user content"
 
 
+def test_defaults_restore_treats_directory_prefix_as_literal(tmp_path):
+    defaults = tmp_path / "defaults [image]*"
+    defaults.mkdir()
+    (defaults / "welcome.txt").write_text("image welcome")
+    nested = defaults / "nested"
+    nested.mkdir()
+    (nested / "settings.json").write_text('{"theme": "dark"}')
+    home = tmp_path / "home with spaces"
+    home.mkdir()
+    script = source("restore_home_defaults.sh").replace(
+        'DEFAULTS_DIR="/opt/jovyan_defaults"',
+        f"DEFAULTS_DIR={shlex.quote(str(defaults))}",
+    )
+
+    shell(script, home)
+
+    assert (home / "welcome.txt").read_text() == "image welcome"
+    assert (home / "nested/settings.json").read_text() == '{"theme": "dark"}'
+
+
 def test_deferred_components_run_independently_and_done_waits_for_both(tmp_path):
     script = source("deferred_startup.sh")
     run = script[script.index('echo "[deferred] Starting deferred initialization..."'):]

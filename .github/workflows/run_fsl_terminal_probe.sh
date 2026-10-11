@@ -52,6 +52,8 @@ WEBSOCKET_INPUT="$PROBE_DIR/websocket.input"
 WEBSOCAT_PID=""
 INPUT_PID=""
 
+# Invoked by the EXIT trap, including signal-triggered exits.
+# shellcheck disable=SC2329
 cleanup() {
     if [ -n "$WEBSOCAT_PID" ]; then
         kill "$WEBSOCAT_PID" 2>/dev/null || true
