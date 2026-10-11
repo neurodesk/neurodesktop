@@ -127,7 +127,8 @@ access to its daemon. Individual gates are available as `python`, `shell`,
 `scripts/check_quality.sh`. Checks report failures without changing source files.
 
 Ruff checks owned Python, including tests and the extensionless provenance CLI.
-Its configuration excludes frozen upstream Python fixtures. ShellCheck discovers
+Its configuration excludes frozen upstream Python fixtures and notebooks; the
+FSL notebook fixture is covered by its execution test. ShellCheck discovers
 shell files by extension or shebang, including extensionless launchers.
 Actionlint checks workflow expressions and embedded shell commands. JavaScript
 syntax checks cover owned scripts and DOM test drivers; generated bundles and
