@@ -3,7 +3,9 @@
 from datetime import datetime, UTC
 import hashlib
 import json
+from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 
@@ -47,6 +49,22 @@ def github(worker, monkeypatch):
     monkeypatch.setattr(worker, "api", api)
     monkeypatch.setattr(worker, "pages", api)
     return responses, calls
+
+
+@pytest.mark.parametrize("script", ["agentic_worker.py", "check_agentic_sandbox.py"])
+def test_runner_host_scripts_load_without_python_311_datetime(script, tmp_path):
+    # The self-hosted runner host executes these with Ubuntu 22.04's Python 3.10.
+    (tmp_path / "sitecustomize.py").write_text("import datetime\ndel datetime.UTC\n")
+    path = Path(".github/scripts") / script
+    loader = (
+        "import importlib.util, sys; "
+        "spec = importlib.util.spec_from_file_location('host_script', sys.argv[1]); "
+        "spec.loader.exec_module(importlib.util.module_from_spec(spec))"
+    )
+    subprocess.run(
+        [sys.executable, "-c", loader, str(path.resolve())],
+        cwd=tmp_path, env={"PYTHONPATH": str(tmp_path)}, check=True,
+    )
 
 
 def pull(**changes):
