@@ -70,7 +70,7 @@ def main(argv=None):
             "-p", "no:cacheprovider",
             str(tests / "unit"), "-q",
         ],
-        cwd=baseline,
+        cwd=workspace,
         env=baseline_env,
     )
     candidate_status = run(

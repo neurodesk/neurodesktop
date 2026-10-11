@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 import subprocess
 import sys
 
@@ -7,7 +6,9 @@ import nibabel as nib
 import numpy as np
 import pytest
 
-CLI = Path(__file__).resolve().parents[2] / 'scripts/validate_fsl_bet.py'
+from testlib import repo_path
+
+CLI = repo_path('scripts/validate_fsl_bet.py')
 
 
 def validate(tmp_path, brain=None, mask=None, affine=None):

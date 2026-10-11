@@ -84,6 +84,30 @@ def test_frozen_baseline_redirects_testlib_to_patched_workspace(tmp_path):
     assert "=== candidate tests ===" in result.stdout
 
 
+def test_frozen_baseline_reads_relative_workspace_sources_without_candidate_controls(tmp_path):
+    baseline = tmp_path / "baseline"
+    workspace = tmp_path / "workspace"
+    write_baseline(baseline)
+    write_candidate(workspace, "good\n")
+    (baseline / "tests" / "unit" / "test_relative.py").write_text(
+        "from pathlib import Path\n\n"
+        "def test_relative_subject():\n"
+        "    assert Path('subject.txt').read_text() == 'good\\n'\n"
+    )
+
+    passing = validate(baseline, workspace)
+
+    assert passing.returncode == 0, passing.stdout
+    assert "2 passed" in passing.stdout
+
+    (workspace / "subject.txt").write_text("bad\n")
+    failing = validate(baseline, workspace)
+
+    assert failing.returncode == 1
+    assert "test_relative_subject" in failing.stdout
+    assert "2 failed" in failing.stdout
+
+
 def test_candidate_failure_blocks_a_passing_frozen_baseline(tmp_path):
     baseline = tmp_path / "baseline"
     workspace = tmp_path / "workspace"
@@ -114,6 +138,34 @@ def test_worker_pins_match_viewer_dependencies():
     for requirement in viewer["project"]["dependencies"]:
         if requirement.startswith(("astra-spec==", "astra-tools==", "anywidget==")):
             assert requirement in worker, f"Worker dependency drift: {requirement}"
+
+
+@pytest.mark.parametrize("requirement", [
+    "jupyterhub==6.0.1", "requests", "ipykernel", "websocket-client", "nibabel", "numpy",
+    "openssh-client", "acl", "jq",
+    "jsdom@26.1.0", "typescript@5.2.2", "esbuild@0.28.2",
+    "@jupyterlab/docregistry@4.6.3", "@jupyterlab/coreutils@6.6.3",
+    "@jupyterlab/services@7.6.3", "@lumino/widgets@2.9.0",
+])
+def test_worker_provisions_mandatory_ci_dependencies(requirement):
+    worker = repo_path("config/agentic/Dockerfile").read_text()
+    workflow = repo_path(".github/workflows/unit-tests.yml").read_text()
+
+    assert requirement in workflow
+    assert requirement in worker, f"Offline worker is missing CI dependency: {requirement}"
+
+
+def test_worker_supports_system_python_shebangs():
+    worker = repo_path("config/agentic/Dockerfile").read_text()
+
+    assert "ln -s /usr/local/bin/python3 /usr/bin/python3" in worker
+
+
+def test_worker_exposes_image_owned_dom_dependencies():
+    worker = repo_path("config/agentic/Dockerfile").read_text()
+
+    assert "npm install --prefix /opt/launcher-dom --no-audit --no-fund" in worker
+    assert "ENV NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES=/opt/launcher-dom/node_modules" in worker
 
 
 @pytest.mark.parametrize("module", ["test_jupyterlab_slurm_build.py", "test_audit_image_versions.py"])

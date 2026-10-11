@@ -91,6 +91,9 @@ so a candidate patch cannot reach it through the environment. Isolated mode
 also drops user site packages, so a `--user` install of `pytest` or of its
 `pygments` dependency leaves that subprocess unable to import pytest, and the
 test fails for a reason unrelated to the code under test.
+Use `testlib.repo_path()` to locate repository sources in unit tests. The frozen
+baseline redirects that helper to the candidate checkout; source roots derived
+from the test file's `__file__` instead point into the tests-only snapshot.
 
 Two modules need heavier optional dependencies and skip cleanly when they are
 absent rather than failing a plain checkout; CI installs them, so they always
