@@ -4,7 +4,7 @@ description: CVMFS server selection and mount configuration, and the
   neurocommand CLI/module system for neuroimaging tools
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-08"
+last-reviewed: "2026-10-11"
 ---
 
 # CVMFS and Neurocommand
@@ -90,7 +90,19 @@ neurocommand's desired container inventory. Only after that source is complete
 does it fan out across the advertised replicas and the fallback-list job. This
 turns a publication omission into one source failure instead of an identical
 failure from every downstream replica. Both its single-server and fallback-list
-jobs use
+jobs first run
+[`check_cvmfs_mount.sh`](../../.github/workflows/check_cvmfs_mount.sh). It triggers
+a repository read with a 45-second timeout and confirms a `fuse` or `fuse.cvmfs`
+mount with source `cvmfs2` using `findmnt`. An unavailable mount produces one
+mount-failure annotation and stops before inventory download, replica propagation
+waits, or the FSL file copy.
+Failure diagnostics include effective client configuration, the repository probe
+and status, autofs status and journal, and client logs. Each diagnostic has a
+10-second timeout. The diagnostic timeout runs under noninteractive sudo so it
+can terminate privileged child processes. All mount checks and diagnostics have
+a five-second kill grace period; diagnostic failures preserve the mount-failure
+exit status.
+Once the mount passes, both jobs use
 [`check_cvmfs_inventory.sh`](../../.github/workflows/check_cvmfs_inventory.sh),
 which fails unavailable or empty inventory downloads and reports every missing
 container in the snapshot before failing. When the first comparison finds a
