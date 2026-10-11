@@ -3,7 +3,7 @@ title: Agentic CI workflows
 description: Failure reporting, issue repair, scheduled maintenance, and subscription-authenticated Codex execution through conventional Actions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-07"
+last-reviewed: "2026-10-11"
 ---
 
 # Agentic CI workflows
@@ -75,7 +75,10 @@ default-branch test suite was snapshotted before the model ran and is mounted
 read-only. Review tasks preserve that trusted validation revision separately
 from the PR head they edit.
 It exercises the patched sources before the candidate suite runs, using
-trusted pytest configuration. Captured output is limited to 8 MiB per stream;
+trusted pytest configuration. Both suites run with the patched checkout as
+the working directory, so relative source paths resolve there while frozen
+tests and their configuration remain independent of candidate pytest controls.
+Captured output is limited to 8 MiB per stream;
 overflow and timeouts terminate the command. The
 validation record includes the patch hash and retains bounded failure logs.
 This separates the agent's own test claims from the checks that authorize
@@ -116,6 +119,14 @@ Each worker run builds `neurodesktop-agentic:codex-0.153.4` from the trusted
 [`config/agentic/Dockerfile`](../../config/agentic/Dockerfile), using Docker's
 layer cache. `WORKER_UID` and `WORKER_GID` build arguments create the runner's
 identity inside the image. The image pins Codex CLI `0.153.4`.
+
+The trusted image build also installs the unit-test workflow's Python, system,
+and pinned DOM dependencies, including JupyterHub, NIfTI support, and ACL tools.
+The image also exposes Python 3.12 at `/usr/bin/python3` for launcher shebangs.
+`NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES` points both validation suites to the
+image-owned DOM packages. Dependency downloads happen during the image build;
+validation remains offline and credential-free.
+
 `AGENTIC_CODEX_MODEL` defaults to `gpt-5.6-sol`.
 `AGENTIC_RUNNER` defaults to `neurodesk-syd-arcrunner-neurodesktop` and
 `AGENTIC_CODEX_HOME` defaults to `/var/lib/neurodesktop-codex`. The persistent

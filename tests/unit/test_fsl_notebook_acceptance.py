@@ -1,6 +1,5 @@
 import json
 import os
-from pathlib import Path
 import socket
 import subprocess
 import sys
@@ -9,8 +8,9 @@ import time
 import pytest
 import requests
 
-ROOT = Path(__file__).resolve().parents[2]
-CLI = ROOT / 'scripts/check_fsl_notebook.py'
+from testlib import repo_path
+
+CLI = repo_path('scripts/check_fsl_notebook.py')
 
 @pytest.fixture(scope='module', params=['modern', 'legacy'])
 def server(tmp_path_factory, request):

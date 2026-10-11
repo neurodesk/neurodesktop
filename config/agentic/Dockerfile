@@ -13,10 +13,19 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
     && ln -s ../lib/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex \
     && apt-get update \
-    && apt-get install -y --no-install-recommends bash git curl jq openssh-client ripgrep ca-certificates \
+    && apt-get install -y --no-install-recommends bash git curl jq openssh-client acl ripgrep ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir pytest==8.4.2 httpx==0.28.1 traitlets==5.14.3 \
        PyYAML==6.0.2 jupyter-server==2.17.0 jupyter-server-proxy==4.5.0 \
-       astra-spec==0.0.14 astra-tools==0.2.17 anywidget==0.11.0
+       astra-spec==0.0.14 astra-tools==0.2.17 anywidget==0.11.0 \
+       jupyterhub==6.0.1 requests==2.34.2 ipykernel==7.4.0 websocket-client==1.9.2 \
+       nibabel==5.4.2 numpy==2.5.4
+RUN npm install --prefix /opt/launcher-dom --no-audit --no-fund \
+       jsdom@26.1.0 typescript@5.2.2 esbuild@0.28.2 \
+       @jupyterlab/docregistry@4.6.3 @jupyterlab/coreutils@6.6.3 \
+       @jupyterlab/services@7.6.3 @lumino/widgets@2.9.0 \
+    && npm cache clean --force
+RUN ln -s /usr/local/bin/python3 /usr/bin/python3
+ENV NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES=/opt/launcher-dom/node_modules
 ENV PYTHONDONTWRITEBYTECODE=1
 WORKDIR /workspace
