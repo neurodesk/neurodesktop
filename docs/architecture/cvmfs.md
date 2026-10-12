@@ -4,7 +4,7 @@ description: CVMFS server selection and mount configuration, and the
   neurocommand CLI/module system for neuroimaging tools
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-11"
+last-reviewed: "2026-10-12"
 ---
 
 # CVMFS and Neurocommand
@@ -24,7 +24,9 @@ uses Python's standard library and curl without requiring a mounted repository.
 
 Selection proceeds in three stages:
 
-1. Probe manifests in parallel, including the FNAL CDN endpoint. Collapse direct
+1. Probe manifests in parallel, including the FNAL Stratum 1 both directly and
+   through its CDN endpoint. Geo-DNS names such as `cvmfs-geoproximity` resolve
+   to FNAL only some of the time, so FNAL is also listed by name. Collapse direct
    aliases with the same observed IP, scheme, and port, while preserving separate
    `openhtc.io` hostnames because shared CDN edge IPs can route to different origins.
 2. Download the same hash-verified root catalog sequentially from **every**
