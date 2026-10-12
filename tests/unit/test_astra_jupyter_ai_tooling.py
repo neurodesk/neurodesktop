@@ -33,6 +33,14 @@ def test_astra_tools_is_installed_exactly_once():
     assert DOCKERFILE.count("astra-tools==${ASTRA_TOOLS_VERSION}") == 2
 
 
+def test_lightcone_uv_install_cannot_follow_the_default_python_release():
+    """uv 0.13 defaults to Python 3.15, but Lightcone belongs to the image env."""
+    install = DOCKERFILE.split("uv tool install /tmp/lightcone-cli-src", 1)[1]
+    install = install.split("&& test \"$(lc --version)\"", 1)[0]
+
+    assert "--python /opt/conda/bin/python --no-python-downloads" in install
+
+
 def test_astra_version_arguments_are_declared_once_per_stage():
     """Two defaults for one pin is a second place to forget on a bump."""
     for argument in ("ASTRA_SPEC_VERSION", "ASTRA_TOOLS_VERSION"):

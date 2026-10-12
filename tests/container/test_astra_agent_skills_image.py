@@ -90,7 +90,12 @@ def test_pinned_astra_cli_wins_with_one_image_owned_install():
     # environment so its Dask/Snakemake graph cannot perturb JupyterLab.
     code, output = run_cmd("uv --version")
     assert code == 0, output
-    assert output.startswith("uv 0.12.23")
+    assert output.startswith("uv 0.13.0")
+
+    code, output = run_cmd("UV_TOOL_DIR=/opt/uv/tools uv tool list")
+    assert code == 0, output
+    assert "lightcone-cli v0.4.2" in output
+    assert "- lc" in output
 
 
 def test_skill_toolchain_pins_match_the_installed_toolchain():

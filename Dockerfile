@@ -584,7 +584,7 @@ RUN retry conda install -c conda-forge nb_conda_kernels \
 # `env PATH=` restores the conda-first PATH that runuser resets (the
 # jupyterlab-slurm source build needs jlpm and node on PATH).
 ARG BUST_CACHE_PIP=4
-ARG UV_VERSION="0.12.23"
+ARG UV_VERSION="0.13.0"
 ARG JUPYTER_AI_VERSION="3.2.0"
 ARG JUPYTER_COLLABORATION_VERSION="4.4.2"
 ARG JUPYTER_COLLABORATION_REF="3bf11cb7b271b554998105a11e6c9b8c3e376615"
