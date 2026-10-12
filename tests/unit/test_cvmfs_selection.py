@@ -592,6 +592,24 @@ def test_cdn_virtual_hosts_remain_distinct():
     assert selector.destination(first) != selector.destination(second)
 
 
+def test_default_pool_benchmarks_the_fnal_stratum_one_directly(tmp_path):
+    # Geo-DNS only occasionally resolves to FNAL, which was the fastest
+    # mirror from GitHub-hosted runners, so it must be a candidate by name.
+    stub = tmp_path / "bin" / "python3"
+    stub.parent.mkdir()
+    stub.write_text('#!/bin/sh\nprintf "%s\\0" "$@" > "$ARGS_FILE"\n')
+    stub.chmod(0o755)
+    env = {k: v for k, v in os.environ.items() if k != "NEURODESKTOP_CVMFS_HOST_POOL"}
+    env.update(PATH=f"{stub.parent}:{env['PATH']}", ARGS_FILE=str(tmp_path / "args"),
+               NEURODESKTOP_CVMFS_TARGET_CONFIG=str(tmp_path / "repo.conf"),
+               NEURODESKTOP_CVMFS_CACHE_FILE=str(tmp_path / "selection.env"))
+    subprocess.run(["bash", _script_path()], env=env, check=True, timeout=30)
+    arguments = (tmp_path / "args").read_text().split("\0")
+    pool = arguments[arguments.index("--host-pool") + 1].split()
+    assert "http://cvmfs-s1fnal.opensciencegrid.org:8000" in pool
+    assert "http://s1fnal-cvmfs.openhtc.io:8080" in pool
+
+
 def test_faster_cached_challenger_triggers_ranking(tmp_path, mock_repo, transfer_times):
     first, first_base = _start_server(mock_repo, _QuietHandler)
     second, second_base = _start_server(mock_repo, _QuietHandler)
