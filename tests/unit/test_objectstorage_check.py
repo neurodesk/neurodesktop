@@ -46,6 +46,11 @@ if [[ "$image" == "${FAKE_TRANSPORT_IMAGE:-}" ]]; then
     exit 7
 fi
 
+if [[ "$image" == "${FAKE_REDIRECT_IMAGE:-}" ]]; then
+    printf '302'
+    exit 0
+fi
+
 case " $FAKE_PRESENT_IMAGES " in
     *" $image "*) printf '200'; exit 0 ;;
 esac
@@ -71,6 +76,7 @@ def _run_checker(
     present=(),
     transient_image="",
     transport_image="",
+    redirect_image="",
     appears_on=2,
     attempts=2,
     download_fails=False,
@@ -100,6 +106,7 @@ def _run_checker(
             "FAKE_TRANSIENT_IMAGE": transient_image,
             "FAKE_TRANSIENT_APPEARS_ON": str(appears_on),
             "FAKE_TRANSPORT_IMAGE": transport_image,
+            "FAKE_REDIRECT_IMAGE": redirect_image,
             "FAKE_CURL_LOG": str(curl_log),
             "FAKE_SLEEP_LOG": str(sleep_log),
             "OBJECT_STORAGE_INVENTORY_URL": "https://example.invalid/log.txt",
@@ -179,6 +186,22 @@ def test_object_storage_check_stops_on_a_transport_failure(tmp_path):
     assert result.returncode == 1
     assert "curl status 7, HTTP status 000" in result.stdout
     assert requests == ["unreachable_1.0_20260101"]
+    assert not sleep_log.exists()
+
+
+def test_object_storage_check_rejects_a_redirect(tmp_path):
+    result, requests, sleep_log = _run_checker(
+        tmp_path,
+        "redirected_1.0_20260101 categories:testing,\n"
+        "unchecked_2.0_20260202 categories:testing,\n",
+        present=("unchecked_2.0_20260202",),
+        redirect_image="redirected_1.0_20260101",
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "curl status 0, HTTP status 302" in result.stdout
+    assert "Validated" not in result.stdout
+    assert requests == ["redirected_1.0_20260101"]
     assert not sleep_log.exists()
 
 

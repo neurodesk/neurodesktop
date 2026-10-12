@@ -83,7 +83,7 @@ find_missing_images() {
             --fail \
             --write-out "%{http_code}" \
             "${SERVER_ADDRESS}${image}.simg") || curl_status=$?
-        if [[ "$curl_status" -eq 0 ]]; then
+        if [[ "$curl_status" -eq 0 && "$http_code" == "200" ]]; then
             echo "[DEBUG] ${image}.simg exists in $SERVER_ADDRESS"
         elif [[ "$http_code" == "404" ]]; then
             missing_images+=("$image")
