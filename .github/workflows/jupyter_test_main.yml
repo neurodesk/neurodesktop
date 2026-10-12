@@ -121,7 +121,10 @@ jobs:
         echo "Waiting for server to start..."
         SERVER_STARTED=false
 
-        for i in {1..24}; do
+        # A cold Neurodesktop image can take longer than four minutes to pull
+        # and initialize. Match the ten-minute cold-launch budget used by the
+        # image acceptance tests before declaring the Hub spawn unhealthy.
+        for i in {1..60}; do
           sleep 10
           STATE=$(server_state)
 

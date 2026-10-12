@@ -192,6 +192,22 @@ def test_start_waits_through_pending_spawn_until_ready(tmp_path):
     assert calls == ["STATUS", "GET", "POST", "GET", "GET", "GET"]
 
 
+def test_start_allows_a_cold_spawn_the_full_ten_minute_budget(tmp_path):
+    # Issue #1065: the edu instance was still pending when the old 24-poll
+    # deadline expired. Cold image startup is allowed the same ten-minute
+    # budget as the repository's other cold application launches.
+    result, calls = _run_step(
+        tmp_path,
+        "Start JupyterHub Server",
+        [STOPPED, *([SPAWNING] * 59), READY],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Server is still starting... (590s elapsed)" in result.stdout
+    assert "✅ Server started successfully (600s elapsed)" in result.stdout
+    assert calls.count("GET") == 61
+
+
 def test_start_restarts_a_running_server_before_spawning(tmp_path):
     result, calls = _run_step(
         tmp_path, "Start JupyterHub Server", [READY, STOPPED, SPAWNING, READY]

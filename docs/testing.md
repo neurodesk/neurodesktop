@@ -756,6 +756,9 @@ It prefers `servers[""]` and falls back to the top-level `server` and
 `pending` fields. The Hub keeps the `server` key as `null` once a server
 stops, so cleanup waits for `stopped` rather than for the key to disappear.
 Cleanup repeats the stop request while a timed-out spawn is still pending.
+The start step allows ten minutes for a cold image to pull and initialize;
+the former four-minute deadline could cancel a healthy spawn while the Hub
+still reported `pending:spawn`.
 The unit tier runs both workflow steps against a stubbed `curl` and `sleep`.
 
 ### Lmod extension listing
