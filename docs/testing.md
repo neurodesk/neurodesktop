@@ -147,9 +147,38 @@ is not covered by Ruff and continues to rely on execution tests. Keep exceptions
 local and explain external runtime dependencies such as Jupyter-injected globals.
 
 The workflow uses stable job names so repository rules can require each check.
-Adding the workflow does not itself change branch protection. Unit and installed
-image tests remain necessary for authentication, startup ordering, filesystem
-permissions, UI disposal, and installed application behavior.
+Unit and installed image tests remain necessary for authentication, startup
+ordering, filesystem permissions, UI disposal, and installed application behavior.
+
+### Required checks
+
+The `protect-default` repository ruleset (id 24091967) targets the default branch.
+It keeps the deletion and non-fast-forward rules and the organization-admin
+bypass. It also requires these check contexts from GitHub Actions
+(integration id 15368):
+
+| Workflow | Required check context |
+| --- | --- |
+| Code quality | `Python lint and types` |
+| Code quality | `Shell, workflows and formatting` |
+| Code quality | `JavaScript syntax` |
+| Code quality | `Frontend types and promises` |
+| Code quality | `Dockerfile checks` |
+| Unit tests | `pytest tests/unit` |
+| PR image acceptance | `Installed image (amd64)` |
+| PR image acceptance | `Installed image (arm64)` |
+
+Branches need not be up to date with `main` before merging. A missing, pending,
+or cancelled required check blocks a normal merge. Every pull request to `main`
+must emit all eight contexts, so these workflows must not gain workflow-level
+path filters. Renaming a required job also requires updating the ruleset in the
+same change. No merge queue is configured; add a `merge_group` trigger to each
+workflow before enabling one. Read the active configuration back with:
+
+```bash
+gh api repos/neurodesk/neurodesktop/rulesets/24091967
+gh api repos/neurodesk/neurodesktop/rules/branches/main
+```
 
 ## Behavioral coverage
 
