@@ -606,8 +606,8 @@ def test_default_pool_benchmarks_the_fnal_stratum_one_directly(tmp_path):
     subprocess.run(["bash", _script_path()], env=env, check=True, timeout=30)
     arguments = (tmp_path / "args").read_text().split("\0")
     pool = arguments[arguments.index("--host-pool") + 1].split()
-    assert "http://cvmfs-s1fnal.opensciencegrid.org:8000" in pool
-    assert "http://s1fnal-cvmfs.openhtc.io:8080" in pool
+    fnal = {"http://cvmfs-s1fnal.opensciencegrid.org:8000", "http://s1fnal-cvmfs.openhtc.io:8080"}
+    assert fnal <= set(pool), pool
 
 
 def test_faster_cached_challenger_triggers_ranking(tmp_path, mock_repo, transfer_times):
