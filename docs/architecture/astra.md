@@ -30,7 +30,10 @@ viewer. The build asserts that exactly `/opt/conda/bin/astra` answers there.
 `lc` (`lightcone-cli`) is installed as an isolated `uv` tool under
 `/opt/uv/tools/lightcone-cli` and linked onto `PATH`, so its Dask and Snakemake
 dependency graph cannot perturb JupyterLab. `uv` itself is on `PATH` for that
-reason; ordinary `uv tool` operations stay user-local at runtime.
+reason; ordinary `uv tool` operations stay user-local at runtime. The image
+build selects `/opt/conda/bin/python` explicitly and disables uv-managed Python
+downloads, so changes to uv's default Python release cannot change the
+Lightcone interpreter.
 
 The latest stable Lightcone release, 0.4.2, still pins ASTRA Tools 0.2.11
 because ASTRA 0.2.14 added required arguments to the idempotent `astra init`
