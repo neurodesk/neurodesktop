@@ -92,9 +92,11 @@ secrets. See [startup privileges](../environment-variables.md#startup-privileges
 for the package-only sudo policy.
 
 The SSH daemon used only for Guacamole's VNC SFTP side-channel listens on
-`127.0.0.1`. Startup forces that address independently of the home-directory
-configuration so a persisted configuration from an older image cannot expose
-the service on a container or shared HPC network interface.
+`127.0.0.1`. Startup checks every effective listener address, including addresses
+from included files. A saved configuration that allows another address uses a
+minimal loopback-only fallback without replacing the saved file. This prevents
+persisted configurations from exposing the service on a container or shared
+HPC network interface.
 
 The Neurodesk menu's **Update** entry updates the notebook-owned
 `/neurocommand` checkout without sudo. Root startup repairs checkout ownership
