@@ -107,6 +107,7 @@ jobs:
             sudo timeout 20 cvmfs_talk -i neurodesk.ardc.edu.au host info || true
             sudo timeout 20 cvmfs_config stat -v neurodesk.ardc.edu.au || true
           fi
+          sudo journalctl --no-pager -n 50 -t cvmfs2 -t automount || true
       # Pull requests save only when nothing was restored, so a PR without a
       # main-branch cache still gets warm reruns.
       - name: Release scientific tool cache

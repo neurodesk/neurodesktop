@@ -363,6 +363,7 @@ jobs:
             sudo timeout 20 cvmfs_talk -i neurodesk.ardc.edu.au host info || true
             sudo timeout 20 cvmfs_config stat -v neurodesk.ardc.edu.au || true
           fi
+          sudo journalctl --no-pager -n 50 -t cvmfs2 -t automount || true
       # Main-branch runs refresh the cache that pull requests restore.
       - name: Release scientific tool cache
         if: always() && steps.cvmfs-cache-prepare.outcome == 'success' && (github.ref == 'refs/heads/main' || steps.cvmfs-cache.outputs.cache-matched-key == '')
