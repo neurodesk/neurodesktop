@@ -34,6 +34,13 @@ for value in "$FSL_PROBE_ATTEMPTS" "$FSL_PROBE_DELAY" "$FSL_PROBE_HOLD_OPEN" "$F
     esac
 done
 
+# Force base 10: bash arithmetic reads a leading zero as octal, so "08" would
+# fail and "010" would mean 8.
+FSL_PROBE_ATTEMPTS=$((10#$FSL_PROBE_ATTEMPTS))
+FSL_PROBE_DELAY=$((10#$FSL_PROBE_DELAY))
+FSL_PROBE_HOLD_OPEN=$((10#$FSL_PROBE_HOLD_OPEN))
+FSL_PROBE_STOP_TIMEOUT=$((10#$FSL_PROBE_STOP_TIMEOUT))
+
 if [ "$FSL_PROBE_ATTEMPTS" -lt 1 ]; then
     echo "fsl-terminal-probe: FSL_PROBE_ATTEMPTS must be at least 1." >&2
     exit 2

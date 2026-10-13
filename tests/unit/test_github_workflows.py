@@ -274,7 +274,7 @@ esac
 """
 
 
-def _run_fsl_terminal_probe(tmp_path, result):
+def _run_fsl_terminal_probe(tmp_path, result, **env_overrides):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     websocat = bin_dir / "websocat"
@@ -311,6 +311,7 @@ def _run_fsl_terminal_probe(tmp_path, result):
             "FAKE_WEBSOCAT_RESULT": result,
         }
     )
+    env.update(env_overrides)
     # Run the probe in its own process group so a timeout kills the fakes too;
     # subprocess.run would only kill the probe and could orphan its children.
     with subprocess.Popen(
@@ -324,7 +325,12 @@ def _run_fsl_terminal_probe(tmp_path, result):
         try:
             stdout, stderr = proc.communicate(timeout=5)
         except subprocess.TimeoutExpired:
-            os.killpg(proc.pid, signal.SIGKILL)
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                # The group already exited (macOS reports EPERM for a group
+                # of zombies); keep the original timeout as the failure.
+                pass
             proc.communicate()
             raise
     completed = subprocess.CompletedProcess(proc.args, proc.returncode, stdout, stderr)
@@ -364,6 +370,20 @@ def test_fsl_terminal_probe_kills_websocket_that_ignores_term(tmp_path):
 
     assert result.returncode == 1
     assert "did not report completion" in result.stderr
+
+
+def test_fsl_terminal_probe_reads_zero_padded_values_as_decimal(tmp_path):
+    # "08" is an invalid octal literal in bash arithmetic and "010" is 8.
+    result, _, _ = _run_fsl_terminal_probe(
+        tmp_path,
+        "success",
+        FSL_PROBE_ATTEMPTS="08",
+        FSL_PROBE_DELAY="00",
+        FSL_PROBE_STOP_TIMEOUT="010",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "value too great for base" not in result.stderr
 
 
 def test_fsl_terminal_probe_rejects_echoed_command_as_completion(tmp_path):
