@@ -49,6 +49,9 @@ The startup sequence follows this order (per
    [`config/jupyter/cvmfs_server_select.sh`](../config/jupyter/cvmfs_server_select.sh).
    The worker waits for both components before writing its completion marker;
    that marker records completion of the attempts, not service health.
+   After the CVMFS attempt it also launches the background
+   [module cache warm-up](architecture/cvmfs.md#module-cache-warm-up), which
+   does not delay the marker.
    The hook also launches
    [`config/jupyter/print_access_url.sh`](../config/jupyter/print_access_url.sh)
    in the background, which waits until the Jupyter server answers HTTP and

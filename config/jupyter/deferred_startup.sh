@@ -183,6 +183,10 @@ cvmfs_pid=$!
 start_slurm &
 slurm_pid=$!
 wait "$cvmfs_pid"
+# Detached: building the module cache must not delay the done marker or Slurm.
+if [ -x /opt/neurodesktop/warm_module_cache.sh ]; then
+    /opt/neurodesktop/warm_module_cache.sh &
+fi
 wait "$slurm_pid"
 echo "[deferred] Deferred initialization complete."
 touch "$DEFERRED_DONE"

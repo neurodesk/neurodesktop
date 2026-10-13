@@ -36,6 +36,11 @@ The session home is `/home/kasm-user`; persist that path instead of overriding
 - `LMOD_AVAIL_EXTENSIONS`: defaults to `no`, hiding the extension inventory
   from `ml av` and `module avail`. Set to `yes` to show it again. Module
   loading and `module spider` searches are unchanged.
+- `NEURODESKTOP_LMOD_CACHE_WARMUP`: defaults to `1`, building the notebook
+  user's Lmod module cache in the background after CVMFS mounts so the first
+  `ml av` does not fetch every modulefile. Set to `0` to skip it, for example
+  on metered connections. See
+  [Module cache warm-up](architecture/cvmfs.md#module-cache-warm-up).
 - `CVMFS_DISABLE`: set to `true` to disable CVMFS mounting
 - `CVMFS_MODULES`: CVMFS module catalogue path used when refreshing
   `MODULEPATH`. Fixed to `/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/` by
