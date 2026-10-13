@@ -592,9 +592,7 @@ def test_cdn_virtual_hosts_remain_distinct():
     assert selector.destination(first) != selector.destination(second)
 
 
-def test_default_pool_benchmarks_the_fnal_stratum_one_directly(tmp_path):
-    # Geo-DNS only occasionally resolves to FNAL, which was the fastest
-    # mirror from GitHub-hosted runners, so it must be a candidate by name.
+def _default_pool(tmp_path):
     stub = tmp_path / "bin" / "python3"
     stub.parent.mkdir()
     stub.write_text('#!/bin/sh\nprintf "%s\\0" "$@" > "$ARGS_FILE"\n')
@@ -605,9 +603,22 @@ def test_default_pool_benchmarks_the_fnal_stratum_one_directly(tmp_path):
                NEURODESKTOP_CVMFS_CACHE_FILE=str(tmp_path / "selection.env"))
     subprocess.run(["bash", _script_path()], env=env, check=True, timeout=30)
     arguments = (tmp_path / "args").read_text().split("\0")
-    pool = arguments[arguments.index("--host-pool") + 1].split()
+    return set(arguments[arguments.index("--host-pool") + 1].split())
+
+
+def test_default_pool_benchmarks_the_fnal_stratum_one_directly(tmp_path):
+    # Geo-DNS only occasionally resolves to FNAL, which was the fastest
+    # mirror from GitHub-hosted runners, so it must be a candidate by name.
     fnal = {"http://cvmfs-s1fnal.opensciencegrid.org:8000", "http://s1fnal-cvmfs.openhtc.io:8080"}
-    assert fnal <= set(pool), pool
+    assert fnal <= _default_pool(tmp_path)
+
+
+def test_default_pool_benchmarks_every_monitored_cdn_alias(tmp_path):
+    workflow = yaml.safe_load(repo_path(".github/workflows/test-cvmfs.yml").read_text())
+    monitored = workflow["jobs"]["test_cvmfs"]["strategy"]["matrix"]["cvmfs-servers"]
+    aliases = {f"http://{server}" for server in monitored if ".openhtc.io" in server}
+    assert len(aliases) > 1
+    assert aliases <= _default_pool(tmp_path)
 
 
 def test_faster_cached_challenger_triggers_ranking(tmp_path, mock_repo, transfer_times):
