@@ -351,7 +351,8 @@ verified mirror selection as PR acceptance before mounting the generated
 configuration. Mounting the static GeoAPI list instead left cold application
 launches at the mercy of whichever mirror it picked; see
 [issue #1021](https://github.com/NeuroDesk/neurodesktop/issues/1021). They fail setup if no mirror passes and
-report the active CVMFS host and mount statistics even after a failed test.
+report the active CVMFS host, mount statistics, and recent client syslog
+entries even after a failed test.
 The steps use `exec` so the command retains the workflow shell's cancellation
 boundary. On its disposable Ubuntu 24.04 runner, PR scientific acceptance
 temporarily disables AppArmor's restriction on unprivileged user namespaces,
