@@ -4,7 +4,7 @@ description: LXDE desktop over VNC/RDP through Guacamole, clipboard sync,
   per-display Firefox profiles, and office file associations
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-07"
+last-reviewed: "2026-10-13"
 ---
 
 # Desktop Environment
@@ -90,6 +90,11 @@ still start when their launcher opens. Local Slurm and CVMFS retain their root
 startup worker. Guacamole web and VNC credentials remain separate per-user
 secrets. See [startup privileges](../environment-variables.md#startup-privileges)
 for the package-only sudo policy.
+
+The SSH daemon used only for Guacamole's VNC SFTP side-channel listens on
+`127.0.0.1`. Startup forces that address independently of the home-directory
+configuration so a persisted configuration from an older image cannot expose
+the service on a container or shared HPC network interface.
 
 The Neurodesk menu's **Update** entry updates the notebook-owned
 `/neurocommand` checkout without sudo. Root startup repairs checkout ownership

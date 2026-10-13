@@ -242,6 +242,11 @@ start_sshd() {
     #                    ownership checks, and sshd rejects pubkey auth on
     #                    failure. We are only ever accepting a key that we
     #                    wrote ourselves; no weaker security posture.
+    #   ListenAddress   - this daemon exists only for Guacamole's local SFTP
+    #                    side-channel. Force loopback on the command line as
+    #                    well as in the current default config so homes that
+    #                    restored an older sshd_config cannot expose it on a
+    #                    container or shared HPC network interface.
     if ! "${sshd_prefix[@]}" /usr/sbin/sshd \
         -f "${ssh_config_to_use}" \
         -p "${SFTP_SSH_PORT}" \
@@ -250,6 +255,7 @@ start_sshd() {
         -o "PidFile=${SFTP_SSH_PID_FILE}" \
         -o "UsePAM=no" \
         -o "StrictModes=no" \
+        -o "ListenAddress=127.0.0.1" \
         -o "KbdInteractiveAuthentication=no" \
         -o "PasswordAuthentication=no" \
         -o "PubkeyAuthentication=yes" >"${startup_log}" 2>&1; then

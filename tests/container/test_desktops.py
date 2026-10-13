@@ -1088,10 +1088,8 @@ def test_guac_login_rejects_legacy_default_password():
         _cleanup_guacamole_process(process, home_dir=home_dir, guacamole_home=guacamole_home)
 
 
-def test_vncserver_binds_localhost_only():
-    """The vncserver must be launched with -localhost yes so its TCP port is
-    reachable only through the local loopback. On Apptainer the host netns is
-    shared, but at least the backend is not reachable off-node."""
+def test_vnc_backends_bind_localhost_only():
+    """VNC and its SFTP side-channel must be reachable only on loopback."""
     nb_user, home_dir, _, guacamole_home = _prepare_guacamole_runtime()
     process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home, backend="vnc")
     try:
@@ -1122,6 +1120,15 @@ def test_vncserver_binds_localhost_only():
         listen_addr = ss_out.split()[3]
         assert listen_addr.startswith("127.0.0.1:") or listen_addr.startswith("[::1]:"), \
             f"vncserver must bind loopback only; listen address was {listen_addr}"
+
+        sftp_port = _read_runtime_port(home_dir, "sftp_port", default=None)
+        assert sftp_port, "SFTP port was not published after sshd startup"
+        _wait_for_tcp_port(sftp_port, timeout_seconds=30)
+        _, ss_out = run_cmd(f"ss -lnt 'sport = :{sftp_port}' | tail -n +2")
+        assert ss_out, f"No listen socket found for SFTP port {sftp_port}: {ss_out!r}"
+        listen_addr = ss_out.split()[3]
+        assert listen_addr.startswith("127.0.0.1:"), \
+            f"SFTP sshd must bind IPv4 loopback only; listen address was {listen_addr}"
     finally:
         _cleanup_guacamole_process(process, home_dir=home_dir, guacamole_home=guacamole_home)
 
