@@ -54,7 +54,18 @@ jobs:
                         "s1nikhef-cvmfs.openhtc.io",
                         "cvmfs-stratum-one.ihep.ac.cn:8000",
                         "s1sampa-cvmfs.openhtc.io:8080",
-                        "cvmfs-geoproximity.neurodesk.org"]
+                        "cvmfs-geoproximity.neurodesk.org",
+                        "cvmfs.neurodesk.org",
+                        "cvmfs-brisbane.neurodesk.org",
+                        "cvmfs-melbourne.neurodesk.org",
+                        "cvmfs-sydney.neurodesk.org",
+                        "cvmfs-perth.neurodesk.org",
+                        "cvmfs01.nikhef.nl:8000",
+                        "cvmfs-s1bnl.opensciencegrid.org:8000",
+                        "cvmfs-s1fnal.opensciencegrid.org:8000",
+                        "cvmfs-s1goc.opensciencegrid.org:8000",
+                        "sampacs01.if.usp.br:8000",
+                        "s1ihep-cvmfs.openhtc.io"]
                         # not yet active:
                           # "cvmfs-s1.hpc.swin.edu.au",
     steps:

@@ -26,9 +26,7 @@ Selection proceeds in three stages:
 
 1. Probe manifests in parallel, including the FNAL Stratum 1 both directly and
    through its CDN endpoint. Geo-DNS names such as `cvmfs-geoproximity` resolve
-   to FNAL only some of the time, so FNAL is also listed by name. Every
-   Cloudflare `openhtc.io` alias that the CVMFS health workflow monitors is
-   also a candidate; a unit test keeps the two lists aligned. Collapse direct
+   to FNAL only some of the time, so FNAL is also listed by name. Collapse direct
    aliases with the same observed IP, scheme, and port, while preserving separate
    `openhtc.io` hostnames because shared CDN edge IPs can route to different origins.
    When aliases collapse, keep a hostname that is its own DNS target over a
@@ -117,7 +115,11 @@ first mounts the authoritative Stratum 0 repository and compares it with
 neurocommand's desired container inventory. Only after that source is complete
 does it fan out across the advertised replicas and the fallback-list job. This
 turns a publication omission into one source failure instead of an identical
-failure from every downstream replica. Both its single-server and fallback-list
+failure from every downstream replica.
+The replica matrix is exactly the selector's candidate pool, including direct
+Stratum 1 servers, geo-DNS names, and Cloudflare aliases. A unit test keeps
+the two lists identical, so every mirror that users can select is checked for
+a complete inventory. Both its single-server and fallback-list
 jobs first run
 [`check_cvmfs_mount.sh`](../../.github/workflows/check_cvmfs_mount.sh). It triggers
 a repository read with a 45-second timeout and confirms a `fuse` or `fuse.cvmfs`

@@ -54,7 +54,7 @@ def test_replica_checks_wait_for_a_complete_authoritative_repository():
 
     replicas = jobs["test_cvmfs"]["strategy"]["matrix"]["cvmfs-servers"]
     assert ORIGIN not in replicas
-    assert len(replicas) == len(set(replicas)) == 14
+    assert len(replicas) == len(set(replicas))
 
 
 def test_selector_helper_is_installed_beside_shell_entry_point():
