@@ -25,6 +25,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from urllib.parse import urlsplit
 import uuid
@@ -72,17 +73,26 @@ def destination(candidate):
     return url.scheme, identity, url.port or (443 if url.scheme == "https" else 80)
 
 
-def is_canonical(base):
+def is_canonical(base, timeout=3):
     """Whether the hostname is its own DNS target rather than a CNAME alias.
 
     A geo-DNS alias can resolve elsewhere when the client mounts later, and
-    could then duplicate another configured entry. Unknown counts as canonical.
+    could then duplicate another configured entry. The resolver has no timeout
+    of its own, so a lookup that fails or outlasts *timeout* counts as canonical.
     """
     host = urlsplit(base).hostname
-    try:
-        return socket.gethostbyname_ex(host)[0].rstrip(".").lower() == host
-    except (OSError, UnicodeError):
-        return True
+    answer = []
+
+    def lookup():
+        try:
+            answer.append(socket.gethostbyname_ex(host)[0].rstrip(".").lower() == host)
+        except (OSError, UnicodeError):
+            pass
+
+    worker = threading.Thread(target=lookup, daemon=True)
+    worker.start()
+    worker.join(max(0, timeout))
+    return answer[0] if answer else True
 
 
 def distinct_destinations(rows):
@@ -177,7 +187,9 @@ class Benchmark:
         if not replies:
             log(f"  {base}: manifest unavailable or invalid")
             return None
-        return {**min(replies, key=lambda r: r["latency"]), "canonical": is_canonical(base)}
+        timeout = min(3, self.deadline - time.monotonic())
+        return {**min(replies, key=lambda r: r["latency"]),
+                "canonical": is_canonical(base, timeout)}
 
     def sample(self, base, obj):
         return self.fetch(base, object_path(obj["hash"], obj["suffix"]), digest=obj["hash"])

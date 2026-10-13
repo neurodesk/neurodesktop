@@ -45,7 +45,7 @@ The startup sequence follows this order (per
    synchronously. The worker reads the live Jupyter server's runtime file and
    probes its local HTTP endpoint, including its configured port and base path.
    It starts CVMFS and Slurm independently after readiness, or after a
-   120-second timeout. CVMFS ranks servers by measured download throughput via
+   120-second timeout. CVMFS ranks servers by measured request latency and download speed via
    [`config/jupyter/cvmfs_server_select.sh`](../config/jupyter/cvmfs_server_select.sh).
    The worker waits for both components before writing its completion marker;
    that marker records completion of the attempts, not service health.

@@ -290,7 +290,7 @@ def test_all_unreachable_writes_fallback(tmp_path, dead_server_url):
     assert proc.returncode == 1, proc.stdout
     assert "CVMFS_USE_GEOAPI=yes" in config
     server_hosts = {urlparse(url).hostname for url in _configured_server_urls(config)}
-    assert "cvmfs-frankfurt.neurodesk.org" in server_hosts
+    assert {"cvmfs-frankfurt.neurodesk.org"} <= server_hosts
     # A failed probe must not poison the cache.
     assert not (tmp_path / "selection.env").is_file()
 
@@ -877,6 +877,14 @@ def test_unresolvable_names_are_not_treated_as_aliases(monkeypatch):
 
     monkeypatch.setattr(selector.socket, "gethostbyname_ex", fail)
     assert selector.is_canonical("http://cvmfs-sydney.neurodesk.org")
+
+
+def test_stalled_alias_lookup_cannot_hold_up_selection(monkeypatch):
+    selector = _selector("cvmfs_alias_lookup_stall")
+    monkeypatch.setattr(selector.socket, "gethostbyname_ex", lambda host: time.sleep(30))
+    started = time.monotonic()
+    assert selector.is_canonical("http://cvmfs-sydney.neurodesk.org", timeout=0.2)
+    assert time.monotonic() - started < 2
 
 
 def test_static_fallback_lists_distinct_hosts_in_sync_with_the_image_default():
