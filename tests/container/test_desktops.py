@@ -1088,11 +1088,21 @@ def test_guac_login_rejects_legacy_default_password():
         _cleanup_guacamole_process(process, home_dir=home_dir, guacamole_home=guacamole_home)
 
 
-def test_vncserver_binds_localhost_only():
-    """The vncserver must be launched with -localhost yes so its TCP port is
-    reachable only through the local loopback. On Apptainer the host netns is
-    shared, but at least the backend is not reachable off-node."""
+@pytest.mark.parametrize("sftp_config", ["default", "wildcard", "include"])
+def test_vnc_backends_bind_localhost_only(sftp_config):
+    """VNC and its SFTP side-channel must be reachable only on loopback."""
     nb_user, home_dir, _, guacamole_home = _prepare_guacamole_runtime()
+    if sftp_config != "default":
+        ssh_dir = Path(home_dir) / ".ssh"
+        config = Path("/opt/jovyan_defaults/.ssh/sshd_config").read_text()
+        config = config.replace("/home/jovyan", home_dir)
+        unsafe_listeners = "ListenAddress 0.0.0.0\nListenAddress ::\n"
+        if sftp_config == "include":
+            included_config = ssh_dir / "listeners.conf"
+            included_config.write_text(unsafe_listeners)
+            unsafe_listeners = f'Include "{included_config}"\n'
+        config = config.replace("ListenAddress 127.0.0.1\n", unsafe_listeners)
+        (ssh_dir / "sshd_config").write_text(config)
     process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home, backend="vnc")
     try:
         _guacamole_ready(process.tomcat_port, home_dir=home_dir, process=process)
@@ -1117,11 +1127,39 @@ def test_vncserver_binds_localhost_only():
         # Attempt to connect via the external interface. We don't have a real
         # non-loopback IP in-container always, but we can at least check that
         # `ss -lnt` reports the listen address as 127.0.0.1.
-        _, ss_out = run_cmd(f"ss -lnt 'sport = :{vnc_port}' | tail -n +2")
+        code, ss_out = run_cmd(f"ss -H -lnt 'sport = :{vnc_port}'")
+        assert code == 0, ss_out
         assert ss_out, f"No listen socket found for port {vnc_port}: {ss_out!r}"
-        listen_addr = ss_out.split()[3]
-        assert listen_addr.startswith("127.0.0.1:") or listen_addr.startswith("[::1]:"), \
-            f"vncserver must bind loopback only; listen address was {listen_addr}"
+        listen_addresses = [line.split()[3] for line in ss_out.splitlines()]
+        assert all(address in (f"127.0.0.1:{vnc_port}", f"[::1]:{vnc_port}")
+                   for address in listen_addresses), \
+            f"vncserver must bind loopback only; listen addresses were {listen_addresses}"
+
+        sftp_port = _read_runtime_port(home_dir, "sftp_port", default=None)
+        assert sftp_port, "SFTP port was not published after sshd startup"
+        _wait_for_tcp_port(sftp_port, timeout_seconds=30)
+        code, ss_out = run_cmd(f"ss -H -lnt 'sport = :{sftp_port}'")
+        assert code == 0, ss_out
+        assert ss_out, f"No listen socket found for SFTP port {sftp_port}: {ss_out!r}"
+        listen_addresses = [line.split()[3] for line in ss_out.splitlines()]
+        assert listen_addresses == [f"127.0.0.1:{sftp_port}"], \
+            f"SFTP sshd must bind IPv4 loopback only; listen addresses were {listen_addresses}"
+
+        if sftp_config != "default":
+            source = Path(home_dir) / "sftp-probe.txt"
+            downloaded = Path(home_dir) / "sftp-downloaded.txt"
+            source.write_text("Guacamole SFTP loopback probe\n")
+            transfer = subprocess.run(
+                ["sftp", "-b", "-", "-P", str(sftp_port),
+                 "-i", str(Path(home_dir) / ".ssh/guacamole_rsa"),
+                 "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
+                 "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+                 f"{nb_user}@127.0.0.1"],
+                input=f'get "{source}" "{downloaded}"\n',
+                capture_output=True, text=True, timeout=30,
+            )
+            assert transfer.returncode == 0, transfer.stdout + transfer.stderr
+            assert downloaded.read_text() == "Guacamole SFTP loopback probe\n"
     finally:
         _cleanup_guacamole_process(process, home_dir=home_dir, guacamole_home=guacamole_home)
 

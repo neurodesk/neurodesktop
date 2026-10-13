@@ -14,7 +14,7 @@ Include /etc/ssh/sshd_config.d/*.conf
 Port 2222
 #Port 22
 #AddressFamily any
-#ListenAddress 0.0.0.0
+ListenAddress 127.0.0.1
 #ListenAddress ::
 
 HostKey /home/jovyan/.ssh/hostkeys/ssh_host_ed25519_key
