@@ -18,7 +18,7 @@ case "${1:-}" in
     init)
         arch="${2:?usage: cvmfs_ci_cache.sh init ARCH}"
         sudo install -d -o "$(id -u)" -g "$(id -g)" "$CACHE_DIR"
-        prefix="neurodesk-cvmfs-alien-v1-${arch}-$(date -u +%G-W%V)-"
+        prefix="neurodesk-cvmfs-alien-v2-${arch}-$(date -u +%G-W%V)-"
         echo "path=${CACHE_DIR}"
         echo "restore-prefix=${prefix}"
         echo "key=${prefix}${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}"
@@ -33,7 +33,9 @@ case "${1:-}" in
         echo "CVMFS alien cache: $(sudo du -sh "$CACHE_DIR" | cut -f1) restored in ${CACHE_DIR}"
         ;;
     export)
-        sudo rm -rf "${CACHE_DIR}/txn"
+        # The client does not recreate txn/ in an existing alien cache, and
+        # needs it to download anything newer than the saved revision.
+        sudo find "${CACHE_DIR}/txn" -mindepth 1 -delete 2>/dev/null || true
         sudo chown -R "$(id -u):$(id -g)" "$CACHE_DIR"
         echo "CVMFS alien cache: $(du -sh "$CACHE_DIR" | cut -f1) to save from ${CACHE_DIR}"
         ;;

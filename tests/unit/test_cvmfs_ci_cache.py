@@ -50,7 +50,7 @@ def test_init_keys_rotate_weekly_and_restore_any_run_from_that_week(cache):
     year, week, _ = datetime.datetime.now(datetime.UTC).isocalendar()
     assert outputs["path"] == str(tmp_path / "alien")
     assert (tmp_path / "alien").is_dir()
-    assert outputs["restore-prefix"] == f"neurodesk-cvmfs-alien-v1-amd64-{year}-W{week:02d}-"
+    assert outputs["restore-prefix"] == f"neurodesk-cvmfs-alien-v2-amd64-{year}-W{week:02d}-"
     assert outputs["key"] == outputs["restore-prefix"] + "123-2"
 
 
@@ -78,7 +78,7 @@ def test_export_saves_objects_without_unfinished_transfers(cache):
     (tmp_path / "alien" / "ab").mkdir()
     (tmp_path / "alien" / "ab" / "cdef").write_bytes(b"object")
     run("export")
-    assert not (tmp_path / "alien" / "txn").exists()
+    assert list((tmp_path / "alien" / "txn").iterdir()) == []
     assert (tmp_path / "alien" / "ab" / "cdef").read_bytes() == b"object"
 
 
