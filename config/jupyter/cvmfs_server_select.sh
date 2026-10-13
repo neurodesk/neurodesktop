@@ -36,9 +36,13 @@ http://s1ihep-cvmfs.openhtc.io
 HOST_POOL="${NEURODESKTOP_CVMFS_HOST_POOL:-${DEFAULT_HOST_POOL}}"
 
 # Static fallback when nothing is measurable (e.g. captive portal lets DNS
-# through but blocks HTTP): geo-DNS plus CDN entry points, GeoAPI ordering.
+# through but blocks HTTP): distinct origins on three continents plus CDN entry
+# points, ordered for each client by the GeoAPI. Use concrete hostnames: the
+# geo-DNS aliases currently resolve to the Jetstream host, so listing them
+# beside it would make failover retry the same machine. List a host whose
+# GeoAPI answers first (Jetstream's returned HTTP 500 when this was written).
 # Keep in sync with config/cvmfs/neurodesk.ardc.edu.au.conf.
-FALLBACK_SERVER_URL="http://cvmfs-geoproximity.neurodesk.org/cvmfs/@fqrn@;http://cvmfs.neurodesk.org/cvmfs/@fqrn@;http://s1brisbane-cvmfs.openhtc.io/cvmfs/@fqrn@;http://s1nikhef-cvmfs.openhtc.io/cvmfs/@fqrn@"
+FALLBACK_SERVER_URL="http://cvmfs-frankfurt.neurodesk.org/cvmfs/@fqrn@;http://cvmfs-sydney.neurodesk.org/cvmfs/@fqrn@;http://cvmfs-jetstream.neurodesk.org/cvmfs/@fqrn@;http://s1brisbane-cvmfs.openhtc.io/cvmfs/@fqrn@;http://s1nikhef-cvmfs.openhtc.io/cvmfs/@fqrn@"
 
 log() { echo "[cvmfs-select] $*"; }
 

@@ -31,22 +31,40 @@ Selection proceeds in three stages:
    also a candidate; a unit test keeps the two lists aligned. Collapse direct
    aliases with the same observed IP, scheme, and port, while preserving separate
    `openhtc.io` hostnames because shared CDN edge IPs can route to different origins.
+   When aliases collapse, keep a hostname that is its own DNS target over a
+   CNAME such as `cvmfs.neurodesk.org`. A geo-DNS alias can resolve to a
+   different host at mount time and duplicate another configured entry.
 2. Download the same hash-verified root catalog sequentially from **every**
    distinct reachable destination. Prefer the most widely advertised catalog
    hash, rather than trusting a claimed revision number. If a mirror cannot serve
    that snapshot, test its own verified catalog and objects so an untrusted or
-   lagging source cannot exclude healthy alternatives. Manifest latency does not
-   determine the shortlist.
-3. Test the five fastest catalog responders with two immutable data objects
-   discovered from the catalog. Select the smallest and largest eligible file
-   chunks, with distinct hashes when sizes tie; inspect
-   at most three catalogs and supplement with the root catalog if chunks are
-   unavailable. Rank by total verified bytes divided by total transfer time.
-   A failed, truncated, or corrupt transfer disqualifies the finalist. Fill
-   missing fallback slots from the remaining measured destinations.
+   lagging source cannot exclude healthy alternatives. Shortlist by the workload
+   estimate below, using the manifest and catalog request latencies and the
+   catalog's transfer rate.
+3. Test the five best-estimated responders with two immutable data objects
+   discovered from the catalog, then three further small manifest requests.
+   Select the smallest and largest eligible file chunks, with distinct hashes
+   when sizes tie; inspect at most three catalogs and supplement with the root
+   catalog if chunks are unavailable. A failed, truncated, or corrupt transfer
+   disqualifies the finalist. Fill missing fallback slots from the remaining
+   measured destinations.
+
+Mirrors are ranked by the estimated time of a reference workload: 1,000
+sequential requests at the median measured request latency, plus 256 MiB at the
+measured bulk transfer rate. Module listing and tool startup each issue hundreds
+of small-object requests, so request latency can matter more than bandwidth; a
+throughput-only ranking favors a distant high-bandwidth mirror. Request latency
+is the time from request to first byte. Bulk rate is the data objects' bytes
+divided by their body-transfer time. Both exclude DNS, TCP, and TLS setup,
+because the CVMFS client reuses connections. The weights are fixed and apply
+equally to every region; the measured network path decides the order.
 
 Each request has a unique query string to avoid reusing a CDN edge response.
-This does not flush origin caches. All HTTP probes use direct connections,
+This does not flush origin caches. CDN endpoints are therefore scored on their
+cold path. The client's local CVMFS cache already serves the user's own repeat
+reads. Edge hits depend on other Neurodesk users behind the same CDN location,
+which varies by region and which a repeated probe would only measure after
+warming the edge itself. All HTTP probes use direct connections,
 matching the image's `CVMFS_HTTP_PROXY=DIRECT` configuration. Downloads must
 finish successfully with HTTP 200 and match the catalog's content hash.
 These hashes detect corrupted transfers; the CVMFS client still verifies
@@ -57,8 +75,13 @@ file-size limits, and a 256 MiB Linux address-space limit. Root startup drops th
 child to `nobody` with no supplementary groups before Python executes. Catalog
 inspection failure falls back to catalog-object transfers without parsing those
 bytes in the parent. An incomplete ranking is not cached. No verified finalist produces the static GeoAPI fallback and exit 1.
+That fallback lists concrete origins in Europe, Australia, and North America
+plus two CDN entry points, so failover always reaches a different machine. The
+GeoAPI orders it for each client; the first entry is a host whose GeoAPI
+answered when the list was chosen.
 
-The fastest four verified destinations become `CVMFS_SERVER_URL`. If the
+The four verified destinations with the lowest workload estimates become
+`CVMFS_SERVER_URL`. If the
 shortlist is entirely CDN endpoints, also test the fastest screened direct
 endpoint and retain it as a fallback if its data checks succeed. With
 `CVMFS_USE_GEOAPI=no`, the client walks this order. Runtime failover settings
@@ -67,9 +90,10 @@ endpoint and retain it as a fallback if its data checks succeed. With
 [`config/cvmfs/default.local`](../../config/cvmfs/default.local).
 
 Rankings are cached in `~/.cache/neurodesktop/cvmfs-selection.env` for one day.
-At startup, the primary must complete both hash-verified samples at at least half
-its recorded speed. The first fallback must also complete both objects; a failed
-transfer or a fallback more than 20% faster triggers a full re-ranking. The primary must also serve a
+At startup, the primary must complete both hash-verified samples and the
+latency requests within twice its recorded workload estimate. The first fallback
+must also complete them; a failed transfer or a fallback with an estimate more
+than 20% lower triggers a full re-ranking. The primary must also serve a
 valid manifest. Old cache formats, changed candidate pools, expired caches, and
 failed checks trigger a new benchmark. Cache contents are parsed as data, never
 executed as shell commands. Config and cache writes are atomic. Eager startup

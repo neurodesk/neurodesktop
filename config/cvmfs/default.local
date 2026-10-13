@@ -11,5 +11,5 @@ CVMFS_LOW_SPEED_LIMIT=10240
 CVMFS_TIMEOUT=5
 CVMFS_TIMEOUT_DIRECT=10
 CVMFS_MAX_RETRIES=2
-# Retry the (throughput-ranked) primary server after 30 minutes.
+# Retry the (measurement-ranked) primary server after 30 minutes.
 CVMFS_HOST_RESET_AFTER=1800

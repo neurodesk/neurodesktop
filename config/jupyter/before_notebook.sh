@@ -350,8 +350,8 @@ if [ "$EUID" -eq 0 ]; then
             if [ ! -d "/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/" ]; then
                 # it is not available outside, so try mounting with fuse inside container
 
-                # Rank the CVMFS servers by measured download throughput and
-                # write the repository config with the fastest server first
+                # Rank the CVMFS servers by measured request latency and download
+                # speed and write the repository config with the best server first
                 # (see cvmfs_server_select.sh for the selection strategy).
                 if [ -x /opt/neurodesktop/cvmfs_server_select.sh ]; then
                     /opt/neurodesktop/cvmfs_server_select.sh || echo "Warning: no CVMFS server measurable; wrote static fallback config."
@@ -380,7 +380,7 @@ if [ "$EUID" -eq 0 ]; then
                     ==================================================================
                     CVMFS servers:"
                     # Note: no `host probe` here - it reorders the host chain by
-                    # round-trip time, which would undo the throughput ranking.
+                    # round-trip time, which would undo the measured ranking.
                     cvmfs_talk -i neurodesk.ardc.edu.au host info
                 fi
             fi

@@ -78,8 +78,8 @@ start_cvmfs() {
     }
 
     # ── Server selection ──────────────────────────────────────────────────
-    # Rank the CVMFS servers by measured download throughput and write the
-    # repository config with the fastest server first. The script reuses a
+    # Rank the CVMFS servers by measured request latency and download speed
+    # and write the repository config with the best server first. The script reuses a
     # cached ranking (with health check and TTL) when one is available; see
     # cvmfs_server_select.sh for details.
     if [ -x /opt/neurodesktop/cvmfs_server_select.sh ]; then
@@ -117,7 +117,7 @@ start_cvmfs() {
     fi
 
     # Note: no `host probe` here - it reorders the host chain by round-trip
-    # time, which would undo the throughput ranking.
+    # time, which would undo the measured ranking.
     cvmfs_talk -i neurodesk.ardc.edu.au host info 2>/dev/null || true
 
     # Re-source environment variables so MODULEPATH picks up CVMFS.
