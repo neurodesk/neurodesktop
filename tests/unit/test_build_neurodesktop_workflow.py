@@ -307,4 +307,5 @@ def test_cvmfs_image_tests_report_the_active_mirror_after_a_failure(tmp_path):
         assert calls.read_text().splitlines() == [
             "timeout 20 cvmfs_talk -i neurodesk.ardc.edu.au host info",
             "timeout 20 cvmfs_config stat -v neurodesk.ardc.edu.au",
+            "journalctl --no-pager -n 50 -t cvmfs2 -t automount",
         ], path.name
