@@ -140,7 +140,11 @@ def _configured_server_urls(config):
 
 @pytest.fixture
 def transfer_times(tmp_path, monkeypatch):
-    """Set per-origin (catalog/manifest, chunk) seconds for real curl transfers."""
+    """Set per-origin transfer seconds for real curl transfers.
+
+    Each origin maps to (catalog/manifest, chunk) body-transfer seconds and an
+    optional per-request latency before the first byte (default 1 ms).
+    """
     real_curl = shutil.which("curl")
     assert real_curl is not None
     timings = tmp_path / "transfer-times.json"
@@ -162,19 +166,20 @@ def transfer_times(tmp_path, monkeypatch):
         "if result.returncode:\n"
         "    sys.stdout.buffer.write(result.stdout)\n"
         "    sys.exit(result.returncode)\n"
-        "status, elapsed, address = result.stdout.decode().split()\n"
+        "status, elapsed, address, _, _ = result.stdout.decode().split()\n"
         "url = urlsplit(sys.argv[-1])\n"
         f"timings = json.loads(Path({str(timings)!r}).read_text())\n"
         "origin = f'{url.scheme}://{url.netloc}'\n"
-        "catalog, chunk = timings[origin]\n"
-        "elapsed = chunk if url.path.endswith('P') else catalog\n"
-        "print(status, elapsed, address, end='')\n"
+        "catalog, chunk, *latency = timings[origin]\n"
+        "latency = latency[0] if latency else 0.001\n"
+        "body = chunk if url.path.endswith('P') else catalog\n"
+        "print(status, latency + body, address, 0, latency, end='')\n"
     )
     wrapper.chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
     def set_times(per_host):
         for durations in per_host.values():
-            assert len(durations) == 2, "Supply catalog and chunk transfer times"
+            assert len(durations) in (2, 3), "Supply catalog, chunk and optional latency times"
             assert all(
                 type(seconds) in (int, float) and math.isfinite(seconds) and seconds > 0
                 for seconds in durations
@@ -285,7 +290,7 @@ def test_all_unreachable_writes_fallback(tmp_path, dead_server_url):
     assert proc.returncode == 1, proc.stdout
     assert "CVMFS_USE_GEOAPI=yes" in config
     server_hosts = {urlparse(url).hostname for url in _configured_server_urls(config)}
-    assert "cvmfs-geoproximity.neurodesk.org" in server_hosts
+    assert "cvmfs-frankfurt.neurodesk.org" in server_hosts
     # A failed probe must not poison the cache.
     assert not (tmp_path / "selection.env").is_file()
 
@@ -786,3 +791,105 @@ def test_catalog_worker_refuses_root(monkeypatch):
     )
     monkeypatch.setattr(selector.os, "geteuid", lambda: 0)
     assert selector.catalog_worker() == 1
+
+
+def _selector(name):
+    from testlib import load_source_module
+
+    return load_source_module(
+        name, "/opt/neurodesktop/cvmfs_server_select.py",
+        "config/jupyter/cvmfs_server_select.py",
+    )
+
+
+def test_request_latency_outweighs_a_small_bulk_advantage(tmp_path, mock_repo, transfer_times):
+    """Metadata-heavy work (module listing) is bound by per-request latency.
+
+    The distant mirror transfers each large object slightly faster end to end,
+    which a throughput-only ranking rewards, but every one of the many small
+    requests a session makes costs it 150 ms instead of 5 ms.
+    """
+    distant, distant_base = _start_server(mock_repo, _QuietHandler)
+    near, near_base = _start_server(mock_repo, _QuietHandler)
+    transfer_times({distant_base: (0.01, 0.02, 0.15), near_base: (0.01, 0.18, 0.005)})
+    try:
+        proc, config = run_select(tmp_path, f"{distant_base} {near_base}")
+        assert proc.returncode == 0, proc.stdout
+        assert _configured_server_urls(config) == [
+            near_base + "/cvmfs/@fqrn@", distant_base + "/cvmfs/@fqrn@",
+        ], proc.stdout
+        assert "ms/request" in proc.stdout
+    finally:
+        for server in [distant, near]:
+            server.shutdown()
+            server.server_close()
+
+
+def test_finalists_get_repeated_cache_busted_latency_samples(tmp_path, mock_repo):
+    seen = []
+
+    class Recording(_QuietHandler):
+        def do_GET(self):
+            seen.append(self.path)
+            super().do_GET()
+
+    server, base = _start_server(mock_repo, Recording)
+    try:
+        proc, _ = run_select(tmp_path, base)
+        assert proc.returncode == 0, proc.stdout
+    finally:
+        server.shutdown()
+        server.server_close()
+    selector = _selector("cvmfs_latency_samples")
+    manifests = [path for path in seen if ".cvmfspublished" in path]
+    # Two Stage 1 probes, then repeated Stage 3 latency samples.
+    assert len(manifests) == 2 + selector.LATENCY_PROBES
+    assert all("cvmfsselect=" in path for path in manifests)
+
+
+def test_geo_alias_never_displaces_its_concrete_host(monkeypatch):
+    """A CNAME alias may resolve elsewhere at mount time, duplicating an entry."""
+    selector = _selector("cvmfs_alias_preference")
+    targets = {
+        "cvmfs.neurodesk.org": "cvmfs-jetstream.neurodesk.org",
+        "cvmfs-geoproximity.neurodesk.org": "cvmfs-jetstream.neurodesk.org",
+        "cvmfs-jetstream.neurodesk.org": "cvmfs-jetstream.neurodesk.org",
+    }
+    monkeypatch.setattr(selector.socket, "gethostbyname_ex",
+                        lambda host: (targets[host] + ".", [], ["192.0.2.7"]))
+    rows = [
+        {"base": f"http://{host}", "ip": "192.0.2.7", "latency": latency,
+         "canonical": selector.is_canonical(f"http://{host}")}
+        for host, latency in [("cvmfs.neurodesk.org", 0.01),
+                              ("cvmfs-geoproximity.neurodesk.org", 0.02),
+                              ("cvmfs-jetstream.neurodesk.org", 0.05)]
+    ]
+    assert [row["base"] for row in selector.distinct_destinations(rows)] == [
+        "http://cvmfs-jetstream.neurodesk.org",
+    ]
+
+
+def test_unresolvable_names_are_not_treated_as_aliases(monkeypatch):
+    selector = _selector("cvmfs_alias_lookup_failure")
+
+    def fail(host):
+        raise socket.gaierror("no answer")
+
+    monkeypatch.setattr(selector.socket, "gethostbyname_ex", fail)
+    assert selector.is_canonical("http://cvmfs-sydney.neurodesk.org")
+
+
+def test_static_fallback_lists_distinct_hosts_in_sync_with_the_image_default():
+    # The installed repository config is regenerated at startup, so compare
+    # the checkout's static default rather than whatever the selector wrote.
+    script = repo_path("config/jupyter/cvmfs_server_select.sh").read_text()
+    fallback = next(line for line in script.splitlines()
+                    if line.startswith("FALLBACK_SERVER_URL="))
+    static = repo_path("config/cvmfs/neurodesk.ardc.edu.au.conf").read_text()
+    urls = fallback.split('"')[1].split(";")
+    assert urls == _configured_server_urls(static)
+    hosts = [urlparse(url).hostname for url in urls]
+    assert len(hosts) == len(set(hosts))
+    # Geo-DNS aliases resolve to whichever host DNS picks, which can be
+    # another entry in this list; failover would then retry the same server.
+    assert not {"cvmfs.neurodesk.org", "cvmfs-geoproximity.neurodesk.org"} & set(hosts)
