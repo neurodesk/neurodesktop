@@ -236,7 +236,10 @@ case "$FAKE_WEBSOCAT_RESULT" in
             exit 0
         }
         trap final_frames TERM
-        while :; do read -r -t 0.1 ignored || :; done
+        # Wait for TERM without busy-looping: macOS bash 3.2 rejects
+        # fractional `read -t`, and an unbounded loop can outlive the test.
+        for _ in $(seq 100); do sleep 0.1; done
+        exit 1
         ;;
     timeout)
         exec /bin/sleep 30
