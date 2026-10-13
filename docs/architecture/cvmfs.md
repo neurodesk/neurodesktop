@@ -155,6 +155,29 @@ receive up to three total checks, with a 30-second delay between attempts by
 default. Persistent omissions produce one annotation per object and exit code 2.
 The checker reports publication omissions; it does not upload or repair objects.
 
+## Module cache warm-up
+
+Lmod lists modules by reading every modulefile in `MODULEPATH`. On a cold
+CVMFS cache, the first `ml av` therefore makes about 2,000 sequential CVMFS
+requests. In a test container this took 55 seconds. Afterwards, Lmod reads one
+per-user spider cache file, and `ml av` takes about 0.1 seconds. Request latency
+sets that cost, so it is largest for users far from every mirror.
+
+After the deferred worker's CVMFS attempt, it launches
+[`warm_module_cache.sh`](../../config/jupyter/warm_module_cache.sh) in the
+background. The script runs as the notebook user with a clean environment and
+`nice -n 10`. It invalidates any existing Lmod user cache in `~/.lmod.d/.cache`,
+so a restart lists tools published since the last build, then runs
+`module avail` with `LMOD_SHORT_TIME=0` so Lmod writes the cache even when the
+build is quick. The build does not delay the worker's completion marker or
+Slurm. It is skipped when CVMFS modules are unavailable or when
+`NEURODESKTOP_LMOD_CACHE_WARMUP=0`, and it stops after 15 minutes. Failures are
+logged and leave Lmod to build the cache on demand. An `ml av` that runs during
+the warm-up still benefits from the modulefiles the warm-up has already
+fetched. The warm-up runs whenever the deferred worker does, which includes
+eager CVMFS with the default lazy Slurm. It does not run when both CVMFS and
+Slurm use eager mode.
+
 ## Build-time CVMFS setup
 
 The active repository configuration is generated at startup by
