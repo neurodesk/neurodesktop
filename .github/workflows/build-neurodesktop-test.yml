@@ -442,6 +442,22 @@ jobs:
           NEURODESKTOP_CVMFS_TARGET_CONFIG="$RUNNER_TEMP/neurodesk-cvmfs.conf" \
           NEURODESKTOP_CVMFS_CACHE_FILE="$RUNNER_TEMP/neurodesk-cvmfs-selection.env" \
             bash config/jupyter/cvmfs_server_select.sh --force-probe
+      - name: Locate scientific tool cache
+        id: cvmfs-cache-key
+        if: matrix.profile.needs_cvmfs
+        run: bash .github/scripts/cvmfs_ci_cache.sh init '${{ matrix.arch }}' >> "$GITHUB_OUTPUT"
+      - name: Restore scientific tool cache
+        id: cvmfs-cache
+        if: matrix.profile.needs_cvmfs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.cvmfs-cache-key.outputs.path }}
+          key: ${{ steps.cvmfs-cache-key.outputs.key }}
+          restore-keys: ${{ steps.cvmfs-cache-key.outputs.restore-prefix }}
+      - name: Use scientific tool cache
+        id: cvmfs-cache-prepare
+        if: matrix.profile.needs_cvmfs
+        run: bash .github/scripts/cvmfs_ci_cache.sh prepare
       - name: Configure Neurodesk CVMFS
         if: matrix.profile.needs_cvmfs
         run: |
@@ -471,6 +487,16 @@ jobs:
             sudo timeout 20 cvmfs_talk -i neurodesk.ardc.edu.au host info || true
             sudo timeout 20 cvmfs_config stat -v neurodesk.ardc.edu.au || true
           fi
+      # Main-branch runs refresh the cache that pull requests restore.
+      - name: Release scientific tool cache
+        if: always() && steps.cvmfs-cache-prepare.outcome == 'success' && (github.ref == 'refs/heads/main' || steps.cvmfs-cache.outputs.cache-matched-key == '')
+        run: bash .github/scripts/cvmfs_ci_cache.sh export
+      - name: Save scientific tool cache
+        if: always() && steps.cvmfs-cache-prepare.outcome == 'success' && (github.ref == 'refs/heads/main' || steps.cvmfs-cache.outputs.cache-matched-key == '')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.cvmfs-cache-key.outputs.path }}
+          key: ${{ steps.cvmfs-cache-key.outputs.key }}
 
   scan-image:
     name: scan-image (${{ matrix.arch }})

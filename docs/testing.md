@@ -358,6 +358,19 @@ temporarily disables AppArmor's restriction on unprivileged user namespaces,
 as required for nested Apptainer. An `always()` step restores the original host
 policy after acceptance, including on failure or cancellation.
 
+These jobs also restore the host CVMFS client cache from earlier runs through
+[`cvmfs_ci_cache.sh`](../.github/scripts/cvmfs_ci_cache.sh). A cold cache made
+application tests depend on live mirror throughput, and a run with every mirror
+slow timed out FSLeyes; see
+[issue #1077](https://github.com/NeuroDesk/neurodesktop/issues/1077). The client
+uses the restored directory as an alien cache, which has no quota database to
+disagree with a snapshot. Cache keys roll over each ISO week, so the first run
+of the week fetches live from CVMFS. Runs on `main`, including the daily
+scheduled production build, save the cache that pull requests restore. Other
+refs save only when nothing was restored. The scheduled
+[CVMFS health workflow](../.github/workflows/test-cvmfs.yml) never uses this
+cache and continues to check the live mirrors.
+
 The regular and acceptance profiles poll readiness up to 60 times and fail
 before pytest if polling expires. The HPC profile also checks container
 liveness during its 90 readiness attempts and fails before pytest if the
@@ -371,7 +384,8 @@ execute the command with temporary Docker and sleep adapters and check workflow
 calls. Run the focused checks with:
 
 ```bash
-pytest tests/unit/test_image_runtime_validation.py tests/unit/test_build_neurodesktop_workflow.py
+pytest tests/unit/test_image_runtime_validation.py tests/unit/test_build_neurodesktop_workflow.py \
+  tests/unit/test_cvmfs_ci_cache.py
 ```
 
 ## Shared helpers
