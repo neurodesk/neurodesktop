@@ -123,6 +123,14 @@ noninteractive sudo when needed, and records catalog status before and after.
 A refresh failure or timeout still checks the inventory. After the final
 comparison, the checker reports every remaining omission and exits with code 2.
 
+The scheduled [object-storage health workflow](../../.github/workflows/test-objectstorage.yml)
+checks a validated snapshot of the same Neurocommand inventory. Each object's
+HEAD request must finish successfully with HTTP 200. Redirects, other HTTP
+responses except 404, and transport failures stop the check. Missing objects
+receive up to three total checks, with a 30-second delay between attempts by
+default. Persistent omissions produce one annotation per object and exit code 2.
+The checker reports publication omissions; it does not upload or repair objects.
+
 ## Build-time CVMFS setup
 
 The active repository configuration is generated at startup by

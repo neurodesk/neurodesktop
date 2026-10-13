@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-11"
+last-reviewed: "2026-10-12"
 ---
 
 # Testing
@@ -421,6 +421,7 @@ non-obvious tiers protect.
 | ghapi public credential examples | `pytest tests/unit/test_ghapi_examples.py tests/unit/test_image_packaging_layers.py` | `pytest /opt/tests/test_image_size_hygiene.py` and unchanged image secret scan |
 | CVMFS mirror selection | `pytest tests/unit/test_cvmfs_selection.py tests/unit/test_cvmfs_server_inventory.py` | Run the selector with temporary config/cache paths, then verify a mounted read; see [CVMFS](architecture/cvmfs.md) |
 | CVMFS inventory health | `pytest tests/unit/test_cvmfs_mount_check.py tests/unit/test_cvmfs_inventory_check.py` | Live mirror workflow |
+| Object-storage inventory health | `pytest tests/unit/test_objectstorage_check.py` | Live `Test Objectstorage` workflow |
 | Nightly JupyterHub probe (terminal creation, FSL commands) | `pytest tests/unit/test_jupyter_terminal_creation.py tests/unit/test_github_workflows.py` | Live `JupyterHub API Testing` workflow |
 | Lmod extension listing default | `pytest tests/unit/test_lmod_extensions.py` | `pytest /opt/tests/test_lmod_avail_extensions.py` |
 | Interactive module banner | `pytest tests/unit/test_module_banner.py` | — |
