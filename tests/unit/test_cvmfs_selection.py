@@ -613,13 +613,10 @@ def test_default_pool_benchmarks_the_fnal_stratum_one_directly(tmp_path):
     assert fnal <= _default_pool(tmp_path)
 
 
-def test_default_pool_benchmarks_every_monitored_cdn_alias(tmp_path):
+def test_health_workflow_checks_exactly_the_mirrors_users_can_select(tmp_path):
     workflow = yaml.safe_load(repo_path(".github/workflows/test-cvmfs.yml").read_text())
     monitored = workflow["jobs"]["test_cvmfs"]["strategy"]["matrix"]["cvmfs-servers"]
-    aliases = {f"http://{server}" for server in monitored
-               if urlparse(f"http://{server}").hostname.endswith(".openhtc.io")}
-    assert len(aliases) > 1
-    assert aliases <= _default_pool(tmp_path)
+    assert {f"http://{server}" for server in monitored} == _default_pool(tmp_path)
 
 
 def test_faster_cached_challenger_triggers_ranking(tmp_path, mock_repo, transfer_times):
