@@ -23,11 +23,15 @@ http://cvmfs-stratum-one.ihep.ac.cn:8000
 http://sampacs01.if.usp.br:8000
 http://s1brisbane-cvmfs.openhtc.io
 http://s1melbourne-cvmfs.openhtc.io
+http://s1sydney-cvmfs.openhtc.io
+http://s1perth-cvmfs.openhtc.io
 http://s1nikhef-cvmfs.openhtc.io
 http://s1osggoc-cvmfs.openhtc.io:8080
 http://s1bnl-cvmfs.openhtc.io
 http://s1fnal-cvmfs.openhtc.io:8080
 http://s1sampa-cvmfs.openhtc.io:8080
+http://s1ral-cvmfs.openhtc.io
+http://s1ihep-cvmfs.openhtc.io
 "
 HOST_POOL="${NEURODESKTOP_CVMFS_HOST_POOL:-${DEFAULT_HOST_POOL}}"
 

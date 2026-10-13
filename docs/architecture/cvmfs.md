@@ -4,7 +4,7 @@ description: CVMFS server selection and mount configuration, and the
   neurocommand CLI/module system for neuroimaging tools
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-12"
+last-reviewed: "2026-10-13"
 ---
 
 # CVMFS and Neurocommand
@@ -26,7 +26,9 @@ Selection proceeds in three stages:
 
 1. Probe manifests in parallel, including the FNAL Stratum 1 both directly and
    through its CDN endpoint. Geo-DNS names such as `cvmfs-geoproximity` resolve
-   to FNAL only some of the time, so FNAL is also listed by name. Collapse direct
+   to FNAL only some of the time, so FNAL is also listed by name. Every
+   Cloudflare `openhtc.io` alias that the CVMFS health workflow monitors is
+   also a candidate; a unit test keeps the two lists aligned. Collapse direct
    aliases with the same observed IP, scheme, and port, while preserving separate
    `openhtc.io` hostnames because shared CDN edge IPs can route to different origins.
 2. Download the same hash-verified root catalog sequentially from **every**
