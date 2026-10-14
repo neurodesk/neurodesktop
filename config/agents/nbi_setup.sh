@@ -13,8 +13,10 @@
 
 set -u
 umask 077
-PYTHONPATH="$(dirname "${BASH_SOURCE[0]}")${PYTHONPATH:+:${PYTHONPATH}}"
+NBI_SETUP_DIR="$(dirname "${BASH_SOURCE[0]}")"
+PYTHONPATH="${NBI_SETUP_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 export PYTHONPATH
+NBI_MIRROR_OPENCODE_HELPER="${NBI_SETUP_DIR}/nbi_mirror_opencode.py"
 
 case "${1:-}" in
     ""|--no-refresh) ;;
@@ -251,150 +253,14 @@ if changed:
 PY
 fi
 
-# Mirror the OpenCode model selection into NBI. The OpenCode wrapper stores
-# the chosen model as "provider/model_id" in opencode.json together with each
-# provider's baseURL, so that file is the single source of truth for which
-# model/endpoint the coding agents use. Sections the user pointed at an
-# endpoint OpenCode does not manage (via the NBI Settings UI) are left alone,
-# as are sections using a non-openai-compatible provider (claude, ollama...).
+# Mirror the OpenCode model selection into NBI's openai-compatible sections.
+# opencode.json is the single source of truth for the coding agents' model and
+# endpoint. The helper leaves sections that use another provider, or an
+# endpoint OpenCode does not manage, alone. Keys travel in the environment.
 if command -v python3 >/dev/null 2>&1 && [ -f "${OPENCODE_CONFIG_FILE}" ]; then
-    NBI_CONFIG_FILE="${NBI_CONFIG_FILE}" \
-    OPENCODE_CONFIG_FILE="${OPENCODE_CONFIG_FILE}" \
     NEURODESK_API_KEY_VALUE="${NEURODESK_API_KEY_VALUE}" \
-    python3 - <<'PY'
-import json
-import os
-import sys
-from provider_security import is_neurodesk_endpoint
-
-cfg_path = os.environ["NBI_CONFIG_FILE"]
-opencode_path = os.environ["OPENCODE_CONFIG_FILE"]
-neurodesk_key = os.environ.get("NEURODESK_API_KEY_VALUE", "")
-
-def load_json(path):
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, json.JSONDecodeError):
-        return None
-
-opencode_cfg = load_json(opencode_path)
-cfg = load_json(cfg_path)
-if not isinstance(opencode_cfg, dict) or not isinstance(cfg, dict):
-    sys.exit(0)
-
-model_ref = opencode_cfg.get("model")
-if not isinstance(model_ref, str) or "/" not in model_ref:
-    sys.exit(0)
-provider_key, model_id = model_ref.split("/", 1)
-
-providers = opencode_cfg.get("provider")
-if not isinstance(providers, dict):
-    sys.exit(0)
-provider_cfg = providers.get(provider_key)
-if not isinstance(provider_cfg, dict):
-    sys.exit(0)
-# Only OpenAI-compatible providers map onto NBI's openai-compatible sections.
-if provider_cfg.get("npm") != "@ai-sdk/openai-compatible":
-    sys.exit(0)
-
-options = provider_cfg.get("options")
-if not isinstance(options, dict):
-    options = {}
-base_url = str(options.get("baseURL") or "").rstrip("/")
-if not base_url or not model_id:
-    sys.exit(0)
-
-def resolve_api_key(raw):
-    # OpenCode stores keys as "{env:VAR}" placeholders and resolves them from
-    # the environment itself; NBI needs the literal value.
-    raw = str(raw or "")
-    if raw.startswith("{env:") and raw.endswith("}"):
-        var_name = raw[5:-1]
-        if var_name == "NEURODESK_API_KEY":
-            return neurodesk_key if is_neurodesk_endpoint(base_url) else ""
-        return os.environ.get(var_name, "")
-    return raw
-
-api_key = resolve_api_key(options.get("apiKey"))
-
-# Every baseURL OpenCode knows about counts as managed; an NBI section
-# pointing anywhere else was configured by hand and is left untouched.
-managed_urls = {"https://llm.neurodesk.org/openai"}
-for candidate in providers.values():
-    if not isinstance(candidate, dict):
-        continue
-    candidate_options = candidate.get("options")
-    if isinstance(candidate_options, dict):
-        url = str(candidate_options.get("baseURL") or "").rstrip("/")
-        if url:
-            managed_urls.add(url)
-
-context_window = ""
-models_cfg = provider_cfg.get("models")
-if isinstance(models_cfg, dict):
-    model_cfg = models_cfg.get(model_id)
-    if isinstance(model_cfg, dict):
-        limit_cfg = model_cfg.get("limit")
-        if isinstance(limit_cfg, dict):
-            try:
-                context_limit = int(limit_cfg.get("context"))
-            except (TypeError, ValueError):
-                context_limit = 0
-            if context_limit > 0:
-                context_window = str(context_limit)
-
-def get_prop(props, prop_id):
-    for prop in props:
-        if isinstance(prop, dict) and prop.get("id") == prop_id:
-            return str(prop.get("value") or "")
-    return ""
-
-def set_prop(props, prop_id, value):
-    for prop in props:
-        if isinstance(prop, dict) and prop.get("id") == prop_id:
-            if prop.get("value") != value:
-                prop["value"] = value
-                return True
-            return False
-    props.append({"id": prop_id, "value": value})
-    return True
-
-changed = False
-for section in ("chat_model", "inline_completion_model"):
-    model_section = cfg.get(section)
-    if not isinstance(model_section, dict):
-        continue
-    if model_section.get("provider") != "openai-compatible":
-        continue
-    props = model_section.get("properties")
-    if not isinstance(props, list):
-        props = []
-        model_section["properties"] = props
-    current_url = get_prop(props, "base_url").rstrip("/")
-    if current_url and current_url not in managed_urls:
-        continue
-    if set_prop(props, "base_url", base_url):
-        changed = True
-    if set_prop(props, "model_id", model_id):
-        changed = True
-    # Preserve a missing key only while staying on the same endpoint.
-    if (api_key or current_url != base_url) and set_prop(props, "api_key", api_key):
-        changed = True
-    if context_window and set_prop(props, "context_window", context_window):
-        changed = True
-
-if changed:
-    tmp = f"{cfg_path}.tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(cfg, fh, indent=2)
-        fh.write("\n")
-    os.replace(tmp, cfg_path)
-    print(
-        f"nbi_setup.sh: synced Notebook Intelligence to OpenCode selection {provider_key}/{model_id}",
-        file=sys.stderr,
-    )
-PY
+        python3 "${NBI_MIRROR_OPENCODE_HELPER}" \
+        "${NBI_CONFIG_FILE}" "${OPENCODE_CONFIG_FILE}"
 fi
 
 # If there is no key yet, NBI boots with an empty key. The user can run

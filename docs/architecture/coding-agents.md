@@ -136,6 +136,29 @@ missing, corrupt, or not a JSON object, the helper leaves the file unchanged,
 writes one line to stderr, and exits with status 1. The wrapper then continues
 to launch OpenCode. The helper writes nothing to stdout.
 
+`nbi_setup.sh` mirrors the OpenCode model selection into Notebook Intelligence
+with
+[`config/agents/nbi_mirror_opencode.py`](../../config/agents/nbi_mirror_opencode.py),
+installed beside it as `/opt/neurodesktop/nbi_mirror_opencode.py`. The setup
+script runs it with `python3` from the caller's `PATH`, as the notebook user,
+both at JupyterLab startup and after each OpenCode run. It passes the NBI and
+OpenCode config paths as arguments. Credentials travel only in the
+environment: `NEURODESK_API_KEY_VALUE` carries the Neurodesk key, and other
+`{env:VAR}` placeholders in OpenCode's provider options resolve from `VAR`. The
+helper retargets only the openai-compatible `chat_model` and
+`inline_completion_model` sections that point at an endpoint OpenCode
+manages, or at none. It sets the base URL, model ID, and context window, and
+it sends the Neurodesk key only to the exact `https://llm.neurodesk.org`
+authority. It keeps a section's existing key when the endpoint is unchanged
+and the selection has no key. Other sections, properties, and settings stay
+unchanged. A missing, corrupt, or unusable config is skipped silently with
+exit status 0. A change replaces `config.json` atomically as a 0600 file and
+writes one `nbi_setup.sh: synced Notebook Intelligence ...` line to stderr. If
+the write fails, the helper keeps the old file, writes one line to stderr, and
+exits with status 1; `nbi_setup.sh` continues. The helper never prints keys
+and writes nothing to stdout. It makes no network requests, so boot-time
+`nbi_setup.sh --no-refresh` stays free of live-server probes.
+
 Session sharing is disabled by default in
 [`config/agents/opencode_config.json`](../../config/agents/opencode_config.json)
 (`"share": "disabled"`) so research conversations are not uploaded to the

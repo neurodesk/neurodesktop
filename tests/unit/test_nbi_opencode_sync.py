@@ -46,7 +46,7 @@ OPENCODE_PROVIDERS = {
 
 
 # Python modules nbi_setup.sh loads from its own directory.
-NBI_SETUP_HELPERS = ("provider_security.py",)
+NBI_SETUP_HELPERS = ("provider_security.py", "nbi_mirror_opencode.py")
 
 
 def make_nbi_setup_sandbox(tmp_path):
