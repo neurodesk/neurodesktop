@@ -1,0 +1,208 @@
+"""Exercise compiled Glass helpers at their X11, vsock and exec boundaries."""
+
+import os
+from pathlib import Path
+import select
+import shutil
+import signal
+import socket
+import struct
+import subprocess
+import time
+
+import pytest
+
+from testlib import repo_path
+
+
+@pytest.fixture(scope="module")
+def binaries(tmp_path_factory):
+    build = tmp_path_factory.mktemp("glass-native")
+    for tool in ("gcc", "Xvfb", "xrandr"):
+        assert shutil.which(tool), f"Install gcc libx11-dev xvfb x11-xserver-utils ({tool} missing)"
+    for name, source, flags in (
+        ("clipboard", "config/glass/glass-clipboard.c", ["-lX11"]),
+        ("resize", "config/glass/glass-resize.c", []),
+        ("peer", "tests/fixtures/glass/peer.c", ["-lX11"]),
+        ("transport.so", "tests/fixtures/glass/transport.c", ["-shared", "-fPIC", "-ldl"]),
+    ):
+        subprocess.run(["gcc", "-Wall", "-Wextra", "-Werror", str(repo_path(source)),
+                        "-o", str(build / name), *flags], check=True)
+    return build
+
+
+@pytest.fixture
+def display():
+    read, write = os.pipe()
+    process = subprocess.Popen(["Xvfb", "-displayfd", str(write), "-screen", "0", "800x600x24",
+                                "-nolisten", "tcp"], pass_fds=(write,), stderr=subprocess.PIPE)
+    os.close(write)
+    try:
+        assert select.select([read], [], [], 5)[0], "Xvfb did not start"
+        yield ":" + os.read(read, 32).decode().strip()
+    finally:
+        os.close(read)
+        process.terminate()
+        process.communicate(timeout=5)
+
+
+class Bridge:
+    def __init__(self, binaries, tmp_path, display, name):
+        self.listener = socket.socket(socket.AF_UNIX)
+        self.listener.bind(str(tmp_path / "host"))
+        self.listener.listen()
+        self.listener.settimeout(4)
+        self.env = {**os.environ, "DISPLAY": display, "LD_PRELOAD": str(binaries / "transport.so"),
+                    "GLASS_TEST_SOCKET": str(tmp_path / "host"),
+                    "GLASS_TEST_PORT": "10778" if name == "clipboard" else "10779"}
+        recorder = tmp_path / "recorder"
+        self.record = tmp_path / "calls"
+        recorder.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$GLASS_TEST_CALLS"\n'
+                            '[ "$(wc -l < "$GLASS_TEST_CALLS")" -gt 1 ]\n')
+        recorder.chmod(0o755)
+        self.env.update(GLASS_TEST_RECORDER=str(recorder), GLASS_TEST_CALLS=str(self.record))
+        self.process = subprocess.Popen([binaries / name], env=self.env, stderr=subprocess.PIPE)
+        self.connection, _ = self.listener.accept()
+        self.connection.settimeout(3)
+        self.peer = subprocess.Popen([binaries / "peer"], env={**os.environ, "DISPLAY": display},
+                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        assert self.line() == "ready"
+
+    def line(self):
+        assert select.select([self.peer.stdout], [], [], 4)[0], "X11 peer did not answer"
+        return self.peer.stdout.readline().decode().rstrip("\n")
+
+    def command(self, command):
+        self.peer.stdin.write((command + "\n").encode())
+        self.peer.stdin.flush()
+        assert self.line() == "ok"
+
+    def receive(self):
+        def exact(n):
+            data = b""
+            while len(data) < n:
+                chunk = self.connection.recv(n - len(data))
+                assert chunk, "bridge disconnected"
+                data += chunk
+            return data
+        return exact(struct.unpack("!I", exact(4))[0])
+
+    def send(self, text):
+        frame = struct.pack("!I", len(text)) + text
+        for byte in frame:
+            self.connection.sendall(bytes([byte]))
+
+    def quiet(self):
+        assert not select.select([self.connection], [], [], 0.5)[0]
+
+    def reconnect(self):
+        self.connection.close()
+        self.connection, _ = self.listener.accept()
+        self.connection.settimeout(3)
+
+    def close(self):
+        self.process.send_signal(signal.SIGCONT)
+        self.process.terminate()
+        self.process.communicate(timeout=5)
+        self.peer.terminate()
+        self.peer.communicate(timeout=5)
+        self.connection.close()
+        self.listener.close()
+
+
+@pytest.fixture
+def bridge(binaries, tmp_path, display):
+    active = []
+
+    def start(name="clipboard"):
+        instance = Bridge(binaries, tmp_path, display, name)
+        active.append(instance)
+        return instance
+
+    yield start
+    for instance in active:
+        instance.close()
+
+
+def test_same_window_copies_and_host_takeover(bridge):
+    b = bridge()
+    b.command("own first")
+    assert b.receive() == b"first"
+    b.command("set second")
+    assert b.receive() == b"second"
+    b.quiet()
+    b.send(b"host")
+    time.sleep(0.3)
+    b.command("paste")
+    assert b.line() == "text:host"
+    b.command("own second")
+    assert b.receive() == b"second"
+    b.reconnect()
+    assert b.receive() == b"second"
+
+
+def test_first_empty_and_refusal_recovery(bridge):
+    b = bridge()
+    b.command("own ")
+    assert b.receive() == b""
+    b.command("refuse")
+    time.sleep(0.4)
+    b.command("set recovered")
+    assert b.receive() == b"recovered"
+
+
+def test_pending_timeout_and_host_takeover(bridge):
+    b = bridge()
+    b.command("own initial")
+    assert b.receive() == b"initial"
+    b.command("hold")
+    time.sleep(1.5)
+    b.send(b"host")
+    time.sleep(0.3)
+    b.command("release")
+    b.quiet()
+    b.command("paste")
+    assert b.line() == "text:host"
+    b.command("own recovered")
+    assert b.receive() == b"recovered"
+
+
+def test_destroyed_requester_does_not_kill_bridge(bridge):
+    b = bridge()
+    b.send(b"survives")
+    time.sleep(0.3)
+    b.process.send_signal(signal.SIGSTOP)
+    b.command("destroy")
+    b.process.send_signal(signal.SIGCONT)
+    time.sleep(0.3)
+    assert b.process.poll() is None
+    b.command("paste")
+    assert b.line() == "text:survives"
+
+
+def test_resize_fragmentation_retries_invalid_and_reconnect(bridge):
+    b = bridge("resize")
+    for byte in struct.pack("!II", 800, 600):
+        b.connection.sendall(bytes([byte]))
+    deadline = time.monotonic() + 4
+    while time.monotonic() < deadline:
+        if b.record.exists() and len(b.record.read_text().splitlines()) == 2:
+            break
+        time.sleep(0.02)
+    assert b.record.read_text().splitlines() == ["--screen 0 --size 800x600"] * 2
+    for size in ((0, 600), (800, 0), (8193, 600), (800, 8193)):
+        b.connection.sendall(struct.pack("!II", *size))
+        assert b.connection.recv(1) == b""
+        b.reconnect()
+    assert len(b.record.read_text().splitlines()) == 2
+    b.connection.sendall(struct.pack("!II", 640, 480))
+    time.sleep(0.2)
+    assert b.record.read_text().splitlines()[-1] == "--screen 0 --size 640x480"
+
+
+def test_real_xrandr_accepts_advertised_mode(bridge):
+    b = bridge("resize")
+    # The helper's actual execl path is exercised separately with the recorder.
+    result = subprocess.run(["/usr/bin/xrandr", "--screen", "0", "--size", "800x600"],
+                            env={**os.environ, "DISPLAY": b.env["DISPLAY"]}, capture_output=True)
+    assert result.returncode == 0, result.stderr.decode()
