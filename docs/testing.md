@@ -309,6 +309,10 @@ Desktop acceptance in
 checks document
 content after LibreOffice format conversions, saved VS Code editor content,
 a segmentation exported from ITK-SNAP, and FSLeyes pixels from a known volume.
+The VS Code journey clicks the file through its BiDi element reference so a
+late Explorer layout change cannot invalidate recorded screen coordinates.
+`test_vscode_browser_workflow.py` moves the row between discovery and native
+input, then requires the same edit and authenticated save to complete.
 These tests start their own Xtigervnc display through
 [native_desktop_driver.py](../tests/container/native_desktop_driver.py), so they
 need no running desktop. If the container refuses abstract Unix sockets, the
@@ -503,6 +507,7 @@ non-obvious tiers protect.
 | Image packaging layers | `pytest tests/unit/test_image_packaging_layers.py tests/unit/test_myst_build_workaround.py` | `pytest /opt/tests/test_image_size_hygiene.py /opt/tests/test_additional_components.py` and image layer inventory |
 | PyJWT asymmetric/HMAC key confusion | `pytest tests/unit/test_pyjwt_security.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_pyjwt_security.py` |
 | ghapi public credential examples | `pytest tests/unit/test_ghapi_examples.py tests/unit/test_image_packaging_layers.py` | `pytest /opt/tests/test_image_size_hygiene.py` and unchanged image secret scan |
+| Anthropic SDK public credential examples | `pytest tests/unit/test_anthropic_examples.py tests/unit/test_image_packaging_layers.py` | `pytest /opt/tests/test_anthropic_examples.py` and unchanged image secret scan |
 | CVMFS mirror selection | `pytest tests/unit/test_cvmfs_selection.py tests/unit/test_cvmfs_server_inventory.py` | Run the selector with temporary config/cache paths, then verify a mounted read; see [CVMFS](architecture/cvmfs.md) |
 | CVMFS inventory health | `pytest tests/unit/test_cvmfs_mount_check.py tests/unit/test_cvmfs_inventory_check.py` | Live mirror workflow |
 | Object-storage inventory health | `pytest tests/unit/test_objectstorage_check.py` | Live `Test Objectstorage` workflow |

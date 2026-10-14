@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-08"
+last-reviewed: "2026-10-14"
 ---
 
 # Build-Time Behaviors
@@ -49,6 +49,16 @@ cache. The cleanup matches only those exact examples, preserves API metadata,
 and removes only `gh_spec.*.pyc` cache files before the install layer is committed.
 Unexpected example changes fail the build for reassessment. Secret-scanning
 rules and release gates remain unchanged.
+
+The same pip layer runs
+[`sanitize_anthropic_examples.py`](../../scripts/sanitize_anthropic_examples.py)
+against six Anthropic SDK modules. Trivy identifies the public JSON example
+`{"type": "service_account"}` as a Google credential even without a key.
+The cleanup rewrites that example as `dict(type="service_account")` only in
+standalone documentation strings and removes the affected modules' bytecode.
+It validates all six files before writing and fails if their example counts
+change or the literal appears in executable code. SDK request construction,
+user credentials, and scanner rules remain unchanged.
 
 The runtime stage is ordered by how often each layer's inputs change, because
 invalidating a layer re-runs every layer after it. Three bands, in order:

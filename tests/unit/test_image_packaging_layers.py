@@ -55,6 +55,8 @@ def test_wheel_frontends_are_removed_in_the_pip_install_layer():
     assert "pip install --build-constraint" in layer
     assert "source=scripts/sanitize_ghapi_examples.py,target=/tmp/sanitize_ghapi_examples.py,ro" in layer
     assert "/opt/conda/bin/python /tmp/sanitize_ghapi_examples.py" in layer
+    assert "source=scripts/sanitize_anthropic_examples.py,target=/tmp/sanitize_anthropic_examples.py,ro" in layer
+    assert "/opt/conda/bin/python /tmp/sanitize_anthropic_examples.py" in layer
     assert 'rm -rf "${SITE_PACKAGES}/${package}/labextension"' in layer
     for package in (
         "notebook_intelligence", "jupyterlab_myst",
