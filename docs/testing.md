@@ -185,6 +185,29 @@ pinned in `requirements-quality.txt`. Remaining limitations:
 is not covered by Ruff and continues to rely on execution tests. Keep exceptions
 local and explain external runtime dependencies such as Jupyter-injected globals.
 
+[Issue #1074](https://github.com/neurodesk/neurodesktop/issues/1074) moves
+substantial heredocs into owned modules, one block per change. The OpenCode
+`opencode.json` model refresh is now
+`config/agents/opencode_update_config.py`. That module is in the formatter and
+strict typing scopes. `tests/unit/test_opencode_update_config.py` tests it
+directly, and `tests/unit/test_coding_agents.py` covers the wrapper contract.
+These substantive heredocs remain:
+
+| File | Block | Lines |
+| --- | --- | --- |
+| `config/agents/nbi_setup.sh` | Mirror the OpenCode selection into NBI | ~130 |
+| `config/agents/nbi_setup.sh` | Repair wiped NBI endpoint settings | ~80 |
+| `config/agents/opencode` | Probe Ollama model context windows | ~80 |
+| `config/agents/nbi_setup.sh` | Inject the Neurodesk API key into NBI | ~70 |
+| `config/agents/nbi_setup.sh` | Refresh a running NBI server | ~50 |
+| `config/agents/nbi_setup.sh` | Sync the Brain Researcher MCP entry | ~40 |
+| `config/agents/opencode` | Apply the Brain Researcher MCP entry | ~40 |
+| `Dockerfile` | Wrap kernel specs to re-source the environment | ~30 |
+| `config/agents/opencode` | Seed the TUI sidebar default | ~25 |
+
+The OpenCode wrapper's two 13-line JSON listing parsers remain inline
+because extracting them would not add a useful testing boundary.
+
 The workflow uses stable job names so repository rules can require each check.
 Unit and installed image tests remain necessary for authentication, startup
 ordering, filesystem permissions, UI disposal, and installed application behavior.

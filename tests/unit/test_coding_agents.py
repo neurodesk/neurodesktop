@@ -23,6 +23,13 @@ def opencode_wrapper_path():
     return resolve_source("/usr/local/sbin/opencode", "config/agents/opencode")
 
 
+def opencode_update_config_path():
+    return resolve_source(
+        "/opt/neurodesktop/opencode_update_config.py",
+        "config/agents/opencode_update_config.py",
+    )
+
+
 def codex_wrapper_path():
     return resolve_source("/usr/local/sbin/codex", "config/agents/codex")
 
@@ -357,6 +364,10 @@ case "$url" in
             printf '000'
         fi
         ;;
+    *127.0.0.1:"${FAKE_OLLAMA_SHOW_PORT:-none}"/api/tags*)
+        printf '%s' '{"models":[{"name":"local-model:latest"}]}' > "$outfile"
+        printf '200'
+        ;;
     *api/tags*)
         printf '%s' '{}' > "$outfile"
         printf '000'
@@ -380,6 +391,14 @@ esac
     wrapper_contents = wrapper_contents.replace(
         'OPENCODE_DEFAULT_CONFIG_FILE="/opt/jovyan_defaults/.config/opencode/opencode.json"',
         f'OPENCODE_DEFAULT_CONFIG_FILE="{default_config}"',
+    )
+    helper_assignment = (
+        'OPENCODE_UPDATE_CONFIG_HELPER="/opt/neurodesktop/opencode_update_config.py"'
+    )
+    assert helper_assignment in wrapper_contents
+    wrapper_contents = wrapper_contents.replace(
+        helper_assignment,
+        f'OPENCODE_UPDATE_CONFIG_HELPER="{opencode_update_config_path()}"',
     )
     wrapper_contents = wrapper_contents.replace("/usr/bin/opencode", str(fake_opencode))
     test_wrapper.write_text(wrapper_contents, encoding="utf-8")
@@ -659,6 +678,61 @@ def test_opencode_model_refresh_seeds_providers_and_ollama_limits(tmp_path):
     assert neurodesk["npm"] == "@ai-sdk/openai-compatible"
     assert neurodesk["options"]["apiKey"] == "{env:NEURODESK_API_KEY}"
     assert list(neurodesk["models"]) == ["model-alpha", "openai/gpt-4.1-mini"]
+
+
+def test_opencode_model_refresh_records_probed_ollama_context(tmp_path):
+    """The context window Ollama reports for a model becomes its limit."""
+    import http.server
+    import threading
+
+    class ShowHandler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", "0"))
+            request = json.loads(self.rfile.read(length) or b"{}")
+            body = json.dumps(
+                {"model_info": {"llama.context_length": 65536}}
+                if request.get("name") == "local-model:latest"
+                else {}
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), ShowHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+        port = server.server_address[1]
+        env["OLLAMA_HOST"] = f"http://127.0.0.1:{port}"
+        env["FAKE_OLLAMA_SHOW_PORT"] = str(port)
+
+        returncode, output = _run_opencode_with_model_profile(
+            test_wrapper, env, tmp_path, profile="ollama"
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert returncode == 0, output
+    cfg = json.loads(
+        (home_dir / ".config" / "opencode" / "opencode.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert cfg["model"] == "ollama/local-model:latest"
+    assert cfg["provider"]["ollama"]["options"]["baseURL"] == (
+        f"http://127.0.0.1:{port}/v1"
+    )
+    assert cfg["provider"]["ollama"]["models"]["local-model:latest"]["limit"] == {
+        "context": 65536,
+        "output": 8192,
+    }
 
 
 def test_opencode_corrupt_config_is_left_untouched_and_opencode_starts(tmp_path):

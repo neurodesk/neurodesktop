@@ -1444,6 +1444,7 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     --mount=type=bind,source=config/agents/codex,target=/tmp/agents/codex,ro \
     --mount=type=bind,source=config/agents/codex_exec,target=/tmp/agents/codex_exec,ro \
     --mount=type=bind,source=config/agents/opencode_prune_sessions.py,target=/tmp/agents/opencode_prune_sessions.py,ro \
+    --mount=type=bind,source=config/agents/opencode_update_config.py,target=/tmp/agents/opencode_update_config.py,ro \
     --mount=type=bind,source=config/agents/patch_nbi.py,target=/tmp/agents/patch_nbi.py,ro \
     --mount=type=bind,source=scripts/t3_neurodesk_setup.py,target=/tmp/t3_neurodesk_setup.py,ro \
     install -m 0755 -o root -g users /tmp/restore_home_defaults.sh /opt/neurodesktop/restore_home_defaults.sh \
@@ -1452,6 +1453,8 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
     && install -m 0755 -o root -g root /tmp/agents/claude /usr/local/sbin/claude \
     && install -m 0755 -o root -g root /tmp/agents/claude_exec /opt/neurodesktop/claude-exec \
     && install -m 0755 -o root -g root /tmp/agents/opencode /usr/local/sbin/opencode \
+    # Model refresh the OpenCode wrapper runs as the notebook user.
+    && install -m 0755 -o root -g users /tmp/agents/opencode_update_config.py /opt/neurodesktop/opencode_update_config.py \
     && install -m 0644 -o root -g users /tmp/agents/agent_bash_env.sh /opt/neurodesktop/agent_bash_env.sh \
     && install -m 0644 -o root -g users /tmp/agents/agent_shell_setup.sh /opt/neurodesktop/agent_shell_setup.sh \
     && install -m 0644 -o root -g users /tmp/agents/agent_profile.sh /etc/profile.d/zz-neurodesk-agent.sh \
