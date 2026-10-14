@@ -117,7 +117,7 @@ def test_providers_absent_everywhere_use_builtin_definitions():
         base_urls={
             "jetstream": "https://js.example/v1",
             "ollama": "http://ollama.example:11434/v1",
-            "neurodesk": "https://nd.example/openai",
+            "neurodesk": "https://neurodesk.example/openai",
         },
     )
 
@@ -140,7 +140,7 @@ def test_providers_absent_everywhere_use_builtin_definitions():
             "npm": "@ai-sdk/openai-compatible",
             "name": "Neurodesk LLMs",
             "options": {
-                "baseURL": "https://nd.example/openai",
+                "baseURL": "https://neurodesk.example/openai",
                 "apiKey": "{env:NEURODESK_API_KEY}",
             },
             "models": {"m": {"name": "m"}},
