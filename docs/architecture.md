@@ -124,6 +124,9 @@ itself.
   external cluster launchers such as `connectSherlock.sh`
 - [`extensions/`](../extensions/): in-repo JupyterLab extensions
   (`neurodesk-launcher`, `astra-viewer`)
+- [`tools/javascript-lint/`](../tools/javascript-lint/): the locked ESLint
+  toolchain and runtime map for owned JavaScript; see
+  [code quality checks](testing.md#code-quality-checks)
 - [`tests/`](../tests/): the two-tier test suite (see [Testing](testing.md));
   [`tests/fixtures/astra-bet/`](../tests/fixtures/astra-bet/) is the canonical
   worked ASTRA spec installed into the image as an example

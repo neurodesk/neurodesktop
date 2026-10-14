@@ -6,6 +6,7 @@ import { join } from 'node:path';
 const require = createRequire(join(process.env.NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES, 'package.json'));
 const { JSDOM } = require('jsdom');
 const dom = new JSDOM('<!doctype html><body></body>');
+/* global document -- installed from jsdom for the renderer */
 globalThis.document = dom.window.document;
 const { render } = await import(`data:text/javascript;base64,${Buffer.from(readFileSync(process.argv[2])).toString('base64')}`);
 

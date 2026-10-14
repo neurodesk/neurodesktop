@@ -19,6 +19,9 @@ const dom = new JSDOM(
 dom.window.addEventListener("error", (event) =>
   browserErrors.push(event.error),
 );
+// The loops below install these jsdom globals for the module under test.
+/* global window, document, Element, HTMLElement, Node, MouseEvent,
+   requestAnimationFrame, cancelAnimationFrame */
 for (const key of [
   "window",
   "document",
