@@ -4,7 +4,7 @@ description: Claude Code and Codex installation, the OpenCode terminal wrapper,
   and OpenCode session pruning
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-21"
+last-reviewed: "2026-10-14"
 ---
 
 # Coding agents
@@ -120,6 +120,21 @@ Intelligence via [nbi_setup.sh](../../config/agents/nbi_setup.sh) before
 exec-ing the real binary as a TUI. Its Lightcone reproduction skills and the
 native adapter for their ASTRA hooks are described in
 [ASTRA integration](astra.md#lightcone-agent-skills).
+
+The `opencode.json` rewrite is a separate module,
+[`config/agents/opencode_update_config.py`](../../config/agents/opencode_update_config.py),
+installed as `/opt/neurodesktop/opencode_update_config.py`. The wrapper runs it
+with `python3` from the notebook user's `PATH`. It passes the user config path,
+the image default config, the selected model, and each detected model and
+endpoint as `--option=value` arguments. The helper manages only the `jetstream`,
+`ollama`, and `neurodesk` providers. It removes models a provider no longer
+lists and caps each Ollama output limit at the model's context window. It keeps
+other providers, MCP servers, user instructions, per-model settings, and extra
+provider options, and drops only the legacy `/opt/AGENTS.md` instruction. The
+helper replaces the file atomically and keeps its mode. If the config is
+missing, corrupt, or not a JSON object, the helper leaves the file unchanged,
+writes one line to stderr, and exits with status 1. The wrapper then continues
+to launch OpenCode. The helper writes nothing to stdout.
 
 Session sharing is disabled by default in
 [`config/agents/opencode_config.json`](../../config/agents/opencode_config.json)
