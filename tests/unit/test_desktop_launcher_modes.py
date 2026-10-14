@@ -1,5 +1,7 @@
 import os
 import subprocess
+
+import pytest
 from types import SimpleNamespace
 from xml.etree import ElementTree
 
@@ -121,18 +123,21 @@ def _execute_jupyter_config(config, tmp_path, monkeypatch, *, apptainer=False, e
     return c.ServerProxy.servers
 
 
-def test_jupyter_launcher_exposes_separate_desktop_backends():
+@pytest.mark.parametrize("runtime", ["container", "glass"])
+def test_jupyter_launcher_exposes_separate_desktop_backends(tmp_path, monkeypatch, runtime):
     config = _read_first(
         "/etc/jupyter/jupyter_notebook_config.py",
         "/opt/neurodesktop/jupyter_notebook_config.py.template",
         "config/jupyter/jupyter_notebook_config.py.template",
     )
-    compile(config, "jupyter_notebook_config.py.template", "exec")
-
-    assert "'neurodesktop-rdp': _neurodesktop_server('rdp', 'Neurodesktop RDP', 'neurodesktop-rdp', launcher_enabled=_rdp_launcher_enabled())" in config
-    assert "'neurodesktop-vnc': _neurodesktop_server('vnc', 'Neurodesktop VNC', 'neurodesktop-vnc')" in config
-    assert 'NEURODESKTOP_DESKTOP_BACKEND="{backend}"' in config
-    assert "launcher_enabled=False" in config
+    monkeypatch.setenv("NEURODESKTOP_RUNTIME", runtime)
+    servers = _execute_jupyter_config(config, tmp_path, monkeypatch, apptainer=False, euid=1000)
+    for backend in ("rdp", "vnc"):
+        server = servers[f"neurodesktop-{backend}"]
+        assert server["launcher_entry"]["enabled"] is (runtime == "container")
+        assert server["launcher_entry"]["path_info"] == f"neurodesktop-{backend}"
+        assert f'NEURODESKTOP_DESKTOP_BACKEND="{backend}"' in " ".join(server["command"])
+    assert servers["neurodesktop"]["launcher_entry"]["enabled"] is False
 
 
 def test_vscode_uses_private_socket_in_shared_network_namespace(tmp_path, monkeypatch):

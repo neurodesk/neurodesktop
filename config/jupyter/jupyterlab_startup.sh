@@ -29,7 +29,7 @@ source /opt/neurodesktop/restore_home_defaults.sh
 # /neurodesktop proxy is derived from ${HOME}/.neurodesk/secrets files written
 # by this script. Skipping this step would cause Jupyter to send stale
 # jovyan/password credentials and result in a 401 from the rotated Guacamole.
-if [ -x /opt/neurodesktop/init_secrets.sh ]; then
+if [ "${NEURODESKTOP_RUNTIME:-container}" != glass ] && [ -x /opt/neurodesktop/init_secrets.sh ]; then
     # shellcheck disable=SC1091
     source /opt/neurodesktop/init_secrets.sh || \
         echo "[WARN] init_secrets.sh failed; Guacamole web auth may fall back to the static default."
@@ -278,6 +278,7 @@ ensure_codeserver_extensions &
 # Conda shell hooks are already provided by the base image/defaults.
 # Avoid mutating shell config on each startup.
 
+if [ "${NEURODESKTOP_RUNTIME:-container}" != glass ]; then
 # Setup VNC directory and ensure files exist (should be restored from defaults)
 echo "[INFO] Setting up VNC..."
 mkdir -p "${HOME}/.vnc"
@@ -305,5 +306,7 @@ chmod +x "${HOME}/.vnc/xstartup"
 
 # echo "[INFO] VNC setup complete. Contents of ${HOME}/.vnc:"
 # ls -la "${HOME}/.vnc/"
+
+fi
 
 touch "$STARTUP_DONE_FILE"

@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/bin/python3 -I /opt/neurodesktop/glass/jupyter.py open

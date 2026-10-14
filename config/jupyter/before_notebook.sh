@@ -741,6 +741,7 @@ if [ "$EUID" -eq 0 ]; then
         NB_UID="${NB_UID}" \
         NB_GID="${NB_GID}" \
         HOSTNAME="${HOSTNAME}" \
+        NEURODESKTOP_RUNTIME="${NEURODESKTOP_RUNTIME:-container}" \
         /opt/neurodesktop/jupyterlab_startup.sh
 else
     /opt/neurodesktop/jupyterlab_startup.sh

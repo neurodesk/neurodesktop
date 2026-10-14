@@ -1,0 +1,5 @@
+[Unit]
+Description=Opt-in Neurodesktop Glass desktop
+Requires=neurodesktop-glass.service
+After=neurodesktop-glass.service
+AllowIsolate=yes

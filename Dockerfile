@@ -116,11 +116,19 @@ COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
 # Install build dependencies + nodejs for npm operations
 RUN apt-install-retry \
     ${BUILD_ONLY_APT_PACKAGES} \
+    libx11-dev \
     wget \
     curl \
     && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-install-retry nodejs yarn \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Build the small Glass vsock/X11 helpers for the target architecture.
+COPY config/glass/glass-clipboard.c config/glass/glass-resize.c /tmp/glass/
+RUN mkdir -p /opt/glass/bin \
+    && cc -O2 -Wall -Wextra -o /opt/glass/bin/glass-clipboard /tmp/glass/glass-clipboard.c -lX11 \
+    && cc -O2 -Wall -Wextra -o /opt/glass/bin/glass-resize /tmp/glass/glass-resize.c \
+    && rm -rf /tmp/glass
 
 # Build Guacamole server
 RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
@@ -363,17 +371,16 @@ RUN retry curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 --connect-time
 # # Software (as root user)
 # #========================================#
 
-# Workaround for CVMFS to break systemctl by replacing it with a dummy script
-RUN mv /usr/bin/systemctl /usr/bin/systemctl.orig \
-    && echo '#!/bin/bash' > /usr/bin/systemctl \
-    && echo 'echo "systemctl is disabled in this container"' >> /usr/bin/systemctl \
-    && chmod +x /usr/bin/systemctl
-
 # Install CVMFS
 ARG CVMFS_VERSION
 ARG CVMFS_RELEASE_VERSION
 ARG CVMFS_RELEASE_SHA256
-RUN retry wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb -P /tmp \
+# CVMFS maintainer scripts must not manage services during image construction.
+# Restore systemctl in this same layer; Glass needs the real binary at runtime.
+RUN mv /usr/bin/systemctl /usr/bin/systemctl.build-original \
+    && printf '#!/bin/sh\nexit 0\n' > /usr/bin/systemctl \
+    && chmod 0755 /usr/bin/systemctl \
+    && retry wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb -P /tmp \
     && if ! echo "${CVMFS_RELEASE_SHA256}  /tmp/cvmfs-release-latest_all.deb" | sha256sum -c -; then \
         echo "CVMFS release bootstrap changed; update CVMFS_RELEASE_VERSION and CVMFS_RELEASE_SHA256 together." >&2; \
         exit 1; \
@@ -387,6 +394,7 @@ RUN retry wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_al
     cvmfs-fuse3="${CVMFS_VERSION}" \
     cvmfs-libs="${CVMFS_VERSION}" \
     uuid-dev \
+    && mv -f /usr/bin/systemctl.build-original /usr/bin/systemctl \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Tools and Libs
@@ -1613,13 +1621,24 @@ RUN --mount=type=bind,source=config/jupyter/patch_jupyter_ai_acp_client.py,targe
     install -m 0755 -o root -g users /tmp/patch_jupyter_ai_acp_client.py /opt/neurodesktop/patch_jupyter_ai_acp_client.py \
     && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_ai_acp_client.py
 
+# Glass is an opt-in runtime of this same image, not a separate scientific stack.
+RUN apt-install-retry systemd systemd-sysv xauth xserver-xorg-core \
+    xserver-xorg-input-evdev x11-xserver-utils libx11-6 fonts-dejavu-core \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /opt/glass/bin/ /usr/local/bin/
+COPY --chmod=0644 config/glass/ /opt/neurodesktop/glass/
+RUN install -m 0644 /opt/neurodesktop/glass/neurodesktop-glass.service /etc/systemd/system/ \
+    && install -m 0644 /opt/neurodesktop/glass/neurodesktop-jupyter.service /etc/systemd/system/ \
+    && install -m 0644 /opt/neurodesktop/glass/glass.target /etc/systemd/system/ \
+    && install -m 0755 /opt/neurodesktop/glass/neurodesktop-start-jupyter /usr/local/bin/
+
 # Start the container as root so docker-stacks runs before-notebook hooks with
 # the privileges needed to bootstrap local Slurm/CVMFS, then drops to NB_USER.
 USER root
 
 WORKDIR "/home/${NB_USER}"
 
-HEALTHCHECK --interval=1m --timeout=1s --start-period=3s --retries=3 CMD /etc/jupyter/docker_healthcheck.py || exit 1
+HEALTHCHECK --interval=1m --timeout=1s --start-period=3s --retries=3 CMD /usr/bin/python3 -I /opt/neurodesktop/glass/healthcheck.py || exit 1
 
 # Image metadata
 ARG BASE_IMAGE_TAG

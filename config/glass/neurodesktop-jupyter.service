@@ -1,0 +1,24 @@
+[Unit]
+Description=Authenticated on-demand Neurodesktop JupyterLab
+After=neurodesktop-glass.service
+Requires=neurodesktop-glass.service
+
+[Service]
+Type=simple
+User=jovyan
+Group=users
+WorkingDirectory=/home/jovyan
+Environment=NEURODESKTOP_RUNTIME=glass
+Environment=HOME=/home/jovyan
+Environment=USER=jovyan
+Environment=NB_USER=jovyan
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/run/user/1000/neurodesktop/Xauthority
+Environment=NEURODESKTOP_JUPYTER_PORT=8888
+Environment=NEURODESKTOP_CVMFS_STARTUP_MODE=external
+Environment=CVMFS_DISABLE=true
+Environment=PATH=/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/python3 -I /opt/neurodesktop/glass/jupyter.py run
+TimeoutStopSec=30
+KillMode=control-group

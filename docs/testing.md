@@ -53,7 +53,8 @@ pytest tests/unit          # from a checkout, no container needed
 pytest /opt/tests/         # inside the built image
 ```
 
-Running `tests/unit` needs Python 3.12, Node.js 24, `pytest`, `httpx`,
+Running `tests/unit` needs GCC and X11 development headers for the Glass helpers,
+Python 3.12, Node.js 24, `pytest`, `httpx`,
 `traitlets`, Git, curl, `jq`, and `ssh-keygen` (`openssh-client`); see
 `.github/workflows/unit-tests.yml`. The terminal-creation
 tests stub `curl` but use the real `jq` to parse responses.

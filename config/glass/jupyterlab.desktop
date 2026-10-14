@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=JupyterLab (host browser)
+Comment=Start authenticated JupyterLab in the CC guest
+Exec=/usr/local/bin/neurodesktop-start-jupyter
+Icon=/opt/neurodesk_brain_logo.svg
+Terminal=true
+Categories=Development;Science;
