@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 from types import SimpleNamespace
 from xml.etree import ElementTree
@@ -468,6 +469,32 @@ def test_every_guacamole_source_is_consumed_by_the_image_build():
     )
 
     assert unused == []
+
+
+def test_every_lxde_runtime_source_is_consumed_by_the_image_build():
+    """Checked-in runtime config must not be hidden by the bind mount."""
+    dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
+    lxde_dir = repo_path("config/lxde")
+    source_only = {"background.svg": "background.png"}
+    # Exact paths read by build commands; mount targets and comments do not
+    # consume a file.
+    consumed = {
+        match
+        for line in dockerfile.splitlines()
+        if not line.lstrip().startswith("#")
+        for match in re.findall(r"(?<!target=)/tmp/lxde/([^\s,;\\\"']+)", line)
+    }
+    sources = {
+        path.relative_to(lxde_dir).as_posix()
+        for path in lxde_dir.rglob("*")
+        if path.is_file()
+    }
+
+    for source, rendered in source_only.items():
+        assert source in sources
+        assert rendered in consumed
+
+    assert sorted(sources - consumed - source_only.keys()) == []
 
 
 def test_vncserver_uses_mesa_only_for_virtual_x_server_startup():
