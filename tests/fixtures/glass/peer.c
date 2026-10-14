@@ -38,9 +38,9 @@ int main(void) {
             else if (!strcmp(line, "release")) {
                 if (held.type) XPutBackEvent(d, &held);
                 mode = 0;
-            } else if (!strcmp(line, "paste") || !strcmp(line, "destroy") || !strcmp(line, "targets")) {
+            } else if (!strcmp(line, "paste") || !strcmp(line, "destroy") || !strcmp(line, "targets") || !strcmp(line, "string")) {
                 Window reader = XCreateSimpleWindow(d, DefaultRootWindow(d), 0, 0, 1, 1, 0, 0, 0);
-                XConvertSelection(d, clipboard, line[0] == 't' ? targets : utf8, property, reader, CurrentTime);
+                XConvertSelection(d, clipboard, line[0] == 't' ? targets : line[0] == 's' ? XA_STRING : utf8, property, reader, CurrentTime);
                 if (line[0] == 'd') XDestroyWindow(d, reader);
             }
             XSync(d, False);
@@ -80,6 +80,11 @@ int main(void) {
                         printf("%s%s", i ? "," : "", name);
                         XFree(name);
                     }
+                    puts("");
+                } else if (e.xselection.target == XA_STRING) {
+                    if (type != XA_STRING || format != 8 || rest != 0) return 3;
+                    printf("hex:");
+                    for (unsigned long i = 0; i < n; i++) printf("%02x", value[i]);
                     puts("");
                 } else printf("text:%.*s\n", (int)n, value ? (char *)value : "");
                 if (value) XFree(value);

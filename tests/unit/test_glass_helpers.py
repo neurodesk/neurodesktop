@@ -325,6 +325,24 @@ def test_oversized_selection_refuses_and_recovers(bridge):
     assert b.process.poll() is None
 
 
+@pytest.mark.parametrize(("text", "expected"), [
+    ("", "hex:"),
+    ("ASCII", "hex:4153434949"),
+    ("caf\u00e9 \u00ff", "hex:636166e920ff"),
+    ("\u20ac", "refused"),
+    ("\U0001f603", "refused"),
+])
+def test_string_selection_uses_latin1_and_preserves_utf8(bridge, text, expected):
+    b = bridge()
+    b.send(text.encode("utf-8"))
+    time.sleep(0.3)
+    b.command("string")
+    assert b.line() == expected
+    b.command("paste")
+    assert b.line() == "text:" + text
+    assert b.process.poll() is None
+
+
 def test_unrelated_x_error_keeps_default_handler(bridge, monkeypatch):
     monkeypatch.setenv("GLASS_TEST_UNRELATED_ERROR", "1")
     b = bridge()
