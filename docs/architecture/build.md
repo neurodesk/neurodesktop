@@ -230,6 +230,13 @@ cannot run on 'arm64'" bug on macOS. Other non-Apptainer sessions leave
 Matlab. Non-root Apptainer/HPC sessions use `--writable-tmpfs` because setuid
 Apptainer cannot use a directory overlay as an unprivileged user.
 
+Root startup adds missing CPU MHz information for Matlab by binding a prepared
+file onto `/proc/cpuinfo`. The successful bind source stays in the root-private
+`/run/neurodesktop/cpuinfo` directory for the mount's lifetime. Unlinking that
+source prevents nested Apptainer sessions from binding their own CPU information
+onto `/proc/cpuinfo`. Failed preparation removes its temporary file; repeated
+startup leaves an existing CPU MHz entry intact.
+
 When `/proc/driver/nvidia/version` shows that the proprietary NVIDIA driver is
 loaded, `environment_variables.sh` defaults `APPTAINER_NV` to `1`. Apptainer
 then binds the host's NVIDIA device files and userspace libraries into each

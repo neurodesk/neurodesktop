@@ -59,6 +59,7 @@ def test_cpuinfo_workaround_is_root_startup_and_best_effort(tmp_path, existing_m
     result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     if existing_mhz:
+        assert cpuinfo.read_text() == contents
         assert not runtime.exists()
         assert not mounted.exists()
     else:
@@ -68,6 +69,7 @@ def test_cpuinfo_workaround_is_root_startup_and_best_effort(tmp_path, existing_m
         sources = mount_sources.read_text().splitlines()
         assert len(sources) == 1
         prepared = runtime / os.path.basename(sources[0])
+        assert sources[0] == str(prepared)
         if mount_status:
             assert list(runtime.iterdir()) == []
             assert cpuinfo.read_text() == contents
