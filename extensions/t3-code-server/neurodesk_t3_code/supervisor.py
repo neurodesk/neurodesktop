@@ -162,29 +162,33 @@ class ProviderSeed:
     disabled_by_default: bool = False
     # Legacy ``providers.<driver>`` blobs that hold no user configuration.
     # T3 writes ``{"enabled": false}`` for its own default-off drivers.
-    inert_legacy: tuple[dict, ...] = ()
+    inert_legacy: tuple[Mapping[str, object], ...] = ()
     # Earlier images wrote this driver's default into ``providers.<driver>``.
     # Only such a driver can own an entry matching the config seeded below;
     # for every other driver an identical entry was authored by the user.
     promotes_image_default: bool = False
 
-    def config(self, provider_bin: Path) -> dict:
+    def config(self, provider_bin: Path) -> dict[str, str]:
         return {"binaryPath": str(provider_bin / self.driver)}
 
-    def instance(self, provider_bin: Path) -> dict:
-        instance = {"driver": self.driver}
+    def instance(self, provider_bin: Path) -> dict[str, object]:
+        instance: dict[str, object] = {"driver": self.driver}
         if self.disabled_by_default:
             instance["enabled"] = True
         instance["config"] = self.config(provider_bin)
         return instance
 
     def is_user_owned(
-        self, instances: dict, providers: dict, provider_bin: Path
+        self,
+        instances: Mapping[str, object],
+        providers: Mapping[str, object],
+        provider_bin: Path,
     ) -> bool:
         if self.driver in instances:
             return True
         if any(
-            instance.get("driver") == self.driver for instance in instances.values()
+            isinstance(instance, dict) and instance.get("driver") == self.driver
+            for instance in instances.values()
         ):
             return True
         if self.driver not in providers:
@@ -208,6 +212,7 @@ def prepare_startup_settings(policy: Policy) -> None:
     directory = policy.base_dir / "userdata"
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     target = directory / "settings.json"
+    settings: object
     try:
         settings = json.loads(target.read_text())
     except FileNotFoundError:
@@ -239,7 +244,7 @@ def prepare_startup_settings(policy: Policy) -> None:
         _write_settings(directory, settings)
 
 
-def _write_settings(directory: Path, settings: dict) -> None:
+def _write_settings(directory: Path, settings: Mapping[str, object]) -> None:
     target = directory / "settings.json"
     descriptor, name = tempfile.mkstemp(prefix=".settings-", dir=directory)
     try:
@@ -321,9 +326,9 @@ class T3Supervisor:
         self._task: asyncio.Task[None] | None = None
         self._ready = asyncio.Event()
         self.connect_tunnel_limit: int | None = None
-        self._output_reader: asyncio.Task | None = None
+        self._output_reader: asyncio.Task[None] | None = None
 
-    async def _read_output(self, stream) -> None:
+    async def _read_output(self, stream: asyncio.StreamReader) -> None:
         # Drain continuously so a noisy child cannot block. Raw output is never
         # persisted or logged; retain only a bounded overlap for split messages.
         overlap = b""
@@ -399,6 +404,8 @@ class T3Supervisor:
                         self.state = ServiceState.BACKING_OFF
                         await asyncio.sleep(min(2 ** (failures - 1), 8))
                     continue
+                # stdout=PIPE above guarantees a reader.
+                assert self._process.stdout is not None
                 self._output_reader = asyncio.create_task(
                     self._read_output(self._process.stdout)
                 )

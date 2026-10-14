@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-12"
+last-reviewed: "2026-10-14"
 ---
 
 # Testing
@@ -142,7 +142,23 @@ Compilation runs without the Python-side JupyterLab bundling step.
 Formatting and Python typing start with explicit, small scopes. The formatter
 scope is declared in `scripts/check_quality.py`; strict Python typing is declared
 in `mypy.ini`. Expand these scopes in reviewed changes rather than reformatting
-unrelated files to fix a correctness finding. Python embedded in shell heredocs
+unrelated files to fix a correctness finding.
+
+The strict scope covers the provider credential policy and the T3 package's
+process side: the supervisor, its environment naming, the Jupyter lifecycle
+adapter and the extension entry point. The same modules are in the Ruff
+formatter scope. mypy skips unlisted modules, so a checked module's callers
+are listed with it. The lifecycle adapter's `ExtensionApp` base is typed by
+following only `jupyter_server.extension`, `jupyter_core` and `traitlets`,
+pinned in `requirements-quality.txt`. Remaining limitations:
+
+- The T3 `web` and `connect` adapters are outside the scope, so the lifecycle
+  adapter sees `ConnectManager` and the handler classes as untyped, and those
+  adapters' calls into the supervisor are not checked. They need typed
+  `tornado` and `jupyter_server.base` APIs, and `jupyter-server-proxy` has
+  no type information.
+- `ExtensionApp.log` is an untyped traitlets trait upstream, so the logger
+  passed to the supervisor is not checked. Python embedded in shell heredocs
 is not covered by Ruff and continues to rely on execution tests. Keep exceptions
 local and explain external runtime dependencies such as Jupyter-injected globals.
 

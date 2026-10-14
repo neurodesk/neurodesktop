@@ -1,2 +1,6 @@
 ruff==0.14.14
 mypy==1.19.1
+# Typed base classes for the strict T3 lifecycle adapter (see mypy.ini).
+jupyter-server==2.21.1
+jupyter-core==5.9.1
+traitlets==5.16.1
