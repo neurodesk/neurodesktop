@@ -19,6 +19,7 @@ SHELL_FORMAT_SCOPE = (
     "scripts/check_quality.sh",
     "scripts/install_quality_tools.sh",
     "config/jupyter/guard_ollama_host.sh",
+    "config/jupyter/detect_resource_limits.sh",
 )
 GATES = ("python", "shell", "javascript", "frontend", "format", "workflow", "docker")
 SHELL_SHEBANG = re.compile(rb"^#![^\n]*\b(?:bash|sh|dash|ksh)\b")
