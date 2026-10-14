@@ -59,7 +59,7 @@ def _is_apptainer_runtime():
 def _rdp_launcher_enabled():
   # In unprivileged Apptainer/Singularity sessions, guacamole.sh cannot start
   # or reconfigure xrdp because service management requires root/sudo.
-  return not (_is_apptainer_runtime() and os.geteuid() != 0)
+  return os.environ.get('NEURODESKTOP_RUNTIME', 'container') != 'glass' and not (_is_apptainer_runtime() and os.geteuid() != 0)
 
 
 def _neurodesktop_server(backend, title, path_info, launcher_enabled=True):
@@ -88,7 +88,7 @@ def _neurodesktop_server(backend, title, path_info, launcher_enabled=True):
 
 c.ServerProxy.servers = {
   'neurodesktop-rdp': _neurodesktop_server('rdp', 'Neurodesktop RDP', 'neurodesktop-rdp', launcher_enabled=_rdp_launcher_enabled()),
-  'neurodesktop-vnc': _neurodesktop_server('vnc', 'Neurodesktop VNC', 'neurodesktop-vnc'),
+  'neurodesktop-vnc': _neurodesktop_server('vnc', 'Neurodesktop VNC', 'neurodesktop-vnc', launcher_enabled=os.environ.get('NEURODESKTOP_RUNTIME', 'container') != 'glass'),
   # Preserve the historical /neurodesktop route for old links without adding a
   # third launcher tile. New launcher entries choose the backend explicitly.
   'neurodesktop': _neurodesktop_server('rdp', 'Neurodesktop', 'neurodesktop', launcher_enabled=False),

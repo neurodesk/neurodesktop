@@ -53,7 +53,9 @@ pytest tests/unit          # from a checkout, no container needed
 pytest /opt/tests/         # inside the built image
 ```
 
-Running `tests/unit` needs Python 3.12, Node.js 24, `pytest`, `httpx`,
+Running `tests/unit` needs GCC, X11 development headers, Xvfb, and `xrandr`
+for the Glass helpers,
+Python 3.12, Node.js 24, `pytest`, `httpx`,
 `traitlets`, `requests`, `ipykernel`, `websocket-client`, `nibabel`, `numpy`,
 Git, curl, `jq`, and `ssh-keygen` (`openssh-client`); see
 `.github/workflows/unit-tests.yml`. The terminal-creation
@@ -438,10 +440,14 @@ launches at the mercy of whichever mirror it picked; see
 report the active CVMFS host, mount statistics, and recent client syslog
 entries even after a failed test.
 The steps use `exec` so the command retains the workflow shell's cancellation
-boundary. On its disposable Ubuntu 24.04 runner, PR scientific acceptance
-temporarily disables AppArmor's restriction on unprivileged user namespaces,
-as required for nested Apptainer. An `always()` step restores the original host
-policy after acceptance, including on failure or cancellation.
+boundary. On both disposable Ubuntu 24.04 runners, PR image validation captures
+and temporarily disables AppArmor's restriction on unprivileged user namespaces
+before the regular runtime suite, including its Glass scientific isolation probe.
+This follows [Apptainer's Ubuntu namespace prerequisite](https://apptainer.org/docs/admin/main/user_namespace.html#user-namespace-requirements).
+Setup fails if the policy cannot be read or changed. An `always()` step restores
+the captured policy on both architectures after validation, including on failure
+or cancellation. The HPC profile retains Docker's default security settings and
+skips the Glass-specific nested namespace probe.
 
 These jobs also restore the host CVMFS client cache from earlier runs through
 [`cvmfs_ci_cache.sh`](../.github/scripts/cvmfs_ci_cache.sh). A cold cache made
@@ -1088,6 +1094,37 @@ assigned-device isolation on a multi-GPU worker. See the
 application, transport, performance, and platform coverage.
 
 ## Startup performance regressions
+
+### Glass runtime regressions
+
+Run the Glass helper and startup checks on a checkout:
+
+```bash
+pytest tests/unit/test_glass_helpers.py tests/unit/test_glass_startup.py tests/unit/test_glass_runtime.py tests/unit/test_glass_packaging.py tests/unit/test_startup_security.py
+```
+
+The helper tests execute the compiled binaries through test-owned transport
+adapters. An independent X client under Xvfb checks host and guest clipboard
+transfer, repeated copies from one window, empty text, and closed requesters.
+Resize tests check framed dimensions and the real `xrandr` execution boundary.
+They do not establish native CC frame presentation or display resizing.
+Startup tests execute the access-URL watcher decision and scientific environment
+settings. Installed-image checks verify directory traversal, root ownership,
+and isolation between Apptainer writable sessions. The Glass scientific isolation
+probe runs as the notebook user in the privileged regular image profile and on
+native hosts. It exercises the image-owned writable-tmpfs and read-only CPU-info
+bind options in a user namespace, with temporary home and sandbox directories.
+Like Glass tool invocations, it shares the caller's PID namespace. This preserves
+compatibility with the outer `/proc/cpuinfo` bind installed during ARM startup;
+an added PID namespace would require a fresh proc mount that the kernel rejects
+when the parent proc filesystem has that overmount. It skips nested HPC
+environments identified by the same Apptainer and Singularity markers as the installed security tests. The unprivileged Docker
+HPC profile blocks the user namespaces required by this Glass-specific probe;
+its runtime security settings stay unchanged. Namespace or Apptainer failures
+in the regular and native profiles still fail the probe. Native CC acceptance
+remains in [the Glass deployment contract](architecture/glass.md#acceptance).
+
+### Shared startup regressions
 
 The menu-update and startup-ownership checks run with:
 

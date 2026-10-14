@@ -1,0 +1,19 @@
+[Unit]
+Description=Neurodesktop native Glass desktop (opt-in)
+After=ccx3-stage2.service dbus.service
+Wants=dbus.service
+
+[Service]
+Type=simple
+Environment=NEURODESKTOP_RUNTIME=glass
+Environment=NEURODESKTOP_CVMFS_STARTUP_MODE=external
+Environment=CVMFS_DISABLE=true
+Environment=PATH=/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/python3 -I /opt/neurodesktop/glass/runtime.py
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=30
+KillMode=control-group
+
+[Install]
+WantedBy=glass.target

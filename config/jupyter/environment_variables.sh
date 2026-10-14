@@ -213,9 +213,20 @@ esac
 
 # This is needed to make containers writable as a workaround for macos with Apple Silicon.
 # Directory overlays are only used for macOS root-managed Docker sessions. On HPC
-# Apptainer runs as the calling user, so use a writable tmpfs session instead.
+# and Glass, Apptainer runs as the calling user with a private tmpfs per invocation.
 if is_apptainer_runtime && [ "${EUID}" -ne 0 ]; then
         export neurodesk_singularity_opts=" --writable-tmpfs "
+elif [ "${NEURODESKTOP_RUNTIME:-container}" = glass ] && [ "${EUID}" -ne 0 ]; then
+        export neurodesk_singularity_opts=" --writable-tmpfs "
+        glass_cpuinfo="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/neurodesktop/cpuinfo"
+        if [ -r "$glass_cpuinfo" ]; then
+                export neurodesk_singularity_opts="${neurodesk_singularity_opts} --bind ${glass_cpuinfo}:/proc/cpuinfo:ro "
+        fi
+        export MCR_CACHE_ROOT="${HOME}/.cache/neurodesktop-mcr"
+        install -d -m 0700 "$MCR_CACHE_ROOT"
+        export APPTAINERENV_MCR_CACHE_ROOT="$MCR_CACHE_ROOT"
+        export SINGULARITYENV_MCR_CACHE_ROOT="$MCR_CACHE_ROOT"
+        unset glass_cpuinfo
 elif is_macos_host_runtime; then
         export neurodesk_singularity_opts=" --overlay /tmp/apptainer_overlay "
 else

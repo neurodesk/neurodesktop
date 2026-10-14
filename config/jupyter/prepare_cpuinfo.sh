@@ -25,7 +25,6 @@ prepare_cpuinfo() {
         return 1
     fi
     if /usr/bin/mount --bind "$prepared" "$cpuinfo"; then
-        rm -f "$prepared"
         echo "[INFO] Added CPU MHz information for Matlab."
     else
         rm -f "$prepared"

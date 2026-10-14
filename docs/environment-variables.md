@@ -112,6 +112,11 @@ for RDP initialization and VS Code isolation.
 
 ## Startup
 
+- `NEURODESKTOP_RUNTIME`: `container` by default; `glass` opts into the CC VM
+  desktop initialization and private scientific-tool overlay. It does not boot
+  a VM. See [Glass runtime](architecture/glass.md) for systemd deployment,
+  CVMFS, authenticated on-demand Jupyter and native acceptance requirements.
+
 - `NB_UID`, `NB_GID`: user and group IDs for permission matching
 - `NEURODESKTOP_CVMFS_STARTUP_MODE`, `NEURODESKTOP_SLURM_STARTUP_MODE`: set
   either service to `eager` for disposable runtime-acceptance containers that

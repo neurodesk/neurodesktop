@@ -19,6 +19,8 @@ STATE = Path("/var/lib/neurodesktop/rdp")
 RUNTIME = Path("/run/neurodesktop/rdp")
 XRDP_CONFIG = Path("/etc/xrdp/xrdp.ini")
 ROOT_STORAGE = Path("/neurodesktop-storage")
+GLASS_STORAGE = Path("/vmsh-neurodesktop-storage")
+SSHD_RUNTIME = Path("/run/sshd")
 NEUROCOMMAND = Path("/neurocommand")
 ROOT_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "HOME": "/root", "LC_ALL": "C"}
 
@@ -108,11 +110,15 @@ def configure_rdp(account, port):
     write_private(runtime / "port", port, account.pw_uid, account.pw_gid)
 
 
-def prepare_storage(home):
+def prepare_storage(home, shared=None):
     """Preserve home-backed storage without granting notebook users root access."""
-    if ROOT_STORAGE.is_symlink() or ROOT_STORAGE.is_mount():
+    if ROOT_STORAGE.is_mount():
         return
-    target = Path(home) / "neurodesktop-storage"
+    target = shared if shared is not None else Path(home) / "neurodesktop-storage"
+    if ROOT_STORAGE.is_symlink():
+        if shared is not None and ROOT_STORAGE.resolve() != shared.resolve():
+            raise ValueError("Existing storage link conflicts with CC share; preserve/migrate it explicitly")
+        return
     try:
         if ROOT_STORAGE.is_dir():
             entries = list(ROOT_STORAGE.iterdir())
@@ -121,7 +127,9 @@ def prepare_storage(home):
                 legacy.unlink()
             ROOT_STORAGE.rmdir()  # Refuse to replace a directory containing user data.
         ROOT_STORAGE.symlink_to(target, target_is_directory=True)
-    except OSError:
+    except OSError as error:
+        if shared is not None:
+            raise ValueError("Existing storage data conflicts with the CC share; migrate it explicitly") from error
         print("[WARN] Existing root storage was preserved; it could not be linked to the home directory.", file=sys.stderr)
 
 
@@ -160,11 +168,24 @@ def main():
     if os.geteuid() != 0:
         raise PermissionError("Security initialization requires root")
     account = pwd.getpwnam(os.environ.get("NB_USER", "jovyan"))
+    mode = os.environ.get("NEURODESKTOP_RUNTIME", "container")
+    if mode not in {"container", "glass"}:
+        raise ValueError("NEURODESKTOP_RUNTIME must be container or glass")
     configure_sudo(account, os.environ.get("GRANT_SUDO", "packages"))
-    prepare_storage(account.pw_dir)
+    shared = GLASS_STORAGE if mode == "glass" and GLASS_STORAGE.is_mount() else None
+    prepare_storage(account.pw_dir, shared)
+    SSHD_RUNTIME.mkdir(mode=0o755, exist_ok=True)
+    # Only this exact static service can be activated from the Glass desktop.
+    policy = SUDOERS / "neurodesktop-glass-jupyter"
+    policy.unlink(missing_ok=True)
+    if mode == "glass":
+        write_private(policy, f"{account.pw_name} ALL=(root) NOPASSWD: NOSETENV: /usr/bin/systemctl start neurodesktop-jupyter.service\n")
+        policy.chmod(0o440)
+        subprocess.run(["/usr/sbin/visudo", "-cf", str(policy)], env=ROOT_ENV, check=True,
+                       stdout=subprocess.DEVNULL)
+    else:
+        configure_rdp(account, os.environ.get("NEURODESKTOP_RDP_PORT", "3389"))
     prepare_neurocommand(account)
-    Path("/run/sshd").mkdir(mode=0o755, exist_ok=True)
-    configure_rdp(account, os.environ.get("NEURODESKTOP_RDP_PORT", "3389"))
 
 
 if __name__ == "__main__":

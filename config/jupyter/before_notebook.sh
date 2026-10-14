@@ -369,7 +369,7 @@ fi
 
 # Reprint the Jupyter access URL once the server actually answers: the
 # ServerApp's own token banner scrolls away behind extension startup logs.
-if [ -x /opt/neurodesktop/print_access_url.sh ]; then
+if [ "${NEURODESKTOP_RUNTIME:-container}" != glass ] && [ -x /opt/neurodesktop/print_access_url.sh ]; then
     /opt/neurodesktop/print_access_url.sh &
 fi
 
@@ -423,6 +423,7 @@ if [ "$EUID" -eq 0 ]; then
         NB_UID="${NB_UID}" \
         NB_GID="${NB_GID}" \
         HOSTNAME="${HOSTNAME}" \
+        NEURODESKTOP_RUNTIME="${NEURODESKTOP_RUNTIME:-container}" \
         /opt/neurodesktop/jupyterlab_startup.sh
 else
     /opt/neurodesktop/jupyterlab_startup.sh

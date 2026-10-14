@@ -45,24 +45,42 @@ def test_cpuinfo_workaround_is_root_startup_and_best_effort(tmp_path, existing_m
     cpuinfo.write_text(contents)
     runtime = tmp_path / "runtime"
     mounted = tmp_path / "mounted"
+    mount_sources = tmp_path / "mount-sources"
     mount = tmp_path / "mount"
     mount.write_text(f'#!/bin/bash\ntest "$1" = --bind || exit 99\n'
-                     f'cp "$2" "{mounted}"\nexit {mount_status}\n')
+                     f'printf "%s\\n" "$2" >> "{mount_sources}"\n'
+                     f'cp "$2" "{mounted}"\n'
+                     f'if [ {mount_status} -eq 0 ]; then cp "$2" "$3"; fi\n'
+                     f'exit {mount_status}\n')
     mount.chmod(0o755)
     script = script.replace("cpuinfo=/proc/cpuinfo", f'cpuinfo="{cpuinfo}"')
     script = script.replace("runtime=/run/neurodesktop/cpuinfo", f'runtime="{runtime}"')
     script = script.replace("/usr/bin/mount", str(mount))
     result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-    assert cpuinfo.read_text() == contents
     if existing_mhz:
+        assert cpuinfo.read_text() == contents
         assert not runtime.exists()
         assert not mounted.exists()
     else:
         assert "cpu MHz         : 2245.778" in mounted.read_text()
         assert "processor : 0" in mounted.read_text()
         assert runtime.stat().st_mode & 0o777 == 0o700
-        assert list(runtime.iterdir()) == []
+        sources = mount_sources.read_text().splitlines()
+        assert len(sources) == 1
+        prepared = runtime / os.path.basename(sources[0])
+        assert sources[0] == str(prepared)
+        if mount_status:
+            assert list(runtime.iterdir()) == []
+            assert cpuinfo.read_text() == contents
+        else:
+            assert list(runtime.iterdir()) == [prepared]
+            assert prepared.stat().st_mode & 0o777 == 0o644
+            assert prepared.read_text() == mounted.read_text() == cpuinfo.read_text()
+            repeated = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+            assert repeated.returncode == 0, repeated.stderr
+            assert mount_sources.read_text().splitlines() == sources
+            assert list(runtime.iterdir()) == [prepared]
         assert ("[WARN]" in result.stderr) == bool(mount_status)
     startup = BEFORE_NOTEBOOK.read_text()
     assert 'if [ "$EUID" -eq 0 ]; then\n    /usr/bin/python3 -I /opt/neurodesktop/startup_security.py || exit 1\n    /bin/bash /opt/neurodesktop/prepare_cpuinfo.sh' in startup
