@@ -19,172 +19,6 @@ is_apptainer_runtime() {
     [ -d "/.singularity.d" ]
 }
 
-slurm_conf_is_local_neurodesktop() {
-    local conf_file="$1"
-    [ -r "${conf_file}" ] && grep -Eq '^ClusterName=neurodesktop([[:space:]]|$)' "${conf_file}" 2>/dev/null
-}
-
-resolve_host_slurm_conf() {
-    local conf_file
-
-    if [ -n "${SLURM_CONF:-}" ] && [ -r "${SLURM_CONF}" ]; then
-        if ! slurm_conf_is_local_neurodesktop "${SLURM_CONF}"; then
-            echo "${SLURM_CONF}"
-            return 0
-        fi
-    fi
-
-    for conf_file in \
-        /etc/slurm/slurm.conf \
-        /etc/slurm-llnl/slurm.conf \
-        /run/host/etc/slurm/slurm.conf \
-        /host/etc/slurm/slurm.conf
-    do
-        if [ ! -r "${conf_file}" ]; then
-            continue
-        fi
-        if slurm_conf_is_local_neurodesktop "${conf_file}"; then
-            continue
-        fi
-        echo "${conf_file}"
-        return 0
-    done
-
-    return 1
-}
-
-read_slurm_conf_value() {
-    local conf_file="$1"
-    local key="$2"
-    [ -r "${conf_file}" ] || return 1
-
-    awk -F= -v key="${key}" '
-        /^[[:space:]]*#/ { next }
-        {
-            line=$0
-            sub(/^[[:space:]]+/, "", line)
-            if (line ~ ("^" key "[[:space:]]*=")) {
-                sub(/^[^=]*=/, "", line)
-                sub(/[[:space:]]+#.*$/, "", line)
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
-                print line
-                exit
-            }
-        }
-    ' "${conf_file}"
-}
-
-resolve_slurm_auth_type() {
-    local conf_file="$1"
-    local auth_type
-
-    auth_type="$(read_slurm_conf_value "${conf_file}" "AuthType" || true)"
-    if [ -n "${auth_type}" ]; then
-        printf '%s\n' "${auth_type}" | tr '[:upper:]' '[:lower:]'
-        return 0
-    fi
-    return 1
-}
-
-resolve_slurm_cluster_name() {
-    local conf_file="$1"
-    read_slurm_conf_value "${conf_file}" "ClusterName"
-}
-
-resolve_munge_socket() {
-    local socket_path
-    for socket_path in \
-        "${MUNGE_SOCKET:-}" \
-        /run/munge/munge.socket.2 \
-        /var/run/munge/munge.socket.2
-    do
-        if [ -n "${socket_path}" ] && [ -S "${socket_path}" ]; then
-            echo "${socket_path}"
-            return 0
-        fi
-    done
-    return 1
-}
-
-resolve_sack_socket() {
-    local cluster_name="$1"
-    local cluster_socket=""
-    local socket_path
-
-    if [ -n "${cluster_name}" ]; then
-        cluster_socket="/run/slurm-${cluster_name}/sack.socket"
-    fi
-
-    for socket_path in \
-        "${SLURM_SACK_SOCKET:-}" \
-        "${cluster_socket}" \
-        /run/slurm/sack.socket \
-        /run/slurmctld/sack.socket \
-        /run/slurmdbd/sack.socket \
-        /var/run/slurm/sack.socket \
-        /var/run/slurmctld/sack.socket \
-        /var/run/slurmdbd/sack.socket
-    do
-        if [ -n "${socket_path}" ] && [ -S "${socket_path}" ]; then
-            echo "${socket_path}"
-            return 0
-        fi
-    done
-    return 1
-}
-
-configure_host_slurm_environment() {
-    local host_slurm_conf host_munge_socket host_sack_socket host_auth_type host_cluster_name
-    host_slurm_conf="$(resolve_host_slurm_conf || true)"
-    if [ -n "${host_slurm_conf}" ]; then
-        export SLURM_CONF="${host_slurm_conf}"
-    else
-        if [ -n "${SLURM_CONF:-}" ] && slurm_conf_is_local_neurodesktop "${SLURM_CONF}"; then
-            unset SLURM_CONF
-        fi
-        echo "[WARN] Host Slurm mode selected but no readable slurm.conf was found."
-        echo "[WARN] Bind your host Slurm config (for example: --bind /etc/slurm:/etc/slurm)."
-    fi
-
-    host_auth_type=""
-    host_cluster_name=""
-    if [ -n "${host_slurm_conf}" ]; then
-        host_auth_type="$(resolve_slurm_auth_type "${host_slurm_conf}" || true)"
-        host_cluster_name="$(resolve_slurm_cluster_name "${host_slurm_conf}" || true)"
-    fi
-
-    host_munge_socket="$(resolve_munge_socket || true)"
-    if [ -n "${host_munge_socket}" ]; then
-        export MUNGE_SOCKET="${host_munge_socket}"
-    fi
-
-    host_sack_socket="$(resolve_sack_socket "${host_cluster_name}" || true)"
-    if [ -n "${host_sack_socket}" ]; then
-        export SLURM_SACK_SOCKET="${host_sack_socket}"
-    fi
-
-    case "${host_auth_type}" in
-        auth/munge)
-            if [ -z "${host_munge_socket}" ]; then
-                echo "[WARN] Host Slurm uses AuthType=auth/munge but no MUNGE socket was found."
-                echo "[WARN] Bind /run/munge or /var/run/munge into the container."
-            fi
-            ;;
-        auth/slurm)
-            if [ -z "${host_sack_socket}" ]; then
-                echo "[WARN] Host Slurm uses AuthType=auth/slurm but no sack.socket was found."
-                echo "[WARN] Bind the host Slurm runtime directory (for example: --bind /run/slurm:/run/slurm)."
-            fi
-            ;;
-        *)
-            if [ -z "${host_munge_socket}" ] && [ -z "${host_sack_socket}" ]; then
-                echo "[WARN] Host Slurm mode selected but neither MUNGE nor sack.socket was found."
-                echo "[WARN] Bind your host auth socket paths (for example /run/munge or /run/slurm)."
-            fi
-            ;;
-    esac
-}
-
 can_chown_path_with_runner() {
     local path="$1"
     shift
@@ -469,7 +303,11 @@ SLURM_STARTUP_MODE="${NEURODESKTOP_SLURM_STARTUP_MODE:-lazy}"
 # Start a local single-node Slurm queue inside the container.
 # In auto mode, Slurm defaults to non-cgroup compatibility settings unless explicitly enabled.
 if [ "${NEURODESKTOP_SLURM_MODE}" = "host" ]; then
-    configure_host_slurm_environment
+    # Sourced so the host SLURM_CONF and auth socket exports reach Jupyter;
+    # --warn reports missing binds in the startup log.
+    # shellcheck source=/dev/null
+    source /opt/neurodesktop/host_slurm_environment.sh
+    configure_host_slurm_environment --warn
     export NEURODESKTOP_SLURM_ENABLE=0
     echo "[INFO] NEURODESKTOP_SLURM_MODE=host: skipping local Slurm startup."
 elif [ "$SLURM_STARTUP_MODE" = "eager" ]; then

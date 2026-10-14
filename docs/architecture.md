@@ -44,7 +44,12 @@ The startup sequence follows this order (per
    from cgroup v2/v1 files, or from the Slurm allocation inside a Slurm job,
    for the Jupyter resource indicator. It also sources
    [`guard_ollama_host.sh`](../config/jupyter/guard_ollama_host.sh) to bound the
-   Ollama availability check. Both helpers are installed under
+   Ollama availability check. In `NEURODESKTOP_SLURM_MODE=host` it sources
+   [`host_slurm_environment.sh`](../config/jupyter/host_slurm_environment.sh)
+   and calls `configure_host_slurm_environment --warn`, which exports the
+   bound host `SLURM_CONF`, `MUNGE_SOCKET` and `SLURM_SACK_SOCKET` and warns
+   about missing binds. `environment_variables.sh` makes the same call without
+   warnings for every shell and kernel. These helpers are installed under
    `/opt/neurodesktop/` and sourced rather than executed: docker-stacks sources
    the hook into the shell that starts Jupyter, so their exports reach the
    server. The hook then launches the deferred worker for lazy

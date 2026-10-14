@@ -140,6 +140,10 @@ for RDP initialization and VS Code isolation.
   uses the integrated single-node `neurodesktop` partition; `host` skips
   in-container Slurm startup and uses the host cluster. See
   [`config/slurm/README.md`](../config/slurm/README.md)
+- `SLURM_CONF`, `MUNGE_SOCKET`, `SLURM_SACK_SOCKET`: in host mode, a preset
+  readable config or existing socket takes precedence; otherwise
+  `host_slurm_environment.sh` exports the bound host paths it finds. Local
+  mode sets `SLURM_CONF=/etc/slurm/slurm.conf`
 - Further Slurm tuning variables (`NEURODESKTOP_SLURM_ENABLE`,
   `NEURODESKTOP_SLURM_PARTITION`, `NEURODESKTOP_SLURM_MEMORY_RESERVE_MB`,
   the cgroup plugin/mountpoint overrides, and

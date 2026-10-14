@@ -244,3 +244,42 @@ def test_sbatch_environment_retrieval_keeps_worker_alive(tmp_path, environment_o
     finally:
         for job_id in job_ids:
             subprocess.run(["scancel", job_id], capture_output=True, timeout=10)
+
+
+def test_installed_shell_environment_configures_host_slurm(tmp_path):
+    """Host mode loads the installed helper into every shell's environment."""
+    helper = Path("/opt/neurodesktop/host_slurm_environment.sh")
+    status = helper.stat()
+    assert (status.st_uid, status.st_mode & 0o7777) == (0, 0o644)
+
+    conf = tmp_path / "slurm.conf"
+    conf.write_text("ClusterName=ndtesthost\nAuthType=auth/slurm\n")
+    stale = tmp_path / "stale-sack.socket"
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"NEURODESKTOP_SLURM_MODE", "SLURM_CONF", "SLURM_SACK_SOCKET"}
+    }
+    env.update(
+        NEURODESKTOP_SLURM_MODE="host",
+        SLURM_CONF=str(conf),
+        SLURM_SACK_SOCKET=str(stale),
+    )
+    report = 'printf "%s\\n%s\\n" "$SLURM_CONF" "${SLURM_SACK_SOCKET-unset}"'
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "source /opt/neurodesktop/environment_variables.sh >/dev/null 2>&1; "
+            f"bash -c {shlex.quote(report)}",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    slurm_conf, sack_socket = result.stdout.splitlines()
+    assert slurm_conf == str(conf)
+    # auth/slurm without a reachable sack.socket must not keep the stale path.
+    assert sack_socket != str(stale)
