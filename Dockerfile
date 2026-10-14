@@ -1545,6 +1545,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/jupyter/print_access_url.sh /opt/neurodesktop/print_access_url.sh \
     && install -m 0755 /tmp/jupyter/guard_ollama_host.sh /opt/neurodesktop/guard_ollama_host.sh \
     && install -m 0644 /tmp/jupyter/detect_resource_limits.sh /opt/neurodesktop/detect_resource_limits.sh \
+    && install -m 0644 /tmp/jupyter/host_slurm_environment.sh /opt/neurodesktop/host_slurm_environment.sh \
     && install -m 0755 /tmp/jupyter/cvmfs_server_select.sh /opt/neurodesktop/cvmfs_server_select.sh \
     && install -m 0644 /tmp/jupyter/cvmfs_server_select.py /opt/neurodesktop/cvmfs_server_select.py \
     && install -m 0755 /tmp/guacamole/guacamole.sh /opt/neurodesktop/guacamole.sh \

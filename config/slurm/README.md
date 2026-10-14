@@ -50,6 +50,12 @@ apptainer exec \
 
 If your site uses different paths for `slurm.conf`, MUNGE, or `sack.socket`, bind those paths instead.
 Neurodesktop will auto-detect and export `SLURM_CONF`, `MUNGE_SOCKET`, and `SLURM_SACK_SOCKET` in host mode when available.
+[`host_slurm_environment.sh`](../jupyter/host_slurm_environment.sh) owns the search: a readable `SLURM_CONF`
+that is not the local `ClusterName=neurodesktop` config wins, then `/etc/slurm`, `/etc/slurm-llnl`,
+`/run/host/etc/slurm` and `/host/etc/slurm`. An explicit `MUNGE_SOCKET` or `SLURM_SACK_SOCKET` wins when it is a
+socket; otherwise the standard `/run` and `/var/run` paths are tried, starting with `/run/slurm-<ClusterName>/sack.socket`.
+With `AuthType=auth/slurm` and no socket, an inherited `SLURM_SACK_SOCKET` is cleared. Startup logs a warning
+for a missing config or auth socket; interactive shells stay quiet.
 
 ### Accounting (MariaDB + slurmdbd)
 

@@ -32,6 +32,7 @@ SHELL_FORMAT_SCOPE = (
     "scripts/install_quality_tools.sh",
     "config/jupyter/guard_ollama_host.sh",
     "config/jupyter/detect_resource_limits.sh",
+    "config/jupyter/host_slurm_environment.sh",
 )
 JAVASCRIPT_EXCLUDED = (
     # Frozen excerpts of the pinned upstream wheel; patch tests own them.

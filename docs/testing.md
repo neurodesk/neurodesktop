@@ -1104,7 +1104,7 @@ checkout ownership, root refusal, and package-only sudo restrictions.
 Run the startup checks on a checkout:
 
 ```bash
-pytest tests/unit/test_startup_batching.py tests/unit/test_wait_for_jupyter.py tests/unit/test_nbi_opencode_sync.py tests/unit/test_startup_performance_fixes.py tests/unit/test_detect_resource_limits.py
+pytest tests/unit/test_startup_batching.py tests/unit/test_wait_for_jupyter.py tests/unit/test_nbi_opencode_sync.py tests/unit/test_startup_performance_fixes.py tests/unit/test_detect_resource_limits.py tests/unit/test_host_slurm_environment.py
 ```
 
 These tests cover workspace quarantine in a single Python invocation, default
@@ -1112,7 +1112,11 @@ restoration and ownership repair, SSH permission inheritance, NBI boot setup
 without live refresh, custom Jupyter ports and base paths, and independent
 CVMFS and Slurm execution. Resource-limit detection is sourced from the
 helper against temporary cgroup v2 and v1 trees, with Slurm allocation
-overrides and malformed or missing limit files. HTTP checks use temporary localhost servers.
+overrides and malformed or missing limit files. Host Slurm configuration is
+sourced from its helper against a temporary root with real Unix sockets,
+covering `slurm.conf` search order, the local `neurodesktop` config, MUNGE
+and `sack.socket` discovery, stale values, and the startup warnings that the
+quiet shell call omits. HTTP checks use temporary localhost servers.
 Readiness deadlines run on a controlled clock instead of real elapsed
 time, so scheduling delay cannot decide whether the helper probes at all.
 See the [startup flow](architecture.md#container-initialization-flow) for
