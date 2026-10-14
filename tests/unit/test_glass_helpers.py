@@ -150,6 +150,19 @@ class Bridge:
         self.connection, _ = self.listener.accept()
         self.connection.settimeout(3)
 
+    def disconnect(self):
+        self.listener.close()
+        self.connection.close()
+        os.unlink(self.env["GLASS_TEST_SOCKET"])
+
+    def resume(self):
+        self.listener = socket.socket(socket.AF_UNIX)
+        self.listener.bind(self.env["GLASS_TEST_SOCKET"])
+        self.listener.listen()
+        self.listener.settimeout(4)
+        self.connection, _ = self.listener.accept()
+        self.connection.settimeout(3)
+
     def close(self):
         self.process.send_signal(signal.SIGCONT)
         self.process.terminate()
@@ -189,6 +202,45 @@ def test_same_window_copies_and_host_takeover(bridge):
     assert b.receive() == b"second"
     b.reconnect()
     assert b.receive() == b"second"
+
+
+@pytest.mark.parametrize("paste_offline", [True, False])
+def test_host_clipboard_survives_relay_outage(bridge, paste_offline):
+    b = bridge()
+    b.send(b"cached host")
+    time.sleep(0.3)
+    b.command("paste")
+    assert b.line() == "text:cached host"
+    b.disconnect()
+    time.sleep(0.4)
+    if paste_offline:
+        b.command("paste")
+        assert b.line() == "text:cached host"
+    b.resume()
+    b.command("paste")
+    assert b.line() == "text:cached host"
+    b.send(b"fresh host")
+    time.sleep(0.3)
+    b.command("paste")
+    assert b.line() == "text:fresh host"
+
+
+@pytest.mark.parametrize("initial_owner", ["host", "guest"])
+def test_guest_clipboard_changed_offline_is_sent_after_reconnect(bridge, initial_owner):
+    b = bridge()
+    if initial_owner == "host":
+        b.send(b"cached host")
+        time.sleep(0.3)
+    else:
+        b.command("own initial guest")
+        assert b.receive() == b"initial guest"
+    b.disconnect()
+    time.sleep(0.4)
+    b.command("own offline guest")
+    b.resume()
+    assert b.receive() == b"offline guest"
+    b.command("paste")
+    assert b.line() == "text:offline guest"
 
 
 def test_first_empty_and_refusal_recovery(bridge):
