@@ -94,6 +94,29 @@ def test_production_build_serializes_shared_publish_tags():
     assert "  cancel-in-progress: false\n" in workflow
 
 
+def test_pr_candidates_use_the_release_security_scan_before_runtime_checks():
+    workflow = yaml.safe_load(repo_path(".github/workflows/pr-image-validation.yml").read_text())
+    steps = workflow["jobs"]["image"]["steps"]
+    scan = next(step for step in steps if step.get("name") == "Scan local candidate")
+    release = yaml.safe_load(WORKFLOW.read_text())
+    release_scan = next(
+        step for step in release["jobs"]["scan-image"]["steps"]
+        if step.get("uses", "").startswith("aquasecurity/trivy-action@")
+    )
+    assert scan["uses"] == release_scan["uses"]
+    assert scan["with"]["image-ref"] == "${{ env.IMAGE_REF }}"
+    assert scan["with"]["exit-code"] == "1"
+    assert scan["with"]["severity"] == "CRITICAL"
+    for setting in ("format", "trivyignores", "timeout", "skip-files"):
+        assert scan["with"][setting] == release_scan["with"][setting]
+    assert "if" not in scan and not scan.get("continue-on-error", False)
+    build = next(step for step in steps if step.get("name") == "Build local candidate")
+    runtime = next(step for step in steps if step.get("name") == "Validate Slurm under default Docker permissions")
+    assert steps.index(build) < steps.index(scan) < steps.index(runtime)
+    assert build["with"]["load"] is True
+    assert build["with"]["push"] is False
+
+
 def test_production_build_checkouts_stay_on_the_run_sha():
     workflow = WORKFLOW.read_text()
     checkout_count = workflow.count("uses: actions/checkout@")

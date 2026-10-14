@@ -55,7 +55,7 @@ pytest /opt/tests/         # inside the built image
 
 Running `tests/unit` needs Python 3.12, Node.js 24, `pytest`, `httpx`,
 `traitlets`, `requests`, `ipykernel`, `websocket-client`, `nibabel`, `numpy`,
-Git, curl, `jq`, and `ssh-keygen` (`openssh-client`); see
+Git, curl, `jq`, GNU `mkdir`, and `ssh-keygen` (`openssh-client`); see
 `.github/workflows/unit-tests.yml`. The terminal-creation
 tests stub `curl` but use the real `jq` to parse responses.
 
@@ -379,6 +379,10 @@ run SHA on disposable native amd64 and arm64 GitHub runners. Its token has only
 `contents: read`; checkout credentials are not persisted. The candidate stays
 local to each runner, and the workflow neither publishes nor promotes tags.
 Both architectures run the package-only sudo and foreign-UID HPC suites.
+Before runtime acceptance, each candidate passes the release workflow's
+critical vulnerability and secret scan with the same ignore policy. The scan
+includes image layers, so removing flagged examples in a later layer does not
+repair a package installation that already committed them.
 The amd64 runner also provisions CVMFS and runs the `acceptance` profile.
 Before mounting, it uses the image's server-selection CLI to verify and rank
 mirrors from the runner's network. No verified mirror fails this setup step.
