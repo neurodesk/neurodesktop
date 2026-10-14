@@ -1487,6 +1487,12 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
 # Switch to root user
 USER root
 
+# Install Glass dependencies before runtime configuration replaces apt-get
+# with the package-only wrapper, which rejects build-time apt options.
+RUN apt-install-retry systemd systemd-sysv xauth xserver-xorg-core \
+    xserver-xorg-input-evdev x11-xserver-utils libx11-6 fonts-dejavu-core \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # Install local runtime configuration late. This layer intentionally sits after
 # neurocommand so launcher/webapp config edits do not invalidate Guacamole,
 # defaults, CVMFS, or the neurocommand clone/install layer.
@@ -1674,10 +1680,6 @@ RUN --mount=type=bind,source=config/jupyter/patch_jupyter_ai_acp_client.py,targe
     install -m 0755 -o root -g users /tmp/patch_jupyter_ai_acp_client.py /opt/neurodesktop/patch_jupyter_ai_acp_client.py \
     && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_ai_acp_client.py
 
-# Glass is an opt-in runtime of this same image, not a separate scientific stack.
-RUN apt-install-retry systemd systemd-sysv xauth xserver-xorg-core \
-    xserver-xorg-input-evdev x11-xserver-utils libx11-6 fonts-dejavu-core \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /opt/glass/bin/ /usr/local/bin/
 COPY --chmod=0755 config/glass/ /opt/neurodesktop/glass/
 RUN find /opt/neurodesktop/glass -type f -exec chmod 0644 {} + \
