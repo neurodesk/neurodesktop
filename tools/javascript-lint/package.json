@@ -1,0 +1,11 @@
+{
+  "name": "neurodesktop-javascript-lint",
+  "private": true,
+  "description": "Pinned ESLint toolchain for owned JavaScript, run by scripts/check_quality.sh javascript",
+  "license": "MIT",
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.12.0",
+    "globals": "17.13.0"
+  }
+}

@@ -4,7 +4,7 @@
     "model": "openai-compatible-chat-model",
     "properties": [
       {"id": "api_key", "value": ""},
-      {"id": "model_id", "value": "kimi-k2.5"},
+      {"id": "model_id", "value": "neurodesk"},
       {"id": "base_url", "value": "https://llm.neurodesk.org/openai"},
       {"id": "context_window", "value": "131000"}
     ]
@@ -14,7 +14,7 @@
     "model": "openai-compatible-inline-completion-model",
     "properties": [
       {"id": "api_key", "value": ""},
-      {"id": "model_id", "value": "kimi-k2.5"},
+      {"id": "model_id", "value": "neurodesk"},
       {"id": "base_url", "value": "https://llm.neurodesk.org/openai"},
       {"id": "context_window", "value": "131000"}
     ]

@@ -4,7 +4,7 @@ description: LXDE desktop over VNC/RDP through Guacamole, clipboard sync,
   per-display Firefox profiles, and office file associations
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-20"
+last-reviewed: "2026-10-13"
 ---
 
 # Desktop Environment
@@ -38,6 +38,39 @@ server child to Mesa's EGL vendor so NVIDIA Container Toolkit driver injection
 cannot make it load an incompatible host NVIDIA EGL library. The parent launcher
 and LXDE applications retain the deployment's normal EGL vendor selection.
 
+## GPU rendering prerequisites
+
+The image installs checksum-pinned VirtualGL 3.1.5 packages on amd64 and
+arm64, plus Mesa's graphics diagnostics. `vglrun` is available on `PATH`;
+`vgl-eglinfo` selects VirtualGL's EGL diagnostic rather than Mesa's similarly
+named tool. The image requests NVIDIA runtime capabilities
+`compute,utility,graphics,display` by default. Operators still provide the
+host driver, NVIDIA Container Toolkit integration, and an assigned GPU.
+An explicit deployment capability setting overrides the image default.
+
+The existing LXDE, TigerVNC, and Guacamole services retain their launch paths.
+Applications use VirtualGL only when explicitly launched through it. From a
+desktop terminal, run:
+
+```bash
+neurodesktop-gpu-check egl0
+vglrun -d egl0 -c proxy YOUR_IMAGE_LOCAL_OPENGL_APPLICATION
+```
+
+The diagnostic runs EGL initialization and a GLX rendering probe in the
+current `DISPLAY`, prints the renderer, and fails unless it reports NVIDIA's
+OpenGL vendor. Its optional device argument overrides `VGL_DISPLAY`, which
+otherwise defaults to `egl0`. Select the device after checking the allocation
+inside the container; an EGL index is not a scheduler GPU UUID.
+
+These are image prerequisites, not automatic acceleration for scientific tools.
+FreeView runs in a nested Apptainer image whose `--cleanenv` boundary needs
+explicit integration. The [tool integration checklist](../designs/gpu-tool-integration.md)
+lists the required FreeSurfer and Neurocommand changes. Run the hardware
+[acceptance profile](../testing.md#virtualgl-and-gpu-rendering) before claiming
+GPU rendering support. NVIDIA/amd64 is the initial target; arm64 hardware,
+RDP rendering, and Kasm platform GPU sessions remain unverified.
+
 ## Credentials and service access
 
 The image locks the notebook account's password at build time. Root startup
@@ -58,6 +91,18 @@ startup worker. Guacamole web and VNC credentials remain separate per-user
 secrets. See [startup privileges](../environment-variables.md#startup-privileges)
 for the package-only sudo policy.
 
+The SSH daemon used only for Guacamole's VNC SFTP side-channel listens on
+`127.0.0.1`. Startup checks every effective listener address, including addresses
+from included files. A saved configuration that allows another address uses a
+minimal loopback-only fallback without replacing the saved file. This prevents
+persisted configurations from exposing the service on a container or shared
+HPC network interface.
+
+The Neurodesk menu's **Update** entry updates the notebook-owned
+`/neurocommand` checkout without sudo. Root startup repairs checkout ownership
+after notebook UID or GID changes, without executing its scripts. See
+[Neurocommand](cvmfs.md#neurocommand) for update behavior and HPC restrictions.
+
 Failure to start the optional xrdp service leaves Jupyter and VNC available.
 Failure to provision credentials or validate sudo policy stops startup.
 Root startup also prepares the ARM CPU-information workaround used by MATLAB,
@@ -69,6 +114,17 @@ by Jupyter Server Proxy. It does not open an unauthenticated TCP listener on the
 shared host. Jupyter authenticates browser requests before forwarding them.
 The proxy's [Unix-socket option](https://jupyter-server-proxy.readthedocs.io/en/latest/server-process.html#unix-socket)
 provides the private directory and WebSocket transport.
+
+The proxy considers VS Code ready as soon as its socket returns any HTTP
+response. code-server listens before it registers its routes, so the proxy could
+forward a user's first request to an empty router and show a 404.
+`config/jupyter/code_server_ready.py` starts code-server on a staging socket in
+the same private directory and renames it to the proxy's path once `/healthz`
+returns 200. The launcher forwards termination signals and gives code-server a
+parent-death signal, so the proxy's SIGKILL cannot leave code-server running.
+Each launch uses its own staging name and removes the published socket only if
+it is still the one that launch placed. An orphan from a launch that missed the
+proxy's timeout cannot remove the next launch's socket while it shuts down.
 
 ## Clipboard sync
 

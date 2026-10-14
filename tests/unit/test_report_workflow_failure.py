@@ -119,8 +119,9 @@ def marker_comment(kind, user="github-actions[bot]", issue=42):
     }
 
 
-def test_completed_run_aggregates_matrix_failures_and_dispatches_default_branch():
-    output = run_reporter(jobs=[
+@pytest.mark.parametrize("workflow", ["Unit tests", "Code quality"])
+def test_completed_run_aggregates_matrix_failures_and_dispatches_default_branch(workflow):
+    output = run_reporter(runs=[{"name": workflow}], jobs=[
         {"id": 1, "name": "amd64", "conclusion": "failure", "steps": [
             {"name": "pytest", "conclusion": "failure"},
             {"name": "checkout", "conclusion": "success"},
@@ -140,6 +141,53 @@ def test_completed_run_aggregates_matrix_failures_and_dispatches_default_branch(
     assert dispatch["ref"] == "main"
     assert dispatch["inputs"] == {"issue-number": "100"}
     assert any(call.get("attempt_number") == 1 for call in output["calls"])
+
+
+@pytest.mark.parametrize("successful_jobs", [[], [
+    {"id": 9, "name": "setup", "conclusion": "success", "steps": [
+        {"name": "Prepare runner", "conclusion": "success"},
+    ]},
+]])
+def test_cancelled_jobs_without_steps_are_reported_without_guessing_cause(successful_jobs):
+    output = run_reporter(jobs=successful_jobs + [
+        {"id": 7, "name": "Check for spelling errors", "conclusion": "cancelled", "steps": []},
+        {"id": 8, "name": "lint", "conclusion": "skipped", "steps": []},
+    ])
+    body = output["issues"][0]["body"]
+    assert "Cancelled jobs have no recorded steps" in body
+    assert "did not assign a runner" not in body
+    assert "No job started" not in body
+    comment = output["comments"][0]["body"]
+    assert "no job failed; 1 cancelled jobs" in comment
+    assert "/actions/runs/1234/job/7): `cancelled`; no steps recorded" in comment
+    assert "lint" not in comment
+    assert not calls_of(output, "dispatch")
+    assert output["results"][0]["dispatched"] is False
+
+
+def test_cancelled_job_that_ran_steps_still_dispatches_repair():
+    output = run_reporter(jobs=[
+        {"id": 7, "name": "pytest", "conclusion": "cancelled", "steps": [
+            {"name": "checkout", "conclusion": "success"},
+            {"name": "Run unit tests", "conclusion": "cancelled"},
+        ]},
+    ])
+    assert "did not assign a runner" not in output["issues"][0]["body"]
+    comment = output["comments"][0]["body"]
+    assert "/actions/runs/1234/job/7): `cancelled`\n" in comment + "\n"
+    assert "never started" not in comment
+    assert len(calls_of(output, "dispatch")) == 1
+
+
+def test_cancelled_siblings_are_omitted_when_a_job_failed():
+    output = run_reporter(jobs=[
+        {"id": 1, "name": "amd64", "conclusion": "failure", "steps": []},
+        {"id": 2, "name": "arm64", "conclusion": "cancelled", "steps": []},
+    ])
+    comment = output["comments"][0]["body"]
+    assert "1 failed or timed-out jobs" in comment
+    assert "arm64" not in comment and "never started" not in comment
+    assert len(calls_of(output, "dispatch")) == 1
 
 
 @pytest.mark.parametrize("head_repository", ["NeuroDesk/neurodesktop", "contributor/neurodesktop"])

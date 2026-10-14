@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-09-20"
+last-reviewed: "2026-10-14"
 ---
 
 # Environment Variables
@@ -36,6 +36,11 @@ The session home is `/home/kasm-user`; persist that path instead of overriding
 - `LMOD_AVAIL_EXTENSIONS`: defaults to `no`, hiding the extension inventory
   from `ml av` and `module avail`. Set to `yes` to show it again. Module
   loading and `module spider` searches are unchanged.
+- `NEURODESKTOP_LMOD_CACHE_WARMUP`: defaults to `1`, building the notebook
+  user's Lmod module cache in the background after CVMFS mounts so the first
+  `ml av` does not fetch every modulefile. Set to `0` to skip it, for example
+  on metered connections. See
+  [Module cache warm-up](architecture/cvmfs.md#module-cache-warm-up).
 - `CVMFS_DISABLE`: set to `true` to disable CVMFS mounting
 - `CVMFS_MODULES`: CVMFS module catalogue path used when refreshing
   `MODULEPATH`. Fixed to `/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/` by
@@ -77,6 +82,10 @@ packages still execute maintainer scripts as root, so it is not a boundary
 against a determined user or a compromised repository. Container capabilities,
 mounts, and host isolation still determine the consequences of root access.
 Unprivileged Apptainer startup cannot grant sudo rights or change host passwords.
+
+The Neurodesk menu's **Update** entry runs as the notebook user and needs no sudo grant.
+It requires a writable `/neurocommand` checkout. See
+[Neurocommand](architecture/cvmfs.md#neurocommand).
 
 See [desktop credentials and service access](architecture/desktop.md#credentials-and-service-access)
 for RDP initialization and VS Code isolation.
@@ -123,6 +132,12 @@ for RDP initialization and VS Code isolation.
   the server answers so the banner lands after the startup log burst;
   defaults to `3`
 - `NEURODESKTOP_VERSION`: version tag set by CI
+- `MEM_LIMIT`, `CPU_LIMIT`: exported by startup for the Jupyter resource
+  indicator, in bytes and CPUs. `detect_resource_limits.sh` reads them from
+  cgroup v2 or v1 limit files. Inside a Slurm job (`SLURM_JOB_ID` set), a
+  valid `SLURM_MEM_PER_NODE`, or `SLURM_MEM_PER_CPU` times the CPU count, and
+  `SLURM_CPUS_ON_NODE`, `SLURM_JOB_CPUS_PER_NODE` or `SLURM_CPUS_PER_TASK`
+  override them. A preset value is kept when no limit is detected
 
 ## Slurm
 
@@ -138,6 +153,13 @@ for RDP initialization and VS Code isolation.
 
 ## Desktop (VNC/RDP, Guacamole, Firefox)
 
+- `NVIDIA_DRIVER_CAPABILITIES`: NVIDIA Container Toolkit's driver-library
+  capabilities. The image defaults to `compute,utility,graphics,display` so
+  an allocated GPU has OpenGL/EGL libraries as well as CUDA and diagnostics.
+  Override at deployment if needed; this setting does not allocate a GPU.
+- `VGL_DISPLAY`: VirtualGL rendering device. `neurodesktop-gpu-check` uses
+  this value, or `egl0` when unset/empty; its device argument takes precedence.
+  It does not change the desktop's X11 `DISPLAY` or enable nested tool rendering.
 - `NEURODESKTOP_DESKTOP_BACKEND`: desktop backend started by `guacamole.sh`;
   supported values are `rdp`, `vnc`, and `both`. The Jupyter launcher sets this
   automatically for the separate RDP and VNC desktop entries
@@ -212,7 +234,11 @@ Connect procedures.
   OpenCode (the top-level `model` in `~/.config/opencode/opencode.json`)
   into Notebook Intelligence, so picking a model in the OpenCode startup
   menu updates both tools; Notebook Intelligence sections pointed at a
-  custom endpoint via its Settings UI are left alone. After writing the
+  custom endpoint via its Settings UI are left alone. Without an OpenCode
+  selection, Notebook Intelligence uses the gateway's stable `neurodesk`
+  alias; `nbi_setup.sh` migrates the `kimi-k2.5` ID that earlier images
+  seeded for llm.neurodesk.org, which the gateway now hides, to that alias
+  and keeps every other model choice. After writing the
   files, `nbi_setup.sh` asks every running Jupyter server (discovered via
   `jpserver-*.json` under the Jupyter runtime directory) to re-read the
   config so the change applies without a JupyterLab restart. An NBI
@@ -240,7 +266,8 @@ Connect procedures.
 - `OLLAMA_HOST`: Ollama endpoint used by the AI tools; defaults to
   `http://host.docker.internal:11434` (an Ollama server on the Docker host —
   the image does not bundle Ollama itself). At container startup,
-  `before_notebook.sh` probes the endpoint (1s connect timeout) and repoints
+  `before_notebook.sh` sources `guard_ollama_host.sh` to probe the endpoint
+  (1s connect timeout) and repoints
   the Jupyter server process at `http://127.0.0.1:11434` when it is
   unreachable, so a black-holed host cannot block server startup while
   Notebook Intelligence enumerates Ollama models
@@ -302,16 +329,16 @@ reviewed; the Dockerfile itself is authoritative.
 - `UV_VERSION`, `ASTRA_TOOLS_VERSION`, `ASTRA_SPEC_VERSION`,
   `ANYWIDGET_VERSION`, `LIGHTCONE_CLI_VERSION`, `LIGHTCONE_CLI_SHA256`: exact `uv`,
   ASTRA CLI/schema, viewer runtime, and isolated Lightcone CLI releases
-  installed in the image; defaults to `0.12.17`, `0.2.17`, `0.0.14`, `0.11.0`,
+  installed in the image; defaults to `0.12.23`, `0.2.17`, `0.0.14`, `0.11.0`,
   `0.4.2`, and the verified SHA-256 of that Lightcone source archive
 - `SNAKEMAKE_VERSION`: user-facing Snakemake workflow release; defaults to
   `9.27.0` in the main and isolated Lightcone environments. Its current
   metadata requires `packaging<26`, so the image holds that infrastructure
   library at the newest compatible release, `25.0`
 - `PYJWT_VERSION`: exact PyJWT release installed into the main Python
-  environment; defaults to `2.14.0`, the first release that rejects
-  non-canonical public-key PEM encodings before they can be reused as HMAC
-  secrets (CVE-2026-102268)
+  environment; defaults to `2.15.1`. It retains the rejection of non-canonical
+  public-key PEM encodings introduced in `2.14.0`, preventing their reuse as
+  HMAC secrets (CVE-2026-102268)
 - `AGENT_SKILLS_REF`: exact commit of
   `LightconeResearch/agent-skills` used for the Codex and Claude reproduction
   plugin and OpenCode's copied skills and hook adapter;
@@ -338,7 +365,7 @@ reviewed; the Dockerfile itself is authoritative.
   linking; defaults to `2026.9.1` and uses T3's supported executable override. Update
   both architecture SHA-256 values in `Dockerfile` whenever this version changes.
 - `T3_CODE_VERSION`: the headless T3 Code server release installed from the
-  checked manifest; defaults to `0.0.42`. The release ships one self-contained
+  checked manifest; defaults to `0.0.45`. The release ships one self-contained
   executable per platform, so the layer installs no lockfile and compiles
   nothing
 - `TAILSCALE_VERSION`: static Tailscale CLI and daemon release; defaults to
@@ -352,24 +379,35 @@ reviewed; the Dockerfile itself is authoritative.
   `3bf11cb7b271b554998105a11e6c9b8c3e376615`
 - `MYST_PNPM_VERSION`, `MYST_YDOC_VERSION`: pnpm and Jupyter
   YDoc releases used for the MyST/RISE compatibility rebuild; defaults to
-  `11.27.0` and `4.1.1`
+  `11.28.4` and `4.1.1`
 - `APPTAINER_VERSION`, `APPTAINER_GO_VERSION`, `APPTAINER_GRPC_VERSION`,
   `APPTAINER_CRYPTO_VERSION`: Apptainer source release and the Go
   toolchain/grpc/crypto module versions used in its dedicated build stage;
-  defaults to `1.5.3`, `1.27.1`, `1.84.0`, and `0.57.0`. The crypto override
+  defaults to `1.5.4`, `1.27.1`, `1.84.0`, and `0.57.0`. The crypto override
   also updates the separately vendored gocryptfs build.
 - `BASE_IMAGE_TAG`: tag of the upstream Jupyter Docker base image; defaults to
   the multi-architecture `2026-09-18` release
 - `NPM_VERSION`: npm release installed with the runtime Node.js distribution;
-  defaults to `12.0.2`
+  defaults to `12.2.0`
+- `FREEBROWSE_REF`: exact FreeBrowse source commit used to build the default
+  neuroimaging viewer from `neurodesk/freebrowse`, including its authenticated
+  JupyterLab/JupyterHub integration.
 - `JUPYTER_BUILDER_VERSION`, `JUPYTERLAB_SLURM_REF`: current Jupyter Builder
   release and exact `jupyterlab-slurm` source revision used to build its
   JupyterLab 4 extension; defaults to `1.2.3` and
   `8dccb39808f8a1b77712a9a5773a7d2601a56683`
 - `GUACAMOLE_VERSION`, `TOMCAT_REL`, `TOMCAT_VERSION`,
   `TOMCAT_MIGRATION_VERSION`: Guacamole release (`1.6.0`) and the Tomcat
-  major/exact/migration-tool versions serving it (`11`, `11.0.26`, `1.0.12`)
+  major/exact/migration-tool versions serving it (`11`, `11.0.26`, `1.0.13`)
+- `VIRTUALGL_VERSION`, `VIRTUALGL_AMD64_SHA256`, `VIRTUALGL_ARM64_SHA256`:
+  VirtualGL release and architecture-specific Debian package checksums.
+  The version defaults to `3.1.5`; update its verified checksums together with
+  the version. GPU rendering remains an explicit application launch choice.
 - `CODE_SERVER_VERSION`: code-server release; defaults to `4.138.0`
+- `SHELL_QUOTE_VERSION`: shell-quote release for VS Code's nested package;
+  defaults to `1.12.0`
+- `PROXY_ADDR_VERSION`: proxy-addr release for code-server's npm dependency
+  tree; defaults to `2.0.8`
 - `NEUROCOMMAND_REF`: neurocommand git ref cloned during the build; CI passes
   a resolved `main` SHA so neurocommand changes invalidate the install layer
 - `NODE_TAR_VERSION`: patched `node-tar` version applied to every bundled

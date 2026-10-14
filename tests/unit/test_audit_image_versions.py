@@ -188,3 +188,25 @@ def test_audit_rejects_pins_outside_jupyter_ai_dependency_ranges(
     assert report["dependencies"] == []
     assert len(report["errors"]) == 1
     assert f"declared version =={current} violates compatibility constraint" in report["errors"][0]
+
+
+def test_bundled_code_server_security_pins_use_npm_authority(tmp_path):
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text("ARG SHELL_QUOTE_VERSION=1.10.0\nARG PROXY_ADDR_VERSION=2.0.7\n")
+    fixtures = tmp_path / "releases.json"
+    fixtures.write_text(json.dumps({
+        "npm:shell-quote": ["1.10.0", "1.12.0"],
+        "npm:proxy-addr": ["2.0.7", "2.0.8"],
+    }))
+
+    completed = run_audit(dockerfile, fixtures)
+
+    assert completed.returncode == 0, completed.stdout
+    rows = {row["key"]: row for row in json.loads(completed.stdout)["dependencies"]}
+    for name, current, latest in (
+        ("shell-quote", "1.10.0", "1.12.0"),
+        ("proxy-addr", "2.0.7", "2.0.8"),
+    ):
+        assert rows[f"npm:{name}"]["current"] == current
+        assert rows[f"npm:{name}"]["latest_upstream"] == latest
+        assert rows[f"npm:{name}"]["status"] == "update-available"

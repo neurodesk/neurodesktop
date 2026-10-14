@@ -77,7 +77,8 @@ downloads.
 
 The Dockerfile clones neurocommand, copies its `neurodesk/webapps.json`, applies
 [`config/jupyter/webapp_links.json`](../../config/jupyter/webapp_links.json), and
-generates `jupyter_notebook_config.py` using a template system. It also writes
+generates `jupyter_notebook_config.py` using a template system. Webapp metadata,
+including quotes and backslashes, is preserved as literal values. It also writes
 the merged webapp configuration back to `/opt/neurodesktop/webapps.json`, which
 is what the webapp wrapper reads at launch time. To add new container-backed
 webapps, update the source `webapps.json`. To change the catalog link or local
@@ -93,3 +94,37 @@ BuildKit to make unauthenticated GitHub API requests from inside the Dockerfile.
 The Dockerfile resets the local neurocommand `main` branch to that ref and keeps
 it tracking `origin/main` so the runtime Update launcher can use
 `git pull --rebase --autostash`.
+
+## Default neuroimaging viewer
+
+The image builds [Neurodesk's FreeBrowse fork](https://github.com/neurodesk/freebrowse/tree/main/jupyter)
+from the commit pinned by `FREEBROWSE_REF` in the Dockerfile. Double-clicking
+`.nii`, `.nii.gz`, or `.nvd` files opens FreeBrowse in a JupyterLab document tab.
+The file browser also offers **Open in FreeBrowse** in its context menu.
+FreeBrowse replaces `jupyterlab-niivue` as the default document viewer;
+`ipyniivue` remains available in notebooks.
+
+The serverless frontend is built with upstream's `build:jupyter` target and
+packaged with its federated JupyterLab extension. It runs without a separate
+backend, Pixi environment, or external data service. The parent JupyterLab tab resolves downloads through the contents service and
+fetches bytes with Jupyter's authenticated `ServerConnection`, matching the
+previous NiiVue viewer. FreeBrowse receives a temporary blob URL and the
+original filename; server credentials stay in the parent tab. Both viewer assets and file URLs
+respect the single-user server's base path, including JupyterHub paths such
+as `/user/alice/`.
+
+The fork owns Jupyter authentication, embedded document tabs, filename encoding,
+and rename/disposal cleanup. The asset handler permits cookie authentication
+for same-origin GET/HEAD requests identified by browser Fetch Metadata. This
+covers module scripts and crossorigin stylesheets, which use CORS mode without
+an XSRF header. The exception applies only to packaged static assets;
+anonymous access, cross-site requests, missing Fetch Metadata, and mutations
+retain authentication and XSRF checks. Workspace downloads still use Jupyter's
+Contents service and its XSRF protection.
+
+Closing the tab aborts pending downloads, revokes the blob URL, unloads the
+iframe, and disconnects its path listener. A rename cancels the earlier download
+before loading the new path. The image builds both bundles from the same exact
+fork commit, without a local source patch.
+The serverless build supports viewing and browser downloads; upstream's
+backend-dependent save and AI annotation services are not configured.

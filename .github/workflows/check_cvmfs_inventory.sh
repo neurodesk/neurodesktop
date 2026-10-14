@@ -6,6 +6,16 @@ INVENTORY_URL="${CVMFS_INVENTORY_URL:-https://raw.githubusercontent.com/NeuroDes
 REPOSITORY_ROOT="${CVMFS_REPOSITORY_ROOT:-/cvmfs/neurodesk.ardc.edu.au}"
 REPOSITORY_NAME="${CVMFS_REPOSITORY_NAME:-$(basename "$REPOSITORY_ROOT")}"
 
+refresh_delays=(0)
+case "${CVMFS_INVENTORY_REPLICA_RETRY:-false}" in
+    true) refresh_delays+=(240) ;;
+    false) ;;
+    *)
+        echo "ERROR: CVMFS_INVENTORY_REPLICA_RETRY must be true or false."
+        exit 1
+        ;;
+esac
+
 inventory_file=$(mktemp) || {
     echo "ERROR: could not create a temporary CVMFS inventory file."
     exit 1
@@ -78,15 +88,20 @@ refresh_catalog() {
 }
 
 find_missing_images
-if [[ "${#missing_images[@]}" -ne 0 ]]; then
-    echo "WARNING: ${#missing_images[@]} CVMFS inventory entries were not visible; refreshing the catalog before the final check."
+for delay in "${refresh_delays[@]}"; do
+    [[ "${#missing_images[@]}" -ne 0 ]] || break
+    if [[ "$delay" -gt 0 ]]; then
+        echo "WARNING: ${#missing_images[@]} CVMFS inventory entries remain missing; waiting $delay seconds for replica propagation before the final refresh."
+        sleep "$delay"
+    fi
+    echo "WARNING: ${#missing_images[@]} CVMFS inventory entries were not visible; refreshing the catalog before checking again."
     catalog_status
     if ! refresh_catalog; then
         echo "WARNING: CVMFS catalog refresh failed or timed out; checking the same inventory again."
     fi
     catalog_status
     find_missing_images
-fi
+done
 
 missing_count=${#missing_images[@]}
 if [[ "$missing_count" -ne 0 ]]; then

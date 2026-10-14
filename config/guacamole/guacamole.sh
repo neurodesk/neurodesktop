@@ -294,6 +294,8 @@ if [ "${_start_vnc}" -eq 1 ]; then
     if [ ! -f "${HOME}/.vnc/xstartup" ]; then
         echo "[ERROR] VNC xstartup not found at ${HOME}/.vnc/xstartup"
         echo "[DEBUG] Creating xstartup..."
+        # Keep command substitution literal for the generated xstartup script.
+        # shellcheck disable=SC2016
         printf '%s\n' '#!/bin/sh' 'eval "$(dbus-launch --sh-syntax)"' 'export DBUS_SESSION_BUS_ADDRESS' '/usr/bin/startlxde' 'vncconfig -nowin -noiconic &' > "${HOME}/.vnc/xstartup"
         chmod +x "${HOME}/.vnc/xstartup"
     fi
@@ -530,7 +532,7 @@ if [ "${_start_vnc}" -eq 1 ]; then
     update_mapping_param "vnc" "port" "${VNC_PORT}" || exit 1
     update_mapping_param "vnc" "password" "${NEURODESKTOP_VNC_PASSWORD}" || exit 1
 
-    xset -display :${DISPLAY_NUM} s off || true
+    xset -display ":${DISPLAY_NUM}" s off || true
 else
     echo "[INFO] NEURODESKTOP_DESKTOP_BACKEND=${NEURODESKTOP_DESKTOP_BACKEND}: skipping VNC backend."
     remove_mapping_connection "vnc" || \

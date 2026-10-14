@@ -17,7 +17,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from collections.abc import Iterable
 
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
@@ -53,7 +53,10 @@ CATALOG = (
     CatalogEntry("arg:NPM_VERSION", "npm:npm", "npm"),
     CatalogEntry("arg:JUPYTER_BUILDER_VERSION", "npm:@jupyter/builder", "npm"),
     CatalogEntry("arg:GUACAMOLE_VERSION", "github:apache/guacamole-server", "github-tags"),
+    CatalogEntry("arg:VIRTUALGL_VERSION", "github:VirtualGL/virtualgl", "github-releases"),
     CatalogEntry("arg:CODE_SERVER_VERSION", "github:coder/code-server", "github-releases"),
+    CatalogEntry("arg:SHELL_QUOTE_VERSION", "npm:shell-quote", "npm"),
+    CatalogEntry("arg:PROXY_ADDR_VERSION", "npm:proxy-addr", "npm"),
     CatalogEntry("arg:TOMCAT_VERSION", "apache:tomcat/tomcat-11", "apache-dist", "<12"),
     CatalogEntry("arg:TOMCAT_MIGRATION_VERSION", "github:apache/tomcat-jakartaee-migration", "github-tags"),
     CatalogEntry("arg:UV_VERSION", "pypi:uv", "pypi"),
@@ -125,7 +128,6 @@ CATALOG = (
     CatalogEntry("requirement:pypi:jupyterlab-commands-toolkit", "pypi:jupyterlab-commands-toolkit", "pypi",
                  ">=0.2.0,<0.3.0", "Jupyter AI 3.2 requires jupyterlab-commands-toolkit>=0.2.0,<0.3.0."),
     CatalogEntry("requirement:pypi:jupyterlab-notebook-awareness", "pypi:jupyterlab-notebook-awareness", "pypi"),
-    CatalogEntry("requirement:pypi:jupyterlab-niivue", "pypi:jupyterlab-niivue", "pypi"),
     CatalogEntry("requirement:pypi:jupyterlab-myst", "pypi:jupyterlab-myst", "pypi"),
     CatalogEntry(
         "requirement:pypi:ipykernel",

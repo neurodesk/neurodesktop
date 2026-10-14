@@ -20,7 +20,7 @@ for arg in "$@"; do
             use_session_profile=0
             expect_profile_value=1
             ;;
-        -P?*|--profile=*|-profile=*|--ProfileManager|-ProfileManager|--profilemanager|\
+        -P?*|--profile=*|-profile=*|--ProfileManager|--profilemanager|\
         --headless|--help|-h|-help|--version|-v)
             use_session_profile=0
             ;;

@@ -142,7 +142,7 @@ def apply_settings_bundle_patch(bundle_glob):
     patched = 0
     already = 0
     for bundle_file in bundle_files:
-        with open(bundle_file, "r", encoding="utf-8") as fh:
+        with open(bundle_file, encoding="utf-8") as fh:
             text = fh.read()
         if SETTINGS_MARKER in text:
             already += 1
@@ -200,7 +200,7 @@ def apply_ollama_provider_patch(provider_glob):
         return False
 
     for provider_file in provider_files:
-        with open(provider_file, "r", encoding="utf-8") as fh:
+        with open(provider_file, encoding="utf-8") as fh:
             text = fh.read()
         try:
             new_text, changed = patch_ollama_provider_text(text)

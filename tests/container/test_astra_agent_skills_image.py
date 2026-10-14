@@ -18,7 +18,7 @@ from pathlib import Path
 from testlib import run_cmd
 
 
-ASTRA_TOOLS_VERSION = "0.2.17"
+ASTRA_TOOLS_VERSION = "0.2.18"
 
 SKILLS_CHECKOUT = Path("/opt/neurodesktop/agent-skills")
 HOOK_SCRIPTS = SKILLS_CHECKOUT / "plugins/reproduction/hooks/scripts"
@@ -90,7 +90,12 @@ def test_pinned_astra_cli_wins_with_one_image_owned_install():
     # environment so its Dask/Snakemake graph cannot perturb JupyterLab.
     code, output = run_cmd("uv --version")
     assert code == 0, output
-    assert output.startswith("uv 0.12.17")
+    assert output.startswith("uv 0.13.0")
+
+    code, output = run_cmd("UV_TOOL_DIR=/opt/uv/tools uv tool list")
+    assert code == 0, output
+    assert "lightcone-cli v0.4.2" in output
+    assert "- lc" in output
 
 
 def test_skill_toolchain_pins_match_the_installed_toolchain():
@@ -224,11 +229,19 @@ def test_opencode_finds_every_reproduction_skill_in_a_restored_home(tmp_path):
     # particular, the Lightcone adapter runs its session-start hook while it
     # loads, which makes this read-only assertion depend on unrelated external
     # work. The adapter itself is exercised by the focused test below.
+    # OpenCode also discovers skills from the working directory, so run it from
+    # an empty project. It truncates piped output at 64 KiB; read a file instead.
+    project = tmp_path / "project"
+    project.mkdir()
+    listing = tmp_path / "skills.json"
     code, output = run_cmd(
-        "/usr/bin/opencode debug skill --pure", env={"HOME": str(home)}, timeout=30
+        f"/usr/bin/opencode debug skill --pure > {listing}",
+        cwd=project,
+        env={"HOME": str(home)},
+        timeout=30,
     )
     assert code == 0, output
-    discovered = {skill["name"] for skill in json.loads(output)}
+    discovered = {skill["name"] for skill in json.loads(listing.read_text())}
     assert skill_names <= discovered
 
 

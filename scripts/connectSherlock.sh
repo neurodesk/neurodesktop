@@ -783,7 +783,8 @@ run_foreground_neurodesk_session() {
 function connectSherlock() {
     local LOGIN_NODE="sherlock"
     local JOB_NAME="neurodesktop"
-    local CTRL_SOCKET="${HOME}/.ssh/sherlock_ctrl_$(date +%s)_${RANDOM}"
+    local CTRL_SOCKET
+    CTRL_SOCKET="${HOME}/.ssh/sherlock_ctrl_$(date +%s)_${RANDOM}"
     local NOTEBOOK_PORT
     local TUNNEL_PORT
 
@@ -795,8 +796,7 @@ function connectSherlock() {
     # Start master connection
     # -M: master mode, -f: background, -N: no command, -S: socket path
     if ! start_master_connection_with_password_autofill "$LOGIN_NODE" "$CTRL_SOCKET"; then
-        ssh -M -f -N -S "$CTRL_SOCKET" "$LOGIN_NODE"
-        if [ $? -ne 0 ]; then
+        if ! ssh -M -f -N -S "$CTRL_SOCKET" "$LOGIN_NODE"; then
             echo "Authentication failed."
             return 1
         fi

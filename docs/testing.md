@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-09-21"
+last-reviewed: "2026-10-14"
 ---
 
 # Testing
@@ -31,7 +31,7 @@ single question: **does it need a running container to answer?**
 | --- | --- | --- |
 | Runs on | a repository checkout | inside the built image |
 | Command | `pytest tests/unit` | `pytest /opt/tests/` |
-| Run by | the `Unit tests` workflow, on every push and pull request | the build workflows, once per test profile |
+| Run by | the `Unit tests` workflow, on every push and pull request | PR candidate and release workflows, once per test profile |
 | Covers | repository sources, importable Python modules, shell scripts driven against a temporary `HOME` | mounts, installed kernels, running services, CVMFS, the shipped binaries |
 
 Default to `tests/unit/`. Reach for `tests/container/` only when the assertion
@@ -55,16 +55,29 @@ pytest /opt/tests/         # inside the built image
 
 Running `tests/unit` needs GCC and X11 development headers for the Glass helpers,
 Python 3.12, Node.js 24, `pytest`, `httpx`,
-`traitlets`, Git, curl, `jq`, and `ssh-keygen` (`openssh-client`); see
+`traitlets`, `requests`, `ipykernel`, `websocket-client`, `nibabel`, `numpy`,
+Git, curl, `jq`, and `ssh-keygen` (`openssh-client`); see
 `.github/workflows/unit-tests.yml`. The terminal-creation
 tests stub `curl` but use the real `jq` to parse responses.
 
+The installed workspace-link browser test starts Jupyter directly with a fresh
+home. It sets `NBI_TOUR_CONFIG_PATH` to the image's installed default and checks
+the authenticated capabilities response before clicking launcher tiles. This
+preserves the normal startup configuration that disables NBI's first-run tour.
+The same journey adds real launcher-model entries before clicking Slurm in two
+new launchers. The click waits for the tile to remain visible and unobscured
+as those entries change its position.
+
 The launcher DOM regressions, including T3 iframe file-link capture, reloads,
-disposal, and the T3 Connect panel, also require jsdom and TypeScript. Install them
+disposal, and the T3 Connect panel, also require jsdom and TypeScript.
+ASTRA document tests additionally load the
+real JupyterLab registry, document context, and Lumino widgets. Install them
 in a temporary directory and expose that directory when running the suite:
 
 ```bash
-npm install --prefix /tmp/neurodesk-launcher-tests --no-audit --no-fund jsdom@26.1.0 typescript@5.2.2
+npm install --prefix /tmp/neurodesk-launcher-tests --no-audit --no-fund jsdom@26.1.0 typescript@5.2.2 esbuild@0.28.2 \
+  @jupyterlab/docregistry@4.6.3 @jupyterlab/coreutils@6.6.3 \
+  @jupyterlab/services@7.6.3 @lumino/widgets@2.9.0
 export NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES=/tmp/neurodesk-launcher-tests/node_modules
 pytest tests/unit
 ```
@@ -79,6 +92,9 @@ so a candidate patch cannot reach it through the environment. Isolated mode
 also drops user site packages, so a `--user` install of `pytest` or of its
 `pygments` dependency leaves that subprocess unable to import pytest, and the
 test fails for a reason unrelated to the code under test.
+Use `testlib.repo_path()` to locate repository sources in unit tests. The frozen
+baseline redirects that helper to the candidate checkout; source roots derived
+from the test file's `__file__` instead point into the tests-only snapshot.
 
 Two modules need heavier optional dependencies and skip cleanly when they are
 absent rather than failing a plain checkout; CI installs them, so they always
@@ -92,6 +108,264 @@ run there:
   further packages.
 - `tests/unit/test_astra_view_filebrowser.py` needs `jupyter-server` to drive
   the file-browser server extension.
+
+## Code quality checks
+
+The [code quality workflow](../.github/workflows/code-quality.yml) runs on every
+pull request and push to `main`, independently of unit tests and image acceptance.
+Run the same checks locally from a checkout with Python 3.12 and Node.js 24:
+
+```bash
+python3 -m venv .venv-quality
+. .venv-quality/bin/activate
+python -m pip install -r requirements-quality.txt
+bash scripts/install_quality_tools.sh "$VIRTUAL_ENV/bin"
+npm ci --prefix extensions/neurodesk-launcher --no-audit --no-fund
+npm ci --prefix tools/javascript-lint --no-audit --no-fund
+bash scripts/check_quality.sh all
+```
+
+The binary installer supports Linux amd64 and arm64 and verifies pinned
+SHA-256 checksums. The Dockerfile check also requires Docker with Buildx and
+access to its daemon. Individual gates are available as `python`, `shell`,
+`workflow`, `javascript`, `frontend`, `format`, and `docker` arguments to
+`scripts/check_quality.sh`. Checks report failures without changing source files.
+
+Ruff checks owned Python, including tests and the extensionless provenance CLI.
+Its configuration excludes frozen upstream Python fixtures and notebooks; the
+FSL notebook fixture is covered by its execution test. ShellCheck discovers
+shell files by extension or shebang, including extensionless launchers.
+Actionlint checks workflow expressions and embedded shell commands.
+
+The `javascript` gate checks the syntax of owned scripts and DOM test drivers,
+then lints the same files with ESLint. `javascript_files()` in
+`scripts/check_quality.py` is the only file scope. It excludes `node_modules`,
+the frozen widget-manager excerpts, and the launcher's generated `lib/` and
+`labextension/` output; a directory merely named `lib` or `vendor` elsewhere is
+still checked. ESLint, its rule packages, and
+[`eslint.config.mjs`](../tools/javascript-lint/eslint.config.mjs) live in
+`tools/javascript-lint/` with their own lockfile, so the gate does not depend on
+the launcher's install. The rules cover correctness only: undefined and unused
+names, unreachable code, and unsafe control flow such as fall-through,
+`return` in `finally`, and constant conditions. Formatting is not linted.
+
+The configuration maps each file to the runtime that executes it. `.cjs` files
+are Node CommonJS and `.mjs` files are Node ES modules. Each `.js` file is named
+with its runtime: CommonJS build helpers, the OpenCode ES-module plugin, the
+ASTRA anywidget module, classic browser scripts injected into Guacamole and the
+T3 iframe, and the Firefox preference file. An unlisted `.js` file gets only
+ECMAScript globals, so Node or browser API use fails until the file is
+classified. Globals supplied by a runtime contract are declared next to it, for
+example the `__T3_PREFIX__` value that `web.py` substitutes and the jsdom
+globals that a DOM driver installs. The checks run on untyped JavaScript, so
+they do not prove promise handling. Browser adapters rely on behavioral
+rejection and disposal tests instead. The frontend gate compiles the launcher
+against its locked dependencies and checks typed promise handling with ESLint.
+Compilation runs without the Python-side JupyterLab bundling step.
+
+Formatting and Python typing start with explicit, small scopes. The formatter
+scope is declared in `scripts/check_quality.py`; strict Python typing is declared
+in `mypy.ini`. Expand these scopes in reviewed changes rather than reformatting
+unrelated files to fix a correctness finding.
+
+The strict scope covers the provider credential policy and the T3 package's
+process side: the supervisor, its environment naming, the Jupyter lifecycle
+adapter and the extension entry point. The same modules are in the Ruff
+formatter scope. mypy skips unlisted modules, so a checked module's callers
+are listed with it. The lifecycle adapter's `ExtensionApp` base is typed by
+following only `jupyter_server.extension`, `jupyter_core` and `traitlets`,
+pinned in `requirements-quality.txt`. Remaining limitations:
+
+- The T3 `web` and `connect` adapters are outside the scope, so the lifecycle
+  adapter sees `ConnectManager` and the handler classes as untyped, and those
+  adapters' calls into the supervisor are not checked. They need typed
+  `tornado` and `jupyter_server.base` APIs, and `jupyter-server-proxy` has
+  no type information.
+- `ExtensionApp.log` is an untyped traitlets trait upstream, so the logger
+  passed to the supervisor is not checked. Python embedded in shell heredocs
+is not covered by Ruff and continues to rely on execution tests. Keep exceptions
+local and explain external runtime dependencies such as Jupyter-injected globals.
+
+The workflow uses stable job names so repository rules can require each check.
+Unit and installed image tests remain necessary for authentication, startup
+ordering, filesystem permissions, UI disposal, and installed application behavior.
+
+### Required checks
+
+The `protect-default` repository ruleset (id 24091967) targets the default branch.
+It keeps the deletion and non-fast-forward rules and the organization-admin
+bypass. It also requires these check contexts from GitHub Actions
+(integration id 15368):
+
+| Workflow | Required check context |
+| --- | --- |
+| Code quality | `Python lint and types` |
+| Code quality | `Shell, workflows and formatting` |
+| Code quality | `JavaScript syntax` |
+| Code quality | `Frontend types and promises` |
+| Code quality | `Dockerfile checks` |
+| Unit tests | `pytest tests/unit` |
+| PR image acceptance | `Installed image (amd64)` |
+| PR image acceptance | `Installed image (arm64)` |
+
+Branches need not be up to date with `main` before merging. A missing, pending,
+or cancelled required check blocks a normal merge. Every pull request to `main`
+must emit all eight contexts, so these workflows must not gain workflow-level
+path filters. Renaming a required job also requires updating the ruleset in the
+same change. No merge queue is configured; add a `merge_group` trigger to each
+workflow before enabling one. Read the active configuration back with:
+
+```bash
+gh api repos/neurodesk/neurodesktop/rulesets/24091967
+gh api repos/neurodesk/neurodesktop/rules/branches/main
+```
+
+Disposable PR #1101 verified the gate on 2026-10-14 and was closed unmerged.
+Its `mergeStateStatus` was `BLOCKED` when a real `JavaScript syntax` failure was
+the only unsuccessful required check, while the image checks were in progress,
+and after the image run was cancelled. After the fix and a rerun, all eight
+checks passed and the state became `CLEAN`. Organization admins keep the
+ruleset bypass, so they can still merge past a failing check; agents must not
+use it.
+
+## Behavioral coverage
+
+Checkout tests execute scripts, HTTP handlers, and DOM interactions. Source
+assertions establish packaging contracts only. Expected inputs and outputs come
+from worked examples, documented behavior, or independent upstream fixtures.
+The widget patch CLI uses frozen excerpts from the pinned upstream wheel under
+`tests/fixtures/widget-manager/`; changing its search constants cannot silently
+change those fixtures too.
+
+CVMFS ranking fixtures download real payloads from local HTTP servers. A curl
+wrapper controls only reported transfer times for speed-dependent cases, keeping
+HTTP status, remote addresses, transfer failures, and body validation real. These
+cases verify ranking decisions, not host network performance.
+
+The ASTRA renderer cases run its shipped ESM in jsdom. They cover filtering,
+layout ordering, warnings, selection, scroll retention, and shared-model
+cleanup. The ASTRA HTTP cases start real token-authenticated Jupyter servers at
+`/` and `/user/alice/`, exercise both asset and graph routes, and reject workspace
+escapes through `spec`, `universe`, and `run` request parameters. Document tests
+exercise evidence discovery, save, refresh, retry, stale requests, and disposal
+through the real document factory. The installed browser journey opens the
+example from the file browser, selects a universe and evidence mode, saves
+changed files through Jupyter Contents, and refreshes the graph.
+
+The Bash negative case requires a successful calculation and the specific
+missing-command error in executed cell output. An unrelated nbconvert failure
+fails the test. DataLad creates a local annexed dataset, saves and clones it,
+retrieves exact content, drops the clone's content, and retrieves it again.
+Neither test needs an external dataset or account.
+
+The FSL notebook workflow executes code over the authenticated kernel
+WebSocket and requires a matching successful reply plus idle status. It saves
+and retrieves the executed notebook through Contents, validates code-cell
+outputs, and checks finite, compatible brain and binary-mask images against
+the input. A printed success message cannot hide a failed subprocess. Retrieved counts
+and outputs must match the results captured during execution. The independent
+brain/skull fixture under `tests/container/fixtures/fsl-bet/` is executed by
+`test_fsl_bet_image.py`; it requires known brain tissue to survive and excludes
+the surrounding shell, so a consistent but anatomically wrong mask fails.
+
+Desktop acceptance in
+[test_desktop_application_workflows.py](../tests/container/test_desktop_application_workflows.py)
+checks document
+content after LibreOffice format conversions, saved VS Code editor content,
+a segmentation exported from ITK-SNAP, and FSLeyes pixels from a known volume.
+These tests start their own Xtigervnc display through
+[native_desktop_driver.py](../tests/container/native_desktop_driver.py), so they
+need no running desktop. If the container refuses abstract Unix sockets, the
+driver retries with only the `/tmp/.X11-unix` file socket. It waits for the
+complete newline-terminated `-displayfd` announcement before closing the pipe;
+closing after the digits alone can make Xtigervnc abort its final write.
+Checkout tests cover fragmented announcements, invalid replies, and early EOF.
+The FSLeyes batch check uses the upstream `fsleyes_unfiltered render` entrypoint
+so captured output remains available. It requires exit status zero and the
+expected image pixels. The FSL image build repairs the default `fsleyes` filter's
+stream cleanup. Its [release tests](https://github.com/neurodesk/neurocontainers/blob/main/recipes/fsl/fulltest.yaml)
+check filtering, stdout/stderr restoration, application exit codes, and rendering
+without an X display. [Issue #1012](https://github.com/NeuroDesk/neurodesktop/issues/1012)
+records the shutdown race in older builds that could return 120 after rendering.
+Timed-out module commands terminate their process groups and report captured
+output. Module commands and ITK-SNAP's first window share a 600-second launch
+budget because a cold CVMFS cache must fetch the application container first.
+ITK-SNAP waits for the selected segmentation to render before using its
+save menu; failures include the application's log. Native window discovery and
+focus run in one bounded X server grab so closing application dialogs cannot
+race the focus request. The driver also replaces Xlib's default error and I/O
+error handlers, which would otherwise end pytest with exit status 1 and no
+report; a rejected request or a lost display fails the test with the display
+log. `test_desktops.py` checks that contract by provoking both faults. Closing the
+driver restores the previous process-wide Xlib handlers; a separate display
+checks both handlers after the closed driver has been garbage-collected.
+`NEURODESKTOP_REQUIRE_APPLICATIONS=1` prevents the required science profile
+from silently skipping when CVMFS is disabled.
+
+The RDP test uses the service provisioned by root startup. It runs as the
+notebook user without unrestricted sudo, waits for desktop pixels, then launches
+a command through Guacamole keyboard input and checks its output file. The
+marker lives in a fresh, session-owned temporary directory, so root-run tests
+remain writable by the desktop user and cannot accept a prior result. A login
+screen alone does not satisfy this check. Enable it only in disposable test
+containers with `NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1`. The HPC
+profile skips RDP because unprivileged startup does not provision that service.
+
+Pull-request CI runs the checkout tier and native image acceptance. Release
+workflows also validate installed applications before promotion. Neither a
+version check nor a passing checkout suite proves every shipped application works. The
+[behavior audit](designs/test-behavior-audit-2026-10-03.md) records the coverage
+and remaining acceptance gaps.
+
+## Bundled code-server security regressions
+
+`tests/unit/test_code_server_dependency_security.py` checks the builder's
+security version floors, installed paths, version assertions, and package
+cleanup. `tests/unit/test_audit_image_versions.py` checks npm release reporting
+for both build arguments without network access.
+
+`tests/container/test_code_server_dependency_security.py` loads the installed
+packages through Node.js. The shell-quote cases require a `TypeError` for
+LF, CR, U+2028, and U+2029 after a comment, and execute safe quoted arguments
+through `/bin/sh` to check literal preservation. The proxy-addr cases reject
+trust bypass through a malformed IPv4-mapped IPv6 CIDR. Ordinary IPv4 and
+correctly mapped CIDRs must still resolve forwarded clients only through
+trusted proxies.
+
+## Pull request image acceptance
+
+[PR image acceptance](../.github/workflows/pr-image-validation.yml) builds the
+run SHA on disposable native amd64 and arm64 GitHub runners. Its token has only
+`contents: read`; checkout credentials are not persisted. The candidate stays
+local to each runner, and the workflow neither publishes nor promotes tags.
+Both architectures run the package-only sudo and foreign-UID HPC suites.
+The amd64 runner also provisions CVMFS and runs the `acceptance` profile.
+Before mounting, it uses the image's server-selection CLI to verify and rank
+mirrors from the runner's network. No verified mirror fails this setup step.
+The workflow reports the active CVMFS host and mount statistics after acceptance,
+including failed runs.
+
+```bash
+bash .github/scripts/validate_image_runtime.sh IMAGE acceptance
+```
+
+That profile requires scientific and desktop application workflows, followed
+by [test_niivue_rendering_image.py](../tests/container/test_niivue_rendering_image.py)
+with `NEURODESKTOP_REQUIRE_WEBGL=1`.
+The graphics test starts a private Xtigervnc display without network listeners
+and uses Mesa software rendering in Firefox. It requires volume pixels and
+browser-to-kernel scene updates in a compact viewport. It measures the canvas
+again before dragging and reads scene coordinates from the active notebook's
+kernel through JupyterLab's authenticated execution API. Reads queue behind
+the widget's first-render comm traffic, so the test waits up to 90 seconds for
+a successful kernel reply and idle state, then checks the initial and changed
+coordinates. A kernel that stays busy fails with its reported status. Missing WebGL is a failure. The portable
+widget suite remains available on displayless runners.
+
+The validator installs cleanup before startup, rejects a readiness timeout or
+malformed HTTP status, and propagates application and graphics test failures.
+CVMFS-backed application validation currently applies to amd64; arm64 still
+runs the portable installed-image suite.
 
 ## Image release validation
 
@@ -113,16 +387,55 @@ new attempt builds the candidate tags its validation jobs expect.
 
 Both architectures exercise sudo-disabled, sudo-enabled, package-only sudo,
 and HPC simulation profiles. Only amd64 exercises CVMFS; arm64 CVMFS remains
-excluded until its upstream content and routing are available. WebGL2 coverage
-still depends on the runner graphics capabilities described below.
+excluded until its upstream content and routing are available. PR acceptance
+requires WebGL2 on amd64 through the image's software-rendered display.
 
-The test steps source [the cleanup script](../.github/scripts/image_test_cleanup.sh)
-before startup. Its EXIT trap removes the container and HPC temporary files
-on success, startup failure, security-policy failure, or pytest failure. Cleanup
-preserves the original failure status and fails an otherwise successful job if
-cleanup fails. Checkout coverage is in
-`tests/unit/test_build_neurodesktop_workflow.py` and
-`tests/unit/test_image_test_cleanup.py`.
+Each test step runs [the runtime validation command](../.github/scripts/validate_image_runtime.sh)
+with the candidate image and the `regular`, `hpc`, or `acceptance` profile. The command
+owns startup, readiness polling, security-policy checks, pytest, and cleanup.
+The workflows own candidate pulls and host CVMFS provisioning. CVMFS jobs in
+the production, scheduled test, and development image workflows run the same
+verified mirror selection as PR acceptance before mounting the generated
+configuration. Mounting the static GeoAPI list instead left cold application
+launches at the mercy of whichever mirror it picked; see
+[issue #1021](https://github.com/NeuroDesk/neurodesktop/issues/1021). They fail setup if no mirror passes and
+report the active CVMFS host, mount statistics, and recent client syslog
+entries even after a failed test.
+The steps use `exec` so the command retains the workflow shell's cancellation
+boundary. On its disposable Ubuntu 24.04 runner, PR scientific acceptance
+temporarily disables AppArmor's restriction on unprivileged user namespaces,
+as required for nested Apptainer. An `always()` step restores the original host
+policy after acceptance, including on failure or cancellation.
+
+These jobs also restore the host CVMFS client cache from earlier runs through
+[`cvmfs_ci_cache.sh`](../.github/scripts/cvmfs_ci_cache.sh). A cold cache made
+application tests depend on live mirror throughput, and a run with every mirror
+slow timed out FSLeyes; see
+[issue #1077](https://github.com/NeuroDesk/neurodesktop/issues/1077). The client
+uses the restored directory as an alien cache, which has no quota database to
+disagree with a snapshot. Cache keys roll over each ISO week, so the first run
+of the week fetches live from CVMFS. Runs on `main`, including the daily
+scheduled production build, save the cache that pull requests restore. Other
+refs save only when nothing was restored. The scheduled
+[CVMFS health workflow](../.github/workflows/test-cvmfs.yml) never uses this
+cache and continues to check the live mirrors.
+
+The regular and acceptance profiles poll readiness up to 60 times and fail
+before pytest if polling expires. The HPC profile also checks container
+liveness during its 90 readiness attempts and fails before pytest if the
+container exits or polling expires.
+
+The command installs its EXIT trap before startup or temporary-file allocation.
+The trap removes the container, repairs HPC home ownership, and deletes HPC
+temporary files on success or failure. Cleanup preserves the original failure
+status and fails an otherwise successful job if cleanup fails. Checkout tests
+execute the command with temporary Docker and sleep adapters and check workflow
+calls. Run the focused checks with:
+
+```bash
+pytest tests/unit/test_image_runtime_validation.py tests/unit/test_build_neurodesktop_workflow.py \
+  tests/unit/test_cvmfs_ci_cache.py
+```
 
 ## Shared helpers
 
@@ -155,19 +468,20 @@ non-obvious tiers protect.
 | PyJWT asymmetric/HMAC key confusion | `pytest tests/unit/test_pyjwt_security.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_pyjwt_security.py` |
 | ghapi public credential examples | `pytest tests/unit/test_ghapi_examples.py tests/unit/test_image_packaging_layers.py` | `pytest /opt/tests/test_image_size_hygiene.py` and unchanged image secret scan |
 | CVMFS mirror selection | `pytest tests/unit/test_cvmfs_selection.py tests/unit/test_cvmfs_server_inventory.py` | Run the selector with temporary config/cache paths, then verify a mounted read; see [CVMFS](architecture/cvmfs.md) |
-| CVMFS inventory health | `pytest tests/unit/test_cvmfs_inventory_check.py` | Live mirror workflow |
+| CVMFS inventory health | `pytest tests/unit/test_cvmfs_mount_check.py tests/unit/test_cvmfs_inventory_check.py` | Live mirror workflow |
+| Object-storage inventory health | `pytest tests/unit/test_objectstorage_check.py` | Live `Test Objectstorage` workflow |
 | Nightly JupyterHub probe (terminal creation, FSL commands) | `pytest tests/unit/test_jupyter_terminal_creation.py tests/unit/test_github_workflows.py` | Live `JupyterHub API Testing` workflow |
 | Lmod extension listing default | `pytest tests/unit/test_lmod_extensions.py` | `pytest /opt/tests/test_lmod_avail_extensions.py` |
 | Interactive module banner | `pytest tests/unit/test_module_banner.py` | — |
 | Apptainer NVIDIA auto-configuration | `pytest tests/unit/test_apptainer_nv.py` | — |
 | Access-URL banner (`print_access_url.sh`) | `pytest tests/unit/test_print_access_url.py` | — |
 | Sherlock launcher (`scripts/connectSherlock.sh`) | `pytest tests/unit/test_connect_sherlock.py` | — |
-| T3 Code server, web UI, lifecycle, and packaging | `pytest tests/unit/test_t3_code_server.py tests/unit/test_t3_code_web.py` | `pytest /opt/tests/test_t3_code_server_image.py /opt/tests/test_t3_code_web_image.py` |
+| T3 Code server, web UI, lifecycle, and packaging | `pytest tests/unit/test_t3_code_server.py tests/unit/test_t3_startup_settings.py tests/unit/test_t3_code_web.py` | `pytest /opt/tests/test_t3_code_server_image.py /opt/tests/test_t3_code_web_image.py` |
 | Tailscale binary packaging | `pytest tests/unit/test_tailscale_packaging.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_tailscale_image.py` |
 | Guided T3/Tailscale setup | `pytest tests/unit/test_t3_neurodesk_setup.py tests/unit/test_t3_code_server.py` | `pytest /opt/tests/test_tailscale_image.py /opt/tests/test_t3_code_server_image.py` |
 | Jupyter Server Proxy response limits | `pytest tests/unit/test_jupyter_server_proxy_limits.py` | `pytest /opt/tests/test_jupyter_server_proxy_limits.py` |
-| ASTRA viewer core (adapter, graph, widget, previews) | `pytest tests/unit/test_astra_view_graph.py tests/unit/test_astra_view_packaging.py` | `pytest /opt/tests/test_astra_view_image.py` |
-| File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py` | `pytest /opt/tests/test_astra_view_image.py` |
+| ASTRA viewer core (adapter, graph, widget, previews) | `pytest tests/unit/test_astra_view_graph.py tests/unit/test_astra_view_packaging.py tests/unit/test_astra_view_renderer.py` | `pytest /opt/tests/test_astra_view_image.py` |
+| File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py tests/unit/test_astra_view_http.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | `astra`/`lc` installs, Lightcone skills and hooks | `pytest tests/unit/test_astra_jupyter_ai_tooling.py tests/unit/test_lightcone_cli_patch.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
 | ASTRA run provenance sidecars and the spec agreement check | `pytest tests/unit/test_astra_provenance.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
 | Jupyter AI, ACP personas, collaboration/widget compatibility and server patches | see [below](#jupyter-ai-and-acp-personas) | `pytest /opt/tests/test_astra_jupyter_ai_image.py /opt/tests/test_widget_compatibility_image.py` |
@@ -231,8 +545,9 @@ reporting readiness. A TCP listener alone is insufficient: T3 can accept an
 early request without answering it. The image probe retries short HTTP requests
 within a 20-second deadline and verifies the environment label.
 
-The real-server image test also waits for the Codex provider probe to report
-its CLI version. This exercises T3's login-shell PATH reload and catches
+The real-server image test checks both startup settings policies for fresh
+profiles and exact legacy defaults, then waits for the Codex provider probe
+to report its CLI version. This exercises T3's login-shell PATH reload and catches
 interactive wrapper banners that corrupt the app-server JSON stream. An
 unauthenticated Codex account is acceptable; a protocol decoding error is not.
 
@@ -247,7 +562,11 @@ rather than ACP.
 
 The checkout test drives the process supervisor with a real temporary child
 process. It also checks the pinned package, image cleanup, server extension,
-provider launchers, and direct Docker port settings. The image test starts the
+provider launchers, and direct Docker port settings. Startup settings preparation
+checks provider ownership and update notice suppression together.
+`tests/unit/test_t3_startup_settings.py` covers one JSON read, at most one atomic
+replacement, unchanged bytes on a no-op, and independent update suppression
+when provider data is malformed. The image test starts the
 installed T3 server, loads its native PTY module, and verifies that the build
 removed foreign native payloads and the duplicate Claude binary.
 
@@ -257,6 +576,30 @@ home volume, and confirm that the environment reconnects with its project and
 provider settings intact.
 
 ### Desktop tests
+
+The private VS Code socket check in
+[`tests/container/test_security_policy.py`](../tests/container/test_security_policy.py)
+checks mode `0600` and the private directory before waiting for HTTP 200 from
+`/healthz`. Code-server starts listening before registering its routes, so an
+early HTTP 404 or request timeout is retried within the same 45-second startup
+deadline. Each socket operation uses the time remaining, and fragmented status
+lines are read through their terminating CRLF before checking for HTTP 200.
+A child exit or an expired deadline reports the last request outcome and server
+log.
+The root-run check also requires another UID to be denied access.
+[`pytest tests/unit/test_security_policy_readiness.py`](../tests/unit/test_security_policy_readiness.py)
+exercises delayed route readiness, fragmented responses, request timeouts,
+deadline enforcement, permanent failure, and early process exit with a
+controlled clock.
+The shipped command starts code-server through
+[`config/jupyter/code_server_ready.py`](../config/jupyter/code_server_ready.py),
+which only moves the socket to the proxy's path after `/healthz` returns 200, so
+Jupyter Server Proxy never sees that early 404.
+[`pytest tests/unit/test_code_server_ready.py`](../tests/unit/test_code_server_ready.py)
+runs the launcher against a fake code-server. It covers the hidden socket while
+routes return 404, mode `0600` after the rename, signal forwarding, early exit,
+cleanup of code-server when the launcher is killed, and an orphan from a
+timed-out launch shutting down while the next launch starts.
 
 Desktop smoke tests keep Guacamole, Tomcat, VNC, and credential state in
 temporary per-test homes by default. Tests that need to start the global xrdp
@@ -288,6 +631,10 @@ this check. `tests/unit/test_jupyterlab_url.py` covers accepted document routes
 and rejected navigation targets.
 It also opens the Slurm dashboard through its Neurodesk launcher tile, checking
 its label and icon on two launcher renders against the installed Slurm extension.
+Before its single mouse click, the test waits for the tile's position and size
+to remain stable across animation frames and for its center to be unobscured.
+The click targets the tile's BiDi element reference; the dashboard must then
+become visible without retrying the click.
 This browser test configures `SlurmCommandPaths.squeue_path` as `/usr/bin/true`
 and verifies the HTTP endpoint returns an empty queue using that command,
 so it does not depend on a host Slurm controller in the HPC simulation. The
@@ -388,6 +735,11 @@ second-client replay. Missing-model recovery also requires ``restoredStatus``;
 it will not start a competing restore while the initial restore remains
 pending.
 
+Two kernel-connection regressions run against the installed server. One opens
+a second kernel WebSocket and requires the first to keep receiving replies. The
+other opens a notebook on a fresh kernel, which rejects widget restoration, and
+requires the manager's retries to keep the notebook's kernel WebSocket open.
+
 The browser test requires the bulk control-state reply to survive a five-second
 scheduled kernel delay without entering the per-model fallback. The delay does
 not block the kernel event loop, so concurrent manager requests cannot serialize
@@ -412,9 +764,10 @@ with bounded Firefox and Jupyter Server log tails. The test also requires
 `ipykernel` 6.31.0 as the stable main-shell widget-comm path. When WebGL2 is
 available, the same browser test creates nine NiiVue models, re-executes them,
 and restores them in the second client. It requires nine canvases with no
-permanent ``Loading widget...`` output. It interacts with every canvas and
-requires scene-model traffic to stop once idle. A preload probe counts interval
-callbacks created by the shared ipyniivue asset, so the upstream 30 ms polling
+permanent ``Loading widget...`` output. It interacts with the first,
+volume-bearing canvas and requires scene-model traffic to stop once idle. A
+preload probe counts interval callbacks created by the shared ipyniivue asset,
+so the upstream 30 ms polling
 loop fails even when repeated scene comparisons produce no model delta. The
 ipyniivue unit test moves the installed 5 MB frontend into one content-hashed
 JupyterLab asset, keeps model state inside a factory-created definition, and
@@ -454,6 +807,12 @@ build rather than reaching a user. The image tier is otherwise intentionally
 small — the installed package and pins, the real vendored frontend, and the
 file-browser server extension.
 
+The document browser test checks the refreshed title, trust badge, selected
+universe, Evidence mode, and SVG nodes together in one DOM evaluation. A save
+can deliver a delayed document notification after the manual refresh completes,
+so the viewer can briefly show its loading state again. The test polls for the
+complete result within its existing deadline and sends the Refresh click once.
+
 ### Nightly JupyterHub probe
 
 `.github/workflows/jupyter_test_main.yml` drives each live instance over the
@@ -468,6 +827,26 @@ carry no terminal name, and it fails immediately on a rejection that will not
 change, such as HTTP 403. `TERMINAL_CREATE_ATTEMPTS` and
 `TERMINAL_CREATE_DELAY` bound the wait. The unit tier drives the helper
 against a stubbed `curl`, so it needs no network and no listening socket.
+
+The valid-image FSL operation is submitted by
+`.github/workflows/run_fsl_terminal_probe.sh`. It keeps the original WebSocket
+stream, waits for an explicit completion marker, and takes its authoritative
+output snapshot only after the socket and input writer have stopped. This
+preserves a final stdout frame delivered as the socket closes and reports an
+explicit remote exit status when image creation or `fslmaths` fails. Checkout
+tests drive the helper with a fake WebSocket client, including completion in
+the connection's final frames, echoed input, failures, timeouts, and process
+cleanup. Run `pytest tests/unit/test_github_workflows.py` for these regressions.
+The default wait remains 24 polls at five seconds with a 120-second input
+hold-open; `FSL_PROBE_ATTEMPTS`, `FSL_PROBE_DELAY`, and `FSL_PROBE_HOLD_OPEN`
+allow shorter waits in checkout tests. When stopping the WebSocket client and
+input writer, the helper sends TERM and escalates to KILL after
+`FSL_PROBE_STOP_TIMEOUT` seconds per child (default 10; `0` kills
+immediately), so a child that ignores TERM cannot hang the probe. All four
+values are non-negative integers read as decimal, even with leading zeros.
+Checkout tests run the helper in its own process group and kill the whole
+group on timeout, so fake clients cannot outlive the test. Both success and
+completion markers are required. These tests do not establish live Hub or FSL runtime health.
 
 The start and cleanup steps read the default server's state through
 `.github/workflows/jupyterhub_server_state.sh`, which parses the Hub's user
@@ -511,6 +890,20 @@ Each execution has a 600-second timeout to allow a cold Apptainer launch.
 The Slurm batch test waits for successful job completion and verifies a file
 written by the job. A 180-second deadline bounds queueing and execution, and
 cleanup cancels the submitted job if needed.
+
+The Slurm environment-retrieval regression completes a small job, submits a
+larger job with an `afterok` dependency, then completes another small job on
+the same worker. It covers `--export=NONE`, selected-variable exports, and
+explicit `--get-user-env`, checks job ID, hostname, process identity and supplied
+variables in the output, and fails immediately if the worker exits. Requests
+use 1 CPU/1 GB followed by 4 CPUs/12 GB when the configured node has capacity;
+smaller test nodes use their configured limits. Run it in a Docker container
+without `CAP_SYS_ADMIN` under the default seccomp policy to cover the denied
+PID-namespace path. Privileged image checks alone cannot exercise that denial.
+`bash scripts/verify_slurm_image.sh IMAGE` creates a disposable container with
+default Docker permissions, bootstraps local Slurm as root, runs the Slurm tests
+as the notebook user, and removes the container on success or failure. PR image
+acceptance runs this check on both amd64 and native arm64 candidates.
 
 Both `/home/jovyan` and `/neurodesktop-storage` are required writable directories
 in the Docker and HPC simulation profiles. Each receives one complete CRUD test
@@ -628,20 +1021,87 @@ docker rm -f neurodesktop-hpc   # or neurodesktop-hpctest
 rm -rf /tmp/neurodesktop-hpc-home.* /tmp/neurodesktop-hpc-passwd.* /tmp/neurodesktop-hpc-group.*
 ```
 
+## VirtualGL and GPU rendering
+
+Run checkout diagnostics and packaging checks with:
+
+```bash
+pytest tests/unit/test_virtualgl.py tests/unit/test_audit_image_versions.py
+```
+
+The installed checks in `tests/container/test_virtualgl.py` execute the shipped
+VirtualGL version command, diagnostic help, and Mesa rendering in a real
+TigerVNC display, both directly and through VirtualGL's EGL interposer.
+Ordinary CI does not require a GPU. For a GPU worker, run:
+
+```bash
+docker exec -e NEURODESKTOP_REQUIRE_GPU=1 -e VGL_DISPLAY=egl0 \
+  -u jovyan YOUR_RUNNING_GPU_CONTAINER \
+  pytest /opt/tests/test_virtualgl.py -v
+```
+
+The container must already have an allocated NVIDIA GPU and injected graphics
+libraries. `NEURODESKTOP_REQUIRE_GPU=1` selects the hardware acceptance test;
+missing devices, failed EGL, or a software renderer fail rather than skip.
+The test creates its own virtual display and uses the requested EGL device.
+It proves image-local rendering only. Repeat rendering and application checks
+inside the rebuilt FreeSurfer container after the
+[tool integration changes](designs/gpu-tool-integration.md), and verify
+assigned-device isolation on a multi-GPU worker. See the
+[assessment](designs/gpu-desktop-sessions.md#proposed-acceptance-gates) for
+application, transport, performance, and platform coverage.
+
 ## Startup performance regressions
+
+The menu-update and startup-ownership checks run with:
+
+```bash
+pytest tests/unit/test_neurodesk_update.py tests/unit/test_startup_security.py
+```
+
+They execute consecutive updates against a local Git origin, check launcher
+restoration after success and failure, reject root and read-only updates, and
+cover ownership migration without following symbolic or hard links.
+`tests/container/test_security_policy.py` checks the installed menu entry,
+checkout ownership, root refusal, and package-only sudo restrictions.
 
 Run the startup checks on a checkout:
 
 ```bash
-pytest tests/unit/test_startup_batching.py tests/unit/test_wait_for_jupyter.py tests/unit/test_nbi_opencode_sync.py tests/unit/test_startup_performance_fixes.py
+pytest tests/unit/test_startup_batching.py tests/unit/test_wait_for_jupyter.py tests/unit/test_nbi_opencode_sync.py tests/unit/test_startup_performance_fixes.py tests/unit/test_detect_resource_limits.py
 ```
 
 These tests cover workspace quarantine in a single Python invocation, default
 restoration and ownership repair, SSH permission inheritance, NBI boot setup
 without live refresh, custom Jupyter ports and base paths, and independent
-CVMFS and Slurm execution. HTTP checks use temporary localhost servers.
+CVMFS and Slurm execution. Resource-limit detection is sourced from the
+helper against temporary cgroup v2 and v1 trees, with Slurm allocation
+overrides and malformed or missing limit files. HTTP checks use temporary localhost servers.
 Readiness deadlines run on a controlled clock instead of real elapsed
 time, so scheduling delay cannot decide whether the helper probes at all.
 See the [startup flow](architecture.md#container-initialization-flow) for
 runtime behavior. Built-image service checks remain in
 `tests/container/test_startup_modes.py`.
+
+## FreeBrowse document viewer
+
+`pytest tests/unit/test_freebrowse.py` executes frozen fork integration
+fixtures and executes the document factory and context menu. It checks default
+viewer registration, embedded document tabs, rename/disposal behavior,
+authenticated contents-service downloads, temporary blob URLs, NIfTI and
+NiiVue document routing, and special filenames
+under standalone and JupyterHub base paths. Real Jupyter HTTP tests verify
+viewer assets require authentication, GET/HEAD work, and traversal is rejected.
+The fixtures come from the `FREEBROWSE_REF` commit in the Dockerfile.
+JupyterHub 6.0.1 cookie-authentication tests exercise its real XSRF decision
+through HTTP for same-origin module/style requests, invalid and absent cookies,
+cross-site and missing metadata, mutations, and traversal. Only the Hub token
+lookup is replaced. CI installs `jupyterhub==6.0.1` for this regression.
+The installed-image suite repeats those cases against the shipped handler in
+[`test_freebrowse_hub_image.py`](../tests/container/test_freebrowse_hub_image.py).
+
+The graphics acceptance profile also runs
+[`test_freebrowse_image.py`](../tests/container/test_freebrowse_image.py).
+It double-clicks a generated volume with special characters in its filename,
+checks the default factory opens an embedded FreeBrowse tab without a popup, and checks rendered
+image pixels under `/` and `/user/alice/`.

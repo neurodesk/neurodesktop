@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from pathlib import Path
 import stat
 import sys
 from types import SimpleNamespace
@@ -236,8 +235,8 @@ def test_extension_package_and_image_install_contract():
         / "jupyter-config/jupyter_server_config.d/neurodesk_t3_code.json"
     ).read_text(encoding="utf-8")
 
-    assert 'ARG T3_CODE_VERSION="0.0.42"' in dockerfile
-    assert package["dependencies"]["t3"] == "0.0.42"
+    assert 'ARG T3_CODE_VERSION="0.0.45"' in dockerfile
+    assert package["dependencies"]["t3"] == "0.0.45"
     # The self-contained build bundles its dependencies, so nothing is
     # compiled, no install script runs, and one platform build is installed.
     assert "npm install --omit=dev --ignore-scripts" in dockerfile
@@ -247,12 +246,12 @@ def test_extension_package_and_image_install_contract():
     )[0]
     assert "ls -d /opt/t3-code/node_modules/@t3code/* | wc -l" in dockerfile
     assert "/client/index.html" in dockerfile
-    assert "node-pty/build/Release/pty.node" in dockerfile
+    assert "node-pty/prebuilds/linux-$(node -p process.arch)/pty.node" in dockerfile
     assert "apt-install-retry libatomic1" in dockerfile
     assert "/opt/t3-code/node_modules/.bin/t3" in dockerfile
     assert "extensions/t3-code-server" in dockerfile
     assert '"neurodesk_t3_code": true' in config
-    assert "_start_jupyter_server_extension(self, _serverapp)" in server_extension
+    assert "async def _start_jupyter_server_extension(self, _serverapp" in server_extension
 
 
 def test_convenience_docker_run_publishes_the_direct_pairing_port():
@@ -366,9 +365,9 @@ def test_opencode_launcher_prefers_the_environment_over_the_shell_profile(tmp_pa
 
 def test_provider_default_survives_login_path_hydration_without_overwriting_settings(tmp_path):
     from types import SimpleNamespace
-    from neurodesk_t3_code.supervisor import seed_provider_settings
+    from neurodesk_t3_code.supervisor import prepare_startup_settings
     policy = SimpleNamespace(base_dir=tmp_path / '.t3', provider_bin=tmp_path / 'image-providers')
-    seed_provider_settings(policy)
+    prepare_startup_settings(policy)
     path = policy.base_dir / 'userdata/settings.json'
     settings = json.loads(path.read_text())
     assert settings['providerInstances']['codex']['config']['binaryPath'] == str(policy.provider_bin / 'codex')
@@ -377,10 +376,10 @@ def test_provider_default_survives_login_path_hydration_without_overwriting_sett
     settings['theme'] = 'custom'
     path.write_text(json.dumps(settings))
     original = path.read_bytes()
-    seed_provider_settings(policy)
+    prepare_startup_settings(policy)
     assert path.read_bytes() == original
     path.write_text('{invalid')
-    seed_provider_settings(policy)
+    prepare_startup_settings(policy)
     assert path.read_text() == '{invalid'
 
 
@@ -390,11 +389,13 @@ def test_opencode_is_seeded_enabled_because_t3_ships_that_driver_off(tmp_path):
     The flag belongs on the instance envelope: T3 folds any in-config flag into
     the envelope on load, and an explicit envelope flag beats the driver default.
     """
-    from neurodesk_t3_code.supervisor import seed_provider_settings
+    from neurodesk_t3_code.supervisor import prepare_startup_settings
     policy = SimpleNamespace(base_dir=tmp_path, provider_bin=tmp_path / "providers")
-    seed_provider_settings(policy)
+    prepare_startup_settings(policy)
     path = tmp_path / "userdata/settings.json"
-    instances = json.loads(path.read_text())["providerInstances"]
+    settings = json.loads(path.read_text())
+    assert settings["enableProviderUpdateChecks"] is False
+    instances = settings["providerInstances"]
     assert instances["opencode"] == {
         "driver": "opencode",
         "enabled": True,
@@ -406,7 +407,7 @@ def test_opencode_is_seeded_enabled_because_t3_ships_that_driver_off(tmp_path):
     }
     assert path.stat().st_mode & 0o077 == 0
     before = path.read_bytes()
-    seed_provider_settings(policy)
+    prepare_startup_settings(policy)
     assert path.read_bytes() == before
 
 
@@ -417,12 +418,12 @@ def test_opencode_seed_ignores_t3s_own_default_off_bookkeeping(tmp_path, bookkee
     Reading that as a user decision would make the seed a no-op on the
     persistent `~/.t3` every existing container already carries.
     """
-    from neurodesk_t3_code.supervisor import seed_provider_settings
+    from neurodesk_t3_code.supervisor import prepare_startup_settings
     policy = SimpleNamespace(base_dir=tmp_path, provider_bin=tmp_path / "providers")
     path = tmp_path / "userdata/settings.json"
     path.parent.mkdir()
     path.write_text(json.dumps({"providers": {"opencode": bookkeeping}}))
-    seed_provider_settings(policy)
+    prepare_startup_settings(policy)
     settings = json.loads(path.read_text())
     assert settings["providerInstances"]["opencode"]["enabled"] is True
     assert settings["providers"] == {"opencode": bookkeeping}
@@ -438,7 +439,7 @@ def test_opencode_seed_ignores_t3s_own_default_off_bookkeeping(tmp_path, bookkee
     {"providers": {"opencode": {"binaryPath": "PROVIDER_BIN/opencode"}}},
 ])
 def test_opencode_seed_leaves_a_configured_opencode_alone(tmp_path, existing):
-    from neurodesk_t3_code.supervisor import seed_provider_settings
+    from neurodesk_t3_code.supervisor import prepare_startup_settings
     policy = SimpleNamespace(base_dir=tmp_path, provider_bin=tmp_path / "providers")
     path = tmp_path / "userdata/settings.json"
     path.parent.mkdir()
@@ -448,7 +449,7 @@ def test_opencode_seed_leaves_a_configured_opencode_alone(tmp_path, existing):
         json.dumps(existing).replace("PROVIDER_BIN", str(policy.provider_bin))
     )
     path.write_text(json.dumps(existing))
-    seed_provider_settings(policy)
+    prepare_startup_settings(policy)
     settings = json.loads(path.read_text())
     assert settings.get("providers", {}) == existing.get("providers", {})
     assert settings["providerInstances"] == {
@@ -469,12 +470,12 @@ def test_opencode_seed_leaves_a_configured_opencode_alone(tmp_path, existing):
 ])
 def test_provider_seed_preserves_user_configuration(tmp_path, existing):
     """A user-owned Codex stays untouched while an absent OpenCode still seeds."""
-    from neurodesk_t3_code.supervisor import seed_provider_settings
+    from neurodesk_t3_code.supervisor import prepare_startup_settings
     policy = SimpleNamespace(base_dir=tmp_path, provider_bin=tmp_path / "providers")
     path = tmp_path / "userdata/settings.json"
     path.parent.mkdir()
     path.write_text(json.dumps(existing))
-    seed_provider_settings(policy)
+    prepare_startup_settings(policy)
     settings = json.loads(path.read_text())
     assert settings.get("providers", {}) == existing.get("providers", {})
     assert settings["providerInstances"] == {
@@ -491,18 +492,20 @@ def test_provider_seed_preserves_user_configuration(tmp_path, existing):
     [],
 ])
 def test_provider_seed_writes_nothing_over_unreadable_settings(tmp_path, existing):
-    from neurodesk_t3_code.supervisor import seed_provider_settings
+    from neurodesk_t3_code.supervisor import prepare_startup_settings
     policy = SimpleNamespace(base_dir=tmp_path, provider_bin=tmp_path / "providers")
     path = tmp_path / "userdata/settings.json"
     path.parent.mkdir()
+    if isinstance(existing, dict):
+        existing = {**existing, "enableProviderUpdateChecks": False}
     path.write_text(json.dumps(existing))
     before = path.read_bytes()
-    seed_provider_settings(policy)
+    prepare_startup_settings(policy)
     assert path.read_bytes() == before
 
 
 def test_provider_seed_promotes_only_exact_previous_default(tmp_path):
-    from neurodesk_t3_code.supervisor import seed_provider_settings
+    from neurodesk_t3_code.supervisor import prepare_startup_settings
     policy = SimpleNamespace(base_dir=tmp_path, provider_bin=tmp_path / "providers")
     default = {"binaryPath": str(policy.provider_bin / "codex")}
     other = {"driver": "claudeAgent", "enabled": False}
@@ -513,50 +516,62 @@ def test_provider_seed_promotes_only_exact_previous_default(tmp_path):
     path = tmp_path / "userdata/settings.json"
     path.parent.mkdir()
     path.write_text(json.dumps(settings))
-    seed_provider_settings(policy)
+    prepare_startup_settings(policy)
     actual = json.loads(path.read_text())
-    assert actual == {**settings, "providerInstances": {
+    assert actual == {**settings, "enableProviderUpdateChecks": False, "providerInstances": {
         "claudeAgent": other, "codex": {"driver": "codex", "config": default},
         "opencode": opencode}}
     assert path.stat().st_mode & 0o077 == 0
     before = path.read_bytes()
-    seed_provider_settings(policy)
+    prepare_startup_settings(policy)
     assert path.read_bytes() == before
 
+    settings["enableProviderUpdateChecks"] = False
     settings["providers"]["codex"]["enabled"] = False
     settings["providerInstances"]["opencode"] = opencode
     path.write_text(json.dumps(settings))
     before = path.read_bytes()
-    seed_provider_settings(policy)
+    prepare_startup_settings(policy)
     assert path.read_bytes() == before
 
 
 @pytest.mark.parametrize("original", [{}, {"enableProviderUpdateChecks": True},
                                      {"enableProviderUpdateChecks": False}])
 def test_update_notices_disabled_without_changing_provider_settings(tmp_path, original):
-    from neurodesk_t3_code.supervisor import disable_update_notifications
-    policy = SimpleNamespace(base_dir=tmp_path)
+    from neurodesk_t3_code.supervisor import prepare_startup_settings
+    policy = SimpleNamespace(base_dir=tmp_path, provider_bin=tmp_path / "providers")
     path = tmp_path / "userdata/settings.json"
     path.parent.mkdir()
-    original["providerInstances"] = {"custom": {"driver": "codex", "enabled": False}}
+    original = {**original, "providerInstances": {
+        "custom": {"driver": "codex", "enabled": False},
+        "custom-opencode": {"driver": "opencode", "config": {"binaryPath": "/custom/opencode"}},
+    }}
     path.write_text(json.dumps(original))
-    disable_update_notifications(policy)
+    prepare_startup_settings(policy)
     assert json.loads(path.read_text()) == {**original, "enableProviderUpdateChecks": False}
     before = path.read_bytes()
-    disable_update_notifications(policy)
+    prepare_startup_settings(policy)
     assert path.read_bytes() == before
 
 
 def test_update_notice_policy_preserves_malformed_settings(tmp_path):
-    from neurodesk_t3_code.supervisor import disable_update_notifications
-    policy = SimpleNamespace(base_dir=tmp_path)
-    disable_update_notifications(policy)
+    from neurodesk_t3_code.supervisor import prepare_startup_settings
+    policy = SimpleNamespace(base_dir=tmp_path, provider_bin=tmp_path / "providers")
+    prepare_startup_settings(policy)
     path = tmp_path / "userdata/settings.json"
-    assert json.loads(path.read_text()) == {"enableProviderUpdateChecks": False}
+    assert json.loads(path.read_text()) == {
+        "enableProviderUpdateChecks": False,
+        "providerInstances": {
+            "codex": {"driver": "codex",
+                      "config": {"binaryPath": str(policy.provider_bin / "codex")}},
+            "opencode": {"driver": "opencode", "enabled": True,
+                         "config": {"binaryPath": str(policy.provider_bin / "opencode")}},
+        },
+    }
     assert path.stat().st_mode & 0o077 == 0
     for content in ("{invalid", "[]"):
         path.write_text(content)
-        disable_update_notifications(policy)
+        prepare_startup_settings(policy)
         assert path.read_text() == content
 
 

@@ -19,7 +19,7 @@ import re
 from pathlib import Path
 import signal
 import socket
-from typing import Mapping
+from collections.abc import Mapping
 
 
 DEFAULT_EXECUTABLE = Path("/opt/t3-code/node_modules/.bin/t3")
@@ -30,7 +30,7 @@ DEFAULT_PORT = 3773
 def relay_tunnel_limit(output: bytes) -> int | None:
     """Extract only the quota from the pinned relay's public error message."""
     match = re.search(
-        rb'Relay managed tunnel limit reached: this account allows at most ([0-9]{1,6}) tunnels',
+        rb"Relay managed tunnel limit reached: this account allows at most ([0-9]{1,6}) tunnels",
         output,
     )
     return int(match[1]) if match else None
@@ -116,9 +116,7 @@ def policy_from_environment(
         raise ConfigError("NEURODESKTOP_T3_CODE_EXECUTABLE is not executable")
 
     provider_bin = _absolute_directory(
-        environ.get(
-            "NEURODESKTOP_T3_CODE_PROVIDER_BIN", str(DEFAULT_PROVIDER_BIN)
-        ),
+        environ.get("NEURODESKTOP_T3_CODE_PROVIDER_BIN", str(DEFAULT_PROVIDER_BIN)),
         "NEURODESKTOP_T3_CODE_PROVIDER_BIN",
     )
     return Policy(
@@ -164,29 +162,33 @@ class ProviderSeed:
     disabled_by_default: bool = False
     # Legacy ``providers.<driver>`` blobs that hold no user configuration.
     # T3 writes ``{"enabled": false}`` for its own default-off drivers.
-    inert_legacy: tuple[dict, ...] = ()
+    inert_legacy: tuple[Mapping[str, object], ...] = ()
     # Earlier images wrote this driver's default into ``providers.<driver>``.
     # Only such a driver can own an entry matching the config seeded below;
     # for every other driver an identical entry was authored by the user.
     promotes_image_default: bool = False
 
-    def config(self, provider_bin: Path) -> dict:
+    def config(self, provider_bin: Path) -> dict[str, str]:
         return {"binaryPath": str(provider_bin / self.driver)}
 
-    def instance(self, provider_bin: Path) -> dict:
-        instance = {"driver": self.driver}
+    def instance(self, provider_bin: Path) -> dict[str, object]:
+        instance: dict[str, object] = {"driver": self.driver}
         if self.disabled_by_default:
             instance["enabled"] = True
         instance["config"] = self.config(provider_bin)
         return instance
 
     def is_user_owned(
-        self, instances: dict, providers: dict, provider_bin: Path
+        self,
+        instances: Mapping[str, object],
+        providers: Mapping[str, object],
+        provider_bin: Path,
     ) -> bool:
         if self.driver in instances:
             return True
         if any(
-            instance.get("driver") == self.driver for instance in instances.values()
+            isinstance(instance, dict) and instance.get("driver") == self.driver
+            for instance in instances.values()
         ):
             return True
         if self.driver not in providers:
@@ -205,18 +207,12 @@ PROVIDER_SEEDS = (
 )
 
 
-def seed_provider_settings(policy: Policy) -> None:
-    """Give T3 the image's own agent launchers on a profile that lacks them.
-
-    Codex would otherwise follow a login-shell PATH refresh to an obsolete
-    ``~/.local/bin/codex``, and T3 ships the OpenCode driver disabled, so its
-    instance carries an explicit flag. Explicit paths and provider instances
-    remain user-owned. Write atomically before T3 starts watching its settings
-    file.
-    """
+def prepare_startup_settings(policy: Policy) -> None:
+    """Apply provider and update policies with at most one atomic replacement."""
     directory = policy.base_dir / "userdata"
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     target = directory / "settings.json"
+    settings: object
     try:
         settings = json.loads(target.read_text())
     except FileNotFoundError:
@@ -225,25 +221,30 @@ def seed_provider_settings(policy: Policy) -> None:
         return  # Let T3 report malformed user settings without replacing them.
     if not isinstance(settings, dict):
         return
+    changed = False
     instances = settings.get("providerInstances", {})
     providers = settings.get("providers", {})
-    if not isinstance(instances, dict) or not isinstance(providers, dict):
-        return
-    # A driver is unreadable from a malformed instance, so seed nothing.
-    if any(not isinstance(instance, dict) for instance in instances.values()):
-        return
-    seeded = {
-        seed.driver: seed.instance(policy.provider_bin)
-        for seed in PROVIDER_SEEDS
-        if not seed.is_user_owned(instances, providers, policy.provider_bin)
-    }
-    if not seeded:
-        return
-    settings["providerInstances"] = {**instances, **seeded}
-    _write_settings(directory, settings)
+    if (
+        isinstance(instances, dict)
+        and isinstance(providers, dict)
+        and all(isinstance(instance, dict) for instance in instances.values())
+    ):
+        seeded = {
+            seed.driver: seed.instance(policy.provider_bin)
+            for seed in PROVIDER_SEEDS
+            if not seed.is_user_owned(instances, providers, policy.provider_bin)
+        }
+        if seeded:
+            settings["providerInstances"] = {**instances, **seeded}
+            changed = True
+    if settings.get("enableProviderUpdateChecks") is not False:
+        settings["enableProviderUpdateChecks"] = False
+        changed = True
+    if changed:
+        _write_settings(directory, settings)
 
 
-def _write_settings(directory: Path, settings: dict) -> None:
+def _write_settings(directory: Path, settings: Mapping[str, object]) -> None:
     target = directory / "settings.json"
     descriptor, name = tempfile.mkstemp(prefix=".settings-", dir=directory)
     try:
@@ -256,25 +257,7 @@ def _write_settings(directory: Path, settings: dict) -> None:
             os.unlink(name)
 
 
-def disable_update_notifications(policy: Policy) -> None:
-    """Image releases own agent updates; suppress automatic provider notices."""
-    directory = policy.base_dir / "userdata"
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    try:
-        settings = json.loads((directory / "settings.json").read_text())
-    except FileNotFoundError:
-        settings = {}
-    except (ValueError, UnicodeError):
-        return
-    if not isinstance(settings, dict) or settings.get("enableProviderUpdateChecks") is False:
-        return
-    settings["enableProviderUpdateChecks"] = False
-    _write_settings(directory, settings)
-
-
-def server_environment(
-    policy: Policy, environ: Mapping[str, str]
-) -> dict[str, str]:
+def server_environment(policy: Policy, environ: Mapping[str, str]) -> dict[str, str]:
     """Give T3 quiet, image-owned providers and private persistent state."""
 
     # A parent T3 desktop or harness exports service-launcher IPC and bearer
@@ -307,7 +290,8 @@ def server_environment(
         }
     )
     from .naming import environment_label
-    child['NEURODESKTOP_T3_CODE_LABEL'] = environment_label(policy, environ)
+
+    child["NEURODESKTOP_T3_CODE_LABEL"] = environment_label(policy, environ)
     return child
 
 
@@ -342,12 +326,12 @@ class T3Supervisor:
         self._task: asyncio.Task[None] | None = None
         self._ready = asyncio.Event()
         self.connect_tunnel_limit: int | None = None
-        self._output_reader: asyncio.Task | None = None
+        self._output_reader: asyncio.Task[None] | None = None
 
-    async def _read_output(self, stream) -> None:
+    async def _read_output(self, stream: asyncio.StreamReader) -> None:
         # Drain continuously so a noisy child cannot block. Raw output is never
         # persisted or logged; retain only a bounded overlap for split messages.
-        overlap = b''
+        overlap = b""
         while chunk := await stream.read(4096):
             output = overlap + chunk
             limit = relay_tunnel_limit(output)
@@ -399,8 +383,7 @@ class T3Supervisor:
                 self.state = ServiceState.STARTING
                 self.policy.base_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
                 try:
-                    seed_provider_settings(self.policy)
-                    disable_update_notifications(self.policy)
+                    prepare_startup_settings(self.policy)
                     self.connect_tunnel_limit = None
                     self._process = await asyncio.create_subprocess_exec(
                         *server_command(self.policy),
@@ -421,7 +404,11 @@ class T3Supervisor:
                         self.state = ServiceState.BACKING_OFF
                         await asyncio.sleep(min(2 ** (failures - 1), 8))
                     continue
-                self._output_reader = asyncio.create_task(self._read_output(self._process.stdout))
+                # stdout=PIPE above guarantees a reader.
+                assert self._process.stdout is not None
+                self._output_reader = asyncio.create_task(
+                    self._read_output(self._process.stdout)
+                )
                 self.pid = self._process.pid
                 if await self._wait_for_listener():
                     self.state = ServiceState.READY
@@ -485,7 +472,8 @@ class T3Supervisor:
         try:
             async with asyncio.timeout(0.5):
                 reader, writer = await asyncio.open_connection(
-                    self.policy.readiness_host, self.policy.port,
+                    self.policy.readiness_host,
+                    self.policy.port,
                 )
                 writer.write(
                     b"GET /.well-known/t3/environment HTTP/1.1\r\n"
@@ -512,7 +500,7 @@ class T3Supervisor:
                 asyncio.open_connection(self.policy.readiness_host, self.policy.port),
                 timeout=0.25,
             )
-        except (OSError, asyncio.TimeoutError):
+        except (TimeoutError, OSError):
             return False
         writer.close()
         with suppress(OSError):
@@ -529,7 +517,7 @@ class T3Supervisor:
             os.killpg(process.pid, signal.SIGTERM)
         try:
             await asyncio.wait_for(process.wait(), timeout=10)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             with suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
             await process.wait()

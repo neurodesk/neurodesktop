@@ -1,4 +1,5 @@
 import os
+import shlex
 import subprocess
 
 import yaml
@@ -14,7 +15,7 @@ IMAGE_TEST_WORKFLOWS = (
 )
 CVMFS_ACTION = (
     "cvmfs-contrib/github-action-cvmfs@"
-    "10197e000cc0add8e54ac4fb73d3ed44e2de72b4 # v5.5"
+    "72f2a8d366043978d6aebee154bc9ed321c2f2a8 # v5.6"
 )
 
 
@@ -118,10 +119,6 @@ def test_image_workflows_exercise_package_policy_and_second_uid_isolation():
         profiles = matrix.get("include", matrix.get("profile"))
         assert any(profile["grant_sudo"] == "packages" for profile in profiles)
         assert any(profile["grant_sudo"] == "yes" for profile in profiles)
-        commands = "\n".join(step.get("run", "") for step in job["steps"])
-        grant = "matrix.profile.grant_sudo" if "profile" in matrix else "matrix.grant_sudo"
-        assert 'if [ "${{ ' + grant + ' }}" = "packages" ]; then' in commands
-        assert "docker exec -u root neurodesktop-test pytest /opt/tests/test_security_policy.py -v" in commands
 
 
 def test_production_build_updates_the_date_tag_without_deleting_it():
@@ -199,16 +196,26 @@ def test_every_image_flavor_runs_native_arm64_runtime_checks():
         assert 'blacksmith' in job['runs-on']
 
 
-def test_image_cleanup_is_installed_before_each_runtime_profile_starts():
-    """Ensure startup failures reach cleanup, even before pytest can run."""
+def test_every_image_flavor_invokes_the_runtime_validator_with_its_profile():
     for path in IMAGE_TEST_WORKFLOWS:
-        job = yaml.safe_load(path.read_text())["jobs"]["test-image"]
-        tests = [step["run"] for step in job["steps"]
+        workflow = yaml.safe_load(path.read_text())
+        job = workflow["jobs"]["test-image"]
+        tests = [step for step in job["steps"]
                  if step.get("name", "").startswith("Test container (")]
         assert len(tests) == 2
-        for command in tests:
-            assert command.splitlines()[0] == "source .github/scripts/image_test_cleanup.sh"
-            assert "test_rc=$?" not in command
+        assert "shell" not in workflow.get("defaults", {}).get("run", {})
+        assert "shell" not in job.get("defaults", {}).get("run", {})
+        assert all("shell" not in step for step in tests)
+        assert [step["if"] for step in tests] == [
+            "${{ ! matrix.profile.hpc_mode }}", "${{ matrix.profile.hpc_mode }}",
+        ]
+        commands = [shlex.split(step["run"].replace("\\\n", " ")) for step in tests]
+        assert commands == [
+            ["exec", "bash", ".github/scripts/validate_image_runtime.sh", "$IMAGE_REF", "regular",
+             "${{ matrix.profile.cvmfs_disable }}", "${{ matrix.profile.grant_sudo }}",
+             "${{ matrix.profile.needs_cvmfs }}"],
+            ["exec", "bash", ".github/scripts/validate_image_runtime.sh", "$IMAGE_REF", "hpc"],
+        ]
 
 
 def test_image_version_and_publish_tag_share_one_build_timestamp():
@@ -274,3 +281,31 @@ fi
 
             assert result.returncode == 0, (path.name, job, result.stderr)
             assert calls.read_text() == "pull ghcr.io/neurodesk/candidate:run-123-1-amd64\n" * 2
+
+
+def test_cvmfs_image_tests_report_the_active_mirror_after_a_failure(tmp_path):
+    calls = tmp_path / "calls"
+    for name in ("sudo", "cvmfs_config"):
+        shim = tmp_path / name
+        shim.write_text('#!/usr/bin/env bash\nprintf \'%s\\n\' "$*" >> "$CALLS"\n')
+        shim.chmod(0o755)
+    for path in IMAGE_TEST_WORKFLOWS:
+        steps = yaml.safe_load(path.read_text())["jobs"]["test-image"]["steps"]
+        names = [step.get("name") for step in steps]
+        report = steps[names.index("Report scientific mount status")]
+        assert names.index("Report scientific mount status") > names.index(
+            "Test container (HPC Apptainer simulation)"), path.name
+        assert report["if"] == "always() && matrix.profile.needs_cvmfs", path.name
+        calls.unlink(missing_ok=True)
+        result = subprocess.run(
+            ["bash", "-e", "-c", report["run"]],
+            env={**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
+                 "CALLS": str(calls)},
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert calls.read_text().splitlines() == [
+            "timeout 20 cvmfs_talk -i neurodesk.ardc.edu.au host info",
+            "timeout 20 cvmfs_config stat -v neurodesk.ardc.edu.au",
+            "journalctl --no-pager -n 50 -t cvmfs2 -t automount",
+        ], path.name

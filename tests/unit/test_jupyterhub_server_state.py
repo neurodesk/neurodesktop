@@ -79,6 +79,8 @@ def test_user_model_reduces_to_default_server_state(model, expected):
         '{"status": 403, "message": "Forbidden"}',
         "<html>502 Bad Gateway</html>",
         "",
+        " \n\t",
+        '{"name":"u"}\n{"name":"v"}',
         "[]",
     ],
 )

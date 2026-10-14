@@ -1,3 +1,4 @@
+#!/bin/bash
 # set -e
 
 sudo apt-get install lsb-release
@@ -37,13 +38,7 @@ sudo cvmfs_config setup
 # sudo cvmfs_config wsl2_start
 sudo cvmfs_config chksetup
 
-ls /cvmfs/neurodesk.ardc.edu.au
-
-# sudo cvmfs_config umount
-
-cvmfs_config stat -v neurodesk.ardc.edu.au
-
-
+/bin/bash "$(dirname "${BASH_SOURCE[0]}")/check_cvmfs_mount.sh" || exit $?
 
 ## Test if every container in the desired inventory is on CVMFS. The shared
 ## checker reports the complete mismatch rather than stopping at the first one.

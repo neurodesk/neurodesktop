@@ -76,7 +76,7 @@ jobs:
           echo '{"data-root": "/mnt/docker"}' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.sha }}
       - name: Set environment variables
@@ -116,7 +116,7 @@ jobs:
           echo "NEUROCOMMAND_REF=$NEUROCOMMAND_REF"
           echo "NEUROCOMMAND_REF=$NEUROCOMMAND_REF" >> "$GITHUB_ENV"
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Login to GHCR
         uses: ./.github/actions/docker-login-retry
         with:
@@ -124,7 +124,7 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push arch image
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: ${{ matrix.platform.docker_platform }}
@@ -154,11 +154,11 @@ jobs:
             echo "IMAGENAME=$IMAGENAME"
           } >> "$GITHUB_ENV"
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.sha }}
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Login to GHCR
         uses: ./.github/actions/docker-login-retry
         with:
@@ -167,7 +167,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Login to DockerHub
         if: ${{ env.DOCKERHUB_ORG != '' }}
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
@@ -298,7 +298,7 @@ jobs:
           sudo docker image prune --all --force || true
           sudo docker builder prune --force || true
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.sha }}
       - name: Login to GHCR
@@ -311,123 +311,69 @@ jobs:
         run: bash scripts/retry.sh docker pull "$IMAGE_REF"
       - name: Initialize CVMFS
         if: matrix.profile.needs_cvmfs
-        uses: cvmfs-contrib/github-action-cvmfs@10197e000cc0add8e54ac4fb73d3ed44e2de72b4 # v5.5
+        uses: cvmfs-contrib/github-action-cvmfs@72f2a8d366043978d6aebee154bc9ed321c2f2a8 # v5.6
+      - name: Select scientific tool mirrors
+        if: matrix.profile.needs_cvmfs
+        run: |
+          NEURODESKTOP_CVMFS_TARGET_CONFIG="$RUNNER_TEMP/neurodesk-cvmfs.conf" \
+          NEURODESKTOP_CVMFS_CACHE_FILE="$RUNNER_TEMP/neurodesk-cvmfs-selection.env" \
+            bash config/jupyter/cvmfs_server_select.sh --force-probe
+      - name: Locate scientific tool cache
+        id: cvmfs-cache-key
+        if: matrix.profile.needs_cvmfs
+        run: bash .github/scripts/cvmfs_ci_cache.sh init '${{ matrix.arch }}' >> "$GITHUB_OUTPUT"
+      - name: Restore scientific tool cache
+        id: cvmfs-cache
+        if: matrix.profile.needs_cvmfs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.cvmfs-cache-key.outputs.path }}
+          key: ${{ steps.cvmfs-cache-key.outputs.key }}
+          restore-keys: ${{ steps.cvmfs-cache-key.outputs.restore-prefix }}
+      - name: Use scientific tool cache
+        id: cvmfs-cache-prepare
+        if: matrix.profile.needs_cvmfs
+        run: bash .github/scripts/cvmfs_ci_cache.sh prepare
       - name: Configure Neurodesk CVMFS
         if: matrix.profile.needs_cvmfs
         run: |
           sudo mkdir -p /etc/cvmfs/keys/ardc.edu.au
           sudo cp config/cvmfs/neurodesk.ardc.edu.au.pub /etc/cvmfs/keys/ardc.edu.au/neurodesk.ardc.edu.au.pub
-          sudo cp config/cvmfs/neurodesk.ardc.edu.au.conf /etc/cvmfs/config.d/neurodesk.ardc.edu.au.conf
+          sudo cp "$RUNNER_TEMP/neurodesk-cvmfs.conf" /etc/cvmfs/config.d/neurodesk.ardc.edu.au.conf
           sudo cp config/cvmfs/default.local /etc/cvmfs/default.local
           sudo cvmfs_config setup
           sudo ls /cvmfs/neurodesk.ardc.edu.au
       - name: Test container (CVMFS=${{ matrix.profile.cvmfs_disable == 'false' && 'on' || 'off' }}, SUDO=${{ matrix.profile.grant_sudo }})
         if: ${{ ! matrix.profile.hpc_mode }}
         run: |
-          source .github/scripts/image_test_cleanup.sh
-          docker_args=()
-          if [ "${{ matrix.profile.needs_cvmfs }}" = "true" ]; then
-            docker_args=(-v /cvmfs:/cvmfs:shared)
-          fi
-          docker rm -f neurodesktop-test 2>/dev/null || true
-          docker run -d --shm-size=1gb --privileged --user=root \
-            --name neurodesktop-test \
-            "${docker_args[@]}" \
-            -e "CVMFS_DISABLE=${{ matrix.profile.cvmfs_disable }}" \
-            -e "GRANT_SUDO=${{ matrix.profile.grant_sudo }}" \
-            -e NEURODESKTOP_CVMFS_STARTUP_MODE=eager \
-            -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
-            "$IMAGE_REF"
-          echo "Waiting for container startup..."
-          for i in $(seq 1 60); do
-            code=$(docker exec neurodesktop-test curl -so /dev/null -w '%{http_code}' \
-                     --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
-            if echo "$code" | grep -Eq '^[0-9]{3}$' && [ "$code" != "000" ]; then
-              echo "Container ready after ~$((i*2))s (HTTP ${code})"
-              break
-            fi
-            sleep 2
-          done
-          if [ "${{ matrix.profile.grant_sudo }}" = "packages" ]; then
-            docker exec -u root neurodesktop-test pytest /opt/tests/test_security_policy.py -v
-          fi
-          docker exec -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 \
-            -u jovyan neurodesktop-test pytest /opt/tests/ -v
+          exec bash .github/scripts/validate_image_runtime.sh \
+            "$IMAGE_REF" regular \
+            '${{ matrix.profile.cvmfs_disable }}' \
+            '${{ matrix.profile.grant_sudo }}' \
+            '${{ matrix.profile.needs_cvmfs }}'
 
       - name: Test container (HPC Apptainer simulation)
         if: ${{ matrix.profile.hpc_mode }}
         run: |
-          source .github/scripts/image_test_cleanup.sh
-          # Mirror the `hpctest` mode of build_and_run.sh: non-root, non-jovyan
-          # user with a synthetic /etc/passwd + /etc/group bind-mount, HOME on a
-          # host-owned tempdir over /home/jovyan, APPTAINER_CONTAINER=1.
-          HPC_USER=sciget
-          HPC_UID=5000
-          HPC_GID=5000
-          HPC_HOME_DIR="$(mktemp -d)"
-          HPC_PASSWD_FILE="$(mktemp)"
-          HPC_GROUP_FILE="$(mktemp)"
-
-          cat > "$HPC_PASSWD_FILE" <<EOF
-          root:x:0:0:root:/root:/bin/bash
-          jovyan:x:1000:100:jovyan:/home/jovyan:/bin/bash
-          ${HPC_USER}:x:${HPC_UID}:${HPC_GID}:${HPC_USER} (HPC simulated):/home/jovyan:/bin/bash
-          nobody:x:65534:65534:nobody:/:/usr/sbin/nologin
-          EOF
-          cat > "$HPC_GROUP_FILE" <<EOF
-          root:x:0:
-          users:x:100:jovyan,${HPC_USER}
-          ${HPC_USER}:x:${HPC_GID}:
-          nogroup:x:65534:
-          EOF
-          chmod 0777 "$HPC_HOME_DIR"
-          chmod 0644 "$HPC_PASSWD_FILE" "$HPC_GROUP_FILE"
-
-          docker rm -f neurodesktop-test 2>/dev/null || true
-          docker run -d --shm-size=1gb \
-            --user "${HPC_UID}:${HPC_GID}" \
-            --name neurodesktop-test \
-            -v "${HPC_HOME_DIR}:/home/jovyan" \
-            -v "${HPC_PASSWD_FILE}:/etc/passwd:ro" \
-            -v "${HPC_GROUP_FILE}:/etc/group:ro" \
-            -e CVMFS_DISABLE=true \
-            -e "NB_USER=${HPC_USER}" \
-            -e "NB_UID=${HPC_UID}" \
-            -e "NB_GID=${HPC_GID}" \
-            -e HOME=/home/jovyan \
-            -e "USER=${HPC_USER}" \
-            -e "LOGNAME=${HPC_USER}" \
-            -e APPTAINER_CONTAINER=1 \
-            -e APPTAINER_NAME=neurodesktop-test-hpc \
-            -e NEURODESKTOP_CVMFS_STARTUP_MODE=lazy \
-            -e NEURODESKTOP_SLURM_ENABLE=0 \
-            -e NEURODESKTOP_SLURM_STARTUP_MODE=eager \
-            "$IMAGE_REF"
-          echo "Waiting for container startup..."
-          ready=0
-          for i in $(seq 1 90); do
-            if ! docker inspect -f '{{.State.Running}}' neurodesktop-test 2>/dev/null | grep -q true; then
-              echo "::error::Container exited during startup (HPC mode)."
-              docker logs --tail 120 neurodesktop-test || true
-              exit 1
-            fi
-            code=$(docker exec neurodesktop-test curl -so /dev/null -w '%{http_code}' \
-                     --max-time 2 http://localhost:8888/api/status 2>/dev/null || echo 000)
-            if echo "$code" | grep -Eq '^[0-9]{3}$' && [ "$code" != "000" ]; then
-              echo "Container ready after ~$((i*2))s (HTTP ${code})"
-              ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "$ready" -ne 1 ]; then
-            echo "::error::Container did not reach /api/status in 180s (HPC mode)."
-            docker logs --tail 120 neurodesktop-test || true
-            exit 1
+          exec bash .github/scripts/validate_image_runtime.sh "$IMAGE_REF" hpc
+      - name: Report scientific mount status
+        if: always() && matrix.profile.needs_cvmfs
+        run: |
+          if command -v cvmfs_config >/dev/null 2>&1; then
+            sudo timeout 20 cvmfs_talk -i neurodesk.ardc.edu.au host info || true
+            sudo timeout 20 cvmfs_config stat -v neurodesk.ardc.edu.au || true
           fi
-          # Exec as the current container user (no -u jovyan: we are sciget here).
-          docker exec -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 \
-            neurodesktop-test pytest /opt/tests/ -v
+          sudo journalctl --no-pager -n 50 -t cvmfs2 -t automount || true
+      # Main-branch runs refresh the cache that pull requests restore.
+      - name: Release scientific tool cache
+        if: always() && steps.cvmfs-cache-prepare.outcome == 'success' && (github.ref == 'refs/heads/main' || steps.cvmfs-cache.outputs.cache-matched-key == '')
+        run: bash .github/scripts/cvmfs_ci_cache.sh export
+      - name: Save scientific tool cache
+        if: always() && steps.cvmfs-cache-prepare.outcome == 'success' && (github.ref == 'refs/heads/main' || steps.cvmfs-cache.outputs.cache-matched-key == '')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.cvmfs-cache-key.outputs.path }}
+          key: ${{ steps.cvmfs-cache-key.outputs.key }}
 
   scan-image:
     needs: build-image
@@ -449,7 +395,7 @@ jobs:
           sudo docker image prune --all --force
           sudo docker builder prune --force
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.sha }}
       - name: Login to GHCR

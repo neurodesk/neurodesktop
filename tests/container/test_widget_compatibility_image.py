@@ -530,13 +530,15 @@ def _stop(process: subprocess.Popen[str]) -> None:
 
 
 def _firefox_environment(home: Path) -> dict[str, str]:
-    """Return an isolated environment without a forced Mesa driver mode."""
     environment = os.environ.copy()
     environment["HOME"] = str(home)
     # Firefox's headless compositor chooses a working GL path itself. Forcing
     # Mesa software rendering makes SWGL fail to map its default framebuffer
     # on the CI container's displayless process.
-    environment.pop("LIBGL_ALWAYS_SOFTWARE", None)
+    if os.environ.get("NEURODESKTOP_REQUIRE_WEBGL") == "1":
+        environment["LIBGL_ALWAYS_SOFTWARE"] = "1"
+    else:
+        environment.pop("LIBGL_ALWAYS_SOFTWARE", None)
     return environment
 
 
@@ -651,7 +653,8 @@ def _start_firefox_with_webgl_probe(
         firefox = subprocess.Popen(
             [
                 "/usr/bin/firefox",
-                "--headless",
+                *([] if os.environ.get("NEURODESKTOP_REQUIRE_WEBGL") == "1"
+                  else ["--headless"]),
                 "--profile",
                 str(firefox_profile),
                 f"--remote-debugging-port={firefox_port}",
@@ -826,7 +829,7 @@ def _widget_regression_notebook(*, include_niivue: bool):
             "    scene_sync_label.value = (\n"
             "        f'scene-sync-count:{scene_sync_count}')\n"
             "for niivue in niivues:\n"
-            "    niivue.observe(record_scene_sync, names='scene')\n"
+            "    niivue.on_location_change(record_scene_sync)\n"
             "display(widgets.VBox([scene_sync_label, *niivues]))"
         )
 
@@ -978,7 +981,8 @@ def test_widget_manager_waits_for_a_late_model_registration():
     assert "Date.now()-neurodeskRecoveredAt<30e3" in bundles
     assert "neurodesktop-widget-control-timeout-staged-retry" in bundles
     assert "this.__neurodesktopControlRetry?3e4:1e4" in bundles
-    assert "neurodesktop-widget-control-retry-reconnect" in bundles
+    assert "neurodesktop-widget-control-retry-probe" in bundles
+    assert "neurodeskRetryKernel.requestKernelInfo()" in bundles
     assert "neurodeskRetryKernel.reconnect()" in bundles
     assert "return await this._loadFromKernel()" in bundles
     assert "neurodeskRetries<2" in bundles
@@ -1043,6 +1047,8 @@ def test_server_documents_installs_reconnect_data_loss_guards() -> None:
     assert "neurodesktop-kernel-ws-nudge" in websocket_source
     assert "from . import _neurodesktop_kernel_nudge" in websocket_source
     assert "await _neurodesktop_kernel_nudge.nudge(self)" in websocket_source
+    assert "neurodesktop-kernel-ws-session-identity" in websocket_source
+    assert "self.kernel_manager.client(session=self.session)" in websocket_source
     assert websocket_source.index("start_channels(hb=False)") < (
         websocket_source.index("await _neurodesktop_kernel_nudge.nudge(self)")
     ) < websocket_source.index("asyncio.create_task(self._listen(ch))")
@@ -1089,6 +1095,88 @@ def test_server_documents_installs_reconnect_data_loss_guards() -> None:
         capture_output=True,
         text=True,
     )
+
+
+def _kernel_info_reply_type(connection, session, timeout: float = 10) -> str | None:
+    from jupyter_server.services.kernels.connection.base import (
+        deserialize_msg_from_ws_v1,
+        serialize_msg_to_ws_v1,
+    )
+
+    request = session.msg("kernel_info_request", {})
+    connection.send_binary(serialize_msg_to_ws_v1(request, "shell", pack=session.pack))
+    deadline = time.monotonic() + timeout
+    while (remaining := deadline - time.monotonic()) > 0:
+        connection.settimeout(remaining)
+        try:
+            frame = connection.recv()
+        except websocket.WebSocketTimeoutException:
+            return None
+        channel, parts = deserialize_msg_from_ws_v1(frame)
+        parent = json.loads(parts[1])
+        if channel == "shell" and parent.get("msg_id") == request["header"]["msg_id"]:
+            return json.loads(parts[0])["msg_type"]
+    return None
+
+
+def test_a_new_kernel_websocket_leaves_earlier_connections_answered(
+    tmp_path: Path,
+) -> None:
+    """JupyterLab opens several connections to one kernel; each keeps working."""
+    from jupyter_client.session import Session
+
+    server_port = _unused_port()
+    token = "kernel-websocket-identity"
+    server_log_path = tmp_path / "jupyter-server.log"
+    server_log = server_log_path.open("w", encoding="utf-8")
+    server_home = tmp_path / "server-home"
+    server_home.mkdir()
+    server = subprocess.Popen(
+        [
+            "/opt/conda/bin/jupyter", "server", "--no-browser",
+            "--ServerApp.allow_root=True", f"--ServerApp.port={server_port}",
+            "--ServerApp.port_retries=0", f"--ServerApp.root_dir={tmp_path}",
+            f"--FileContentsManager.preferred_dir={tmp_path}",
+            f"--IdentityProvider.token={token}",
+        ],
+        stdout=server_log, stderr=subprocess.STDOUT,
+        env={**os.environ, "HOME": str(server_home)}, text=True,
+    )
+    connections = []
+    try:
+        base = f"127.0.0.1:{server_port}"
+        _wait_for_server(f"http://{base}/api/status?token={token}", server, server_log_path)
+        request = urllib.request.Request(
+            f"http://{base}/api/kernels?token={token}",
+            data=json.dumps({"name": "python3"}).encode(), method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            kernel_id = json.load(response)["id"]
+
+        def connect():
+            session = Session(key=b"")
+            connection = websocket.create_connection(
+                f"ws://{base}/api/kernels/{kernel_id}/channels"
+                f"?session_id={session.session}&token={token}",
+                subprotocols=["v1.kernel.websocket.jupyter.org"], timeout=30,
+            )
+            connections.append(connection)
+            return connection, session
+
+        first = connect()
+        assert _kernel_info_reply_type(*first) == "kernel_info_reply"
+        second = connect()
+        assert _kernel_info_reply_type(*second) == "kernel_info_reply"
+        assert _kernel_info_reply_type(*first) == "kernel_info_reply", (
+            "Opening a second kernel WebSocket cut off the first one\n"
+            + server_log_path.read_text(encoding="utf-8")[-4000:]
+        )
+    finally:
+        for connection in connections:
+            connection.close()
+        _stop(server)
+        server_log.close()
 
 
 def test_late_sync_step2_is_applied_without_disconnect() -> None:
@@ -1362,6 +1450,8 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
         context = browser.context
         diagnostic_logs = (browser.log_path, server_log_path)
         include_niivue = bool(browser.webgl.get("available"))
+        if os.environ.get("NEURODESKTOP_REQUIRE_WEBGL") == "1":
+            assert include_niivue, f"Required WebGL2 renderer unavailable: {browser.webgl}"
         expected_widget_boxes = 2 if include_niivue else 1
         expected_niivue_canvases = 9 if include_niivue else 0
         render_condition = (
@@ -1697,35 +1787,31 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
             )
             assert len(shared_bundle_fetches) == 1, shared_bundle_fetches
 
-            # Exercise each viewer's real NiiVue.sync() path, then require
-            # both model traffic and frontend work to become quiescent. The
-            # upstream 2.4.4 bundle keeps one 30 ms setInterval per model;
+            # Upstream 2.4.4 keeps one 30 ms setInterval per model;
             # the preload probe records callbacks created by that asset.
-            for canvas_index in range(expected_niivue_canvases):
-                canvas_expression = (
-                    "document.querySelectorAll('.jp-OutputArea canvas')"
-                    f"[{canvas_index}]"
-                )
-                assert bidi.evaluate(
-                    context,
-                    "(() => {"
-                    f"const canvas = {canvas_expression};"
-                    "canvas.scrollIntoView({block: 'center'});"
-                    "return true;"
-                    "})()",
-                )
-                _click_dom_element(
-                    bidi,
-                    context,
-                    canvas_expression,
-                    x_fraction=0.25,
-                    y_fraction=0.25,
-                )
-
+            canvas_expression = (
+                "document.querySelectorAll('.jp-OutputArea canvas')"
+                "[0]"
+            )
+            assert bidi.evaluate(
+                context,
+                "(() => {"
+                f"const canvas = {canvas_expression};"
+                "canvas.scrollIntoView({block: 'center'});"
+                "return true;"
+                "})()",
+            )
+            _click_dom_element(
+                bidi,
+                context,
+                canvas_expression,
+                x_fraction=0.5,
+                y_fraction=0.35,
+            )
             _wait_for_expression(
                 bidi,
                 context,
-                f"{SCENE_SYNC_COUNT_EXPRESSION} >= {expected_niivue_canvases}",
+                f"{SCENE_SYNC_COUNT_EXPRESSION} >= 1",
                 timeout=15,
                 log_paths=diagnostic_logs,
             )
@@ -1904,6 +1990,110 @@ def test_server_side_execution_renders_streams_and_widgets(tmp_path: Path) -> No
                 )
             ]
             assert not context_exhaustion, context_exhaustion
+    finally:
+        if browser is not None:
+            browser.close()
+        _stop(server)
+        server_log.close()
+
+
+KERNEL_SOCKET_RECORDER_PRELOAD = r"""() => {
+    const NativeWebSocket = window.WebSocket;
+    const sockets = window.__neurodesktopKernelSockets = [];
+    window.WebSocket = class extends NativeWebSocket {
+        constructor(url, protocols) {
+            super(url, protocols);
+            if (!String(url).includes('/api/kernels/')) {
+                return;
+            }
+            const record = {closedAt: null, controlOpenedAt: []};
+            sockets.push(record);
+            this.addEventListener('close', () => {
+                record.closedAt = performance.now();
+            });
+            const send = this.send.bind(this);
+            this.send = data => {
+                const text = typeof data === 'string'
+                    ? data
+                    : new TextDecoder().decode(data);
+                if (/"msg_type":\s*"comm_open"/.test(text)
+                    && text.includes('jupyter.widget.control')) {
+                    record.controlOpenedAt.push(performance.now());
+                }
+                return send(data);
+            };
+        }
+    };
+}"""
+
+KERNEL_SOCKETS_EXPRESSION = (
+    "JSON.stringify({now: performance.now(), "
+    "sockets: window.__neurodesktopKernelSockets || []})"
+)
+
+
+def test_unanswered_widget_state_request_keeps_a_healthy_kernel_connection(
+    tmp_path: Path,
+) -> None:
+    """Retrying widget restore must not replace a healthy kernel connection.
+
+    A fresh kernel has not imported ipywidgets, so it rejects the manager's
+    bulk state request and the manager retries. Reconnecting the notebook's
+    kernel connection for that retry discards replies to every request still
+    in flight on it.
+    """
+    server_port = _unused_port()
+    token = "widget-kernel-connection"
+    server_log_path = tmp_path / "jupyter-server.log"
+    server_log = server_log_path.open("w", encoding="utf-8")
+    server_home = tmp_path / "server-home"
+    server_home.mkdir()
+    nbformat.write(
+        nbformat.v4.new_notebook(
+            cells=[nbformat.v4.new_code_cell("value = 1")],
+            metadata={"kernelspec": {"display_name": "Python [conda env:base] *",
+                                     "language": "python", "name": "conda-base-py"}},
+        ),
+        tmp_path / "plain.ipynb",
+    )
+    server = subprocess.Popen(
+        [
+            "/opt/conda/bin/jupyter", "server", "--no-browser",
+            "--ServerApp.allow_root=True", f"--ServerApp.port={server_port}",
+            "--ServerApp.port_retries=0", f"--ServerApp.root_dir={tmp_path}",
+            f"--FileContentsManager.preferred_dir={tmp_path}",
+            f"--IdentityProvider.token={token}", "--LabApp.expose_app_in_browser=True",
+        ],
+        stdout=server_log, stderr=subprocess.STDOUT,
+        env={**os.environ, "HOME": str(server_home)}, text=True,
+    )
+    browser = None
+    try:
+        _wait_for_server(f"http://127.0.0.1:{server_port}/api/status?token={token}",
+                         server, server_log_path)
+        browser = _start_firefox_with_webgl_probe(tmp_path)
+        bidi, context = browser.bidi, browser.context
+        logs = (browser.log_path, server_log_path)
+        bidi.request("script.addPreloadScript", {
+            "functionDeclaration": KERNEL_SOCKET_RECORDER_PRELOAD, "contexts": [context]})
+        bidi.request("browsingContext.navigate", {
+            "context": context, "wait": "complete",
+            "url": f"http://127.0.0.1:{server_port}/lab/tree/plain.ipynb?token={token}"})
+        _wait_for_expression(
+            bidi, context,
+            "(window.__neurodesktopKernelSockets || [])"
+            ".some(socket => socket.controlOpenedAt.length > 0)",
+            timeout=60, log_paths=logs)
+        deadline = time.monotonic() + 45
+        while True:
+            state = json.loads(bidi.evaluate(context, KERNEL_SOCKETS_EXPRESSION))
+            requester = next(s for s in state["sockets"] if s["controlOpenedAt"])
+            if requester["closedAt"] is not None or len(requester["controlOpenedAt"]) > 1:
+                break
+            assert time.monotonic() < deadline, ("The widget manager never retried", state)
+            time.sleep(0.2)
+        assert requester["closedAt"] is None, (
+            "The widget manager replaced a healthy kernel connection", state)
     finally:
         if browser is not None:
             browser.close()

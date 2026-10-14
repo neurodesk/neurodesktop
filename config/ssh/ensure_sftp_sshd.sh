@@ -211,8 +211,18 @@ start_sshd() {
     validation_log="$(mktemp /tmp/sshd-validate.XXXXXX)"
     startup_log="$(mktemp /tmp/sshd-start.XXXXXX)"
 
-    if ! "${sshd_prefix[@]}" /usr/sbin/sshd -t -f "${ssh_config_to_use}" >"${validation_log}" 2>&1; then
-        warn "sshd config validation failed for ${ssh_config_to_use}. Retrying with minimal fallback config."
+    # ListenAddress is additive, including between -o and Include files. Check
+    # the complete effective configuration before trusting a persisted config.
+    if ! "${sshd_prefix[@]}" /usr/sbin/sshd -T -f "${ssh_config_to_use}" \
+        -p "${SFTP_SSH_PORT}" -o "ListenAddress=127.0.0.1" >"${validation_log}" 2>&1 \
+        || ! awk -v expected="127.0.0.1:${SFTP_SSH_PORT}" '
+            $1 == "listenaddress" {
+                found = 1
+                if ($2 != expected) unsafe = 1
+            }
+            END { exit unsafe || !found }
+        ' "${validation_log}"; then
+        warn "sshd config is invalid or allows a non-loopback listener: ${ssh_config_to_use}. Retrying with minimal fallback config."
         emit_sshd_log_preview "${validation_log}"
 
         fallback_config="${SSH_DIR}/sshd_config.fallback"
@@ -242,6 +252,8 @@ start_sshd() {
     #                    ownership checks, and sshd rejects pubkey auth on
     #                    failure. We are only ever accepting a key that we
     #                    wrote ourselves; no weaker security posture.
+    # ListenAddress supplies the loopback default for legacy configurations.
+    # The effective-address check above excludes additional saved listeners.
     if ! "${sshd_prefix[@]}" /usr/sbin/sshd \
         -f "${ssh_config_to_use}" \
         -p "${SFTP_SSH_PORT}" \
@@ -250,6 +262,7 @@ start_sshd() {
         -o "PidFile=${SFTP_SSH_PID_FILE}" \
         -o "UsePAM=no" \
         -o "StrictModes=no" \
+        -o "ListenAddress=127.0.0.1" \
         -o "KbdInteractiveAuthentication=no" \
         -o "PasswordAuthentication=no" \
         -o "PubkeyAuthentication=yes" >"${startup_log}" 2>&1; then

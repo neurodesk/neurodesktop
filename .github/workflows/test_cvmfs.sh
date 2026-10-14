@@ -40,20 +40,7 @@ echo "CVMFS_QUOTA_LIMIT=5000" | sudo tee -a  /etc/cvmfs/default.local
 sudo cvmfs_config setup
 sudo cvmfs_config chksetup
 
-ls /cvmfs/neurodesk.ardc.edu.au
-
-echo "[DEBUG]: Resolving DNS name cvmfs-geoproximity.neurodesk.org"
-resolved_ip=$(dig +short cvmfs-geoproximity.neurodesk.org)
-echo "[DEBUG]: Resolved IP for cvmfs-geoproximity.neurodesk.org: $resolved_ip"
-
-echo "[DEBUG]: Test download from cvmfs-geoproximity.neurodesk.org"
-curl --head http://cvmfs-geoproximity.neurodesk.org/cvmfs/neurodesk.ardc.edu.au/.cvmfspublished
-
-echo "[DEBUG]: Test download from cvmfs.neurodesk.org"
-curl --head http://cvmfs.neurodesk.org/cvmfs/neurodesk.ardc.edu.au/.cvmfspublished
-
-cvmfs_config stat -v neurodesk.ardc.edu.au
-
+/bin/bash "$(dirname "${BASH_SOURCE[0]}")/check_cvmfs_mount.sh" || exit $?
 
 ## Test if every container in the desired inventory is on CVMFS. The shared
 ## checker reports the complete mismatch rather than stopping at the first one.

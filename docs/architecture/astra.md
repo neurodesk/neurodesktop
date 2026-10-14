@@ -30,7 +30,10 @@ viewer. The build asserts that exactly `/opt/conda/bin/astra` answers there.
 `lc` (`lightcone-cli`) is installed as an isolated `uv` tool under
 `/opt/uv/tools/lightcone-cli` and linked onto `PATH`, so its Dask and Snakemake
 dependency graph cannot perturb JupyterLab. `uv` itself is on `PATH` for that
-reason; ordinary `uv tool` operations stay user-local at runtime.
+reason; ordinary `uv tool` operations stay user-local at runtime. The image
+build selects `/opt/conda/bin/python` explicitly and disables uv-managed Python
+downloads, so changes to uv's default Python release cannot change the
+Lightcone interpreter.
 
 The latest stable Lightcone release, 0.4.2, still pins ASTRA Tools 0.2.11
 because ASTRA 0.2.14 added required arguments to the idempotent `astra init`
@@ -241,7 +244,7 @@ for their own analysis.
 
 Double-clicking an `astra.yaml` (or `*.astra.yaml`) in the JupyterLab file
 browser renders the same viewer without a kernel, the way NIfTI volumes open
-in NiiVue. The `neurodesk_astra_view.serverext` Jupyter server extension
+in FreeBrowse. The `neurodesk_astra_view.serverext` Jupyter server extension
 answers `GET <Jupyter Server base URL>/neurodesk-astra-view/graph?spec=…[&universe=…][&run=…]`
 by running `build_graph()` server-side — request paths are workspace-relative
 and rejected with a 404 before any read when absolute, traversing, or resolving
@@ -261,9 +264,9 @@ The notebook widget is handed its run evidence as `AstraView(spec, run=…)`; a
 double-click has nobody to hand it one, so the plugin discovers it from the
 spec's own directory and fills in `run=` itself. It looks for exactly the
 filenames `manifest._directory_run_file` accepts — `run-manifest.json`,
-`manifest.json`, `status.json`, `ro-crate-metadata.json` — and a unit test
-holds the two lists together, since a name only the frontend knows is a
-manifest that never loads. None present sends no `run=`, which is the honest
+`manifest.json`, `status.json`, `ro-crate-metadata.json`. Document tests open
+each supported filename and check the rendered evidence. None present sends
+no `run=`, which is the honest
 `spec-only` reading of a directory with no evidence in it; two or more sends
 the *directory*, so the one ambiguity rule in `manifest.py` refuses it rather
 than the frontend silently picking a file. A `Refresh` beside the universe

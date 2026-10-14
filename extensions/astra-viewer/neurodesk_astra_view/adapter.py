@@ -26,7 +26,7 @@ def _astra_api():
         )
     except ImportError as error:  # pragma: no cover - packaging failure in the image
         raise AdapterError(
-            "astra-tools is unavailable; Neurodesktop requires astra-tools==0.2.17"
+            "astra-tools is unavailable; Neurodesktop requires astra-tools==0.2.18"
         ) from error
     return (
         load_yaml,
@@ -618,7 +618,7 @@ def _collect_entities(
     for nodes in all_universe_nodes:
         selections: dict[str, str] = {}
         for depth in range(1, len(scope) + 1):
-            selections.update((nodes.get(scope[:depth], {}).get("decisions") or {}))
+            selections.update(nodes.get(scope[:depth], {}).get("decisions") or {})
         all_effective.append(selections)
 
     for item in analysis.get("outputs") or []:

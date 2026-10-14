@@ -98,18 +98,41 @@ def check_slurm_launcher(bidi, context):
         assert evaluate(bidi, context, f"Boolean({tile})"), "Slurm launcher icon missing"
         assert evaluate(bidi, context, f"({tile}).textContent.includes('Slurm Dashboard')")
         assert not evaluate(bidi, context, visible), "New launcher should hide the previous dashboard"
-        point = json.loads(evaluate(bidi, context, f"""JSON.stringify((() => {{
-            const node = {tile};
-            node.scrollIntoView({{block: 'center'}});
-            const rect = node.getBoundingClientRect();
-            return {{x: Math.round(rect.left + rect.width / 2),
-                     y: Math.round(rect.top + rect.height / 2)}};
-        }})())"""))
+        target = bidi.request("script.evaluate", {
+            "expression": f"""(async () => {{
+                const node = {tile};
+                for (let index = 0; index < 40; index++) {{
+                    window.jupyterapp.shell.currentWidget.content.model.add({{
+                        command: 'filebrowser:create-new-directory',
+                        category: 'Neurodesk', rank: -1000, args: {{probe: index}}
+                    }});
+                }}
+                const deadline = performance.now() + 20000;
+                let previous = null;
+                let stableFrames = 0;
+                while (performance.now() < deadline) {{
+                    await new Promise(requestAnimationFrame);
+                    node.scrollIntoView({{block: 'center', behavior: 'instant'}});
+                    const rect = node.getBoundingClientRect();
+                    const geometry = JSON.stringify([rect.x, rect.y, rect.width, rect.height]);
+                    const hit = document.elementFromPoint(
+                        rect.x + rect.width / 2, rect.y + rect.height / 2);
+                    stableFrames = geometry === previous && node.contains(hit)
+                        ? stableFrames + 1 : 0;
+                    if (stableFrames >= 2) return node;
+                    previous = geometry;
+                }}
+                throw new Error('Slurm launcher tile did not become stable and unobscured');
+            }})()""",
+            "target": {"context": context}, "awaitPromise": True,
+        })
+        assert target["type"] == "success", target
+        origin = {"type": "element", "element": {"sharedId": target["result"]["sharedId"]}}
         bidi.request("input.performActions", {
             "context": context,
             "actions": [{"type": "pointer", "id": "slurm-mouse",
                          "parameters": {"pointerType": "mouse"}, "actions": [
-                {"type": "pointerMove", "duration": 0, "origin": "viewport", **point},
+                {"type": "pointerMove", "duration": 0, "origin": origin, "x": 0, "y": 0},
                 {"type": "pointerDown", "button": 0},
                 {"type": "pointerUp", "button": 0},
             ]}],
@@ -132,7 +155,11 @@ def test_clicking_workspace_links_opens_rendered_documents(tmp_path, base):
     server_port, browser_port = _unused_port(), _unused_port()
     prefix = f"http://127.0.0.1:{server_port}{base}"
     token = "workspace-links-test"
-    environment = {**os.environ, "HOME": str(tmp_path)}
+    environment = {
+        **os.environ,
+        "HOME": str(tmp_path),
+        "NBI_TOUR_CONFIG_PATH": "/opt/jovyan_defaults/.jupyter/nbi/tour_config.json",
+    }
     # Slurm initialization overwrites flat Tornado settings from this traitlet.
     # Keep this browser test independent of a host controller in HPC mode.
     server_config = tmp_path / "jupyter_server_config.py"
@@ -164,6 +191,13 @@ def test_clicking_workspace_links_opens_rendered_documents(tmp_path, base):
                 queue = json.load(response)
             assert queue["success"] and queue["data"]["rows"] == [], queue
             assert queue["responseMessage"].startswith("Success: /usr/bin/true "), queue
+            with urllib.request.urlopen(
+                prefix + "notebook-intelligence/capabilities?token=" + token, timeout=10
+            ) as response:
+                capabilities = json.load(response)
+            assert capabilities["tour_overrides"] == json.loads(
+                Path("/opt/jovyan_defaults/.jupyter/nbi/tour_config.json").read_text()
+            ), "Browser server must use the image's disabled first-run tour"
             bidi = _BidiSession(f"ws://127.0.0.1:{browser_port}/session", browser)
             bidi.request("session.new", {"capabilities": {}})
             context = bidi.request("browsingContext.create", {"type": "tab"})["context"]

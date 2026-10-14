@@ -19,21 +19,31 @@ import random
 import resource
 import re
 import shlex
+import socket
 import sqlite3
+import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from urllib.parse import urlsplit
 import uuid
 import zlib
 
 REPO = "neurodesk.ardc.edu.au"
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 MAX_BYTES = 8 * 1024 * 1024
 MAX_CATALOG_BYTES = 64 * 1024 * 1024
 FINALISTS = 5
 BUDGET_SECONDS = 180
+# Mirrors are ranked by the estimated time of a reference workload: listing
+# modules and starting a tool issue roughly a thousand sequential small-object
+# requests and read a few hundred MiB of file chunks. Request latency and bulk
+# throughput therefore both count; the mix is not tuned to any one region.
+WORKLOAD_REQUESTS = 1000
+WORKLOAD_BYTES = 256 * 1024 * 1024
+LATENCY_PROBES = 3
 HASH = re.compile(r"[0-9a-f]{40}")
 
 
@@ -63,6 +73,56 @@ def destination(candidate):
     return url.scheme, identity, url.port or (443 if url.scheme == "https" else 80)
 
 
+def is_canonical(base, timeout=3):
+    """Whether the hostname is its own DNS target rather than a CNAME alias.
+
+    A geo-DNS alias can resolve elsewhere when the client mounts later, and
+    could then duplicate another configured entry. The resolver has no timeout
+    of its own, so a lookup that fails or outlasts *timeout* counts as canonical.
+    """
+    host = urlsplit(base).hostname
+    answer = []
+
+    def lookup():
+        try:
+            answer.append(socket.gethostbyname_ex(host)[0].rstrip(".").lower() == host)
+        except (OSError, UnicodeError):
+            pass
+
+    worker = threading.Thread(target=lookup, daemon=True)
+    worker.start()
+    worker.join(max(0, timeout))
+    return answer[0] if answer else True
+
+
+def distinct_destinations(rows):
+    """Keep one row per destination, preferring a concrete name over an alias."""
+    unique = []
+    destinations = set()
+    for row in sorted(rows, key=lambda r: (not r["canonical"], r["latency"], r["base"])):
+        key = destination(row)
+        if key in destinations:
+            log(f"  {row['base']}: duplicate destination {row['ip']}, skipping")
+            continue
+        destinations.add(key)
+        unique.append(row)
+    return unique
+
+
+def estimate(measurement):
+    """Seconds for the reference workload at the measured latency and throughput."""
+    seconds = WORKLOAD_REQUESTS * statistics.median(measurement["latencies"])
+    if measurement["bytes"]:
+        seconds += WORKLOAD_BYTES * measurement["transfer"] / measurement["bytes"]
+    return seconds
+
+
+def describe(measurement):
+    rate = measurement["bytes"] / max(measurement["transfer"], 1e-6) / 1024
+    return (f"{statistics.median(measurement['latencies']) * 1000:.0f} ms/request, "
+            f"{rate:.0f} KiB/s, workload estimate {estimate(measurement):.0f} s")
+
+
 def object_path(digest, suffix):
     if not HASH.fullmatch(digest) or suffix not in {"C", "P", ""}:
         raise ValueError("invalid repository object")
@@ -86,22 +146,28 @@ class Benchmark:
                     ["curl", "--silent", "--show-error", "--fail", "--noproxy", "*",
                      "--connect-timeout", str(min(3, limit)), "--max-time", str(limit),
                      "--max-filesize", str(MAX_BYTES), "--output", str(body),
-                     "--write-out", "%{http_code} %{time_total} %{remote_ip}", url],
+                     "--write-out",
+                     "%{http_code} %{time_total} %{remote_ip} %{time_pretransfer} "
+                     "%{time_starttransfer}", url],
                     capture_output=True, text=True, timeout=limit + 1,
                 )
                 fields = proc.stdout.split()
-                if proc.returncode or len(fields) != 3 or fields[0] != "200":
+                if proc.returncode or len(fields) != 5 or fields[0] != "200":
                     return None
-                elapsed = float(fields[1])
-                if not math.isfinite(elapsed) or elapsed <= 0:
+                elapsed, ready, first_byte = (float(fields[i]) for i in (1, 3, 4))
+                if (not all(math.isfinite(t) for t in (elapsed, ready, first_byte))
+                        or elapsed <= 0 or not 0 <= ready <= first_byte <= elapsed):
                     return None
                 data = body.read_bytes()
                 if not data or len(data) > MAX_BYTES:
                     return None
                 if digest and hashlib.sha1(data).hexdigest() != digest:
                     return None
+                # The CVMFS client reuses connections, so request latency and
+                # transfer time both exclude DNS, TCP and TLS setup.
                 return {"data": data, "seconds": elapsed, "bytes": len(data),
-                        "speed": len(data) / elapsed, "ip": fields[2]}
+                        "speed": len(data) / elapsed, "ip": fields[2],
+                        "latency": first_byte - ready, "transfer": elapsed - first_byte}
             except (OSError, ValueError, subprocess.TimeoutExpired):
                 return None
 
@@ -116,14 +182,35 @@ class Benchmark:
             revision = re.search(r"^S(\d{1,20})$", manifest, re.MULTILINE)
             if digest and revision:
                 replies.append({"base": base, "hash": digest[1], "revision": int(revision[1]),
-                                "latency": result["seconds"], "ip": result["ip"]})
+                                "latency": result["seconds"], "request": result["latency"],
+                                "ip": result["ip"]})
         if not replies:
             log(f"  {base}: manifest unavailable or invalid")
             return None
-        return min(replies, key=lambda r: r["latency"])
+        timeout = min(3, self.deadline - time.monotonic())
+        return {**min(replies, key=lambda r: r["latency"]),
+                "canonical": is_canonical(base, timeout)}
 
     def sample(self, base, obj):
         return self.fetch(base, object_path(obj["hash"], obj["suffix"]), digest=obj["hash"])
+
+    def measure(self, base, objects):
+        """Transfer every data object, then repeat small requests for latency.
+
+        Any failed transfer disqualifies the mirror rather than rewarding a
+        lucky partial result.
+        """
+        results = []
+        for path, digest in ([(object_path(o["hash"], o["suffix"]), o["hash"]) for o in objects]
+                             + [(".cvmfspublished", None)] * LATENCY_PROBES):
+            result = self.fetch(base, path, digest=digest, timeout=10 if digest else 5)
+            if not result:
+                return None
+            results.append(result)
+        bulk = results[:len(objects)]
+        return {"latencies": [r["latency"] for r in results],
+                "bytes": sum(r["bytes"] for r in bulk),
+                "transfer": sum(r["transfer"] for r in bulk)}
 
 
 def catalog_samples(data):
@@ -278,7 +365,8 @@ def read_cache(path, hosts, ttl):
             return None
         for obj in meta["samples"]:
             object_path(obj["hash"], obj["suffix"])
-        if not math.isfinite(meta["baseline"]) or meta["baseline"] <= 0:
+        if (not isinstance(meta["baseline"], (int, float)) or isinstance(meta["baseline"], bool)
+                or not math.isfinite(meta["baseline"]) or meta["baseline"] <= 0):
             return None
         return meta
     except (OSError, ValueError, KeyError, TypeError, OverflowError):
@@ -286,24 +374,22 @@ def read_cache(path, hosts, ttl):
 
 
 def reuse_cache(benchmark, meta):
-    def speed(base):
-        results = [benchmark.sample(base, obj) for obj in meta["samples"]]
-        if not all(results):
-            return 0
-        return sum(r["bytes"] for r in results) / sum(r["seconds"] for r in results)
+    def seconds(base):
+        measurement = benchmark.measure(base, meta["samples"])
+        return estimate(measurement) if measurement else None
 
-    primary = speed(meta["bases"][0])
-    if not primary or primary < meta["baseline"] * 0.5:
+    primary = seconds(meta["bases"][0])
+    if primary is None or primary > meta["baseline"] * 2:
         log("Cached primary failed its transfer check or fell below half its measured speed.")
         return False
-    # Compare both objects, so a lucky small response cannot trigger re-ranking
-    # when the cached primary still wins on the representative data workload.
+    # Compare whole workload estimates, so a lucky small response cannot
+    # trigger re-ranking when the cached primary still wins overall.
     if len(meta["bases"]) > 1:
-        challenger = speed(meta["bases"][1])
-        if not challenger:
+        challenger = seconds(meta["bases"][1])
+        if challenger is None:
             log("Cached fallback failed its transfer check; re-ranking.")
             return False
-        if challenger > primary * 1.2:
+        if challenger * 1.2 < primary:
             log("Cached fallback is over 20% faster than the primary; re-ranking.")
             return False
     # A cached historical object alone does not establish repository health.
@@ -314,16 +400,7 @@ def select(benchmark, hosts):
     log("Stage 1: probing candidate hosts in parallel...")
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(20, len(hosts))) as pool:
         reachable = [row for row in pool.map(benchmark.probe, hosts) if row]
-    reachable.sort(key=lambda row: (row["latency"], row["base"]))
-    unique = []
-    destinations = set()
-    for row in reachable:
-        key = destination(row)
-        if key in destinations:
-            log(f"  {row['base']}: duplicate destination {row['ip']}, skipping")
-            continue
-        destinations.add(key)
-        unique.append(row)
+    unique = distinct_destinations(reachable)
     # Prefer a corroborated snapshot, never an unauthenticated revision claim.
     # A mirror that cannot serve this snapshot still gets tested against its own
     # catalog; one lying or lagging endpoint must not exclude healthy replicas.
@@ -340,7 +417,7 @@ def select(benchmark, hosts):
     samples = discover_samples(benchmark, source, root)
     catalog = {"hash": source["hash"], "suffix": "C"}
     eligible = list(unique)
-    log(f"Stage 2: screening all {len(eligible)} distinct destinations by throughput...")
+    log(f"Stage 2: screening all {len(eligible)} distinct destinations by workload estimate...")
     # Rotate the order so startup ordering does not repeatedly favor one host.
     random.SystemRandom().shuffle(eligible)
     screened = []
@@ -355,39 +432,31 @@ def select(benchmark, hosts):
                 plan = discover_samples(benchmark, row, result)
         if result:
             plans[row["base"]] = plan
-            screened.append((result["speed"], row))
-            log(f"  {row['base']}: catalog {result['speed'] / 1024:.0f} KiB/s")
+            measurement = {"latencies": [row["request"], result["latency"]],
+                           "bytes": result["bytes"], "transfer": result["transfer"]}
+            screened.append((estimate(measurement), row))
+            log(f"  {row['base']}: catalog {describe(measurement)}")
         else:
             log(f"  {row['base']}: incomplete, corrupt or unavailable catalog")
-    screened.sort(key=lambda item: (-item[0], item[1]["base"]))
+    screened.sort(key=lambda item: (item[0], item[1]["base"]))
     # Keep a direct-origin candidate in the finals even if CDN edges dominate.
     finalists = screened[:FINALISTS]
     if finalists and all(is_cdn(row["base"]) for _, row in finalists):
         direct = next((item for item in screened if not is_cdn(item[1]["base"])), None)
         if direct:
             finalists.append(direct)
-    log(f"Stage 3: validating {len(finalists)} finalists with two data-object transfers...")
-    measurements = {row["base"]: [] for _, row in finalists}
-    for index in range(2):
-        order = list(measurements)
-        random.SystemRandom().shuffle(order)
-        for base in order:
-            # One failed transfer disqualifies a finalist rather than rewarding
-            # a lucky best-of-two result or accepting an HTTP 200 partial body.
-            if measurements[base] is None:
-                continue
-            result = benchmark.sample(base, plans[base][index])
-            if result:
-                measurements[base].append(result)
-            else:
-                measurements[base] = None
-                log(f"  {base}: data transfer failed; excluded")
-    ranked = []
-    for base, results in measurements.items():
-        if results and len(results) == len(samples):
-            score = sum(r["bytes"] for r in results) / sum(r["seconds"] for r in results)
-            ranked.append((score, base))
-            log(f"  {base}: verified data {score / 1024:.0f} KiB/s")
+    log(f"Stage 3: validating {len(finalists)} finalists with data transfers and "
+        f"{LATENCY_PROBES} latency samples each...")
+    order = [row["base"] for _, row in finalists]
+    random.SystemRandom().shuffle(order)
+    measured = {}
+    for base in order:
+        measured[base] = benchmark.measure(base, plans[base])
+        if measured[base]:
+            log(f"  {base}: verified {describe(measured[base])}")
+        else:
+            log(f"  {base}: data transfer failed; excluded")
+    ranked = [(estimate(m), base) for base, m in measured.items() if m]
     # A catalog can be healthy while its data backend is unavailable. Fill
     # missing fallback slots from the rest of the measured pool, and keep
     # looking for a working direct origin if CDN finalists are all that survived.
@@ -395,20 +464,15 @@ def select(benchmark, hosts):
         if len(ranked) >= 4 and any(not is_cdn(base) for _, base in ranked):
             break
         base = row["base"]
-        if base in measurements or (len(ranked) >= 4 and is_cdn(base)):
+        if base in measured or (len(ranked) >= 4 and is_cdn(base)):
             continue
-        results = []
-        for obj in plans[base]:
-            result = benchmark.sample(base, obj)
-            if not result:
-                log(f"  {base}: replacement data transfer failed; excluded")
-                break
-            results.append(result)
-        if len(results) == len(samples):
-            score = sum(r["bytes"] for r in results) / sum(r["seconds"] for r in results)
-            ranked.append((score, base))
-            log(f"  {base}: replacement verified data {score / 1024:.0f} KiB/s")
-    ranked.sort(reverse=True)
+        measurement = benchmark.measure(base, plans[base])
+        if measurement:
+            ranked.append((estimate(measurement), base))
+            log(f"  {base}: replacement verified {describe(measurement)}")
+        else:
+            log(f"  {base}: replacement data transfer failed; excluded")
+    ranked.sort()
     if not ranked:
         return None
     chosen = ranked[:4]

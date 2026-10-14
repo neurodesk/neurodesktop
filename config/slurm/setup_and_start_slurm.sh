@@ -632,6 +632,9 @@ if [ "${DEF_MEM_PER_CPU}" -lt 1 ]; then
     DEF_MEM_PER_CPU=1
 fi
 
+# Slurm 23.11 login-environment retrieval creates a PID namespace and calls
+# fatal() if container policy denies clone(). Use its cache-only path instead;
+# without a cache Slurm runs the job with the submitted environment.
 cat > "${SLURM_CONF_PATH}" <<EOF
 ClusterName=neurodesktop
 SlurmctldHost=${NODE_HOSTNAME}
@@ -660,6 +663,7 @@ SlurmdPort=6818
 
 SlurmctldTimeout=120
 SlurmdTimeout=300
+GetEnvTimeout=0
 InactiveLimit=0
 MinJobAge=30
 KillWait=30

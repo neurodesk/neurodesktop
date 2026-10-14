@@ -338,7 +338,7 @@ if [ "$EUID" -eq 0 ]; then
             fi
 
             # Make sure the CVMFS user can access the cache directory
-            chmod 755 ${HOME}
+            chmod 755 "${HOME}"
             # The cache directory needs to be owned by cvmfs user and group
             if sudo -n true 2>/dev/null; then
                 chown -R cvmfs:root "$CACHE_DIR"
@@ -350,8 +350,8 @@ if [ "$EUID" -eq 0 ]; then
             if [ ! -d "/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/" ]; then
                 # it is not available outside, so try mounting with fuse inside container
 
-                # Rank the CVMFS servers by measured download throughput and
-                # write the repository config with the fastest server first
+                # Rank the CVMFS servers by measured request latency and download
+                # speed and write the repository config with the best server first
                 # (see cvmfs_server_select.sh for the selection strategy).
                 if [ -x /opt/neurodesktop/cvmfs_server_select.sh ]; then
                     /opt/neurodesktop/cvmfs_server_select.sh || echo "Warning: no CVMFS server measurable; wrote static fallback config."
@@ -380,7 +380,7 @@ if [ "$EUID" -eq 0 ]; then
                     ==================================================================
                     CVMFS servers:"
                     # Note: no `host probe` here - it reorders the host chain by
-                    # round-trip time, which would undo the throughput ranking.
+                    # round-trip time, which would undo the measured ranking.
                     cvmfs_talk -i neurodesk.ardc.edu.au host info
                 fi
             fi
@@ -438,160 +438,11 @@ fi
 
 # Note: environment_variables.sh is sourced via /etc/bash.bashrc (set in Dockerfile)
 
-# Read cgroup limits and set environment variables for jupyter-resource-usage
-extract_first_uint() {
-    local raw
-    raw="$(printf '%s' "${1:-}" | tr -d '[:space:]')"
-    if [[ "${raw}" =~ ^([0-9]+) ]]; then
-        echo "${BASH_REMATCH[1]}"
-        return 0
-    fi
-    return 1
-}
-
-parse_memory_to_mb() {
-    local raw value unit
-    raw="$(printf '%s' "${1:-}" | tr -d '[:space:]')"
-    if [ -z "${raw}" ]; then
-        return 1
-    fi
-
-    if [[ "${raw}" =~ ^([0-9]+)([KkMmGgTt]?)$ ]]; then
-        value="${BASH_REMATCH[1]}"
-        unit="${BASH_REMATCH[2]}"
-    else
-        return 1
-    fi
-
-    if [ "${value}" -le 0 ]; then
-        return 1
-    fi
-
-    case "${unit}" in
-        ""|[Mm]) echo "${value}" ;;
-        [Kk]) echo $(((value + 1023) / 1024)) ;;
-        [Gg]) echo $((value * 1024)) ;;
-        [Tt]) echo $((value * 1024 * 1024)) ;;
-        *) return 1 ;;
-    esac
-}
-
-detect_slurm_cpu_limit() {
-    local slurm_cpu_limit
-    slurm_cpu_limit="$(extract_first_uint "${SLURM_CPUS_ON_NODE:-}" || true)"
-    if [ -z "${slurm_cpu_limit}" ]; then
-        slurm_cpu_limit="$(extract_first_uint "${SLURM_JOB_CPUS_PER_NODE:-}" || true)"
-    fi
-    if [ -z "${slurm_cpu_limit}" ]; then
-        slurm_cpu_limit="$(extract_first_uint "${SLURM_CPUS_PER_TASK:-}" || true)"
-    fi
-
-    if [ -n "${slurm_cpu_limit}" ] && [ "${slurm_cpu_limit}" -gt 0 ]; then
-        echo "${slurm_cpu_limit}"
-    fi
-}
-
-detect_slurm_mem_limit_bytes() {
-    local mem_per_node_mb mem_per_cpu_mb slurm_cpu_limit
-    mem_per_node_mb="$(parse_memory_to_mb "${SLURM_MEM_PER_NODE:-}" || true)"
-    if [ -n "${mem_per_node_mb}" ] && [ "${mem_per_node_mb}" -gt 0 ]; then
-        echo $((mem_per_node_mb * 1024 * 1024))
-        return 0
-    fi
-
-    mem_per_cpu_mb="$(parse_memory_to_mb "${SLURM_MEM_PER_CPU:-}" || true)"
-    if [ -z "${mem_per_cpu_mb}" ] || [ "${mem_per_cpu_mb}" -le 0 ]; then
-        return 1
-    fi
-
-    slurm_cpu_limit="$(detect_slurm_cpu_limit || true)"
-    if [ -n "${slurm_cpu_limit}" ] && [ "${slurm_cpu_limit}" -gt 0 ]; then
-        echo $((mem_per_cpu_mb * slurm_cpu_limit * 1024 * 1024))
-        return 0
-    fi
-
-    return 1
-}
-
-echo "Detecting container resource limits from cgroups..."
-if [ -f "/sys/fs/cgroup/memory.max" ]; then
-    CGROUP_MEM_LIMIT="$(cat /sys/fs/cgroup/memory.max)"
-    if [ "${CGROUP_MEM_LIMIT}" != "max" ]; then
-        export MEM_LIMIT="${CGROUP_MEM_LIMIT}"
-        echo "Memory limit detected (cgroup v2): $(numfmt --to=iec "${CGROUP_MEM_LIMIT}")"
-    else
-        echo "Memory limit: unlimited"
-    fi
-elif [ -f "/sys/fs/cgroup/memory/memory.limit_in_bytes" ] || [ -f "/sys/fs/cgroup/memory.limit_in_bytes" ]; then
-    CGROUP_MEM_LIMIT_FILE="/sys/fs/cgroup/memory/memory.limit_in_bytes"
-    if [ ! -f "${CGROUP_MEM_LIMIT_FILE}" ]; then
-        CGROUP_MEM_LIMIT_FILE="/sys/fs/cgroup/memory.limit_in_bytes"
-    fi
-    CGROUP_MEM_LIMIT="$(cat "${CGROUP_MEM_LIMIT_FILE}")"
-    if [[ "${CGROUP_MEM_LIMIT}" =~ ^[0-9]+$ ]] && [ "${CGROUP_MEM_LIMIT}" -gt 0 ] && [ "${CGROUP_MEM_LIMIT}" -lt 9000000000000000000 ]; then
-        export MEM_LIMIT="${CGROUP_MEM_LIMIT}"
-        echo "Memory limit detected (cgroup v1): $(numfmt --to=iec "${CGROUP_MEM_LIMIT}")"
-    else
-        echo "Memory limit: unlimited"
-    fi
-else
-    echo "No cgroup memory limit file found."
-fi
-
-if [ -f "/sys/fs/cgroup/cpu.max" ]; then
-    CPU_MAX_LINE="$(cat /sys/fs/cgroup/cpu.max)"
-    CPU_QUOTA="$(echo "${CPU_MAX_LINE}" | awk '{print $1}')"
-    CPU_PERIOD="$(echo "${CPU_MAX_LINE}" | awk '{print $2}')"
-    if [ "${CPU_QUOTA}" != "max" ] && [[ "${CPU_PERIOD}" =~ ^[0-9]+$ ]] && [ "${CPU_PERIOD}" -gt 0 ]; then
-        if [[ "${CPU_QUOTA}" =~ ^[0-9]+$ ]]; then
-            CPU_LIMIT="$(awk "BEGIN {printf \"%.2f\", ${CPU_QUOTA}/${CPU_PERIOD}}")"
-            export CPU_LIMIT="${CPU_LIMIT}"
-            echo "CPU limit detected (cgroup v2): ${CPU_LIMIT} CPUs"
-        fi
-    else
-        echo "CPU limit: unlimited"
-    fi
-else
-    CGROUP_CPU_QUOTA_FILE=""
-    for quota_file in /sys/fs/cgroup/cpu/cpu.cfs_quota_us /sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us /sys/fs/cgroup/cpu.cfs_quota_us; do
-        if [ -f "${quota_file}" ]; then
-            CGROUP_CPU_QUOTA_FILE="${quota_file}"
-            break
-        fi
-    done
-
-    if [ -n "${CGROUP_CPU_QUOTA_FILE}" ]; then
-        CPU_QUOTA="$(cat "${CGROUP_CPU_QUOTA_FILE}")"
-        CPU_PERIOD_FILE="${CGROUP_CPU_QUOTA_FILE%cpu.cfs_quota_us}cpu.cfs_period_us"
-        CPU_PERIOD="$(cat "${CPU_PERIOD_FILE}" 2>/dev/null || echo 0)"
-        if [ "${CPU_QUOTA}" -gt 0 ] && [ "${CPU_PERIOD}" -gt 0 ]; then
-            CPU_LIMIT="$(awk "BEGIN {printf \"%.2f\", ${CPU_QUOTA}/${CPU_PERIOD}}")"
-            export CPU_LIMIT="${CPU_LIMIT}"
-            echo "CPU limit detected (cgroup v1): ${CPU_LIMIT} CPUs"
-        else
-            echo "CPU limit: unlimited"
-        fi
-    else
-        echo "No cgroup cpu limit file found."
-    fi
-fi
-
-# SLURM limit detection (overrides cgroup limits if present)
-if [ -n "${SLURM_JOB_ID:-}" ]; then
-    echo "Running inside a SLURM job (Job ID: ${SLURM_JOB_ID}). Detecting SLURM limits..."
-
-    SLURM_MEM_LIMIT_BYTES="$(detect_slurm_mem_limit_bytes || true)"
-    if [ -n "${SLURM_MEM_LIMIT_BYTES}" ] && [ "${SLURM_MEM_LIMIT_BYTES}" -gt 0 ]; then
-        export MEM_LIMIT="${SLURM_MEM_LIMIT_BYTES}"
-        echo "Memory limit set from SLURM: $(numfmt --to=iec "${MEM_LIMIT}")"
-    fi
-
-    SLURM_CPU_LIMIT="$(detect_slurm_cpu_limit || true)"
-    if [ -n "${SLURM_CPU_LIMIT}" ] && [ "${SLURM_CPU_LIMIT}" -gt 0 ]; then
-        export CPU_LIMIT="${SLURM_CPU_LIMIT}"
-        echo "CPU limit set from SLURM: ${CPU_LIMIT}"
-    fi
-fi
+# Read cgroup and Slurm allocation limits and export MEM_LIMIT/CPU_LIMIT for
+# jupyter-resource-usage. Sourced so the exports reach the Jupyter server.
+# shellcheck source=/dev/null
+source /opt/neurodesktop/detect_resource_limits.sh
+detect_resource_limits
 
 # Slurm mode:
 # - local: start an in-container single-node Slurm queue.
@@ -650,20 +501,13 @@ fi
 # auto-set it to true (because CVMFS isn't mounted yet in lazy mode).
 _ORIG_CVMFS_DISABLE="${CVMFS_DISABLE:-false}"
 
+# Image-installed or user-selected dependency is unavailable in the checkout.
+# shellcheck source=/dev/null
 source /opt/neurodesktop/environment_variables.sh > /dev/null 2>&1
 
-# Guard against a black-holed OLLAMA_HOST. notebook_intelligence probes the
-# Ollama API synchronously while Jupyter loads its server extensions, and a
-# host that silently drops packets (e.g. host.docker.internal without a route
-# on Linux) blocks server startup for 60s+. When the configured endpoint is
-# not reachable within 1s, repoint this server process at 127.0.0.1, which
-# refuses instantly (or is correct anyway when a local Ollama is running).
-if [ -n "${OLLAMA_HOST:-}" ]; then
-    if ! curl -so /dev/null --connect-timeout 1 --max-time 2 "${OLLAMA_HOST%/}/api/version" 2>/dev/null; then
-        echo "[INFO] OLLAMA_HOST=${OLLAMA_HOST} is unreachable; using http://127.0.0.1:11434 for the Jupyter server so extension startup cannot block on it."
-        export OLLAMA_HOST="http://127.0.0.1:11434"
-    fi
-fi
+# Keep extension startup bounded when the configured Ollama endpoint is unreachable.
+# shellcheck source=/dev/null
+source /opt/neurodesktop/guard_ollama_host.sh
 
 _phase_end "critical-startup"
 

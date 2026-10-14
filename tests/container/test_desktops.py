@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import inspect
 import os
 import pwd
@@ -9,12 +10,14 @@ import json
 import socket
 import shutil
 import tempfile
+from pathlib import Path
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import pytest
 import websocket
+from native_desktop_driver import start_display
 
 
 def run_cmd(cmd):
@@ -314,24 +317,6 @@ def _prepare_guacamole_runtime():
     return nb_user, home_dir, root_cmds_available, guacamole_home
 
 
-def _xrdp_already_running():
-    """True when an xrdp daemon is already bound on this netns.
-
-    When the real Jupyter-spawned Neurodesktop has already started xrdp on port
-    3389, a second test-side `ensure_rdp_backend.sh` picks a fresh port (3390,
-    ...) but the system `service xrdp start` is a no-op against the existing
-    daemon, so the test's chosen port never binds and the RDP connection is
-    legitimately stripped from the test mapping. That is not a product bug -
-    it's the known "two Neurodesktop sessions on one netns" RDP limitation.
-    Detect it up-front so dependent tests skip cleanly with an actionable
-    message instead of failing deep inside the Guacamole handshake."""
-    code, out = run_cmd("pgrep -x xrdp 2>/dev/null | head -n1")
-    if code == 0 and out.strip():
-        return True
-    code, out = run_cmd("ss -lnt 2>/dev/null | awk 'NR>1 {print $4}' | grep -E '(^|:)3389$'")
-    return code == 0 and bool(out.strip())
-
-
 def _start_guacamole_as_user(nb_user, home_dir, guacamole_home, tomcat_port=None, backend=None):
     """Start guacamole.sh in a child process, publishing the chosen Tomcat port.
 
@@ -433,35 +418,6 @@ def _open_guacamole_tunnel(port, token, data_source, connection_id, width=1280, 
     return tunnel
 
 
-def _collect_guacamole_frames(tunnel, timeout_seconds=8):
-    """Legacy liberal check - accepts the first control frame as success.
-
-    Kept for RDP compatibility (RDP authenticates via PAM which is a different
-    failure surface). The VNC test uses _collect_guacamole_desktop_frames
-    below, which is much stricter because VNC auth failures only show up as
-    .error frames *after* the initial .sync handshake, and the old check was
-    returning successfully before the backend ever responded."""
-    deadline = time.time() + timeout_seconds
-    frames = []
-
-    while time.time() < deadline:
-        try:
-            frame = tunnel.recv()
-        except websocket.WebSocketTimeoutException:
-            continue
-
-        frames.append(frame)
-        if isinstance(frame, str) and any(
-            opcode in frame for opcode in (".sync,", ".img,", ".size,", ".mouse,")
-        ):
-            return frames
-
-    raise AssertionError(
-        "Guacamole RDP tunnel did not deliver desktop instructions. "
-        f"Frames received: {frames}"
-    )
-
-
 def _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30):
     """Wait for real desktop pixels and reject any Guacamole error frames.
 
@@ -512,7 +468,7 @@ def _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30):
     if not saw_pixels:
         raise AssertionError(
             "Guacamole tunnel produced no pixel frames (.img/.png/.jpeg) within "
-            f"{timeout_seconds}s - VNC backend never handed a rendered desktop "
+            f"{timeout_seconds}s - backend never handed a rendered desktop "
             f"through. Frames received ({len(frames)}):\n"
             + "\n".join(str(f)[:200] for f in frames)
         )
@@ -728,6 +684,100 @@ def test_desktop_smoke_cleanup_does_not_use_global_process_kills():
     ]
     for pattern in forbidden:
         assert pattern not in cleanup_source
+
+
+def test_native_desktop_driver_reports_x_errors_instead_of_exiting(tmp_path):
+    if not os.path.exists("/usr/local/bin/Xtigervnc"):
+        pytest.skip("The native desktop driver needs the image's Xtigervnc")
+    script = f"""
+import os, signal
+from pathlib import Path
+from native_desktop_driver import Desktop
+desktop = Desktop(Path({str(tmp_path)!r}))
+try:
+    desktop.x.XSetInputFocus(desktop.connection, 0x7FFFFFF, 1, 0)
+    try:
+        desktop.chord(0xFF0D)
+    except AssertionError as error:
+        print("rejected:", str(error).splitlines()[0])
+    os.killpg(desktop.process.pid, signal.SIGKILL)
+    desktop.process.wait()
+    try:
+        desktop.click(1, 1)
+    except AssertionError as error:
+        print("lost:", str(error).splitlines()[0])
+finally:
+    desktop.close()
+print("driver survived")
+"""
+    result = subprocess.run([sys.executable, "-c", script], cwd=os.path.dirname(os.path.abspath(__file__)),
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert re.search(r"^rejected: .*BadWindow.*X_SetInputFocus|^rejected: .*BadWindow.*request 42", result.stdout, re.M), result.stdout
+    assert re.search(r"^lost: X display :\d+ closed its connection", result.stdout, re.M), result.stdout
+    assert "driver survived" in result.stdout
+
+
+@pytest.mark.parametrize("fault", ["protocol", "connection"])
+def test_native_desktop_driver_restores_x_handlers(tmp_path, fault):
+    if not os.path.exists("/usr/local/bin/Xtigervnc"):
+        pytest.skip("The native desktop driver needs the image's Xtigervnc")
+    script = f"""
+import ctypes, ctypes.util, gc, os, socket
+from pathlib import Path
+from native_desktop_driver import Desktop, _ERROR_HANDLER, _IO_ERROR_HANDLER, _IO_ERROR_EXIT_HANDLER
+x = ctypes.CDLL(ctypes.util.find_library("X11"))
+x.XSetErrorHandler.argtypes = x.XSetIOErrorHandler.argtypes = [ctypes.c_void_p]
+received = []
+error_handler = _ERROR_HANDLER(lambda display, event: received.append(event.contents.error_code) or 0)
+io_handler = _IO_ERROR_HANDLER(lambda display: received.append("lost") or 0)
+exit_handler = _IO_ERROR_EXIT_HANDLER(lambda display, data: None)
+x.XSetErrorHandler(ctypes.cast(error_handler, ctypes.c_void_p))
+x.XSetIOErrorHandler(ctypes.cast(io_handler, ctypes.c_void_p))
+desktop = Desktop(Path({str(tmp_path)!r}))
+try:
+    desktop.chord(0xFF0D)
+finally:
+    desktop.close()
+del desktop
+gc.collect()
+x.XOpenDisplay.argtypes = [ctypes.c_char_p]
+x.XOpenDisplay.restype = ctypes.c_void_p
+x.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+x.XCloseDisplay.argtypes = [ctypes.c_void_p]
+x.XSetInputFocus.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+x.XSetIOErrorExitHandler.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+connection = x.XOpenDisplay(os.environ["TEST_DISPLAY"].encode())
+assert connection, "Cannot open the independent test display"
+x.XSetIOErrorExitHandler(connection, ctypes.cast(exit_handler, ctypes.c_void_p), None)
+if {fault!r} == "protocol":
+    x.XSetInputFocus(connection, 0x7FFFFFF, 1, 0)
+    x.XSync(connection, 0)
+    assert received == [3], received
+    x.XCloseDisplay(connection)
+else:
+    x.XConnectionNumber.argtypes = [ctypes.c_void_p]
+    transport = socket.socket(fileno=x.XConnectionNumber(connection))
+    transport.shutdown(socket.SHUT_RDWR)
+    transport.detach()
+    x.XSync(connection, 0)
+    assert received == ["lost"], received
+print("previous handler received the error")
+"""
+    with (tmp_path / "independent-display.log").open("w") as log:
+        server, display = start_display(log, "100x100")
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=os.path.dirname(os.path.abspath(__file__)),
+                env={**os.environ, "TEST_DISPLAY": display},
+                capture_output=True, text=True, timeout=120,
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert "previous handler received the error" in result.stdout
+        finally:
+            server.terminate()
+            server.wait(timeout=10)
 
 
 def test_init_secrets_generates_per_user_mapping(tmp_path):
@@ -1038,11 +1088,21 @@ def test_guac_login_rejects_legacy_default_password():
         _cleanup_guacamole_process(process, home_dir=home_dir, guacamole_home=guacamole_home)
 
 
-def test_vncserver_binds_localhost_only():
-    """The vncserver must be launched with -localhost yes so its TCP port is
-    reachable only through the local loopback. On Apptainer the host netns is
-    shared, but at least the backend is not reachable off-node."""
+@pytest.mark.parametrize("sftp_config", ["default", "wildcard", "include"])
+def test_vnc_backends_bind_localhost_only(sftp_config):
+    """VNC and its SFTP side-channel must be reachable only on loopback."""
     nb_user, home_dir, _, guacamole_home = _prepare_guacamole_runtime()
+    if sftp_config != "default":
+        ssh_dir = Path(home_dir) / ".ssh"
+        config = Path("/opt/jovyan_defaults/.ssh/sshd_config").read_text()
+        config = config.replace("/home/jovyan", home_dir)
+        unsafe_listeners = "ListenAddress 0.0.0.0\nListenAddress ::\n"
+        if sftp_config == "include":
+            included_config = ssh_dir / "listeners.conf"
+            included_config.write_text(unsafe_listeners)
+            unsafe_listeners = f'Include "{included_config}"\n'
+        config = config.replace("ListenAddress 127.0.0.1\n", unsafe_listeners)
+        (ssh_dir / "sshd_config").write_text(config)
     process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home, backend="vnc")
     try:
         _guacamole_ready(process.tomcat_port, home_dir=home_dir, process=process)
@@ -1067,11 +1127,39 @@ def test_vncserver_binds_localhost_only():
         # Attempt to connect via the external interface. We don't have a real
         # non-loopback IP in-container always, but we can at least check that
         # `ss -lnt` reports the listen address as 127.0.0.1.
-        _, ss_out = run_cmd(f"ss -lnt 'sport = :{vnc_port}' | tail -n +2")
+        code, ss_out = run_cmd(f"ss -H -lnt 'sport = :{vnc_port}'")
+        assert code == 0, ss_out
         assert ss_out, f"No listen socket found for port {vnc_port}: {ss_out!r}"
-        listen_addr = ss_out.split()[3]
-        assert listen_addr.startswith("127.0.0.1:") or listen_addr.startswith("[::1]:"), \
-            f"vncserver must bind loopback only; listen address was {listen_addr}"
+        listen_addresses = [line.split()[3] for line in ss_out.splitlines()]
+        assert all(address in (f"127.0.0.1:{vnc_port}", f"[::1]:{vnc_port}")
+                   for address in listen_addresses), \
+            f"vncserver must bind loopback only; listen addresses were {listen_addresses}"
+
+        sftp_port = _read_runtime_port(home_dir, "sftp_port", default=None)
+        assert sftp_port, "SFTP port was not published after sshd startup"
+        _wait_for_tcp_port(sftp_port, timeout_seconds=30)
+        code, ss_out = run_cmd(f"ss -H -lnt 'sport = :{sftp_port}'")
+        assert code == 0, ss_out
+        assert ss_out, f"No listen socket found for SFTP port {sftp_port}: {ss_out!r}"
+        listen_addresses = [line.split()[3] for line in ss_out.splitlines()]
+        assert listen_addresses == [f"127.0.0.1:{sftp_port}"], \
+            f"SFTP sshd must bind IPv4 loopback only; listen addresses were {listen_addresses}"
+
+        if sftp_config != "default":
+            source = Path(home_dir) / "sftp-probe.txt"
+            downloaded = Path(home_dir) / "sftp-downloaded.txt"
+            source.write_text("Guacamole SFTP loopback probe\n")
+            transfer = subprocess.run(
+                ["sftp", "-b", "-", "-P", str(sftp_port),
+                 "-i", str(Path(home_dir) / ".ssh/guacamole_rsa"),
+                 "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
+                 "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+                 f"{nb_user}@127.0.0.1"],
+                input=f'get "{source}" "{downloaded}"\n',
+                capture_output=True, text=True, timeout=30,
+            )
+            assert transfer.returncode == 0, transfer.stdout + transfer.stderr
+            assert downloaded.read_text() == "Guacamole SFTP loopback probe\n"
     finally:
         _cleanup_guacamole_process(process, home_dir=home_dir, guacamole_home=guacamole_home)
 
@@ -1097,10 +1185,8 @@ def test_xrdp_tls_key_access():
 def test_guac_vnc_tunnel():
     """End-to-end VNC smoke test through Guacamole - auth + desktop render.
 
-    Stricter than the RDP equivalent because VNC auth errors only surface as
-    .error frames *after* the initial .sync handshake; the legacy collector
-    returned success on that handshake alone. This test additionally
-    cross-checks that the VNC port stamped into user-mapping.xml actually
+    Authentication errors may follow the initial sync handshake.
+    This test also checks that the VNC port stamped into user-mapping.xml
     matches an Xvnc process that is listening, to catch cache-drift bugs where
     Guacamole read the mapping before guacamole.sh finished stamping the
     dynamic port."""
@@ -1169,7 +1255,7 @@ def test_guac_vnc_tunnel():
             vnc_connection_id,
         )
         try:
-            frames = _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30)
+            _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30)
         except AssertionError as exc:
             # Pull the Guacamole log so we can see whether the failure was an
             # auth rejection, a connection refused, or something downstream.
@@ -1191,7 +1277,7 @@ def test_guac_vnc_tunnel():
                 f"{exc}\n--- catalina.out tail ---\n{extra}\n"
                 f"--- latest Xvnc log ---\n{vnc_tail}\n"
                 f"--- mapping VNC entry ---\n{vnc_block}"
-            )
+            ) from exc
     finally:
         if tunnel is not None:
             try:
@@ -1209,24 +1295,19 @@ def test_guac_rdp_tunnel():
         shutil.rmtree(guacamole_home, ignore_errors=True)
         shutil.rmtree(home_dir, ignore_errors=True)
         pytest.skip(
-            "RDP smoke test starts the global xrdp service; set "
+            "RDP smoke test opens a session on the provisioned xrdp service; set "
             "NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 in disposable "
             "test containers to enable it."
         )
 
-    if not root_cmds_available:
+    if os.environ.get("APPTAINER_CONTAINER"):
         shutil.rmtree(guacamole_home, ignore_errors=True)
         shutil.rmtree(home_dir, ignore_errors=True)
-        pytest.skip("RDP smoke test requires root or passwordless sudo to start xrdp")
+        pytest.skip("Unprivileged HPC startup does not provision RDP")
 
-    if _xrdp_already_running():
-        shutil.rmtree(guacamole_home, ignore_errors=True)
-        shutil.rmtree(home_dir, ignore_errors=True)
-        pytest.skip(
-            "xrdp is already running on this netns (likely from the live Neurodesktop "
-            "session). A second guacamole.sh cannot rebind xrdp to its own port, so "
-            "the RDP tunnel smoke test is not meaningful here."
-        )
+    account = pwd.getpwnam(nb_user)
+    with open(f"/run/neurodesktop/rdp/{account.pw_uid}/port") as port_file:
+        _wait_for_tcp_port(int(port_file.read()))
 
     process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home, backend="rdp")
     tunnel = None
@@ -1249,19 +1330,40 @@ def test_guac_rdp_tunnel():
             auth_response["dataSource"],
             rdp_connection_id,
         )
-        frames = _collect_guacamole_frames(tunnel)
-        assert any(
-            isinstance(frame, str)
-            and any(opcode in frame for opcode in (".sync,", ".img,", ".size,", ".mouse,"))
-            for frame in frames
-        ), f"Guacamole RDP tunnel did not render desktop output: {frames}"
+        _collect_guacamole_desktop_frames(tunnel)
 
-        xrdp_log = _read_xrdp_log()
-        assert "Cannot read private key file /etc/xrdp/key.pem: Permission denied" not in xrdp_log, xrdp_log
-        assert (
-            "Cannot accept TLS connections because certificate or private key file is not readable"
-            not in xrdp_log
-        ), xrdp_log
+        def key(keysym, pressed):
+            value = str(keysym)
+            tunnel.send(f"3.key,{len(value)}.{value},1.{int(pressed)};")
+
+        key(65513, True)
+        key(65471, True)
+        key(65471, False)
+        key(65513, False)
+        _collect_guacamole_desktop_frames(tunnel, timeout_seconds=10)
+        output = Path(home_dir) / "rdp-command.txt"
+        assert not output.exists(), "RDP command output must be new for this session"
+        command = "sh -c " + shlex.quote(
+            "printf desktop-ready > " + shlex.quote(str(output))
+        )
+        for character in command:
+            key(ord(character), True)
+            key(ord(character), False)
+        key(65293, True)
+        key(65293, False)
+        deadline = time.monotonic() + 20
+        while not output.exists() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert output.is_file(), "RDP desktop did not execute the keyboard-launched command"
+        assert output.read_text() == "desktop-ready"
+
+        if root_cmds_available:
+            xrdp_log = _read_xrdp_log()
+            assert "Cannot read private key file /etc/xrdp/key.pem: Permission denied" not in xrdp_log, xrdp_log
+            assert (
+                "Cannot accept TLS connections because certificate or private key file is not readable"
+                not in xrdp_log
+            ), xrdp_log
     finally:
         if tunnel is not None:
             try:
@@ -1292,6 +1394,6 @@ def test_vnc_startup(tmp_path):
         code, output = run_cmd("ps auxww | grep -v grep | grep -E 'Xtigervnc.*:99'")
         if code != 0:
             _, log_content = run_cmd(f"cat {tmp_path}/.vnc/*:99.log || true")
-            assert False, f"Xtigervnc :99 process is not running. VNC startup crashed.\\nLog:\\n{log_content}\\n\\nPS Output:\\n{output}"
+            raise AssertionError(f"Xtigervnc :99 process is not running. VNC startup crashed.\\nLog:\\n{log_content}\\n\\nPS Output:\\n{output}")
     finally:
         run_cmd(f"USER=jovyan HOME={tmp_path} vncserver -kill :99")

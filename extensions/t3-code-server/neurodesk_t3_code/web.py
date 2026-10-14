@@ -1,6 +1,6 @@
 """Authenticated, fixed-target proxy for the pinned T3 web client.
 
-T3 0.0.42 has no base-path option. Adapt only responses under this route;
+T3 0.0.45 has no base-path option. Adapt only responses under this route;
 never modify the installed client or claim root-level Jupyter routes.
 """
 from __future__ import annotations
@@ -106,8 +106,7 @@ class T3SessionHandler(APIHandler):
                     if self.request.protocol == "https":
                         cookie += "; Secure"
                     self.add_header("Set-Cookie", cookie)
-        except (OSError, ValueError, KeyError, TypeError, AttributeError, asyncio.TimeoutError,
-                httpclient.HTTPClientError):
+        except (TimeoutError, OSError, ValueError, KeyError, TypeError, AttributeError, httpclient.HTTPClientError):
             # Neither CLI output nor upstream error bodies belong in diagnostics.
             raise web.HTTPError(
                 503, reason="Could not connect to T3 Code. Wait a moment and reopen it."

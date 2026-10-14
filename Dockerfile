@@ -1,16 +1,16 @@
-# syntax=docker/dockerfile:1.25
+# syntax=docker/dockerfile:1.27
 
 # Pin to a specific jupyter/base-notebook date for reproducibility.
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
 ARG BASE_IMAGE_TAG=2026-09-18
-ARG APPTAINER_VERSION=1.5.3
-ARG APPTAINER_GO_VERSION=1.27.1
+ARG APPTAINER_VERSION=1.5.4
+ARG APPTAINER_GO_VERSION=1.27.2
 ARG APPTAINER_GRPC_VERSION=1.84.0
-ARG APPTAINER_CRYPTO_VERSION=0.57.0
+ARG APPTAINER_CRYPTO_VERSION=0.58.0
 ARG CVMFS_VERSION=2.14.1+ubuntu24.04
 ARG CVMFS_RELEASE_VERSION=4.9
 ARG CVMFS_RELEASE_SHA256=88f4bb658c2c85e77aec39181f61dea8ab641b3481a0db2b00f453beabb05395
-ARG NPM_VERSION=12.0.2
+ARG NPM_VERSION=12.2.0
 ARG JUPYTER_BUILDER_VERSION=1.2.3
 
 FROM golang:${APPTAINER_GO_VERSION}-bookworm AS apptainer
@@ -110,6 +110,8 @@ USER root
 ARG BUILD_ONLY_APT_PACKAGES="build-essential libcairo2-dev libjpeg-turbo8-dev libpng-dev libtool-bin freerdp2-dev libvncserver-dev libssl-dev libwebp-dev libssh2-1-dev libpango1.0-dev"
 ARG GUACAMOLE_VERSION="1.6.0"
 ARG CODE_SERVER_VERSION="4.138.0"
+ARG SHELL_QUOTE_VERSION="1.12.0"
+ARG PROXY_ADDR_VERSION="2.0.8"
 
 COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
 
@@ -172,14 +174,16 @@ RUN set -eux; \
     npm update --no-audit --no-fund basic-ftp; \
     # Normalize code-server's bundled tar to the current audited release.
     npm update --no-audit --no-fund tar; \
+    npm install --save-exact --ignore-scripts --no-audit --no-fund "proxy-addr@${PROXY_ADDR_VERSION}"; \
+    test "$(node -p 'require("/opt/code-server/node_modules/proxy-addr/package.json").version')" = "${PROXY_ADDR_VERSION}"; \
     # Keep VS Code's nested shell-quote copy on the current audited release.
-    shell_quote_tar="$(npm pack --silent shell-quote@1.10.0)"; \
+    shell_quote_tar="$(npm pack --silent "shell-quote@${SHELL_QUOTE_VERSION}")"; \
     shell_quote_dir="/opt/code-server/lib/vscode/node_modules/shell-quote"; \
     rm -rf "${shell_quote_dir}"; \
     mkdir -p "${shell_quote_dir}"; \
     tar -xzf "${shell_quote_tar}" -C "${shell_quote_dir}" --strip-components=1; \
     rm -f "${shell_quote_tar}"; \
-    test "$(node -p 'require("/opt/code-server/lib/vscode/node_modules/shell-quote/package.json").version')" = "1.10.0"; \
+    test "$(node -p 'require("/opt/code-server/lib/vscode/node_modules/shell-quote/package.json").version')" = "${SHELL_QUOTE_VERSION}"; \
     # Strip bundled sourcemaps in the stage that unpacks them so the runtime
     # copy layer never carries them; they only serve devtools debugging.
     find /opt/code-server -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete; \
@@ -263,7 +267,7 @@ RUN mkdir -p /opt/strace \
 
 ARG TOMCAT_REL="11"
 ARG TOMCAT_VERSION="11.0.26"
-ARG TOMCAT_MIGRATION_VERSION="1.0.12"
+ARG TOMCAT_MIGRATION_VERSION="1.0.13"
 ARG GUACAMOLE_VERSION="1.6.0"
 ENV LANG=""
 ENV LANGUAGE=""
@@ -588,16 +592,16 @@ RUN retry conda install -c conda-forge nb_conda_kernels \
 # `env PATH=` restores the conda-first PATH that runuser resets (the
 # jupyterlab-slurm source build needs jlpm and node on PATH).
 ARG BUST_CACHE_PIP=4
-ARG UV_VERSION="0.12.17"
+ARG UV_VERSION="0.13.0"
 ARG JUPYTER_AI_VERSION="3.2.0"
 ARG JUPYTER_COLLABORATION_VERSION="4.4.2"
 ARG JUPYTER_COLLABORATION_REF="3bf11cb7b271b554998105a11e6c9b8c3e376615"
 ARG ASTRA_SPEC_VERSION="0.0.14"
-ARG ASTRA_TOOLS_VERSION="0.2.17"
+ARG ASTRA_TOOLS_VERSION="0.2.18"
 ARG ANYWIDGET_VERSION="0.11.0"
 ARG IPYNIIVUE_VERSION="2.4.4"
 ARG SNAKEMAKE_VERSION="9.27.0"
-ARG PYJWT_VERSION="2.14.0"
+ARG PYJWT_VERSION="2.15.1"
 ARG JUPYTER_BUILDER_VERSION
 ARG JUPYTERLAB_SLURM_REF="8dccb39808f8a1b77712a9a5773a7d2601a56683"
 USER root
@@ -657,7 +661,6 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     # need the scoped YDoc 4 rebuild below before JupyterLab 4.6 accepts them.
     jupyter-collaboration==${JUPYTER_COLLABORATION_VERSION} \
     jupyterlab_rise \
-    jupyterlab-niivue==0.2.7 \
     jupyterlab_myst==2.7.0 \
     jupyter-sshd-proxy \
     papermill \
@@ -808,7 +811,7 @@ RUN --mount=type=bind,source=config/jupyter/notebook-intelligence-5.3.1.yarn.loc
 # MyST 2.7.0 uses pnpm. Its published metadata requests @jupyter/ydoc 3.x,
 # while JupyterLab 4.6 provides 4.x, so compile against an exact current YDoc
 # and retain that exact version in both the manifest and lockfile.
-ARG MYST_PNPM_VERSION="11.27.0"
+ARG MYST_PNPM_VERSION="11.28.4"
 ARG MYST_YDOC_VERSION="4.1.1"
 RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
     && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
@@ -903,6 +906,27 @@ RUN --mount=type=bind,source=config/cvmfs,target=/tmp/cvmfs,ro \
     && chmod 0644 /etc/cvmfs/config.d/neurodesk.ardc.edu.au.conf* \
     && install -m 0644 /tmp/cvmfs/default.local /etc/cvmfs/default.local
 
+# Install VirtualGL for opt-in application rendering through headless EGL.
+ARG VIRTUALGL_VERSION="3.1.5"
+ARG VIRTUALGL_AMD64_SHA256="df3f7788ce41b182a47c0d298e5cd6d2d63579522cb41825970b7726e825485e"
+ARG VIRTUALGL_ARM64_SHA256="9ac238e8a18c06d84ef65444a591a7a5bb4c4ce9e8cfdd92f8a2aea35edbb5d7"
+RUN set -eu; \
+    virtualgl_arch="$(dpkg --print-architecture)"; \
+    case "${virtualgl_arch}" in \
+        amd64) virtualgl_sha256="${VIRTUALGL_AMD64_SHA256}" ;; \
+        arm64) virtualgl_sha256="${VIRTUALGL_ARM64_SHA256}" ;; \
+        *) echo "Unsupported VirtualGL architecture: ${virtualgl_arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 300 \
+        "https://github.com/VirtualGL/virtualgl/releases/download/${VIRTUALGL_VERSION}/virtualgl_${VIRTUALGL_VERSION}_${virtualgl_arch}.deb" \
+        -o /tmp/virtualgl.deb; \
+    printf '%s  %s\n' "${virtualgl_sha256}" /tmp/virtualgl.deb | sha256sum -c -; \
+    apt-install-retry /tmp/virtualgl.deb mesa-utils mesa-utils-extra; \
+    test "$(dpkg-query -W -f='${Version}' virtualgl | cut -d- -f1)" = "${VIRTUALGL_VERSION}"; \
+    rm -f /tmp/virtualgl.deb; \
+    apt-get clean; rm -rf /var/lib/apt/lists/*
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display
+
 # Install neurocommand
 ARG NEUROCOMMAND_REF=main
 RUN echo "Installing neurocommand ref ${NEUROCOMMAND_REF}" \
@@ -994,7 +1018,7 @@ RUN set -eu; \
     cloudflared --version; \
     rm /tmp/t3-cloudflared
 
-ARG T3_CODE_VERSION="0.0.42"
+ARG T3_CODE_VERSION="0.0.45"
 RUN --mount=type=bind,source=config/agents/t3-code/package.json,target=/tmp/t3-code/package.json,ro \
     --mount=type=bind,source=config/agents/t3-provider-bin,target=/tmp/t3-provider-bin,ro \
     set -eux; \
@@ -1012,7 +1036,7 @@ RUN --mount=type=bind,source=config/agents/t3-code/package.json,target=/tmp/t3-c
     test "$(node -p "require(\"${t3_platform}/package.json\").version")" = "${T3_CODE_VERSION}"; \
     test -x "${t3_platform}/t3"; \
     test -f "${t3_platform}/client/index.html"; \
-    test -f "${t3_platform}/node_modules/node-pty/build/Release/pty.node"; \
+    test -f "${t3_platform}/node_modules/node-pty/prebuilds/linux-$(node -p process.arch)/pty.node"; \
     find /opt/t3-code -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete; \
     test "$(/opt/t3-code/node_modules/.bin/t3 --version)" = "t3 v${T3_CODE_VERSION}"; \
     install -m 0755 /tmp/t3-provider-bin/codex /tmp/t3-provider-bin/claude \
@@ -1080,6 +1104,24 @@ RUN --mount=type=bind,source=config/agents/patch_lightcone_cli.py,target=/tmp/pa
     "import importlib.metadata as m; assert m.version('astra-tools') == '${ASTRA_TOOLS_VERSION}'; assert m.version('astra-spec') == '${ASTRA_SPEC_VERSION}'; assert m.version('snakemake') == '${SNAKEMAKE_VERSION}'; assert m.version('packaging') == '25.0'" \
     && PATH=/opt/uv/tools/lightcone-cli/bin:${PATH} dask --version \
     && rm -rf /tmp/lightcone-cli-src /tmp/lightcone-cli.tar.gz
+
+# Neurodesk's FreeBrowse fork supplies the authenticated document viewer.
+# Build both the serverless app and federated extension from the same source.
+ARG FREEBROWSE_REF="5f64059c81b7b9eb01ca6a0d261aeb17d27053d2"
+RUN retry git clone https://github.com/neurodesk/freebrowse.git /tmp/freebrowse \
+    && git -C /tmp/freebrowse checkout --detach "${FREEBROWSE_REF}" \
+    && test "$(git -C /tmp/freebrowse rev-parse HEAD)" = "${FREEBROWSE_REF}" \
+    && cd /tmp/freebrowse/frontend \
+    && npm_config_cache=/tmp/freebrowse-npm-cache retry npm ci --no-audit --no-fund \
+    && npm run build:jupyter \
+    && cd /tmp/freebrowse/jupyter \
+    && YARN_ENABLE_IMMUTABLE_INSTALLS=0 retry /opt/conda/bin/jlpm install \
+    && /opt/conda/bin/jlpm build:prod \
+    && /opt/conda/bin/pip install --no-deps . \
+    && /opt/conda/bin/jupyter server extension enable jupyterlab_freebrowse --sys-prefix \
+    && /opt/conda/bin/python -c "from pathlib import Path; import jupyterlab_freebrowse as f; assert (Path(f.__file__).parent / 'static/freebrowse/index.html').is_file()" \
+    && find /opt/conda/share/jupyter/labextensions/jupyterlab-freebrowse -name '*.map' -delete \
+    && rm -rf /tmp/freebrowse /tmp/freebrowse-npm-cache /root/.cache /root/.npm /home/${NB_USER}/.cache /home/${NB_USER}/.yarn
 
 # Build the local JupyterLab extensions here: their sources are the most
 # frequently edited build inputs in the repository, so everything above this
@@ -1472,6 +1514,8 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -d -m 0755 /opt/config/jupyter/webapp_icons \
     && cp -a /tmp/jupyter/webapp_icons/. /opt/config/jupyter/webapp_icons/ \
     && install -D -m 0644 /tmp/lxde/background.png /usr/share/lxde/wallpapers/desktop_wallpaper.png \
+    && install -m 0755 /tmp/lxde/neurodesktop-gpu-check /usr/local/bin/neurodesktop-gpu-check \
+    && ln -sf /opt/VirtualGL/bin/eglinfo /usr/local/bin/vgl-eglinfo \
     # Debian's TigerVNC Perl launcher searches its own directory before PATH
     # when locating Xtigervnc. Invoke it through /usr/local/bin so it selects
     # the adjacent Mesa-confined X-server wrapper below.
@@ -1489,6 +1533,9 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/jupyter/start_notebook.sh /usr/local/bin/start-notebook.d/start_notebook.sh \
     && install -m 0755 /tmp/jupyter/before_notebook.sh /usr/local/bin/before-notebook.d/before_notebook.sh \
     && install -m 0755 /tmp/jupyter/startup_security.py /opt/neurodesktop/startup_security.py \
+    && install -m 0755 -o root -g root /tmp/jupyter/neurodesk_update.py /usr/local/bin/neurodesk-update \
+    && /usr/bin/python3 -I -c 'import runpy; runpy.run_path("/usr/local/bin/neurodesk-update")["install_update_launcher"]()' \
+    && install -m 0755 /tmp/jupyter/code_server_ready.py /opt/neurodesktop/code_server_ready.py \
     && install -m 0755 /tmp/jupyter/prepare_cpuinfo.sh /opt/neurodesktop/prepare_cpuinfo.sh \
     && install -m 0755 /tmp/jupyter/neurodesktop_apt.py /usr/local/bin/apt \
     && ln -sf apt /usr/local/bin/apt-get \
@@ -1497,7 +1544,10 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/jupyter/jupyterlab_startup.sh /opt/neurodesktop/jupyterlab_startup.sh \
     && install -m 0644 /tmp/jupyter/wait_for_jupyter.py /opt/neurodesktop/wait_for_jupyter.py \
     && install -m 0755 /tmp/jupyter/deferred_startup.sh /opt/neurodesktop/deferred_startup.sh \
+    && install -m 0755 /tmp/jupyter/warm_module_cache.sh /opt/neurodesktop/warm_module_cache.sh \
     && install -m 0755 /tmp/jupyter/print_access_url.sh /opt/neurodesktop/print_access_url.sh \
+    && install -m 0755 /tmp/jupyter/guard_ollama_host.sh /opt/neurodesktop/guard_ollama_host.sh \
+    && install -m 0644 /tmp/jupyter/detect_resource_limits.sh /opt/neurodesktop/detect_resource_limits.sh \
     && install -m 0755 /tmp/jupyter/cvmfs_server_select.sh /opt/neurodesktop/cvmfs_server_select.sh \
     && install -m 0644 /tmp/jupyter/cvmfs_server_select.py /opt/neurodesktop/cvmfs_server_select.py \
     && install -m 0755 /tmp/guacamole/guacamole.sh /opt/neurodesktop/guacamole.sh \
@@ -1555,7 +1605,8 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && chown -R root:users /opt/config /opt/neurodesktop /opt/tests \
     # Git checkout modes depend on the builder's umask. The examples and test
     # tier are read-only image assets, so normalize them for the jovyan user.
-    && chmod -R a+rX /opt/neurodesktop/examples /opt/tests
+    && chmod -R a+rX /opt/neurodesktop/examples /opt/tests \
+    && chown -R -h "${NB_UID}:${NB_GID}" /neurocommand
 
 
 # jupyter-server-proxy 4.5.0 constructs SimpleAsyncHTTPClient directly for
@@ -1571,7 +1622,9 @@ RUN --mount=type=bind,source=config/jupyter/patch_jupyter_server_proxy.py,target
 # divergent-history repair, server execution leaves cells untrusted, notebook
 # rooms append non-CRDT outputs, and its per-connection kernel WebSocket
 # bridge skips upstream jupyter_server's connection nudge, silently losing
-# IOPub messages published before a fresh subscription joins. Frontend
+# IOPub messages published before a fresh subscription joins. That bridge also
+# gives every connection the kernel manager's ZMQ identity, so each new kernel
+# WebSocket silently cuts off the previous one. Frontend
 # workarounds publish new content-hashed assets because Jupyter serves bundles
 # as immutable. Keep these anchored workarounds until a fixed release is
 # pinned. The stream-coalescing and kernel-nudge logic live in

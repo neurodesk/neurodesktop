@@ -78,8 +78,8 @@ start_cvmfs() {
     }
 
     # ── Server selection ──────────────────────────────────────────────────
-    # Rank the CVMFS servers by measured download throughput and write the
-    # repository config with the fastest server first. The script reuses a
+    # Rank the CVMFS servers by measured request latency and download speed
+    # and write the repository config with the best server first. The script reuses a
     # cached ranking (with health check and TTL) when one is available; see
     # cvmfs_server_select.sh for details.
     if [ -x /opt/neurodesktop/cvmfs_server_select.sh ]; then
@@ -117,13 +117,15 @@ start_cvmfs() {
     fi
 
     # Note: no `host probe` here - it reorders the host chain by round-trip
-    # time, which would undo the throughput ranking.
+    # time, which would undo the measured ranking.
     cvmfs_talk -i neurodesk.ardc.edu.au host info 2>/dev/null || true
 
     # Re-source environment variables so MODULEPATH picks up CVMFS.
     # Unset the guard so the script re-evaluates paths with CVMFS now mounted.
     if [ -f /opt/neurodesktop/environment_variables.sh ]; then
         unset NEURODESKTOP_ENV_SOURCED
+        # Image-installed or user-selected dependency is unavailable in the checkout.
+        # shellcheck source=/dev/null
         source /opt/neurodesktop/environment_variables.sh > /dev/null 2>&1
     fi
 
@@ -181,6 +183,10 @@ cvmfs_pid=$!
 start_slurm &
 slurm_pid=$!
 wait "$cvmfs_pid"
+# Detached: building the module cache must not delay the done marker or Slurm.
+if [ -x /opt/neurodesktop/warm_module_cache.sh ]; then
+    /opt/neurodesktop/warm_module_cache.sh &
+fi
 wait "$slurm_pid"
 echo "[deferred] Deferred initialization complete."
 touch "$DEFERRED_DONE"

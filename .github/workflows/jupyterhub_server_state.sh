@@ -24,7 +24,9 @@
 
 set -uo pipefail
 
-jq -er '
+jq -ers '
+    if length != 1 then error("expected one JupyterHub user model") else .[0] end
+    |
     if type != "object" or (has("name") | not) then
         error("not a JupyterHub user model")
     else

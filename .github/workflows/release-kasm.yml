@@ -37,14 +37,14 @@ jobs:
       IMAGE_OWNER: ${{ github.repository_owner }}
       RUN_NUMBER: ${{ github.run_number }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.sha }}
       - name: Test release tooling
         run: |
           python3 -m pip install pytest pyyaml
           python3 -m pytest tests/unit/test_kasm_submission.py tests/unit/test_kasm_workspace.py tests/unit/test_kasm_release_workflow.py -q
-      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Validate release inputs
         id: inputs
         run: |
@@ -154,7 +154,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload submission and evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: neurodesktop-kasm-${{ steps.inputs.outputs.tag || github.run_id }}
           path: |

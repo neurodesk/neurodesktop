@@ -42,9 +42,10 @@ def _write_fake_cvmfs_talk(bin_dir):
 set -eu
 printf '%s\\n' "$*" >> "$FAKE_REFRESH_MARKER"
 if [[ "$FAKE_REFRESH_STATUS" != 0 ]]; then exit "$FAKE_REFRESH_STATUS"; fi
-if [[ -n "$FAKE_DISAPPEARS" ]]; then rm "$FAKE_REPOSITORY/containers/$FAKE_DISAPPEARS/commands.txt"; fi
 # A refresh must not make the checker download a newer desired inventory.
 printf 'replacement-inventory\\n' > "$FAKE_INVENTORY"
+if [[ $(wc -l < "$FAKE_REFRESH_MARKER") -lt "$FAKE_APPEARS_ON_REFRESH" ]]; then exit 0; fi
+if [[ -n "$FAKE_DISAPPEARS" ]]; then rm "$FAKE_REPOSITORY/containers/$FAKE_DISAPPEARS/commands.txt"; fi
 for name in $FAKE_REFRESH_CONTAINERS; do
     container="$FAKE_REPOSITORY/containers/$name"
     mkdir -p "$container"
@@ -64,6 +65,8 @@ def _run_checker(
     appears_after_refresh=(),
     refresh_status=0,
     disappears_after_refresh="",
+    replica_retry=False,
+    appears_on_refresh=1,
 ):
     tmp_path.mkdir(parents=True, exist_ok=True)
     repository = tmp_path / "repository"
@@ -89,6 +92,7 @@ if [[ "$1" == cvmfs_talk && "$FAKE_REFRESH_STATUS" == 124 ]]; then
 fi
 exec "$@"
 ''',
+        "sleep": 'printf "%s\\n" "$*" >> "$FAKE_SLEEP_MARKER"',
         "cvmfs_config": 'echo "File Catalog Revision: 69976"',
         "cvmfs_talk": 'exit 1',
     }.items():
@@ -114,6 +118,9 @@ exec "$@"
             "FAKE_REPOSITORY": str(repository),
             "FAKE_REFRESH_STATUS": str(refresh_status),
             "FAKE_DISAPPEARS": disappears_after_refresh,
+            "FAKE_APPEARS_ON_REFRESH": str(appears_on_refresh),
+            "FAKE_SLEEP_MARKER": str(tmp_path / "sleep.log"),
+            "CVMFS_INVENTORY_REPLICA_RETRY": str(replica_retry).lower(),
         }
     )
     result = subprocess.run(
@@ -184,8 +191,9 @@ def test_inventory_check_rejects_malformed_records(tmp_path, invalid):
     assert "invalid container identifier" in result.stdout
 
 
+@pytest.mark.parametrize("replica_retry", [False, True])
 def test_inventory_check_refreshes_catalog_before_reporting_missing_entries(
-    tmp_path,
+    tmp_path, replica_retry,
 ):
     result, _, refresh_marker = _run_checker(
         tmp_path,
@@ -194,12 +202,14 @@ def test_inventory_check_refreshes_catalog_before_reporting_missing_entries(
         present=("present_1.0_20260101",),
         refresh_catalog=True,
         appears_after_refresh=("late_2.0_20260202",),
+        replica_retry=replica_retry,
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "refreshing the catalog before the final check" in result.stdout
+    assert "refreshing the catalog before checking again" in result.stdout
     assert "Validated 2 CVMFS inventory entries" in result.stdout
     assert "::error" not in result.stdout
+    assert not (tmp_path / "sleep.log").exists()
     assert refresh_marker.read_text().splitlines() == [
         "-i repository remount sync"
     ]
@@ -233,14 +243,19 @@ def test_health_jobs_share_the_inventory_checker():
 
 
 @pytest.mark.parametrize("status", [1, 124])
-def test_failed_or_timed_out_refresh_still_fails_missing_inventory(tmp_path, status):
+@pytest.mark.parametrize("replica_retry", [False, True])
+def test_failed_or_timed_out_refresh_still_fails_missing_inventory(
+    tmp_path, status, replica_retry,
+):
     result, _, _ = _run_checker(
-        tmp_path, "missing\n", refresh_catalog=True, refresh_status=status
+        tmp_path, "missing\n", refresh_catalog=True, refresh_status=status,
+        replica_retry=replica_retry,
     )
     assert result.returncode == 2
     assert "refresh failed or timed out" in result.stdout
     assert "1 of 1 CVMFS inventory entries are missing" in result.stdout
-    assert result.stdout.count("File Catalog Revision:") == 2
+    assert result.stdout.count("File Catalog Revision:") == (4 if replica_retry else 2)
+    assert (tmp_path / "sleep.log").exists() == replica_retry
 
 
 def test_refresh_rechecks_previously_present_entries(tmp_path):
@@ -253,9 +268,71 @@ def test_refresh_rechecks_previously_present_entries(tmp_path):
     assert "replacement-inventory" not in result.stdout
 
 
-def test_complete_inventory_does_not_refresh(tmp_path):
+@pytest.mark.parametrize("replica_retry", [False, True])
+def test_complete_inventory_does_not_refresh(tmp_path, replica_retry):
     result, _, marker = _run_checker(
-        tmp_path, "present\n", present=("present",), refresh_catalog=True
+        tmp_path, "present\n", present=("present",), refresh_catalog=True,
+        replica_retry=replica_retry,
     )
     assert result.returncode == 0
     assert not marker.exists()
+    assert not (tmp_path / "sleep.log").exists()
+
+
+def test_replica_inventory_waits_for_delayed_publication(tmp_path):
+    result, _, marker = _run_checker(
+        tmp_path, "present\nlate\n", present=("present",),
+        refresh_catalog=True, appears_after_refresh=("late",),
+        replica_retry=True, appears_on_refresh=2,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Validated 2 CVMFS inventory entries" in result.stdout
+    assert "::error" not in result.stdout
+    assert marker.read_text().splitlines() == ["-i repository remount sync"] * 2
+    assert (tmp_path / "sleep.log").read_text().splitlines() == ["240"]
+
+
+def test_replica_inventory_fails_after_retry_budget(tmp_path):
+    result, _, marker = _run_checker(
+        tmp_path, "missing-one\nmissing-two\n", refresh_catalog=True,
+        replica_retry=True,
+    )
+    assert result.returncode == 2
+    assert "2 of 2 CVMFS inventory entries are missing" in result.stdout
+    assert result.stdout.count("::error title=CVMFS inventory mismatch::") == 2
+    assert marker.read_text().splitlines() == ["-i repository remount sync"] * 2
+    assert (tmp_path / "sleep.log").read_text().splitlines() == ["240"]
+
+
+def test_origin_inventory_does_not_wait_for_replication(tmp_path):
+    result, _, marker = _run_checker(
+        tmp_path, "late\n", refresh_catalog=True,
+        appears_after_refresh=("late",), appears_on_refresh=2,
+    )
+    assert result.returncode == 2
+    assert marker.read_text().splitlines() == ["-i repository remount sync"]
+    assert not (tmp_path / "sleep.log").exists()
+
+
+def test_replica_retry_rechecks_all_entries_in_original_snapshot(tmp_path):
+    result, _, marker = _run_checker(
+        tmp_path, "present\nlate\n", present=("present",),
+        refresh_catalog=True, appears_after_refresh=("late",),
+        disappears_after_refresh="present", replica_retry=True,
+        appears_on_refresh=2,
+    )
+    assert result.returncode == 2
+    assert "mismatch::present is missing" in result.stdout
+    assert "replacement-inventory" not in result.stdout
+    assert marker.read_text().splitlines() == ["-i repository remount sync"] * 2
+
+
+@pytest.mark.parametrize("replica_retry", ["invalid", "1"])
+def test_replica_retry_rejects_invalid_setting(tmp_path, replica_retry):
+    result, _, marker = _run_checker(
+        tmp_path, "missing\n", refresh_catalog=True, replica_retry=replica_retry,
+    )
+    assert result.returncode == 1
+    assert "CVMFS_INVENTORY_REPLICA_RETRY must be true or false" in result.stdout
+    assert not marker.exists()
+    assert not (tmp_path / "sleep.log").exists()

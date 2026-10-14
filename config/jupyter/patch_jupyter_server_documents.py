@@ -17,6 +17,11 @@ reaches the kernel is silently lost — a widget bulk state reply can vanish
 with no error anywhere. The nudge logic lives in
 ``neurodesktop_kernel_nudge.py`` next to this script; the anchored change in
 ``websocket_connection.py`` only awaits it before starting the listen tasks.
+The same bridge builds each connection's kernel client from the kernel
+manager's shared session, so every browser connection uses one ZMQ identity.
+ipykernel hands that identity to whichever socket connected last, and an
+earlier connection's requests then vanish with no error. Upstream
+jupyter_server uses each browser connection's own session id instead.
 
 Its server-side notebook executor also bypasses JupyterLab's normal
 ``CodeCellModel.clearExecution()`` path, which marks a user-executed cell as
@@ -59,6 +64,7 @@ YDOC_OUTPUT_MARKER = "neurodesktop-crdt-notebook-output"
 YDOC_STREAM_TEXT_MARKER = "neurodesktop-crdt-stream-text"
 YDOC_STREAM_MERGE_MARKER = "neurodesktop-crdt-stream-merge"
 KERNEL_NUDGE_MARKER = "neurodesktop-kernel-ws-nudge"
+KERNEL_IDENTITY_MARKER = "neurodesktop-kernel-ws-session-identity"
 WIDGET_TRUST_V1_MARKER = "neurodesktop-server-execution-trust"
 WIDGET_TRUST_MARKER = "neurodesktop-server-execution-dispatch-trust"
 WIDGET_TRUST_RESTORE_MARKER = "neurodesktop-server-execution-restore-trust"
@@ -278,6 +284,17 @@ KERNEL_NUDGE_CONNECT_AFTER = f"""        self._client.start_channels(hb=False)
         # traffic is forwarded; the nudge bounds itself and never raises.
         await _neurodesktop_kernel_nudge.nudge(self)
         self._tasks = [
+"""
+
+KERNEL_IDENTITY_BEFORE = """        self._client = self.kernel_manager.client()
+"""
+
+KERNEL_IDENTITY_AFTER = f"""        # {KERNEL_IDENTITY_MARKER}
+        # The client's session id is its ZMQ identity, and ipykernel hands an
+        # identity to whichever socket connected last. Use this browser
+        # connection's own session, as upstream jupyter_server does, so a
+        # newer connection cannot silently cut this one off from the kernel.
+        self._client = self.kernel_manager.client(session=self.session)
 """
 
 NUDGE_MODULE_NAME = "_neurodesktop_kernel_nudge.py"
@@ -562,6 +579,19 @@ def patch_package(package_dir: Path) -> bool:
             "reassess the kernel websocket nudge workaround"
         )
 
+    identity_patched = KERNEL_IDENTITY_MARKER in websocket_text
+    if identity_patched:
+        if websocket_text.count(KERNEL_IDENTITY_AFTER) != 1:
+            raise ValueError(
+                "kernel websocket session identity workaround is incomplete; "
+                "refusing to continue"
+            )
+    elif websocket_text.count(KERNEL_IDENTITY_BEFORE) != 1:
+        raise ValueError(
+            "kernel websocket session identity anchor did not match exactly "
+            "once; reassess the kernel websocket identity workaround"
+        )
+
     stream_module_path = output_processor_path.with_name(STREAM_MODULE_NAME)
     module_source = stream_module_source()
     output_patched = YDOC_OUTPUT_MARKER in output_processor_text
@@ -636,18 +666,22 @@ def patch_package(package_dir: Path) -> bool:
     if not nudge_patched or nudge_module_refreshed:
         nudge_module_path.write_text(nudge_source, encoding="utf-8")
     if not nudge_patched:
-        websocket_path.write_text(
-            websocket_text.replace(
-                KERNEL_NUDGE_IMPORT_BEFORE, KERNEL_NUDGE_IMPORT_AFTER
-            ).replace(KERNEL_NUDGE_CONNECT_BEFORE, KERNEL_NUDGE_CONNECT_AFTER),
-            encoding="utf-8",
+        websocket_text = websocket_text.replace(
+            KERNEL_NUDGE_IMPORT_BEFORE, KERNEL_NUDGE_IMPORT_AFTER
+        ).replace(KERNEL_NUDGE_CONNECT_BEFORE, KERNEL_NUDGE_CONNECT_AFTER)
+    if not identity_patched:
+        websocket_text = websocket_text.replace(
+            KERNEL_IDENTITY_BEFORE, KERNEL_IDENTITY_AFTER
         )
+    if not nudge_patched or not identity_patched:
+        websocket_path.write_text(websocket_text, encoding="utf-8")
     return (
         yroom_changed
         or not output_patched
         or module_refreshed
         or not nudge_patched
         or nudge_module_refreshed
+        or not identity_patched
     )
 
 

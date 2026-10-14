@@ -4,7 +4,7 @@ description: T3 Code in JupyterLab, server lifecycle, provider paths, persistent
   state, and desktop connection procedures
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-21"
+last-reviewed: "2026-10-09"
 ---
 
 # T3 Code remote access
@@ -228,6 +228,8 @@ the generated label. Local installations keep T3's normal hostname fallback.
 Existing links retain their environment ID and credentials. An idle T3 sidecar
 restarts once when it learns the public hostname; active or unknown chat state
 defers this until an idle session open, connection check, or normal server restart.
+The extension serializes hostname updates with restarts, so updates received
+during a readiness wait cannot be cleared by the earlier restart.
 
 Choose **Setup T3 connect** in the compact bar inside the scigent.ai tab.
 Desktop linking is optional; the embedded app already uses your Jupyter login.
@@ -317,7 +319,13 @@ that expires automatically.
 
 ## Providers
 
-The supervisor sets `enableProviderUpdateChecks` to `false` at startup, including
+The supervisor prepares `userdata/settings.json` before startup with one JSON
+read and at most one atomic replacement. If both policies are already satisfied,
+it preserves the file bytes. Malformed JSON, invalid UTF-8, and a non-object root
+remain untouched. Malformed provider data skips only provider seeding; update
+notice suppression still applies to a valid settings object.
+
+The supervisor sets `enableProviderUpdateChecks` to `false`, including
 for existing profiles, to suppress automatic provider update notices in the
 image-managed T3 environment. Upgrades are delivered through image releases.
 T3's desktop-app update controls are not rendered in its embedded web mode;
@@ -331,7 +339,7 @@ Antigravity drivers disabled, so the OpenCode instance carries an explicit
 in-config flag into the envelope on every load.
 
 Seeding never overwrites a user's choice. An instance under the seed's own id,
-or any instance that declares the same driver, leaves the settings alone, and
+or any instance that declares the same driver, prevents that driver's seed, and
 so does a `providers.<driver>` entry that configures the driver. The supervisor
 still promotes the exact legacy `providers.codex` default written by earlier
 images and retains that entry for backward compatibility. T3 writes
@@ -376,8 +384,10 @@ than using T3's systemd service installer or self-update flow.
 
 ## Build and architecture limits
 
-T3 0.0.42 publishes one self-contained executable per platform, with its web
-client, its `node-pty` build and its other native modules bundled beside it.
+T3 0.0.45 publishes one self-contained executable per platform, with its web
+client, its `node-pty` prebuild and its other native modules bundled beside it.
+The PTY binding lives under `node_modules/node-pty/prebuilds/linux-x64/pty.node`
+on amd64 and `node_modules/node-pty/prebuilds/linux-arm64/pty.node` on arm64.
 The Dockerfile installs the manifest under `config/agents/t3-code` into
 `/opt/t3-code`, so the layer compiles nothing, runs no install script, and
 keeps exactly one `@t3code/t3-linux-<arch>` build. The executable links
@@ -393,6 +403,6 @@ same guarantee instead — the manifest pins `t3`, `t3` pins each
 its own tarball.
 
 Both amd64 and arm64 images must pass the installed server and PTY checks.
-0.0.42 ships a resource monitor for both Linux architectures, so arm64 no
+0.0.45 ships a resource monitor for both Linux architectures, so arm64 no
 longer omits resource telemetry; server, terminal, pairing, and provider
 behavior must still pass.

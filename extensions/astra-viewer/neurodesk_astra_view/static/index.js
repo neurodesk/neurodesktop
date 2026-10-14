@@ -48,18 +48,6 @@ const STATUS_RING = [
   [/executed|run/, "#b7791f"],
 ];
 
-/** Base node kinds drawn by the dataflow-centred views. */
-const BASE_KINDS = [
-  "stage",
-  "input",
-  "input-group",
-  "output",
-  "output-group",
-  "finding",
-  "finding-group",
-  "result",
-];
-
 /** Edge kinds drawn by the dataflow-centred views. */
 const BASE_EDGE_KINDS = ["flow", "produces", "supports", "concludes"];
 

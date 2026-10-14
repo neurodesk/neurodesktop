@@ -7,9 +7,12 @@ import vm from 'node:vm';
 // Execute the complete source module. Only its Jupyter/DOM dependencies are
 // substituted; the exported functions and installed click handler are real.
 const errors = [];
+const warnings = [];
+let failErrorDialog = false;
 const listeners = [];
 const context = vm.createContext({
   URL,
+  console: { warn: (...args) => warnings.push(args) },
   document: {
     baseURI: 'https://notebook.test/user/alice/lab',
     addEventListener: (...args) => listeners.push(args)
@@ -22,7 +25,10 @@ const subject = new vm.SourceTextModule(
 );
 const imports = {
   '@jupyterlab/application': { JupyterFrontEnd: {}, JupyterFrontEndPlugin: {} },
-  '@jupyterlab/apputils': { showErrorMessage: (...args) => errors.push(args) },
+  '@jupyterlab/apputils': { showErrorMessage: async (...args) => {
+    errors.push(args);
+    if (failErrorDialog) throw new Error('dialog unavailable');
+  } },
   '@jupyterlab/coreutils': { PageConfig: { getOption: () => '/home/alice' } },
   '@jupyterlab/docmanager': { IDocumentManager: {} }
 };
@@ -84,7 +90,7 @@ subject.namespace.default.activate(
       return { type: models.get(path) };
     } } },
     registry: { getWidgetFactory: name => factories.has(name) },
-    openOrReveal: async (...args) => opened.push(args)
+    openOrReveal: (...args) => opened.push(args)
   }
 );
 assert.equal(listeners.length, 1);
@@ -152,4 +158,13 @@ await test('an intercepted missing file reports the original requested path', as
   assert.equal(errors.length, 1);
   assert.equal(errors[0][0], 'Cannot open file');
   assert.match(errors[0][1], /missing\.md:7 could not be opened/);
+});
+
+await test('a failed error dialog does not reject the click handler', async () => {
+  failErrorDialog = true;
+  models = new Map();
+  await dispatch('/home/alice/missing.md');
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0][0], /could not show file-open error/);
+  assert.equal(warnings[0][1].message, 'dialog unavailable');
 });

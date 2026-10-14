@@ -27,7 +27,7 @@ start_session() {
         -e VNC_PW="$password" "${run_options[@]}" \
         -e NEURODESKTOP_SLURM_ENABLE=false \
         -v "$volume:/home/kasm-user" "$image" >/dev/null
-    for attempt in {1..90}; do
+    for ((attempt = 1; attempt <= 90; attempt++)); do
         if docker exec "$name" /opt/neurodesktop/kasm-healthcheck.sh 2>/dev/null; then
             if [ "${#tests[@]}" -eq 1 ] || docker exec "$name" \
                 test -d /cvmfs/neurodesk.ardc.edu.au/neurodesk-modules; then

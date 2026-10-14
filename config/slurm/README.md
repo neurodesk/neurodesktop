@@ -144,12 +144,50 @@ Startup logs include:
 - `slurmd started successfully using non-cgroup fallback (...)`
 In non-cgroup mode, cgroup constraints are disabled (no CPU/RAM/SWAP enforcement by Slurm).
 
+### Batch job environments
+
+The local scheduler sets `GetEnvTimeout=0`. Slurm 23.11's live login-environment
+lookup uses `clone(CLONE_NEWPID)`, which requires permissions that ordinary
+Docker containers do not have. A denied lookup exits `slurmd` with
+`fatal: clone: Operation not permitted` before the batch script starts. The
+controller can continue reporting that allocation as running until it detects
+the missing worker. Increasing CPU or memory requests does not itself invoke
+this lookup.
+
+`--get-user-env`, `--export=NONE`, and exports containing only selected variables
+request login-environment retrieval. In local mode, Slurm consults its existing
+environment cache instead of launching a login shell. If no cache exists, it
+logs the missing cache and runs with the submitted environment. Neurodesktop
+does not populate that cache or promise a fresh login environment for these
+options. Host mode uses the host cluster's configuration.
+
+Use `--export=ALL` to inherit the submitting environment. For a clean environment,
+use `--export=NIL` and initialize what the job needs inside its script, for example:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+source /opt/neurodesktop/agent_bash_env.sh
+module load fsl/6.0.7.22
+```
+
+After a worker crash, save `/var/log/slurm/slurmd.log`, cancel the affected job
+IDs, and restart the server with the corrected image. Changing export options
+inside a batch script cannot repair a worker that exits before the script starts.
+
 ### Testing
 
 Quick smoke test inside the container:
 
 ```bash
 /opt/neurodesktop/test_slurm_setup.sh --bootstrap
+```
+
+From a checkout with Docker access, validate the installed scheduler under
+default Docker permissions, including namespace-restricted environment retrieval:
+
+```bash
+bash scripts/verify_slurm_image.sh IMAGE
 ```
 
 Submit test job (end-to-end `sbatch` + `srun`):

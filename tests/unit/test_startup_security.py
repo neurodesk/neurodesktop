@@ -213,3 +213,98 @@ def test_apt_exec_discards_untrusted_environment(apt, monkeypatch):
     assert executable == "/usr/bin/apt-get"
     assert environment == {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "HOME": "/root",
                            "LC_ALL": "C", "DEBIAN_FRONTEND": "noninteractive"}
+
+
+def test_neurocommand_ownership_migration_does_not_follow_links(security, tmp_path, monkeypatch):
+    module, calls = security
+    checkout = tmp_path / "neurocommand"
+    generated = checkout / "local/bin"
+    generated.mkdir(parents=True)
+    build = checkout / "build.sh"
+    build.write_text("exit 99\n")
+    launcher = generated / "update.sh"
+    launcher.write_text("untouched\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "sentinel"
+    sentinel.write_text("private\n")
+    (checkout / "local/containers").symlink_to(outside, target_is_directory=True)
+    (checkout / "file-link").symlink_to(sentinel)
+    os.link(sentinel, checkout / "hard-link")
+    monkeypatch.setattr(module, "NEUROCOMMAND", checkout)
+    target = SimpleNamespace(pw_uid=os.getuid() + 1, pw_gid=os.getgid() + 1)
+    changed = set()
+
+    def record_chown(descriptor, uid, gid):
+        assert (uid, gid) == (target.pw_uid, target.pw_gid)
+        metadata = os.fstat(descriptor)
+        changed.add(metadata.st_ino)
+
+    monkeypatch.setattr(module.os, "fchown", record_chown)
+    module.prepare_neurocommand(target)
+    assert changed == {
+        path.stat().st_ino for path in (checkout, checkout / "local", generated, build, launcher)
+    }
+    assert sentinel.read_text() == "private\n"
+    assert launcher.read_text() == "untouched\n"
+    assert calls == []
+
+
+def test_neurocommand_matching_owner_needs_no_repair(security, tmp_path, monkeypatch):
+    module, calls = security
+    checkout = tmp_path / "neurocommand"
+    checkout.mkdir()
+    monkeypatch.setattr(module, "NEUROCOMMAND", checkout)
+
+    def unexpected_chown(*args, **kwargs):
+        pytest.fail("An already migrated checkout must not be chowned again")
+
+    monkeypatch.setattr(module.os, "fchown", unexpected_chown)
+    module.prepare_neurocommand(SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid()))
+    assert calls == []
+
+
+def test_neurocommand_root_symlink_is_not_traversed(security, tmp_path, monkeypatch):
+    module, calls = security
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    checkout = tmp_path / "neurocommand"
+    checkout.symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(module, "NEUROCOMMAND", checkout)
+
+    def unexpected_chown(*args, **kwargs):
+        pytest.fail("Checkout root symlink must not change outside ownership")
+
+    monkeypatch.setattr(module.os, "fchown", unexpected_chown)
+    module.prepare_neurocommand(SimpleNamespace(pw_uid=os.getuid() + 1, pw_gid=os.getgid() + 1))
+    assert calls == []
+
+
+@pytest.mark.parametrize("replacement", ["symlink", "hardlink"])
+def test_neurocommand_ownership_rechecks_opened_file(security, tmp_path, monkeypatch, replacement):
+    module, calls = security
+    checkout = tmp_path / "neurocommand"
+    checkout.mkdir()
+    candidate = checkout / "candidate"
+    candidate.write_text("menu\n")
+    outside = tmp_path / "outside"
+    outside.write_text("private\n")
+    monkeypatch.setattr(module, "NEUROCOMMAND", checkout)
+    original_open = os.open
+    changed = set()
+
+    def replace_before_open(path, flags, *args, **kwargs):
+        if path == "candidate":
+            candidate.unlink()
+            if replacement == "symlink":
+                candidate.symlink_to(outside)
+            else:
+                os.link(outside, candidate)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(module.os, "open", replace_before_open)
+    monkeypatch.setattr(module.os, "fchown", lambda descriptor, *_: changed.add(os.fstat(descriptor).st_ino))
+    module.prepare_neurocommand(SimpleNamespace(pw_uid=os.getuid() + 1, pw_gid=os.getgid() + 1))
+    assert changed == {checkout.stat().st_ino}
+    assert outside.read_text() == "private\n"
+    assert calls == []

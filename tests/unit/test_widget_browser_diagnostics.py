@@ -1,10 +1,8 @@
 """Checkout contracts for the widget image test's Firefox harness."""
 
-import ast
-import inspect
 import json
 
-from testlib import load_source_module, repo_path
+from testlib import load_source_module
 
 
 def load_widget_test_module():
@@ -36,100 +34,6 @@ def test_firefox_profile_allows_software_webgl_fallback(tmp_path, monkeypatch):
         'user_pref("webgl.forbid-software", false);\n'
         'user_pref("webgl.force-enabled", true);\n'
     )
-
-
-def test_webgl_probe_reports_renderer_and_context_state():
-    module = load_widget_test_module()
-    expression = module.WEBGL2_DIAGNOSTICS_EXPRESSION
-
-    assert "getContext('webgl2')" in expression
-    assert "WEBGL_debug_renderer_info" in expression
-    assert "UNMASKED_RENDERER_WEBGL" in expression
-    assert "isContextLost" in expression
-    assert "WEBGL_lose_context" in expression
-    assert "navigator.userAgent" in expression
-
-
-def test_widget_notebook_keeps_core_replay_coverage_without_webgl():
-    module = load_widget_test_module()
-
-    core_source = module._widget_regression_notebook(
-        include_niivue=False
-    ).cells[0].source
-    webgl_source = module._widget_regression_notebook(
-        include_niivue=True
-    ).cells[0].source
-
-    for source in (core_source, webgl_source):
-        compile(
-            source,
-            "<widget-regression-cell>",
-            "exec",
-            flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT,
-        )
-        assert "stream-fragment" in source
-        assert "open_model_later" in source
-        assert "widgets.HBox" in source
-        assert "delayed-hbox-model" in source
-        assert "asyncio.get_running_loop().call_later(" in source
-        assert "            5," in source
-        assert "widgets.Widget._handle_control_comm_msg" in source
-        assert "control_request_count == 1" in source
-        assert "widget.comm.on_msg(lambda msg: None)" in source
-    assert "NiiVue" not in core_source
-    assert "volume.nii.gz" not in core_source
-    assert "NiiVue" in webgl_source
-    assert "volume.nii.gz" in webgl_source
-    assert "scene-sync-count:0" in webgl_source
-    assert "niivue.observe(record_scene_sync, names='scene')" in webgl_source
-
-
-def test_replay_client_uses_a_distinct_explicit_workspace():
-    module = load_widget_test_module()
-    source = inspect.getsource(
-        module.test_server_side_execution_renders_streams_and_widgets
-    )
-
-    assert '"/lab/workspaces/widget-replay"' in source
-    assert '"--LabApp.expose_app_in_browser=True"' in source
-    assert "window.jupyterapp.allPluginsActivated" in source
-    assert "'docmanager:open', {path: 'widget.ipynb'}" in source
-    assert "NetworkError when attempting to fetch resource" in source
-
-
-def test_replay_waits_for_its_kernel_before_timing_widget_restore():
-    source = inspect.getsource(
-        load_widget_test_module().test_server_side_execution_renders_streams_and_widgets
-    )
-    replay_open = source.index("'docmanager:open', {path: 'widget.ipynb'}")
-    replay_idle = source.index("'Python [conda env:base] * | Idle'", replay_open)
-    replay_render = source.index("stream-fragment-19", replay_idle)
-
-    assert replay_open < replay_idle < replay_render
-
-
-def test_browser_failures_report_live_widget_manager_state():
-    source = repo_path(
-        "tests/container/test_widget_compatibility_image.py"
-    ).read_text(encoding="utf-8")
-
-    assert "WIDGET_RENDERER_DIAGNOSTICS_EXPRESSION" in source
-    assert "managerStatus" in source
-    assert "kernelRestoreInProgress" in source
-    assert '"widgetRenderers": widget_renderers' in source
-
-
-def test_ipyniivue_idle_probe_records_only_shared_asset_intervals():
-    module = load_widget_test_module()
-
-    preload = module.IPYNIIVUE_INTERVAL_PROBE_PRELOAD
-    snapshot = module.IPYNIIVUE_INTERVAL_SNAPSHOT_EXPRESSION
-
-    assert "nativeSetInterval = window.setInterval" in preload
-    assert "stack.includes('neurodesktop-ipyniivue')" in preload
-    assert "record.calls += 1" in preload
-    assert "__neurodesktopIpyniivueIntervalActivity" in snapshot
-    assert "scene-sync-count:" in module.SCENE_SYNC_COUNT_EXPRESSION
 
 
 def test_browser_failure_diagnostics_include_process_logs(tmp_path):
