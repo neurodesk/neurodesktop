@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #include <poll.h>
 #include <stdio.h>
@@ -13,6 +14,7 @@ int main(void) {
     Window w = XCreateSimpleWindow(d, DefaultRootWindow(d), 0, 0, 1, 1, 0, 0, 0);
     Atom clipboard = XInternAtom(d, "CLIPBOARD", False);
     Atom utf8 = XInternAtom(d, "UTF8_STRING", False);
+    Atom targets = XInternAtom(d, "TARGETS", False);
     Atom property = XInternAtom(d, "PEER_TEXT", False);
     char text[1024] = "";
     int mode = 0;
@@ -36,9 +38,9 @@ int main(void) {
             else if (!strcmp(line, "release")) {
                 if (held.type) XPutBackEvent(d, &held);
                 mode = 0;
-            } else if (!strcmp(line, "paste") || !strcmp(line, "destroy")) {
+            } else if (!strcmp(line, "paste") || !strcmp(line, "destroy") || !strcmp(line, "targets")) {
                 Window reader = XCreateSimpleWindow(d, DefaultRootWindow(d), 0, 0, 1, 1, 0, 0, 0);
-                XConvertSelection(d, clipboard, utf8, property, reader, CurrentTime);
+                XConvertSelection(d, clipboard, line[0] == 't' ? targets : utf8, property, reader, CurrentTime);
                 if (line[0] == 'd') XDestroyWindow(d, reader);
             }
             XSync(d, False);
@@ -59,13 +61,27 @@ int main(void) {
                 XSendEvent(d, r->requestor, False, 0, &reply); // codespell:ignore requestor
                 XFlush(d);
             } else if (e.type == SelectionNotify) {
+                if (e.xselection.property == None) {
+                    puts("refused");
+                    XDestroyWindow(d, e.xselection.requestor); // codespell:ignore requestor
+                    continue;
+                }
                 Atom type;
                 int format;
                 unsigned long n, rest;
                 unsigned char *value = NULL;
                 XGetWindowProperty(d, e.xselection.requestor, property, 0, 1024, True, // codespell:ignore requestor
                     AnyPropertyType, &type, &format, &n, &rest, &value);
-                printf("text:%.*s\n", (int)n, value ? (char *)value : "");
+                if (e.xselection.target == targets) {
+                    if (type != XA_ATOM || format != 32 || rest != 0) return 3;
+                    printf("targets:");
+                    for (unsigned long i = 0; i < n; i++) {
+                        char *name = XGetAtomName(d, ((Atom *)value)[i]);
+                        printf("%s%s", i ? "," : "", name);
+                        XFree(name);
+                    }
+                    puts("");
+                } else printf("text:%.*s\n", (int)n, value ? (char *)value : "");
                 if (value) XFree(value);
                 XDestroyWindow(d, e.xselection.requestor); // codespell:ignore requestor
             }

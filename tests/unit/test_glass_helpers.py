@@ -228,6 +228,24 @@ def test_timeout_rejects_old_reply_then_samples_again(bridge):
     assert b.receive() == b"delayed"
 
 
+def test_oversized_selection_refuses_and_recovers(bridge):
+    b = bridge()
+    text = b"x" * (20 << 20)
+    b.connection.sendall(struct.pack("!I", len(text)) + text)
+    time.sleep(0.3)
+    b.command("paste")
+    time.sleep(0.1)
+    assert b.process.poll() is None, b.process.stderr.read().decode()
+    assert b.line() == "refused"
+    b.command("targets")
+    assert b.line() == "targets:TARGETS,UTF8_STRING,STRING"
+    b.send(b"recovered")
+    time.sleep(0.3)
+    b.command("paste")
+    assert b.line() == "text:recovered"
+    assert b.process.poll() is None
+
+
 def test_unrelated_x_error_keeps_default_handler(bridge, monkeypatch):
     monkeypatch.setenv("GLASS_TEST_UNRELATED_ERROR", "1")
     b = bridge()
