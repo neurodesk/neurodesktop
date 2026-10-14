@@ -202,11 +202,14 @@ substantial heredocs into owned modules, one block per change. The OpenCode
 `config/agents/opencode_update_config.py`. That module is in the formatter and
 strict typing scopes. `tests/unit/test_opencode_update_config.py` tests it
 directly, and `tests/unit/test_coding_agents.py` covers the wrapper contract.
+The NBI mirror of the OpenCode model selection is now
+`config/agents/nbi_mirror_opencode.py`, in the same scopes.
+`tests/unit/test_nbi_mirror_opencode.py` tests it directly, and
+`tests/unit/test_nbi_opencode_sync.py` covers the `nbi_setup.sh` contract.
 These substantive heredocs remain:
 
 | File | Block | Lines |
 | --- | --- | --- |
-| `config/agents/nbi_setup.sh` | Mirror the OpenCode selection into NBI | ~130 |
 | `config/agents/nbi_setup.sh` | Repair wiped NBI endpoint settings | ~80 |
 | `config/agents/opencode` | Probe Ollama model context windows | ~80 |
 | `config/agents/nbi_setup.sh` | Inject the Neurodesk API key into NBI | ~70 |

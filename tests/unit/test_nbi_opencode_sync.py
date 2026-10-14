@@ -45,6 +45,10 @@ OPENCODE_PROVIDERS = {
 }
 
 
+# Python modules nbi_setup.sh loads from its own directory.
+NBI_SETUP_HELPERS = ("provider_security.py", "nbi_mirror_opencode.py")
+
+
 def make_nbi_setup_sandbox(tmp_path):
     """Copy nbi_setup.sh with /opt defaults redirected into tmp_path."""
     home_dir = tmp_path / "home"
@@ -69,9 +73,10 @@ def make_nbi_setup_sandbox(tmp_path):
     test_script = tmp_path / "nbi_setup_test.sh"
     test_script.write_text(script_contents, encoding="utf-8")
     test_script.chmod(0o755)
-    (tmp_path / "provider_security.py").write_text(resolve_source(
-        "/opt/neurodesktop/provider_security.py", "config/agents/provider_security.py"
-    ).read_text())
+    for helper in NBI_SETUP_HELPERS:
+        (tmp_path / helper).write_text(resolve_source(
+            f"/opt/neurodesktop/{helper}", f"config/agents/{helper}"
+        ).read_text())
 
     return test_script, home_dir
 
@@ -537,3 +542,259 @@ def test_boot_sync_writes_config_without_contacting_running_server(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+# --- Mirroring the OpenCode selection: wrapper contract ----------------------
+
+
+def run_nbi_setup_split(test_script, home_dir, env_extra=None):
+    """Run nbi_setup.sh as boot does and keep stdout and stderr apart."""
+    env = {**os.environ, "HOME": str(home_dir)}
+    for name in ("NEURODESK_API_KEY", "BR_MCP_TOKEN", "JUPYTER_RUNTIME_DIR"):
+        env.pop(name, None)
+    env.update(env_extra or {})
+    return subprocess.run(
+        ["bash", str(test_script), "--no-refresh"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+
+
+def nbi_config_path(home_dir):
+    return home_dir / ".jupyter/nbi/config.json"
+
+
+def write_raw_opencode_config(home_dir, data):
+    config_dir = home_dir / ".config/opencode"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    path = config_dir / "opencode.json"
+    path.write_text(
+        data if isinstance(data, str) else json.dumps(data), encoding="utf-8"
+    )
+    return path
+
+
+def write_nbi_config(home_dir, cfg):
+    path = nbi_config_path(home_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(cfg if isinstance(cfg, str) else json.dumps(cfg), encoding="utf-8")
+    return path
+
+
+def section_with(base_url, model_id="old-model", api_key="old-key", **extra):
+    props = [
+        {"id": "api_key", "value": api_key},
+        {"id": "model_id", "value": model_id},
+        {"id": "base_url", "value": base_url},
+    ]
+    props += [{"id": key, "value": value} for key, value in extra.items()]
+    return {
+        "provider": "openai-compatible",
+        "model": "openai-compatible-chat-model",
+        "properties": props,
+    }
+
+
+def copied_providers():
+    return json.loads(json.dumps(OPENCODE_PROVIDERS))
+
+
+def test_mirror_keeps_user_settings_and_is_stable_on_rerun(tmp_path):
+    script, home = make_nbi_setup_sandbox(tmp_path)
+    write_opencode_config(home, "jetstream/gpt-oss-120b")
+    chat = section_with("https://llm.neurodesk.org/openai", api_key="", temperature="0.2")
+    chat["properties"].append({"id": "custom", "value": "kept", "note": "x"})
+    chat["user_flag"] = True
+    write_nbi_config(home, {
+        "chat_model": chat,
+        "inline_completion_model": section_with("https://llm.jetstream-cloud.org/v1/"),
+        "embedding_model": {"provider": "mine"},
+        "mcp_server_settings": {"keep": [1, 2]},
+    })
+
+    first = run_nbi_setup_split(script, home)
+
+    assert first.returncode == 0, first.stderr
+    assert first.stdout == ""
+    assert (
+        "nbi_setup.sh: synced Notebook Intelligence to OpenCode selection "
+        "jetstream/gpt-oss-120b\n"
+    ) in first.stderr
+    path = nbi_config_path(home)
+    written = path.read_bytes()
+    assert written.endswith(b"}\n")
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert not path.with_name("config.json.tmp").exists()
+    cfg = json.loads(written)
+    assert cfg["embedding_model"] == {"provider": "mine"}
+    assert cfg["mcp_server_settings"] == {"keep": [1, 2]}
+    assert cfg["chat_model"]["user_flag"] is True
+    assert {"id": "custom", "value": "kept", "note": "x"} in cfg["chat_model"]["properties"]
+    assert get_prop(cfg["chat_model"], "temperature") == "0.2"
+    for name in ("chat_model", "inline_completion_model"):
+        assert get_prop(cfg[name], "base_url") == "https://llm.jetstream-cloud.org/v1"
+        assert get_prop(cfg[name], "model_id") == "gpt-oss-120b"
+        assert get_prop(cfg[name], "context_window") is None
+    # Moving to JetStream, which has no key, clears the old endpoint's key; a
+    # trailing slash does not make the same endpoint look different.
+    assert get_prop(cfg["chat_model"], "api_key") == ""
+    assert get_prop(cfg["inline_completion_model"], "api_key") == "old-key"
+    # Existing properties are updated in place, keeping their order.
+    assert [p["id"] for p in cfg["chat_model"]["properties"]][:3] == [
+        "api_key", "model_id", "base_url",
+    ]
+
+    second = run_nbi_setup_split(script, home)
+
+    assert second.returncode == 0
+    assert "synced Notebook Intelligence" not in second.stderr
+    assert path.read_bytes() == written
+
+
+def test_mirror_keeps_the_existing_key_on_the_same_endpoint(tmp_path):
+    script, home = make_nbi_setup_sandbox(tmp_path)
+    write_opencode_config(home, "jetstream/gpt-oss-120b")
+    write_nbi_config(home, {
+        "chat_model": section_with("https://llm.jetstream-cloud.org/v1", api_key="js-key"),
+        "inline_completion_model": section_with(
+            "https://llm.jetstream-cloud.org/v1", api_key="js-key"
+        ),
+    })
+
+    result = run_nbi_setup_split(script, home)
+
+    assert result.returncode == 0
+    cfg = read_nbi_config(home)
+    for name in ("chat_model", "inline_completion_model"):
+        assert get_prop(cfg[name], "api_key") == "js-key"
+        assert get_prop(cfg[name], "model_id") == "gpt-oss-120b"
+
+
+def test_mirror_resolves_other_env_placeholders_without_printing_them(tmp_path):
+    script, home = make_nbi_setup_sandbox(tmp_path)
+    providers = copied_providers()
+    providers["jetstream"]["options"]["apiKey"] = "{env:JETSTREAM_TOKEN}"
+    providers["jetstream"]["models"]["gpt-oss-120b"]["limit"] = {"context": "65536"}
+    write_raw_opencode_config(
+        home, {"model": "jetstream/gpt-oss-120b", "provider": providers}
+    )
+
+    result = run_nbi_setup_split(
+        script, home, env_extra={"JETSTREAM_TOKEN": "js-secret-value"}
+    )
+
+    assert result.returncode == 0
+    assert "js-secret-value" not in result.stdout + result.stderr
+    cfg = read_nbi_config(home)
+    for name in ("chat_model", "inline_completion_model"):
+        assert get_prop(cfg[name], "api_key") == "js-secret-value"
+        assert get_prop(cfg[name], "context_window") == "65536"
+
+
+def test_mirror_never_sends_the_neurodesk_key_to_another_host(tmp_path):
+    script, home = make_nbi_setup_sandbox(tmp_path)
+    providers = copied_providers()
+    providers["jetstream"]["options"]["apiKey"] = "{env:NEURODESK_API_KEY}"
+    write_raw_opencode_config(
+        home, {"model": "jetstream/gpt-oss-120b", "provider": providers}
+    )
+    write_bashrc_api_key(home, "private-neurodesk-key")
+
+    result = run_nbi_setup_split(script, home)
+
+    assert result.returncode == 0
+    assert "private-neurodesk-key" not in result.stdout + result.stderr
+    cfg = read_nbi_config(home)
+    for name in ("chat_model", "inline_completion_model"):
+        assert get_prop(cfg[name], "base_url") == "https://llm.jetstream-cloud.org/v1"
+        assert get_prop(cfg[name], "api_key") == ""
+
+
+@pytest.mark.parametrize(
+    "opencode",
+    [
+        "{not json",
+        "[]",
+        {"provider": OPENCODE_PROVIDERS},
+        {"model": "no-slash", "provider": OPENCODE_PROVIDERS},
+        {"model": "jetstream/", "provider": OPENCODE_PROVIDERS},
+        {"model": "missing/model", "provider": OPENCODE_PROVIDERS},
+        {"model": "jetstream/gpt-oss-120b", "provider": []},
+        {
+            "model": "ollama/llama3",
+            "provider": {
+                "ollama": {
+                    "npm": "ollama-ai-provider",
+                    "options": {"baseURL": "http://localhost:11434"},
+                }
+            },
+        },
+        {"model": "bare/m", "provider": {"bare": {"npm": "@ai-sdk/openai-compatible"}}},
+    ],
+    ids=[
+        "corrupt", "array", "no-model", "no-slash", "empty-model", "unknown-provider",
+        "providers-not-object", "not-openai-compatible", "no-base-url",
+    ],
+)
+def test_mirror_skips_unusable_opencode_selections(tmp_path, opencode):
+    script, home = make_nbi_setup_sandbox(tmp_path)
+    write_raw_opencode_config(home, opencode)
+    path = write_nbi_config(home, {
+        "chat_model": section_with("https://llm.jetstream-cloud.org/v1"),
+        "inline_completion_model": section_with("https://llm.jetstream-cloud.org/v1"),
+    })
+    before = path.read_bytes()
+
+    result = run_nbi_setup_split(script, home)
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert "synced Notebook Intelligence" not in result.stderr
+    assert "Traceback" not in result.stderr
+    assert path.read_bytes() == before
+
+
+def test_mirror_leaves_a_corrupt_nbi_config_untouched(tmp_path):
+    script, home = make_nbi_setup_sandbox(tmp_path)
+    write_opencode_config(home, "jetstream/gpt-oss-120b")
+    corrupt = '{"chat_model": {"api_key": "do-not-echo"'
+    path = write_nbi_config(home, corrupt)
+
+    result = run_nbi_setup_split(script, home)
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert "do-not-echo" not in result.stderr
+    assert path.read_text() == corrupt
+
+
+def test_mirror_fills_missing_properties_and_ignores_bad_context_limits(tmp_path):
+    script, home = make_nbi_setup_sandbox(tmp_path)
+    providers = copied_providers()
+    providers["jetstream"]["models"]["gpt-oss-120b"]["limit"] = {"context": "lots"}
+    write_raw_opencode_config(
+        home, {"model": "jetstream/gpt-oss-120b", "provider": providers}
+    )
+    section = {
+        "provider": "openai-compatible",
+        "properties": [
+            "not-a-property",
+            {"id": "base_url", "value": "https://llm.jetstream-cloud.org/v1"},
+        ],
+    }
+    write_nbi_config(home, {"chat_model": section, "inline_completion_model": section})
+
+    result = run_nbi_setup_split(script, home)
+
+    assert result.returncode == 0
+    cfg = read_nbi_config(home)
+    for name in ("chat_model", "inline_completion_model"):
+        # No key is invented on the same endpoint, and a non-numeric context
+        # limit is not copied.
+        assert cfg[name]["properties"] == [
+            "not-a-property",
+            {"id": "base_url", "value": "https://llm.jetstream-cloud.org/v1"},
+            {"id": "model_id", "value": "gpt-oss-120b"},
+        ]

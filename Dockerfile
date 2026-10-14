@@ -1319,6 +1319,7 @@ RUN --mount=type=bind,source=config/itksnap/UserPreferences.xml,target=/tmp/itks
     --mount=type=bind,source=config/agents/nbi_tour_config.json,target=/tmp/agents/nbi_tour_config.json,ro \
     --mount=type=bind,source=config/agents/nbi_setup.sh,target=/tmp/agents/nbi_setup.sh,ro \
     --mount=type=bind,source=config/agents/provider_security.py,target=/tmp/agents/provider_security.py,ro \
+    --mount=type=bind,source=config/agents/nbi_mirror_opencode.py,target=/tmp/agents/nbi_mirror_opencode.py,ro \
     --mount=type=bind,source=config/ssh/sshd_config,target=/tmp/sshd_config,ro \
     --mount=type=bind,source=config/jupyter/page_config.json,target=/tmp/page_config.json,ro \
     mkdir -p /opt/jovyan_defaults/.itksnap.org/ITK-SNAP \
@@ -1358,6 +1359,7 @@ RUN --mount=type=bind,source=config/itksnap/UserPreferences.xml,target=/tmp/itks
     && install -m 0644 /tmp/agents/nbi_tour_config.json /opt/jovyan_defaults/.jupyter/nbi/tour_config.json \
     && install -m 0755 /tmp/agents/nbi_setup.sh /opt/neurodesktop/nbi_setup.sh \
     && install -m 0644 /tmp/agents/provider_security.py /opt/neurodesktop/provider_security.py \
+    && install -m 0755 /tmp/agents/nbi_mirror_opencode.py /opt/neurodesktop/nbi_mirror_opencode.py \
     && install -m 0644 /tmp/lxde/.bashrc /opt/jovyan_defaults/.bashrc_append \
     && /usr/bin/printf '%s\n%s\n%s\n' 'password' 'password' 'n' | vncpasswd /opt/jovyan_defaults/.vnc/passwd \
     && chown root:users /opt/jovyan_defaults/.vnc/passwd \
