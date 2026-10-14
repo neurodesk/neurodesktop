@@ -1064,7 +1064,7 @@ pytest tests/unit/test_glass_helpers.py tests/unit/test_glass_startup.py tests/u
 
 The helper tests execute the compiled binaries through test-owned transport
 adapters. An independent X client under Xvfb checks host and guest clipboard
-transfer, repeated copies from one window, empty text, and closed requestors.
+transfer, repeated copies from one window, empty text, and closed requesters.
 Resize tests check framed dimensions and the real `xrandr` execution boundary.
 They do not establish native CC frame presentation or display resizing.
 Startup tests execute the access-URL watcher decision and scientific environment

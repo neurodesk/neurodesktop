@@ -416,7 +416,7 @@
     <mousebind button="Left" action="Drag">
       <action name="Move"/>
     </mousebind>
-    <mousebind button="Left" action="DoubleClick">
+    <mousebind button="Left" action="DoubleClick"> <!-- codespell:ignore doubleclick -->
       <action name="ToggleMaximize"/>
     </mousebind>
 
