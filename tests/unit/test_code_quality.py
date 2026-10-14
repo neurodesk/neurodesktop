@@ -167,10 +167,40 @@ def test_missing_eslint_fails_with_install_guidance(quality_repo):
     assert f"npm ci --prefix {LINT_HOME}" in result.stderr
 
 
-def test_python_failure_still_runs_both_checks_and_fails(quality_repo):
+def test_python_failure_still_runs_every_check_and_fails(quality_repo):
     result = check(quality_repo, "python", QUALITY_TEST_FAIL="ruff")
     assert result.returncode == 1
-    assert [entry["tool"] for entry in commands(quality_repo)] == ["ruff", "mypy"]
+    assert [entry["args"] for entry in commands(quality_repo)] == [
+        ["check", "."],
+        ["--config-file", "mypy.ini"],
+        # The runner itself runs on host Python 3.10, not mypy.ini's 3.12.
+        [
+            "--config-file",
+            "mypy.ini",
+            "--python-version",
+            "3.10",
+            "scripts/check_quality.py",
+        ],
+    ]
+
+
+def test_type_failure_fails_the_python_gate(quality_repo):
+    result = check(quality_repo, "python", QUALITY_TEST_FAIL="mypy")
+    assert result.returncode == 1
+    assert [entry["tool"] for entry in commands(quality_repo)] == [
+        "ruff",
+        "mypy",
+        "mypy",
+    ]
+
+
+def test_gate_error_is_reported_and_later_gates_still_run(quality_repo):
+    # git ls-files fails, so file discovery raises inside two gates.
+    result = check(quality_repo, "all", GIT_DIR=str(quality_repo[0] / "missing"))
+    assert result.returncode == 1
+    assert "shell failed:" in result.stderr
+    assert "javascript failed:" in result.stderr
+    assert commands(quality_repo)[-1]["args"] == ["buildx", "build", "--check", "."]
 
 
 def test_frontend_runs_both_scripts_in_extension(quality_repo):

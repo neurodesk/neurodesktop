@@ -183,6 +183,15 @@ pinned in `requirements-quality.txt`. Remaining limitations:
 - `ExtensionApp.log` is an untyped traitlets trait upstream, so the logger
   passed to the supervisor is not checked.
 
+The quality runner `scripts/check_quality.py` is in both scopes too, with a
+different target. `check_quality.sh` runs it with the `python3` on `PATH`,
+which is Python 3.10 on the Ubuntu 22.04 runner host, while `mypy.ini` targets
+the image's Python 3.12. The `python` gate therefore checks the runner's
+`RUNNER_HOST_TYPED_SCOPE` in a second strict mypy run with `--python-version
+3.10`, and `ruff.toml` gives it a `py310` target. Do not add it to the `files`
+list in `mypy.ini`. Its tests drive it only through the command line, so the
+runner has no Python callers to check.
+
 Python embedded in shell heredocs is not covered by Ruff and continues to rely
 on execution tests. Keep exceptions local and explain external runtime
 dependencies such as Jupyter-injected globals.
