@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-12"
+last-reviewed: "2026-10-14"
 ---
 
 # Testing
@@ -179,6 +179,14 @@ workflow before enabling one. Read the active configuration back with:
 gh api repos/neurodesk/neurodesktop/rulesets/24091967
 gh api repos/neurodesk/neurodesktop/rules/branches/main
 ```
+
+Disposable PR #1101 verified the gate on 2026-10-14 and was closed unmerged.
+Its `mergeStateStatus` was `BLOCKED` when a real `JavaScript syntax` failure was
+the only unsuccessful required check, while the image checks were in progress,
+and after the image run was cancelled. After the fix and a rerun, all eight
+checks passed and the state became `CLEAN`. Organization admins keep the
+ruleset bypass, so they can still merge past a failing check; agents must not
+use it.
 
 ## Behavioral coverage
 
