@@ -1,7 +1,6 @@
 """Exercise compiled Glass helpers at their X11, vsock and exec boundaries."""
 
 import os
-from pathlib import Path
 import select
 import shutil
 import signal
@@ -19,23 +18,52 @@ from testlib import repo_path
 def binaries(tmp_path_factory):
     build = tmp_path_factory.mktemp("glass-native")
     for tool in ("gcc", "Xvfb", "xrandr"):
-        assert shutil.which(tool), f"Install gcc libx11-dev xvfb x11-xserver-utils ({tool} missing)"
+        assert shutil.which(tool), (
+            f"Install gcc libx11-dev xvfb x11-xserver-utils ({tool} missing)"
+        )
     for name, source, flags in (
         ("clipboard", "config/glass/glass-clipboard.c", ["-lX11"]),
         ("resize", "config/glass/glass-resize.c", []),
         ("peer", "tests/fixtures/glass/peer.c", ["-lX11"]),
-        ("transport.so", "tests/fixtures/glass/transport.c", ["-shared", "-fPIC", "-ldl"]),
+        (
+            "transport.so",
+            "tests/fixtures/glass/transport.c",
+            ["-shared", "-fPIC", "-ldl"],
+        ),
     ):
-        subprocess.run(["gcc", "-Wall", "-Wextra", "-Werror", str(repo_path(source)),
-                        "-o", str(build / name), *flags], check=True)
+        subprocess.run(
+            [
+                "gcc",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                str(repo_path(source)),
+                "-o",
+                str(build / name),
+                *flags,
+            ],
+            check=True,
+        )
     return build
 
 
 @pytest.fixture
 def display():
     read, write = os.pipe()
-    process = subprocess.Popen(["Xvfb", "-displayfd", str(write), "-screen", "0", "800x600x24",
-                                "-nolisten", "tcp"], pass_fds=(write,), stderr=subprocess.PIPE)
+    process = subprocess.Popen(
+        [
+            "Xvfb",
+            "-displayfd",
+            str(write),
+            "-screen",
+            "0",
+            "800x600x24",
+            "-nolisten",
+            "tcp",
+        ],
+        pass_fds=(write,),
+        stderr=subprocess.PIPE,
+    )
     os.close(write)
     try:
         assert select.select([read], [], [], 5)[0], "Xvfb did not start"
@@ -52,24 +80,44 @@ class Bridge:
         self.listener.bind(str(tmp_path / "host"))
         self.listener.listen()
         self.listener.settimeout(4)
-        self.env = {**os.environ, "DISPLAY": display, "LD_PRELOAD": str(binaries / "transport.so"),
-                    "GLASS_TEST_SOCKET": str(tmp_path / "host"),
-                    "GLASS_TEST_PORT": "10778" if name == "clipboard" else "10779"}
+        self.env = {
+            **os.environ,
+            "DISPLAY": display,
+            "LD_PRELOAD": str(binaries / "transport.so"),
+            "GLASS_TEST_SOCKET": str(tmp_path / "host"),
+            "GLASS_TEST_PORT": "10778" if name == "clipboard" else "10779",
+        }
         recorder = tmp_path / "recorder"
         self.record = tmp_path / "calls"
-        recorder.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$GLASS_TEST_CALLS"\n'
-                            '[ "$(wc -l < "$GLASS_TEST_CALLS")" -gt 1 ]\n')
+        recorder.write_text(
+            "#!/bin/sh\n"
+            'if [ -n "$GLASS_TEST_REAL_XRANDR" ]; then\n'
+            '  /usr/bin/xrandr "$@" && printf "accepted\\n" >> "$GLASS_TEST_CALLS"\n'
+            "  exit $?\nfi\n"
+            'printf "%s\\n" "$*" >> "$GLASS_TEST_CALLS"\n'
+            '[ "$(wc -l < "$GLASS_TEST_CALLS")" -gt 1 ]\n'
+        )
         recorder.chmod(0o755)
-        self.env.update(GLASS_TEST_RECORDER=str(recorder), GLASS_TEST_CALLS=str(self.record))
-        self.process = subprocess.Popen([binaries / name], env=self.env, stderr=subprocess.PIPE)
+        self.env.update(
+            GLASS_TEST_RECORDER=str(recorder), GLASS_TEST_CALLS=str(self.record)
+        )
+        self.process = subprocess.Popen(
+            [binaries / name], env=self.env, stderr=subprocess.PIPE
+        )
         self.connection, _ = self.listener.accept()
         self.connection.settimeout(3)
-        self.peer = subprocess.Popen([binaries / "peer"], env={**os.environ, "DISPLAY": display},
-                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        self.peer = subprocess.Popen(
+            [binaries / "peer"],
+            env={**os.environ, "DISPLAY": display},
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+        )
         assert self.line() == "ready"
 
     def line(self):
-        assert select.select([self.peer.stdout], [], [], 4)[0], "X11 peer did not answer"
+        assert select.select([self.peer.stdout], [], [], 4)[0], (
+            "X11 peer did not answer"
+        )
         return self.peer.stdout.readline().decode().rstrip("\n")
 
     def command(self, command):
@@ -85,6 +133,7 @@ class Bridge:
                 assert chunk, "bridge disconnected"
                 data += chunk
             return data
+
         return exact(struct.unpack("!I", exact(4))[0])
 
     def send(self, text):
@@ -167,11 +216,35 @@ def test_pending_timeout_and_host_takeover(bridge):
     assert b.receive() == b"recovered"
 
 
+def test_timeout_rejects_old_reply_then_samples_again(bridge):
+    b = bridge()
+    b.command("own initial")
+    assert b.receive() == b"initial"
+    b.command("hold")
+    b.command("text delayed")
+    time.sleep(1.5)
+    b.command("release")
+    b.quiet()
+    assert b.receive() == b"delayed"
+
+
+def test_unrelated_x_error_keeps_default_handler(bridge, monkeypatch):
+    monkeypatch.setenv("GLASS_TEST_UNRELATED_ERROR", "1")
+    b = bridge()
+    b.send(b"host")
+    time.sleep(0.3)
+    b.command("paste")
+    assert b.process.wait(timeout=3) == 1
+    assert b"BadAtom" in b.process.stderr.read()
+
+
 def test_destroyed_requester_does_not_kill_bridge(bridge):
     b = bridge()
     b.send(b"survives")
     time.sleep(0.3)
     b.process.send_signal(signal.SIGSTOP)
+    _, status = os.waitpid(b.process.pid, os.WUNTRACED)
+    assert os.WIFSTOPPED(status)
     b.command("destroy")
     b.process.send_signal(signal.SIGCONT)
     time.sleep(0.3)
@@ -182,7 +255,11 @@ def test_destroyed_requester_does_not_kill_bridge(bridge):
 
 def test_resize_fragmentation_retries_invalid_and_reconnect(bridge):
     b = bridge("resize")
-    for byte in struct.pack("!II", 800, 600):
+    frame = struct.pack("!II", 800, 600)
+    b.connection.sendall(frame[:3])
+    time.sleep(0.1)
+    assert not b.record.exists()
+    for byte in frame[3:]:
         b.connection.sendall(bytes([byte]))
     deadline = time.monotonic() + 4
     while time.monotonic() < deadline:
@@ -200,9 +277,11 @@ def test_resize_fragmentation_retries_invalid_and_reconnect(bridge):
     assert b.record.read_text().splitlines()[-1] == "--screen 0 --size 640x480"
 
 
-def test_real_xrandr_accepts_advertised_mode(bridge):
+def test_real_xrandr_accepts_advertised_mode(bridge, monkeypatch):
+    monkeypatch.setenv("GLASS_TEST_REAL_XRANDR", "1")
     b = bridge("resize")
-    # The helper's actual execl path is exercised separately with the recorder.
-    result = subprocess.run(["/usr/bin/xrandr", "--screen", "0", "--size", "800x600"],
-                            env={**os.environ, "DISPLAY": b.env["DISPLAY"]}, capture_output=True)
-    assert result.returncode == 0, result.stderr.decode()
+    b.connection.sendall(struct.pack("!II", 800, 600))
+    deadline = time.monotonic() + 4
+    while time.monotonic() < deadline and not b.record.exists():
+        time.sleep(0.02)
+    assert b.record.read_text() == "accepted\n"

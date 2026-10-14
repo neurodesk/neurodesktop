@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <X11/Xlib.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -39,4 +40,14 @@ int execl(const char *path, const char *arg, ...) {
     va_end(ap);
     const char *recorder = getenv("GLASS_TEST_RECORDER");
     return execv(strcmp(path, "/usr/bin/xrandr") == 0 && recorder ? recorder : path, args);
+}
+
+Status XSendEvent(Display *display, Window window, Bool propagate, long mask, XEvent *event) {
+    Status (*original)(Display *, Window, Bool, long, XEvent *) = dlsym(RTLD_NEXT, "XSendEvent");
+    if (getenv("GLASS_TEST_UNRELATED_ERROR")) {
+        int (*change)(Display *, Window, Atom, Atom, int, int, const unsigned char *, int) =
+            dlsym(RTLD_NEXT, "XChangeProperty");
+        change(display, window, None, None, 8, PropModeReplace, NULL, 0);
+    }
+    return original(display, window, propagate, mask, event);
 }

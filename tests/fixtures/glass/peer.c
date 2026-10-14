@@ -29,6 +29,8 @@ int main(void) {
                 snprintf(text, sizeof(text), "%s", line + 4);
                 if (line[0] == 'o') XSetSelectionOwner(d, clipboard, w, CurrentTime);
                 mode = 0;
+            } else if (!strncmp(line, "text ", 5)) {
+                snprintf(text, sizeof(text), "%s", line + 5);
             } else if (!strcmp(line, "refuse")) mode = 1;
             else if (!strcmp(line, "hold")) mode = 2;
             else if (!strcmp(line, "release")) {
@@ -47,7 +49,7 @@ int main(void) {
             XNextEvent(d, &e);
             if (e.type == SelectionRequest) {
                 XSelectionRequestEvent *r = &e.xselectionrequest;
-                if (mode == 2) { held = e; continue; }
+                if (mode == 2) { if (!held.type) held = e; continue; }
                 XEvent reply = {0};
                 reply.xselection = (XSelectionEvent){.type = SelectionNotify, .display = d,
                     .requestor = r->requestor, .selection = r->selection, .target = r->target,

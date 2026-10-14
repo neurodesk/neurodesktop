@@ -2,6 +2,7 @@
 
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
+#include <X11/Xproto.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <linux/vm_sockets.h>
@@ -12,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 #define CLIPBOARD_PORT 10778
@@ -78,6 +80,30 @@ static int connect_host(void) {
     return fd;
 }
 
+static struct {
+    Display *display;
+    Window window;
+    unsigned long first;
+    unsigned long last;
+    XErrorHandler previous;
+} reply_errors;
+
+static int reply_error(Display *display, XErrorEvent *error) {
+    if (display == reply_errors.display && error->error_code == BadWindow &&
+        error->resourceid == reply_errors.window &&
+        error->serial >= reply_errors.first && error->serial <= reply_errors.last &&
+        (error->request_code == X_ChangeProperty || error->request_code == X_SendEvent)) {
+        return 0;
+    }
+    return reply_errors.previous(display, error);
+}
+
+static int64_t monotonic_ms(void) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+
 static void answer_selection(
     Display *display,
     XSelectionRequestEvent *request,
@@ -95,6 +121,13 @@ static void answer_selection(
     response.time = request->time;
     response.property = None;
 
+    XSync(display, False);
+    reply_errors.display = display;
+    reply_errors.window = request->requestor; // codespell:ignore requestor
+    reply_errors.first = NextRequest(display);
+    reply_errors.last = reply_errors.first + 1;
+    reply_errors.previous = XSetErrorHandler(reply_error);
+
     Atom property = request->property == None ? request->target : request->property;
     if (request->target == targets) {
         Atom supported[] = {targets, utf8, XA_STRING};
@@ -110,7 +143,9 @@ static void answer_selection(
         response.property = property;
     }
     XSendEvent(display, request->requestor, False, 0, (XEvent *)&response); // codespell:ignore requestor
-    XFlush(display);
+    reply_errors.last = NextRequest(display) - 1;
+    XSync(display, False);
+    XSetErrorHandler(reply_errors.previous);
 }
 
 static int run_bridge(Display *display, Window window, Atom clipboard, Atom targets, Atom utf8, Atom property, int fd) {
@@ -118,7 +153,11 @@ static int run_bridge(Display *display, Window window, Atom clipboard, Atom targ
     size_t owned_length = 0;
     unsigned char *last_sent = NULL;
     size_t last_sent_length = 0;
-    Window observed_owner = None;
+    Window pending_owner = None;
+    Time pending_time = CurrentTime;
+    int64_t deadline = 0;
+    int64_t next_sample = 0;
+    Atom clock_property = XInternAtom(display, "GLASS_SAMPLE_TIME", False);
     int xfd = ConnectionNumber(display);
 
     for (;;) {
@@ -152,7 +191,10 @@ static int run_bridge(Display *display, Window window, Atom clipboard, Atom targ
             owned = next;
             owned_length = length;
             XSetSelectionOwner(display, clipboard, window, CurrentTime);
-            observed_owner = window;
+            pending_owner = None;
+            free(last_sent);
+            last_sent = NULL;
+            last_sent_length = 0;
             XFlush(display);
         }
 
@@ -161,9 +203,17 @@ static int run_bridge(Display *display, Window window, Atom clipboard, Atom targ
             XNextEvent(display, &event);
             if (event.type == SelectionRequest) {
                 answer_selection(display, &event.xselectionrequest, targets, utf8, owned, owned_length);
-            } else if (event.type == SelectionClear) {
-                observed_owner = None;
-            } else if (event.type == SelectionNotify && event.xselection.property != None) {
+            } else if (event.type == SelectionNotify && pending_owner != None &&
+                       event.xselection.requestor == window && // codespell:ignore requestor
+                       event.xselection.selection == clipboard &&
+                       event.xselection.target == utf8 && event.xselection.time == pending_time &&
+                       (event.xselection.property == property || event.xselection.property == None)) {
+                Window sampled_owner = pending_owner;
+                pending_owner = None;
+                if (event.xselection.property == None ||
+                    XGetSelectionOwner(display, clipboard) != sampled_owner) {
+                    continue;
+                }
                 Atom actual_type;
                 int actual_format;
                 unsigned long items;
@@ -173,8 +223,8 @@ static int run_bridge(Display *display, Window window, Atom clipboard, Atom targ
                         display, window, property, 0, CLIPBOARD_MAX / 4,
                         True, AnyPropertyType, &actual_type, &actual_format,
                         &items, &remaining, &value) == Success &&
-                    actual_format == 8 && remaining == 0 && items <= CLIPBOARD_MAX &&
-                    (items != last_sent_length ||
+                    actual_type == utf8 && actual_format == 8 && remaining == 0 && items <= CLIPBOARD_MAX &&
+                    (last_sent == NULL || items != last_sent_length ||
                      (items != 0 && memcmp(value, last_sent, items) != 0))) {
                     if (send_text(fd, value, items) != 0) {
                         if (value != NULL) {
@@ -201,9 +251,22 @@ static int run_bridge(Display *display, Window window, Atom clipboard, Atom targ
         }
 
         Window owner = XGetSelectionOwner(display, clipboard);
-        if (owner != None && owner != window && owner != observed_owner) {
-            observed_owner = owner;
-            XConvertSelection(display, clipboard, utf8, property, window, CurrentTime);
+        int64_t now = monotonic_ms();
+        if (pending_owner != None && (now >= deadline || owner != pending_owner)) {
+            pending_owner = None;
+        }
+        if (owner != None && owner != window && pending_owner == None && now >= next_sample) {
+            // A server timestamp distinguishes late replies from a timed-out sample.
+            XChangeProperty(display, window, clock_property, utf8, 8, PropModeReplace, NULL, 0);
+            XEvent timestamp;
+            do {
+                XWindowEvent(display, window, PropertyChangeMask, &timestamp);
+            } while (timestamp.xproperty.atom != clock_property);
+            pending_time = timestamp.xproperty.time;
+            pending_owner = owner;
+            deadline = now + 1000;
+            next_sample = now + 200;
+            XConvertSelection(display, clipboard, utf8, property, window, pending_time);
             XFlush(display);
         }
     }
@@ -223,6 +286,7 @@ int main(void) {
     }
     Window window = XCreateSimpleWindow(
         display, DefaultRootWindow(display), -1, -1, 1, 1, 0, 0, 0);
+    XSelectInput(display, window, PropertyChangeMask);
     Atom clipboard = XInternAtom(display, "CLIPBOARD", False);
     Atom targets = XInternAtom(display, "TARGETS", False);
     Atom utf8 = XInternAtom(display, "UTF8_STRING", False);
