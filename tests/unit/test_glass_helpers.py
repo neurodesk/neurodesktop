@@ -225,6 +225,32 @@ def test_host_clipboard_survives_relay_outage(bridge, paste_offline):
     assert b.line() == "text:fresh host"
 
 
+def test_pending_reconnect_serves_cached_clipboard_until_connection_completes(
+    bridge, monkeypatch, tmp_path,
+):
+    pending = tmp_path / "pending-connect"
+    monkeypatch.setenv("GLASS_TEST_CONNECT_PENDING", str(pending))
+    b = bridge()
+    b.send(b"cached host")
+    time.sleep(0.3)
+    b.command("paste")
+    assert b.line() == "text:cached host"
+    b.disconnect()
+    pending.touch()
+    b.resume()
+    time.sleep(0.4)
+    b.command("paste")
+    assert b.line() == "text:cached host"
+    assert not select.select([b.connection], [], [], 0.1)[0], (
+        "Pending connection was discarded before the relay became ready"
+    )
+    pending.unlink()
+    b.send(b"fresh after delayed connection")
+    time.sleep(0.4)
+    b.command("paste")
+    assert b.line() == "text:fresh after delayed connection"
+
+
 @pytest.mark.parametrize("initial_owner", ["host", "guest"])
 def test_guest_clipboard_changed_offline_is_sent_after_reconnect(bridge, initial_owner):
     b = bridge()
