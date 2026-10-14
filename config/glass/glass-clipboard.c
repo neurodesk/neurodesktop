@@ -5,6 +5,7 @@
 #include <X11/Xproto.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <linux/vm_sockets.h>
 #include <poll.h>
 #include <signal.h>
@@ -64,7 +65,7 @@ static int send_text(int fd, const unsigned char *text, size_t length) {
 }
 
 static int connect_host(void) {
-    int fd = socket(AF_VSOCK, SOCK_STREAM, 0);
+    int fd = socket(AF_VSOCK, SOCK_STREAM | SOCK_NONBLOCK, 0);
     if (fd < 0) {
         return -1;
     }
@@ -74,6 +75,22 @@ static int connect_host(void) {
     address.svm_cid = VMADDR_CID_HOST;
     address.svm_port = CLIPBOARD_PORT;
     if (connect(fd, (struct sockaddr *)&address, sizeof(address)) != 0) {
+        if (errno != EINPROGRESS) {
+            close(fd);
+            return -1;
+        }
+        struct pollfd pending = {.fd = fd, .events = POLLOUT};
+        int error = 0;
+        socklen_t error_length = sizeof(error);
+        // Bound reconnect work so an unavailable relay cannot stall X requests.
+        if (poll(&pending, 1, 100) <= 0 ||
+            getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &error_length) != 0 || error != 0) {
+            close(fd);
+            return -1;
+        }
+    }
+    int flags = fcntl(fd, F_GETFL);
+    if (flags < 0 || fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) != 0) {
         close(fd);
         return -1;
     }
@@ -157,7 +174,9 @@ static void answer_selection(
     XSetErrorHandler(reply_errors.previous);
 }
 
-static int run_bridge(Display *display, Window window, Atom clipboard, Atom targets, Atom utf8, Atom property, int fd) {
+static int run_bridge(Display *display, Window window, Atom clipboard, Atom targets, Atom utf8, Atom property) {
+    int fd = -1;
+    int64_t next_connect = 0;
     unsigned char *owned = NULL;
     size_t owned_length = 0;
     unsigned char *last_sent = NULL;
@@ -170,6 +189,10 @@ static int run_bridge(Display *display, Window window, Atom clipboard, Atom targ
     int xfd = ConnectionNumber(display);
 
     for (;;) {
+        if (fd < 0 && monotonic_ms() >= next_connect) {
+            fd = connect_host();
+            next_connect = monotonic_ms() + 250;
+        }
         struct pollfd pollfds[] = {
             {.fd = xfd, .events = POLLIN},
             {.fd = fd, .events = POLLIN},
@@ -179,21 +202,21 @@ static int run_bridge(Display *display, Window window, Atom clipboard, Atom targ
             break;
         }
         if (pollfds[1].revents & (POLLERR | POLLHUP | POLLNVAL)) {
-            break;
+            goto disconnected;
         }
         if (pollfds[1].revents & POLLIN) {
             uint32_t encoded = 0;
             if (read_full(fd, &encoded, sizeof(encoded)) != 0) {
-                break;
+                goto disconnected;
             }
             uint32_t length = ntohl(encoded);
             if (length > CLIPBOARD_MAX) {
-                break;
+                goto disconnected;
             }
             unsigned char *next = malloc((size_t)length + 1);
             if (next == NULL || read_full(fd, next, length) != 0) {
                 free(next);
-                break;
+                goto disconnected;
             }
             next[length] = '\0';
             free(owned);
@@ -239,9 +262,7 @@ static int run_bridge(Display *display, Window window, Atom clipboard, Atom targ
                         if (value != NULL) {
                             XFree(value);
                         }
-                        free(owned);
-                        free(last_sent);
-                        return -1;
+                        goto disconnected;
                     }
                     unsigned char *copy = malloc(items == 0 ? 1 : items);
                     if (copy != NULL) {
@@ -264,7 +285,7 @@ static int run_bridge(Display *display, Window window, Atom clipboard, Atom targ
         if (pending_owner != None && (now >= deadline || owner != pending_owner)) {
             pending_owner = None;
         }
-        if (owner != None && owner != window && pending_owner == None && now >= next_sample) {
+        if (fd >= 0 && owner != None && owner != window && pending_owner == None && now >= next_sample) {
             // A server timestamp distinguishes late replies from a timed-out sample.
             XChangeProperty(display, window, clock_property, utf8, 8, PropModeReplace, NULL, 0);
             XEvent timestamp;
@@ -278,6 +299,20 @@ static int run_bridge(Display *display, Window window, Atom clipboard, Atom targ
             XConvertSelection(display, clipboard, utf8, property, window, pending_time);
             XFlush(display);
         }
+        continue;
+
+    disconnected:
+        close(fd);
+        fd = -1;
+        next_connect = monotonic_ms() + 250;
+        pending_owner = None;
+        next_sample = 0;
+        free(last_sent);
+        last_sent = NULL;
+        last_sent_length = 0;
+    }
+    if (fd >= 0) {
+        close(fd);
     }
     free(owned);
     free(last_sent);
@@ -301,14 +336,7 @@ int main(void) {
     Atom utf8 = XInternAtom(display, "UTF8_STRING", False);
     Atom property = XInternAtom(display, "GLASS_CLIPBOARD", False);
 
-    for (;;) {
-        int fd = connect_host();
-        if (fd < 0) {
-            usleep(250000);
-            continue;
-        }
-        run_bridge(display, window, clipboard, targets, utf8, property, fd);
-        close(fd);
-        usleep(250000);
-    }
+    run_bridge(display, window, clipboard, targets, utf8, property);
+    XCloseDisplay(display);
+    return 1;
 }
