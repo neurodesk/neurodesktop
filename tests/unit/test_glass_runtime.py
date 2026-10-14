@@ -78,8 +78,9 @@ def test_jupyter_exec_keeps_token_out_of_arguments_and_enforces_fixed_port(launc
 def test_security_glass_mode_keeps_package_sudo_without_rdp_or_password_mutation(tmp_path, monkeypatch):
     security = load_source_module("glass_security", "/opt/neurodesktop/startup_security.py",
                                  "config/jupyter/startup_security.py")
-    for name in ("SUDOERS", "ROOT_STORAGE", "GLASS_STORAGE", "SSHD_RUNTIME"):
+    for name in ("SUDOERS", "ROOT_STORAGE", "GLASS_STORAGE", "SSHD_RUNTIME", "NEUROCOMMAND"):
         monkeypatch.setattr(security, name, tmp_path / name)
+    security.NEUROCOMMAND.mkdir()
     monkeypatch.setattr(security.os, "geteuid", lambda: 0)
     monkeypatch.setattr(security.os, "fchown", lambda *args: None)
     user = SimpleNamespace(pw_name="jovyan", pw_uid=1000, pw_gid=100,
