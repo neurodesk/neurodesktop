@@ -27,12 +27,14 @@ class NeurodeskT3CodeApp(ExtensionApp):
         self._readiness_task: asyncio.Task[None] | None = None
 
     def initialize_handlers(self) -> None:
-        self.handlers.extend([
-            (r"/neurodesk-t3-status", T3StatusHandler, {"t3_app": self}),
-            (r"/neurodesk-t3/_session", T3SessionHandler, {"t3_app": self}),
-            (r"/neurodesk-t3/_connect", T3ConnectHandler, {"t3_app": self}),
-            (r"/neurodesk-t3/(.*)", T3ProxyHandler, {"t3_app": self}),
-        ])
+        self.handlers.extend(
+            [
+                (r"/neurodesk-t3-status", T3StatusHandler, {"t3_app": self}),
+                (r"/neurodesk-t3/_session", T3SessionHandler, {"t3_app": self}),
+                (r"/neurodesk-t3/_connect", T3ConnectHandler, {"t3_app": self}),
+                (r"/neurodesk-t3/(.*)", T3ProxyHandler, {"t3_app": self}),
+            ]
+        )
 
     async def _start_jupyter_server_extension(self, _serverapp) -> None:
         try:

@@ -30,7 +30,7 @@ DEFAULT_PORT = 3773
 def relay_tunnel_limit(output: bytes) -> int | None:
     """Extract only the quota from the pinned relay's public error message."""
     match = re.search(
-        rb'Relay managed tunnel limit reached: this account allows at most ([0-9]{1,6}) tunnels',
+        rb"Relay managed tunnel limit reached: this account allows at most ([0-9]{1,6}) tunnels",
         output,
     )
     return int(match[1]) if match else None
@@ -116,9 +116,7 @@ def policy_from_environment(
         raise ConfigError("NEURODESKTOP_T3_CODE_EXECUTABLE is not executable")
 
     provider_bin = _absolute_directory(
-        environ.get(
-            "NEURODESKTOP_T3_CODE_PROVIDER_BIN", str(DEFAULT_PROVIDER_BIN)
-        ),
+        environ.get("NEURODESKTOP_T3_CODE_PROVIDER_BIN", str(DEFAULT_PROVIDER_BIN)),
         "NEURODESKTOP_T3_CODE_PROVIDER_BIN",
     )
     return Policy(
@@ -254,9 +252,7 @@ def _write_settings(directory: Path, settings: dict) -> None:
             os.unlink(name)
 
 
-def server_environment(
-    policy: Policy, environ: Mapping[str, str]
-) -> dict[str, str]:
+def server_environment(policy: Policy, environ: Mapping[str, str]) -> dict[str, str]:
     """Give T3 quiet, image-owned providers and private persistent state."""
 
     # A parent T3 desktop or harness exports service-launcher IPC and bearer
@@ -289,7 +285,8 @@ def server_environment(
         }
     )
     from .naming import environment_label
-    child['NEURODESKTOP_T3_CODE_LABEL'] = environment_label(policy, environ)
+
+    child["NEURODESKTOP_T3_CODE_LABEL"] = environment_label(policy, environ)
     return child
 
 
@@ -329,7 +326,7 @@ class T3Supervisor:
     async def _read_output(self, stream) -> None:
         # Drain continuously so a noisy child cannot block. Raw output is never
         # persisted or logged; retain only a bounded overlap for split messages.
-        overlap = b''
+        overlap = b""
         while chunk := await stream.read(4096):
             output = overlap + chunk
             limit = relay_tunnel_limit(output)
@@ -402,7 +399,9 @@ class T3Supervisor:
                         self.state = ServiceState.BACKING_OFF
                         await asyncio.sleep(min(2 ** (failures - 1), 8))
                     continue
-                self._output_reader = asyncio.create_task(self._read_output(self._process.stdout))
+                self._output_reader = asyncio.create_task(
+                    self._read_output(self._process.stdout)
+                )
                 self.pid = self._process.pid
                 if await self._wait_for_listener():
                     self.state = ServiceState.READY
@@ -466,7 +465,8 @@ class T3Supervisor:
         try:
             async with asyncio.timeout(0.5):
                 reader, writer = await asyncio.open_connection(
-                    self.policy.readiness_host, self.policy.port,
+                    self.policy.readiness_host,
+                    self.policy.port,
                 )
                 writer.write(
                     b"GET /.well-known/t3/environment HTTP/1.1\r\n"
