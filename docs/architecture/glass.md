@@ -41,6 +41,15 @@ restoration and workspace quarantine still run. `/vmsh-neurodesktop-storage`
 is mapped to `/neurodesktop-storage` when mounted; conflicting nonempty storage
 or an unrelated existing symlink fails rather than replacing user data.
 
+Each nested scientific command uses Apptainer's `--writable-tmpfs` session.
+Changes inside one tool image disappear when that command exits and are isolated
+from other tool invocations. Files in bound home and storage directories persist.
+The read-only CPU-information bind and the user's MATLAB cache remain available.
+
+The clipboard helper samples an external X11 clipboard owner every 200 ms,
+so copying new text from the same application updates the host clipboard.
+A requesting window can close during a paste without terminating the helper.
+
 ## Jupyter and security
 
 The desktop's **JupyterLab (host browser)** shortcut starts the static
@@ -50,7 +59,9 @@ access. This narrow activation permission is separate from `GRANT_SUDO`'s generi
 package/no/full policy. Service files and root preparation are root-owned.
 
 Jupyter uses a random token stored mode 0600 in the user's private runtime
-directory. Tokens are not passed on command lines or in probe URLs. CC's current
+directory. Tokens are not passed on command lines or in probe URLs. Glass startup
+skips the container's access-URL watcher, which would otherwise print the token
+to the service journal. CC's current
 browser callback opens `/lab` without a token, so the shortcut displays the token
 in the user's terminal for the login page. It does not disable authentication.
 The product forwards guest port 8888; changing the Jupyter port also requires
@@ -64,6 +75,11 @@ control group. Stopping/restarting the service stops its child processes, includ
 clipboard/resize helpers. Jupyter is separate and starts only on request.
 
 ## Acceptance
+
+Checkout regressions run the compiled clipboard and resize helpers against
+test-owned transport endpoints. Clipboard checks use a real Xvfb display.
+The resize checks verify message handling and the `xrandr` command boundary;
+native display resizing still requires CC acceptance.
 
 Source/controller tests are not native VM acceptance. Before promoting an image,
 verify a locally built candidate on Ubuntu/KVM and Apple Silicon: headless boot

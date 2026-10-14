@@ -53,7 +53,8 @@ pytest tests/unit          # from a checkout, no container needed
 pytest /opt/tests/         # inside the built image
 ```
 
-Running `tests/unit` needs GCC and X11 development headers for the Glass helpers,
+Running `tests/unit` needs GCC, X11 development headers, Xvfb, and `xrandr`
+for the Glass helpers,
 Python 3.12, Node.js 24, `pytest`, `httpx`,
 `traitlets`, `requests`, `ipykernel`, `websocket-client`, `nibabel`, `numpy`,
 Git, curl, `jq`, and `ssh-keygen` (`openssh-client`); see
@@ -1052,6 +1053,26 @@ assigned-device isolation on a multi-GPU worker. See the
 application, transport, performance, and platform coverage.
 
 ## Startup performance regressions
+
+### Glass runtime regressions
+
+Run the Glass helper and startup checks on a checkout:
+
+```bash
+pytest tests/unit/test_glass_helpers.py tests/unit/test_glass_startup.py tests/unit/test_glass_runtime.py tests/unit/test_glass_packaging.py tests/unit/test_startup_security.py
+```
+
+The helper tests execute the compiled binaries through test-owned transport
+adapters. An independent X client under Xvfb checks host and guest clipboard
+transfer, repeated copies from one window, empty text, and closed requestors.
+Resize tests check framed dimensions and the real `xrandr` execution boundary.
+They do not establish native CC frame presentation or display resizing.
+Startup tests execute the access-URL watcher decision and scientific environment
+settings. Installed-image checks verify directory traversal, root ownership,
+and isolation between Apptainer writable sessions. Native CC acceptance remains
+in [the Glass deployment contract](architecture/glass.md#acceptance).
+
+### Shared startup regressions
 
 The menu-update and startup-ownership checks run with:
 
