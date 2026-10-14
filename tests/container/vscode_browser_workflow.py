@@ -12,9 +12,12 @@ from test_rise_slides_image import _BidiSession, _stop, _unused_port, _wait_for_
 
 
 def _evaluate(bidi, context, expression):
-    return bidi.request("script.evaluate", {
+    result = bidi.request("script.evaluate", {
         "expression": expression, "target": {"context": context}, "awaitPromise": True,
-    })["result"].get("value")
+    })["result"]
+    if "sharedId" in result:
+        return {"type": "element", "element": {"sharedId": result["sharedId"]}}
+    return result.get("value")
 
 
 def _wait(bidi, context, expression, timeout=60):
@@ -89,7 +92,7 @@ def run_vscode_edit_workflow(tmp_path):
             "wait": "complete",
         })
         _wait(bidi, context, "Boolean(document.querySelector('.monaco-workbench'))", timeout=90)
-        point = json.loads(_wait(bidi, context, """(() => {
+        target = _wait(bidi, context, """(() => {
             const trust = [...document.querySelectorAll('button, [role="button"], .monaco-button')]
                 .find(node => node.textContent.includes('Yes, I trust the authors'));
             if (trust && trust.getClientRects().length) {
@@ -106,13 +109,13 @@ def run_vscode_edit_workflow(tmp_path):
             if (!rect.width || !rect.height || !row.contains(document.elementFromPoint(x, y))) {
                 return false;
             }
-            return JSON.stringify({x, y});
-        })()"""))
+            return label;
+        })()""")
         bidi.request("input.performActions", {
             "context": context, "actions": [{
                 "type": "pointer", "id": "vscode-file", "parameters": {"pointerType": "mouse"},
                 "actions": [
-                    {"type": "pointerMove", "duration": 0, "origin": "viewport", **point},
+                    {"type": "pointerMove", "duration": 0, "origin": target, "x": 0, "y": 0},
                     {"type": "pointerDown", "button": 0},
                     {"type": "pointerUp", "button": 0},
                     {"type": "pause", "duration": 100},
