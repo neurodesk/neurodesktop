@@ -111,6 +111,7 @@ class Bridge:
             env={**os.environ, "DISPLAY": display},
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
+            bufsize=0,
         )
         assert self.line() == "ready"
 
