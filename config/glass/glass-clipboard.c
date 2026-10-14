@@ -111,6 +111,14 @@ static void answer_selection(
     Atom utf8,
     const unsigned char *text,
     size_t length) {
+    size_t request_words = (size_t)XMaxRequestSize(display);
+    long extended_words = XExtendedMaxRequestSize(display);
+    // BIG-REQUESTS adds one length word to the ordinary request header.
+    if (extended_words > 0 && (size_t)extended_words - 1 > request_words) {
+        request_words = (size_t)extended_words - 1;
+    }
+    size_t payload_words = request_words - sz_xChangePropertyReq / 4;
+
     XSelectionEvent response;
     memset(&response, 0, sizeof(response));
     response.type = SelectionNotify;
@@ -136,7 +144,8 @@ static void answer_selection(
             PropModeReplace, (unsigned char *)supported,
             (int)(sizeof(supported) / sizeof(supported[0])));
         response.property = property;
-    } else if (request->target == utf8 || request->target == XA_STRING) {
+    } else if ((request->target == utf8 || request->target == XA_STRING) &&
+               (length + 3) / 4 <= payload_words) {
         XChangeProperty(
             display, request->requestor, property, request->target, 8, // codespell:ignore requestor
             PropModeReplace, text, (int)length);
