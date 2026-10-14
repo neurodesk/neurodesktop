@@ -328,7 +328,7 @@ def test_oversized_selection_refuses_and_recovers(bridge):
 @pytest.mark.parametrize(("text", "expected"), [
     ("", "hex:"),
     ("ASCII", "hex:4153434949"),
-    ("caf\u00e9 \u00ff", "hex:636166e920ff"),
+    ("caf\u00e9 \u00ff", "hex:636166e920ff"),  # codespell:ignore caf
     ("\u20ac", "refused"),
     ("\U0001f603", "refused"),
 ])

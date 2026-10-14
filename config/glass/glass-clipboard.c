@@ -6,6 +6,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <iconv.h>
 #include <linux/vm_sockets.h>
 #include <poll.h>
 #include <signal.h>
@@ -105,6 +106,30 @@ static int64_t monotonic_ms(void) {
     return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
 }
 
+static unsigned char *to_latin1(const unsigned char *text, size_t length, size_t *converted_length) {
+    iconv_t conversion = iconv_open("ISO-8859-1", "UTF-8");
+    if (conversion == (iconv_t)-1) {
+        return NULL;
+    }
+    unsigned char *converted = malloc(length + 1);
+    if (converted == NULL) {
+        iconv_close(conversion);
+        return NULL;
+    }
+    char *input = (char *)text;
+    char *output = (char *)converted;
+    size_t remaining = length;
+    size_t available = length;
+    size_t result = iconv(conversion, &input, &remaining, &output, &available);
+    iconv_close(conversion);
+    if (result != 0 || remaining != 0) {
+        free(converted);
+        return NULL;
+    }
+    *converted_length = length - available;
+    return converted;
+}
+
 static void answer_selection(
     Display *display,
     XSelectionRequestEvent *request,
@@ -130,6 +155,12 @@ static void answer_selection(
     response.time = request->time;
     response.property = None;
 
+    unsigned char *converted = NULL;
+    if (request->target == XA_STRING) {
+        converted = to_latin1(text, length, &length);
+        text = converted;
+    }
+
     XSync(display, False);
     reply_errors.display = display;
     reply_errors.window = request->requestor; // codespell:ignore requestor
@@ -145,7 +176,7 @@ static void answer_selection(
             PropModeReplace, (unsigned char *)supported,
             (int)(sizeof(supported) / sizeof(supported[0])));
         response.property = property;
-    } else if ((request->target == utf8 || request->target == XA_STRING) &&
+    } else if ((request->target == utf8 || (request->target == XA_STRING && converted != NULL)) &&
                (length + 3) / 4 <= payload_words) {
         XChangeProperty(
             display, request->requestor, property, request->target, 8, // codespell:ignore requestor
@@ -156,6 +187,7 @@ static void answer_selection(
     reply_errors.last = NextRequest(display) - 1;
     XSync(display, False);
     XSetErrorHandler(reply_errors.previous);
+    free(converted);
 }
 
 static int run_bridge(Display *display, Window window, Atom clipboard, Atom targets, Atom utf8, Atom property) {

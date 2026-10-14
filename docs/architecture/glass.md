@@ -52,6 +52,10 @@ A requesting window can close during a paste without terminating the helper.
 The helper continues serving the last host clipboard while the relay is offline.
 Reconnecting preserves that text until a new host frame or guest clipboard owner
 replaces it; guest changes made offline are sampled after reconnection.
+Legacy `STRING` requests convert UTF-8 host text to Latin-1, as required by the
+[X11 selection contract](https://www.x.org/releases/current/doc/xorg-docs/icccm/icccm.pdf).
+Characters outside Latin-1 cause an explicit conversion refusal; `UTF8_STRING`
+requests preserve the original text.
 Clipboard conversions use direct X11 properties and reject text that exceeds
 the X server's request capacity. Incremental (`INCR`) selection transfers are
 outside this experimental implementation.
