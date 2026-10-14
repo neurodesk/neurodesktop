@@ -52,22 +52,22 @@ int main(void) {
                 if (mode == 2) { if (!held.type) held = e; continue; }
                 XEvent reply = {0};
                 reply.xselection = (XSelectionEvent){.type = SelectionNotify, .display = d,
-                    .requestor = r->requestor, .selection = r->selection, .target = r->target,
+                    .requestor = r->requestor, .selection = r->selection, .target = r->target, // codespell:ignore requestor
                     .property = mode == 1 ? None : r->property, .time = r->time};
-                if (!mode) XChangeProperty(d, r->requestor, r->property, utf8, 8,
+                if (!mode) XChangeProperty(d, r->requestor, r->property, utf8, 8, // codespell:ignore requestor
                     PropModeReplace, (unsigned char *)text, (int)strlen(text));
-                XSendEvent(d, r->requestor, False, 0, &reply);
+                XSendEvent(d, r->requestor, False, 0, &reply); // codespell:ignore requestor
                 XFlush(d);
             } else if (e.type == SelectionNotify) {
                 Atom type;
                 int format;
                 unsigned long n, rest;
                 unsigned char *value = NULL;
-                XGetWindowProperty(d, e.xselection.requestor, property, 0, 1024, True,
+                XGetWindowProperty(d, e.xselection.requestor, property, 0, 1024, True, // codespell:ignore requestor
                     AnyPropertyType, &type, &format, &n, &rest, &value);
                 printf("text:%.*s\n", (int)n, value ? (char *)value : "");
                 if (value) XFree(value);
-                XDestroyWindow(d, e.xselection.requestor);
+                XDestroyWindow(d, e.xselection.requestor); // codespell:ignore requestor
             }
         }
     }
