@@ -4,7 +4,7 @@ description: Startup flow, services, directory layout, and the map of
   per-subsystem architecture pages
 parent: index.md
 status: current
-last-reviewed: "2026-09-20"
+last-reviewed: "2026-10-14"
 ---
 
 # Architecture
@@ -39,8 +39,15 @@ The startup sequence follows this order (per
    sets ownership permissions for the home directory.
 2. [`config/jupyter/before_notebook.sh`](../config/jupyter/before_notebook.sh)
    configures the environment, sources
+   [`detect_resource_limits.sh`](../config/jupyter/detect_resource_limits.sh)
+   and calls `detect_resource_limits` to export `MEM_LIMIT` and `CPU_LIMIT`
+   from cgroup v2/v1 files, or from the Slurm allocation inside a Slurm job,
+   for the Jupyter resource indicator. It also sources
    [`guard_ollama_host.sh`](../config/jupyter/guard_ollama_host.sh) to bound the
-   Ollama availability check, and launches the deferred worker for lazy
+   Ollama availability check. Both helpers are installed under
+   `/opt/neurodesktop/` and sourced rather than executed: docker-stacks sources
+   the hook into the shell that starts Jupyter, so their exports reach the
+   server. The hook then launches the deferred worker for lazy
    CVMFS and Slurm startup, the default. Eager mode runs each selected service
    synchronously. The worker reads the live Jupyter server's runtime file and
    probes its local HTTP endpoint, including its configured port and base path.

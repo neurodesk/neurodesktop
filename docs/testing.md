@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-12"
+last-reviewed: "2026-10-14"
 ---
 
 # Testing
@@ -1020,13 +1020,15 @@ checkout ownership, root refusal, and package-only sudo restrictions.
 Run the startup checks on a checkout:
 
 ```bash
-pytest tests/unit/test_startup_batching.py tests/unit/test_wait_for_jupyter.py tests/unit/test_nbi_opencode_sync.py tests/unit/test_startup_performance_fixes.py
+pytest tests/unit/test_startup_batching.py tests/unit/test_wait_for_jupyter.py tests/unit/test_nbi_opencode_sync.py tests/unit/test_startup_performance_fixes.py tests/unit/test_detect_resource_limits.py
 ```
 
 These tests cover workspace quarantine in a single Python invocation, default
 restoration and ownership repair, SSH permission inheritance, NBI boot setup
 without live refresh, custom Jupyter ports and base paths, and independent
-CVMFS and Slurm execution. HTTP checks use temporary localhost servers.
+CVMFS and Slurm execution. Resource-limit detection is sourced from the
+helper against temporary cgroup v2 and v1 trees, with Slurm allocation
+overrides and malformed or missing limit files. HTTP checks use temporary localhost servers.
 Readiness deadlines run on a controlled clock instead of real elapsed
 time, so scheduling delay cannot decide whether the helper probes at all.
 See the [startup flow](architecture.md#container-initialization-flow) for

@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-10-09"
+last-reviewed: "2026-10-14"
 ---
 
 # Environment Variables
@@ -127,6 +127,12 @@ for RDP initialization and VS Code isolation.
   the server answers so the banner lands after the startup log burst;
   defaults to `3`
 - `NEURODESKTOP_VERSION`: version tag set by CI
+- `MEM_LIMIT`, `CPU_LIMIT`: exported by startup for the Jupyter resource
+  indicator, in bytes and CPUs. `detect_resource_limits.sh` reads them from
+  cgroup v2 or v1 limit files. Inside a Slurm job (`SLURM_JOB_ID` set), a
+  valid `SLURM_MEM_PER_NODE`, or `SLURM_MEM_PER_CPU` times the CPU count, and
+  `SLURM_CPUS_ON_NODE`, `SLURM_JOB_CPUS_PER_NODE` or `SLURM_CPUS_PER_TASK`
+  override them. A preset value is kept when no limit is detected
 
 ## Slurm
 
