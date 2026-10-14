@@ -65,7 +65,7 @@ def _check_isolation(root, environment):
     images = [_sandbox(root, name) for name in ("A", "B")]
 
     def command(image, script):
-        return ["apptainer", "exec", "--userns", "--containall", *options,
+        return ["apptainer", "exec", "--userns", *options,
                 str(image), "/bin/sh", "-ec", script]
 
     processes = []

@@ -1075,8 +1075,13 @@ Startup tests execute the access-URL watcher decision and scientific environment
 settings. Installed-image checks verify directory traversal, root ownership,
 and isolation between Apptainer writable sessions. The Glass scientific isolation
 probe runs as the notebook user in the privileged regular image profile and on
-native hosts. It skips nested HPC environments identified by the same Apptainer
-and Singularity markers as the installed security tests. The unprivileged Docker
+native hosts. It exercises the image-owned writable-tmpfs and read-only CPU-info
+bind options in a user namespace, with temporary home and sandbox directories.
+Like Glass tool invocations, it shares the caller's PID namespace. This preserves
+compatibility with the outer `/proc/cpuinfo` bind installed during ARM startup;
+an added PID namespace would require a fresh proc mount that the kernel rejects
+when the parent proc filesystem has that overmount. It skips nested HPC
+environments identified by the same Apptainer and Singularity markers as the installed security tests. The unprivileged Docker
 HPC profile blocks the user namespaces required by this Glass-specific probe;
 its runtime security settings stay unchanged. Namespace or Apptainer failures
 in the regular and native profiles still fail the probe. Native CC acceptance
