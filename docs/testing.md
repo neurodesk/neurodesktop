@@ -167,8 +167,8 @@ scope is declared in `scripts/check_quality.py`; strict Python typing is declare
 in `mypy.ini`. Expand these scopes in reviewed changes rather than reformatting
 unrelated files to fix a correctness finding.
 
-The strict scope covers the provider credential policy and the T3 package's
-process side: the supervisor, its environment naming, the Jupyter lifecycle
+The strict scope covers the provider credential policy, the OpenCode
+`opencode.json` update helper, and the T3 package's process side: the supervisor, its environment naming, the Jupyter lifecycle
 adapter and the extension entry point. The same modules are in the Ruff
 formatter scope. mypy skips unlisted modules, so a checked module's callers
 are listed with it. The lifecycle adapter's `ExtensionApp` base is typed by
@@ -181,9 +181,11 @@ pinned in `requirements-quality.txt`. Remaining limitations:
   `tornado` and `jupyter_server.base` APIs, and `jupyter-server-proxy` has
   no type information.
 - `ExtensionApp.log` is an untyped traitlets trait upstream, so the logger
-  passed to the supervisor is not checked. Python embedded in shell heredocs
-is not covered by Ruff and continues to rely on execution tests. Keep exceptions
-local and explain external runtime dependencies such as Jupyter-injected globals.
+  passed to the supervisor is not checked.
+
+Python embedded in shell heredocs is not covered by Ruff and continues to rely
+on execution tests. Keep exceptions local and explain external runtime
+dependencies such as Jupyter-injected globals.
 
 [Issue #1074](https://github.com/neurodesk/neurodesktop/issues/1074) moves
 substantial heredocs into owned modules, one block per change. The OpenCode
