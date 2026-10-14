@@ -89,7 +89,7 @@ static void answer_selection(
     memset(&response, 0, sizeof(response));
     response.type = SelectionNotify;
     response.display = request->display;
-    response.requestor = request->requestor;
+    response.requestor = request->requestor; // codespell:ignore requestor
     response.selection = request->selection;
     response.target = request->target;
     response.time = request->time;
@@ -99,17 +99,17 @@ static void answer_selection(
     if (request->target == targets) {
         Atom supported[] = {targets, utf8, XA_STRING};
         XChangeProperty(
-            display, request->requestor, property, XA_ATOM, 32,
+            display, request->requestor, property, XA_ATOM, 32, // codespell:ignore requestor
             PropModeReplace, (unsigned char *)supported,
             (int)(sizeof(supported) / sizeof(supported[0])));
         response.property = property;
     } else if (request->target == utf8 || request->target == XA_STRING) {
         XChangeProperty(
-            display, request->requestor, property, request->target, 8,
+            display, request->requestor, property, request->target, 8, // codespell:ignore requestor
             PropModeReplace, text, (int)length);
         response.property = property;
     }
-    XSendEvent(display, request->requestor, False, 0, (XEvent *)&response);
+    XSendEvent(display, request->requestor, False, 0, (XEvent *)&response); // codespell:ignore requestor
     XFlush(display);
 }
 
