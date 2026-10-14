@@ -18,6 +18,7 @@ PYTHON_FORMAT_SCOPE = (
     "extensions/t3-code-server/neurodesk_t3_code/naming.py",
     "extensions/t3-code-server/neurodesk_t3_code/serverext.py",
     "extensions/t3-code-server/neurodesk_t3_code/supervisor.py",
+    "scripts/check_quality.py",
 )
 SHELL_FORMAT_SCOPE = (
     "scripts/check_quality.sh",
