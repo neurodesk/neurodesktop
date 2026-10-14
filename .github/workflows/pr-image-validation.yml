@@ -54,6 +54,10 @@ jobs:
           cache-from: type=registry,ref=ghcr.io/neurodesk/neurodesktop:latest
       - name: Validate Slurm under default Docker permissions
         run: exec bash scripts/verify_slurm_image.sh "$IMAGE_REF"
+      - name: Permit nested scientific containers on the disposable runner
+        run: |
+          sysctl -n kernel.apparmor_restrict_unprivileged_userns > "$RUNNER_TEMP/neurodesktop-userns-policy"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Validate package-only sudo and portable applications
         run: exec bash .github/scripts/validate_image_runtime.sh "$IMAGE_REF" regular true packages false
       - name: Validate foreign UID and HPC startup
@@ -92,11 +96,6 @@ jobs:
           sudo cp config/cvmfs/default.local /etc/cvmfs/default.local
           sudo cvmfs_config setup
           ls /cvmfs/neurodesk.ardc.edu.au
-      - name: Permit nested scientific containers on the disposable runner
-        if: matrix.arch == 'amd64'
-        run: |
-          sysctl -n kernel.apparmor_restrict_unprivileged_userns > "$RUNNER_TEMP/neurodesktop-userns-policy"
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Validate scientific and desktop applications with required WebGL
         if: matrix.arch == 'amd64'
         run: exec bash .github/scripts/validate_image_runtime.sh "$IMAGE_REF" acceptance
@@ -120,7 +119,7 @@ jobs:
           path: ${{ steps.cvmfs-cache-key.outputs.path }}
           key: ${{ steps.cvmfs-cache-key.outputs.key }}
       - name: Restore host user namespace policy
-        if: always() && matrix.arch == 'amd64'
+        if: always()
         run: |
           if [ -s "$RUNNER_TEMP/neurodesktop-userns-policy" ]; then
             read -r userns_policy < "$RUNNER_TEMP/neurodesktop-userns-policy"

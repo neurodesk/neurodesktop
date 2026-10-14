@@ -403,10 +403,14 @@ launches at the mercy of whichever mirror it picked; see
 report the active CVMFS host, mount statistics, and recent client syslog
 entries even after a failed test.
 The steps use `exec` so the command retains the workflow shell's cancellation
-boundary. On its disposable Ubuntu 24.04 runner, PR scientific acceptance
-temporarily disables AppArmor's restriction on unprivileged user namespaces,
-as required for nested Apptainer. An `always()` step restores the original host
-policy after acceptance, including on failure or cancellation.
+boundary. On both disposable Ubuntu 24.04 runners, PR image validation captures
+and temporarily disables AppArmor's restriction on unprivileged user namespaces
+before the regular runtime suite, including its Glass scientific isolation probe.
+This follows [Apptainer's Ubuntu namespace prerequisite](https://apptainer.org/docs/admin/main/user_namespace.html#user-namespace-requirements).
+Setup fails if the policy cannot be read or changed. An `always()` step restores
+the captured policy on both architectures after validation, including on failure
+or cancellation. The HPC profile retains Docker's default security settings and
+skips the Glass-specific nested namespace probe.
 
 These jobs also restore the host CVMFS client cache from earlier runs through
 [`cvmfs_ci_cache.sh`](../.github/scripts/cvmfs_ci_cache.sh). A cold cache made
