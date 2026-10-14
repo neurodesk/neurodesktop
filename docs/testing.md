@@ -1069,8 +1069,14 @@ Resize tests check framed dimensions and the real `xrandr` execution boundary.
 They do not establish native CC frame presentation or display resizing.
 Startup tests execute the access-URL watcher decision and scientific environment
 settings. Installed-image checks verify directory traversal, root ownership,
-and isolation between Apptainer writable sessions. Native CC acceptance remains
-in [the Glass deployment contract](architecture/glass.md#acceptance).
+and isolation between Apptainer writable sessions. The Glass scientific isolation
+probe runs as the notebook user in the privileged regular image profile and on
+native hosts. It skips nested HPC environments identified by the same Apptainer
+and Singularity markers as the installed security tests. The unprivileged Docker
+HPC profile blocks the user namespaces required by this Glass-specific probe;
+its runtime security settings stay unchanged. Namespace or Apptainer failures
+in the regular and native profiles still fail the probe. Native CC acceptance
+remains in [the Glass deployment contract](architecture/glass.md#acceptance).
 
 ### Shared startup regressions
 

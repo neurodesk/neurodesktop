@@ -108,4 +108,8 @@ def _check_isolation(root, environment):
 
 
 def test_glass_scientific_invocations_are_isolated_and_cleaned(tmp_path):
+    if any(os.environ.get(name) for name in (
+        "APPTAINER_CONTAINER", "SINGULARITY_CONTAINER", "APPTAINER_NAME", "SINGULARITY_NAME",
+    )) or Path("/.apptainer.d").exists() or Path("/.singularity.d").exists():
+        pytest.skip("Glass user namespaces require the regular or native profile, not nested HPC")
     _check_isolation(tmp_path, Path("/opt/neurodesktop/environment_variables.sh"))
