@@ -12,6 +12,16 @@ import pytest
 from testlib import repo_path
 
 
+LINT_HOME = "tools/javascript-lint"
+ESLINT = f"{LINT_HOME}/node_modules/eslint/bin/eslint.js"
+LINT_COMMAND = [
+    ESLINT,
+    "--config",
+    f"{LINT_HOME}/eslint.config.mjs",
+    "--max-warnings",
+    "0",
+]
+
 @pytest.fixture
 def quality_repo(tmp_path):
     root = tmp_path / "repo"
@@ -21,6 +31,9 @@ def quality_repo(tmp_path):
     )
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     (root / "extensions/neurodesk-launcher").mkdir(parents=True)
+    stub_eslint = root / ESLINT
+    stub_eslint.parent.mkdir(parents=True)
+    stub_eslint.write_text("// Stub; the node stub records the lint command.\n")
     tools = tmp_path / "tools"
     tools.mkdir()
     log = tmp_path / "commands.jsonl"
@@ -101,16 +114,57 @@ def test_javascript_checks_modules_and_excludes_frozen_and_generated_files(
     for name in (
         "tests/fixtures/widget-manager/upstream.js",
         "extensions/neurodesk-launcher/lib/index.js",
-        "extensions/astra-viewer/vendor/upstream.js",
         "extensions/neurodesk-launcher/neurodesk_launcher/labextension/index.js",
+        "extensions/astra-viewer/node_modules/dependency/index.js",
     ):
         write(root, name, "deliberately invalid JavaScript\n")
     assert check(quality_repo, "javascript").returncode == 0
     entries = commands(quality_repo)
-    assert len(entries) == 3
+    assert len(entries) == 4
     assert entries[0]["source"] == "export const value = 1;\n"
     assert entries[1]["args"] == ["--check", "tests/unit/case.cjs"]
     assert entries[2]["source"] == "export default 1;\n"
+    assert entries[3]["args"] == [
+        *LINT_COMMAND,
+        "config/owned.js",
+        "tests/unit/case.cjs",
+        "tests/unit/case.mjs",
+    ]
+
+
+def test_javascript_scope_discovers_new_owned_files_beside_excluded_names(
+    quality_repo,
+):
+    root, _, _ = quality_repo
+    owned = (
+        "config/lib/helper.js",
+        "config/vendor/adapter.mjs",
+        "extensions/astra-viewer/labextension/owned.cjs",
+        "tests/fixtures/other/case.js",
+    )
+    for name in owned:
+        write(root, name, "export {};\n")
+    assert check(quality_repo, "javascript").returncode == 0
+    assert commands(quality_repo)[-1]["args"] == [*LINT_COMMAND, *sorted(owned)]
+
+
+def test_javascript_gate_lints_even_when_syntax_check_fails(quality_repo):
+    write(quality_repo[0], "owned.js", "export {};\n")
+    result = check(quality_repo, "javascript", QUALITY_TEST_FAIL="node")
+    assert result.returncode == 1
+    assert [entry["args"][0] for entry in commands(quality_repo)] == [
+        "--input-type=module",
+        ESLINT,
+    ]
+
+
+def test_missing_eslint_fails_with_install_guidance(quality_repo):
+    root, _, _ = quality_repo
+    (root / ESLINT).unlink()
+    write(root, "owned.js", "export {};\n")
+    result = check(quality_repo, "javascript")
+    assert result.returncode == 1
+    assert f"npm ci --prefix {LINT_HOME}" in result.stderr
 
 
 def test_python_failure_still_runs_both_checks_and_fails(quality_repo):
@@ -171,3 +225,73 @@ def test_real_javascript_syntax_error_fails(quality_repo):
     result = check(quality_repo, "javascript")
     assert result.returncode == 1
     assert "SyntaxError" in result.stderr
+
+
+@pytest.fixture
+def real_lint_repo(quality_repo):
+    root, env, _ = quality_repo
+    node = shutil.which("node", path=os.environ["PATH"])
+    assert node, "Install Node.js as documented in docs/testing.md"
+    installed = repo_path(LINT_HOME) / "node_modules"
+    assert (installed / "eslint").is_dir(), (
+        f"Run npm ci --prefix {LINT_HOME} as documented in docs/testing.md"
+    )
+    stub_node = Path(env["PATH"].split(os.pathsep)[0]) / "node"
+    stub_node.unlink()
+    stub_node.symlink_to(node)
+    shutil.rmtree(root / LINT_HOME / "node_modules")
+    (root / LINT_HOME / "node_modules").symlink_to(installed)
+    shutil.copyfile(
+        repo_path(f"{LINT_HOME}/eslint.config.mjs"),
+        root / LINT_HOME / "eslint.config.mjs",
+    )
+    return root
+
+
+def test_real_eslint_rejects_an_undefined_name(quality_repo, real_lint_repo):
+    root = real_lint_repo
+    write(root, "config/owned.js", "export const total = [1].length;\n")
+    assert check(quality_repo, "javascript").returncode == 0
+    write(root, "config/owned.js", "export const total = [1].length + totl;\n")
+    result = check(quality_repo, "javascript")
+    assert result.returncode == 1
+    assert "'totl' is not defined" in result.stdout
+    assert "no-undef" in result.stdout
+
+
+def test_real_eslint_applies_runtime_globals_per_file(quality_repo, real_lint_repo):
+    root = real_lint_repo
+    adapter = "(() => { new URL(__T3_PREFIX__, location.href); })();\n"
+    write(root, "extensions/t3-code-server/neurodesk_t3_code/web_adapter.js", adapter)
+    write(root, "tests/unit/driver.cjs", "require('node:fs');\n")
+    write(root, "config/firefox/syspref.js", 'pref("a.b", true, locked);\n')
+    assert check(quality_repo, "javascript").returncode == 0
+
+    # The same browser adapter is rejected outside its declared runtime, and
+    # Node's CommonJS globals do not leak into an ES module.
+    write(root, "config/unclassified.js", adapter)
+    write(root, "tests/unit/driver.mjs", "require('node:fs');\n")
+    result = check(quality_repo, "javascript")
+    assert result.returncode == 1
+    report = result.stdout.rpartition(ESLINT)[2].split("\n", 1)[1]
+    assert "config/unclassified.js" in report
+    assert "'__T3_PREFIX__' is not defined" in report
+    assert "'location' is not defined" in report
+    assert "tests/unit/driver.mjs" in report
+    assert "'require' is not defined" in report
+    assert "web_adapter.js" not in report
+    assert "syspref.js" not in report
+
+
+def test_real_eslint_leaves_frozen_upstream_excerpts_unlinted_and_unchanged(
+    quality_repo, real_lint_repo
+):
+    root = real_lint_repo
+    source = "var unusedUpstream = undefinedUpstreamName;\n"
+    write(root, "tests/fixtures/widget-manager/upstream.js", source)
+    write(root, "config/owned.js", "export {};\n")
+    result = check(quality_repo, "javascript")
+    assert result.returncode == 0, result.stdout
+    assert "upstream.js" not in result.stdout
+    fixture = root / "tests/fixtures/widget-manager/upstream.js"
+    assert fixture.read_text() == source

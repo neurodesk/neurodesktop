@@ -20,6 +20,15 @@ SHELL_FORMAT_SCOPE = (
     "scripts/install_quality_tools.sh",
     "config/jupyter/guard_ollama_host.sh",
 )
+JAVASCRIPT_EXCLUDED = (
+    # Frozen excerpts of the pinned upstream wheel; patch tests own them.
+    "tests/fixtures/widget-manager/",
+    # TypeScript output and the generated JupyterLab bundle.
+    "extensions/neurodesk-launcher/lib/",
+    "extensions/neurodesk-launcher/neurodesk_launcher/labextension/",
+)
+JAVASCRIPT_LINT = "tools/javascript-lint"
+ESLINT = f"{JAVASCRIPT_LINT}/node_modules/eslint/bin/eslint.js"
 GATES = ("python", "shell", "javascript", "frontend", "format", "workflow", "docker")
 SHELL_SHEBANG = re.compile(rb"^#![^\n]*\b(?:bash|sh|dash|ksh)\b")
 
@@ -50,17 +59,36 @@ def shell_files():
 
 
 def javascript_files():
+    """Return the single owned-JavaScript scope for syntax and lint checks."""
     return [
         name
         for name in repository_files()
         if Path(name).suffix in {".js", ".cjs", ".mjs"}
-        and not name.startswith("tests/fixtures/widget-manager/")
-        and not any(
-            part in {"lib", "vendor", "node_modules", "labextension"}
-            for part in Path(name).parts
-        )
+        and not name.startswith(JAVASCRIPT_EXCLUDED)
+        and "node_modules" not in Path(name).parts
         and (ROOT / name).is_file()
     ]
+
+
+def lint_javascript(files):
+    if not (ROOT / ESLINT).is_file():
+        print(
+            f"Missing ESLint; run npm ci --prefix {JAVASCRIPT_LINT} "
+            "--no-audit --no-fund.",
+            file=sys.stderr,
+        )
+        return 1
+    return run(
+        [
+            "node",
+            ESLINT,
+            "--config",
+            f"{JAVASCRIPT_LINT}/eslint.config.mjs",
+            "--max-warnings",
+            "0",
+            *files,
+        ]
+    )
 
 
 def run(command, *, cwd=ROOT, source=None):
@@ -84,8 +112,9 @@ def check_gate(gate):
     elif gate == "shell":
         results = [run(["shellcheck", *shell_files()])]
     elif gate == "javascript":
+        files = javascript_files()
         results = []
-        for name in javascript_files():
+        for name in files:
             print(f"Checking JavaScript: {name}", flush=True)
             if Path(name).suffix == ".cjs":
                 results.append(run(["node", "--check", name]))
@@ -96,6 +125,8 @@ def check_gate(gate):
                         source=(ROOT / name).read_bytes(),
                     )
                 )
+        if files:
+            results.append(lint_javascript(files))
     elif gate == "frontend":
         cwd = ROOT / "extensions/neurodesk-launcher"
         results = [

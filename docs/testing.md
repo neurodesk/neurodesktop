@@ -120,6 +120,7 @@ python3 -m venv .venv-quality
 python -m pip install -r requirements-quality.txt
 bash scripts/install_quality_tools.sh "$VIRTUAL_ENV/bin"
 npm ci --prefix extensions/neurodesk-launcher --no-audit --no-fund
+npm ci --prefix tools/javascript-lint --no-audit --no-fund
 bash scripts/check_quality.sh all
 ```
 
@@ -133,9 +134,31 @@ Ruff checks owned Python, including tests and the extensionless provenance CLI.
 Its configuration excludes frozen upstream Python fixtures and notebooks; the
 FSL notebook fixture is covered by its execution test. ShellCheck discovers
 shell files by extension or shebang, including extensionless launchers.
-Actionlint checks workflow expressions and embedded shell commands. JavaScript
-syntax checks cover owned scripts and DOM test drivers; generated bundles and
-frozen upstream snippets are excluded. The frontend gate compiles the launcher
+Actionlint checks workflow expressions and embedded shell commands.
+
+The `javascript` gate checks the syntax of owned scripts and DOM test drivers,
+then lints the same files with ESLint. `javascript_files()` in
+`scripts/check_quality.py` is the only file scope. It excludes `node_modules`,
+the frozen widget-manager excerpts, and the launcher's generated `lib/` and
+`labextension/` output; a directory merely named `lib` or `vendor` elsewhere is
+still checked. ESLint, its rule packages, and
+[`eslint.config.mjs`](../tools/javascript-lint/eslint.config.mjs) live in
+`tools/javascript-lint/` with their own lockfile, so the gate does not depend on
+the launcher's install. The rules cover correctness only: undefined and unused
+names, unreachable code, and unsafe control flow such as fall-through,
+`return` in `finally`, and constant conditions. Formatting is not linted.
+
+The configuration maps each file to the runtime that executes it. `.cjs` files
+are Node CommonJS and `.mjs` files are Node ES modules. Each `.js` file is named
+with its runtime: CommonJS build helpers, the OpenCode ES-module plugin, the
+ASTRA anywidget module, classic browser scripts injected into Guacamole and the
+T3 iframe, and the Firefox preference file. An unlisted `.js` file gets only
+ECMAScript globals, so Node or browser API use fails until the file is
+classified. Globals supplied by a runtime contract are declared next to it, for
+example the `__T3_PREFIX__` value that `web.py` substitutes and the jsdom
+globals that a DOM driver installs. The checks run on untyped JavaScript, so
+they do not prove promise handling. Browser adapters rely on behavioral
+rejection and disposal tests instead. The frontend gate compiles the launcher
 against its locked dependencies and checks typed promise handling with ESLint.
 Compilation runs without the Python-side JupyterLab bundling step.
 

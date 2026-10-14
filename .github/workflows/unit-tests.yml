@@ -59,5 +59,6 @@ jobs:
         env:
           NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES: ${{ runner.temp }}/launcher-dom/node_modules
         run: |
+          npm ci --prefix tools/javascript-lint --ignore-scripts --no-audit --no-fund
           npm install --prefix "$RUNNER_TEMP/launcher-dom" --no-audit --no-fund jsdom@26.1.0 typescript@5.2.2 esbuild@0.28.2 @jupyterlab/docregistry@4.6.3 @jupyterlab/coreutils@6.6.3 @jupyterlab/services@7.6.3 @lumino/widgets@2.9.0
           pytest tests/unit -v

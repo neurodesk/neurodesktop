@@ -74,7 +74,11 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
-      - name: Check handwritten JavaScript
+          cache: npm
+          cache-dependency-path: tools/javascript-lint/package-lock.json
+      - name: Install locked JavaScript lint tools
+        run: npm ci --prefix tools/javascript-lint --ignore-scripts --no-audit --no-fund
+      - name: Check handwritten JavaScript syntax and correctness
         run: bash scripts/check_quality.sh javascript
 
   frontend:

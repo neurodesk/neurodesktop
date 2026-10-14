@@ -294,6 +294,13 @@
       "groupName": "neurodesk-launcher extension"
     },
     {
+      "description": "Repository JavaScript lint toolchain; tests/unit/test_code_quality.py runs it against the owned scripts.",
+      "matchFileNames": [
+        "tools/javascript-lint/package.json"
+      ],
+      "groupName": "javascript lint tools"
+    },
+    {
       "description": "T3 Code server manifest, Dockerfile ARG and tests move together.",
       "matchDepNames": [
         "t3"
