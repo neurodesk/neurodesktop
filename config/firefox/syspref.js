@@ -6,5 +6,3 @@ pref("browser.startup.homepage", "https://www.neurodesk.org", locked);
 pref("browser.startup.firstrunSkipsHomepage", true, locked);
 pref("startup.homepage_welcome_url", "https://www.neurodesk.org", locked);
 pref("browser.aboutwelcome.enabled", true, locked);
-// Deliberate syntax error for the #1070 disposable gate check. Do not merge.
-const = ;
