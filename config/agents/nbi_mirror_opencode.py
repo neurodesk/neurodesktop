@@ -27,6 +27,7 @@ goes to stderr and the exit status is 1.
 
 import argparse
 from collections.abc import Mapping
+import contextlib
 import copy
 from dataclasses import dataclass
 import json
@@ -215,7 +216,9 @@ def write_json_atomic(path: Path, data: JsonObject) -> None:
             handle.write("\n")
         os.replace(tmp_path, path)
     except OSError as exc:
-        tmp_path.unlink(missing_ok=True)
+        # Best effort: a failed cleanup must not mask the original error.
+        with contextlib.suppress(OSError):
+            tmp_path.unlink(missing_ok=True)
         raise ConfigWriteError(f"cannot write {path}: {exc.strerror or exc}") from exc
 
 

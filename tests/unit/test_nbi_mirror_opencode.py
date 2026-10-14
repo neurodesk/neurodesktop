@@ -327,7 +327,8 @@ def test_cli_skips_unreadable_configs_silently(tmp_path, nbi, oc):
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
-def test_cli_write_failure_is_one_line_and_leaves_the_config(tmp_path):
+@pytest.mark.parametrize("stale_tmp", [False, True], ids=["clean", "stale-tmp"])
+def test_cli_write_failure_is_one_line_and_leaves_the_config(tmp_path, stale_tmp):
     nbi_dir = tmp_path / "nbi"
     nbi_dir.mkdir()
     nbi = {"chat_model": section(NEURODESK_URL, api_key="do-not-echo")}
@@ -335,6 +336,9 @@ def test_cli_write_failure_is_one_line_and_leaves_the_config(tmp_path):
     (tmp_path / "opencode.json").write_text(json.dumps(oc))
     path = nbi_dir / "config.json"
     path.write_text(json.dumps(nbi))
+    if stale_tmp:
+        # Its cleanup fails too, and must not mask the write diagnostic.
+        (nbi_dir / "config.json.tmp").write_text("stale")
     nbi_dir.chmod(0o500)
     try:
         result = subprocess.run(
@@ -354,7 +358,7 @@ def test_cli_write_failure_is_one_line_and_leaves_the_config(tmp_path):
     assert "secret-nd-key" not in result.stderr
     assert "do-not-echo" not in result.stderr
     assert json.loads(path.read_text()) == nbi
-    assert not (nbi_dir / "config.json.tmp").exists()
+    assert (nbi_dir / "config.json.tmp").exists() == stale_tmp
 
 
 def test_cli_rejects_missing_arguments(tmp_path):
