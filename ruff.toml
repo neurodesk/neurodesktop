@@ -11,6 +11,8 @@ extend-exclude = [
 [per-file-target-version]
 ".github/scripts/agentic_worker.py" = "py310"
 ".github/scripts/check_agentic_sandbox.py" = "py310"
+# check_quality.sh runs the quality runner with the python3 on PATH, 3.10 there.
+"scripts/check_quality.py" = "py310"
 
 [lint]
 select = ["E4", "E7", "E9", "F", "B", "UP"]
