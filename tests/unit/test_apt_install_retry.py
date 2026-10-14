@@ -1,7 +1,7 @@
 import os
 import subprocess
 
-from testlib import resolve_source
+from testlib import repo_path, resolve_source
 
 
 SCRIPT = resolve_source(
@@ -30,3 +30,11 @@ bash "$APT_INSTALL_RETRY_SCRIPT" curl
 
     assert result.returncode == 42
     assert "apt-install-retry: failed after 1 attempts." in result.stderr
+
+
+def test_build_installs_packages_before_restricted_apt_wrapper():
+    dockerfile = repo_path("Dockerfile").read_text()
+    wrapper_install = dockerfile.index("neurodesktop_apt.py /usr/local/bin/apt")
+    assert "apt-install-retry " not in dockerfile[wrapper_install:], (
+        "Build-time apt retries must precede the restricted runtime apt wrapper"
+    )
