@@ -791,8 +791,14 @@ the connection's final frames, echoed input, failures, timeouts, and process
 cleanup. Run `pytest tests/unit/test_github_workflows.py` for these regressions.
 The default wait remains 24 polls at five seconds with a 120-second input
 hold-open; `FSL_PROBE_ATTEMPTS`, `FSL_PROBE_DELAY`, and `FSL_PROBE_HOLD_OPEN`
-allow shorter waits in checkout tests. Both success and completion markers
-are required. These tests do not establish live Hub or FSL runtime health.
+allow shorter waits in checkout tests. When stopping the WebSocket client and
+input writer, the helper sends TERM and escalates to KILL after
+`FSL_PROBE_STOP_TIMEOUT` seconds per child (default 10; `0` kills
+immediately), so a child that ignores TERM cannot hang the probe. All four
+values are non-negative integers read as decimal, even with leading zeros.
+Checkout tests run the helper in its own process group and kill the whole
+group on timeout, so fake clients cannot outlive the test. Both success and
+completion markers are required. These tests do not establish live Hub or FSL runtime health.
 
 The start and cleanup steps read the default server's state through
 `.github/workflows/jupyterhub_server_state.sh`, which parses the Hub's user

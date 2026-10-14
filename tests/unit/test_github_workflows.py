@@ -1,4 +1,5 @@
 import os
+import signal
 
 import pytest
 import subprocess
@@ -236,7 +237,15 @@ case "$FAKE_WEBSOCAT_RESULT" in
             exit 0
         }
         trap final_frames TERM
-        while :; do read -r -t 0.1 ignored || :; done
+        # Wait for TERM without busy-looping: macOS bash 3.2 rejects
+        # fractional `read -t`, and an unbounded loop can outlive the test.
+        for _ in $(seq 100); do sleep 0.1; done
+        exit 1
+        ;;
+    ignore-term)
+        trap '' TERM
+        for _ in $(seq 100); do sleep 0.1; done
+        exit 1
         ;;
     timeout)
         exec /bin/sleep 30
@@ -265,7 +274,7 @@ esac
 """
 
 
-def _run_fsl_terminal_probe(tmp_path, result):
+def _run_fsl_terminal_probe(tmp_path, result, **env_overrides):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     websocat = bin_dir / "websocat"
@@ -293,6 +302,7 @@ def _run_fsl_terminal_probe(tmp_path, result):
             # A long writer lifetime proves the helper reaps it when the
             # WebSocket exits instead of waiting for the hold-open timeout.
             "FSL_PROBE_HOLD_OPEN": "30",
+            "FSL_PROBE_STOP_TIMEOUT": "1",
             "TMPDIR": str(scratch),
             "FAKE_WEBSOCAT_PID": str(tmp_path / "websocket.pid"),
             "FAKE_INPUT_PID": str(tmp_path / "input.pid"),
@@ -301,14 +311,29 @@ def _run_fsl_terminal_probe(tmp_path, result):
             "FAKE_WEBSOCAT_RESULT": result,
         }
     )
-    completed = subprocess.run(
+    env.update(env_overrides)
+    # Run the probe in its own process group so a timeout kills the fakes too;
+    # subprocess.run would only kill the probe and could orphan its children.
+    with subprocess.Popen(
         ["bash", str(FSL_TERMINAL_PROBE), "wss://example.test/terminal/1"],
-        capture_output=True,
-        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=5,
         env=env,
-    )
+        start_new_session=True,
+    ) as proc:
+        try:
+            stdout, stderr = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                # The group already exited (macOS reports EPERM for a group
+                # of zombies); keep the original timeout as the failure.
+                pass
+            proc.communicate()
+            raise
+    completed = subprocess.CompletedProcess(proc.args, proc.returncode, stdout, stderr)
     assert not list(scratch.iterdir()), "probe left temporary files behind"
     for name in ("websocket.pid", "input.pid"):
         pid = int((tmp_path / name).read_text())
@@ -336,6 +361,29 @@ def test_fsl_terminal_probe_reports_remote_operation_failure(tmp_path):
     assert result.returncode == 1
     assert "__FSLMATHS_FAILED_17__" in result.stdout
     assert "completed unsuccessfully" in result.stderr
+
+
+def test_fsl_terminal_probe_kills_websocket_that_ignores_term(tmp_path):
+    # _run_fsl_terminal_probe also asserts the fake websocat was reaped, which
+    # only happens if the probe escalates to KILL after FSL_PROBE_STOP_TIMEOUT.
+    result, _, _ = _run_fsl_terminal_probe(tmp_path, "ignore-term")
+
+    assert result.returncode == 1
+    assert "did not report completion" in result.stderr
+
+
+def test_fsl_terminal_probe_reads_zero_padded_values_as_decimal(tmp_path):
+    # "08" is an invalid octal literal in bash arithmetic and "010" is 8.
+    result, _, _ = _run_fsl_terminal_probe(
+        tmp_path,
+        "success",
+        FSL_PROBE_ATTEMPTS="08",
+        FSL_PROBE_DELAY="00",
+        FSL_PROBE_STOP_TIMEOUT="010",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "value too great for base" not in result.stderr
 
 
 def test_fsl_terminal_probe_rejects_echoed_command_as_completion(tmp_path):

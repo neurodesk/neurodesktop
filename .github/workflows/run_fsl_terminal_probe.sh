@@ -17,20 +17,29 @@ JUPYTER_API_TOKEN=${JUPYTER_API_TOKEN:-}
 FSL_PROBE_ATTEMPTS=${FSL_PROBE_ATTEMPTS:-24}
 FSL_PROBE_DELAY=${FSL_PROBE_DELAY:-5}
 FSL_PROBE_HOLD_OPEN=${FSL_PROBE_HOLD_OPEN:-120}
+# Seconds to wait after TERM before escalating to KILL when stopping children.
+FSL_PROBE_STOP_TIMEOUT=${FSL_PROBE_STOP_TIMEOUT:-10}
 
 if [ -z "$JUPYTER_API_TOKEN" ]; then
     echo "fsl-terminal-probe: JUPYTER_API_TOKEN is empty." >&2
     exit 2
 fi
 
-for value in "$FSL_PROBE_ATTEMPTS" "$FSL_PROBE_DELAY" "$FSL_PROBE_HOLD_OPEN"; do
+for value in "$FSL_PROBE_ATTEMPTS" "$FSL_PROBE_DELAY" "$FSL_PROBE_HOLD_OPEN" "$FSL_PROBE_STOP_TIMEOUT"; do
     case "$value" in
         ''|*[!0-9]*)
-            echo "fsl-terminal-probe: attempt, delay, and hold-open values must be non-negative integers." >&2
+            echo "fsl-terminal-probe: attempt, delay, hold-open, and stop-timeout values must be non-negative integers." >&2
             exit 2
             ;;
     esac
 done
+
+# Force base 10: bash arithmetic reads a leading zero as octal, so "08" would
+# fail and "010" would mean 8.
+FSL_PROBE_ATTEMPTS=$((10#$FSL_PROBE_ATTEMPTS))
+FSL_PROBE_DELAY=$((10#$FSL_PROBE_DELAY))
+FSL_PROBE_HOLD_OPEN=$((10#$FSL_PROBE_HOLD_OPEN))
+FSL_PROBE_STOP_TIMEOUT=$((10#$FSL_PROBE_STOP_TIMEOUT))
 
 if [ "$FSL_PROBE_ATTEMPTS" -lt 1 ]; then
     echo "fsl-terminal-probe: FSL_PROBE_ATTEMPTS must be at least 1." >&2
@@ -52,16 +61,28 @@ WEBSOCKET_INPUT="$PROBE_DIR/websocket.input"
 WEBSOCAT_PID=""
 INPUT_PID=""
 
+# Send TERM, give the process FSL_PROBE_STOP_TIMEOUT seconds to exit, then
+# KILL it, so a child that ignores TERM can never block the probe forever.
+stop_process() {
+    local pid=$1 waited=0
+    kill "$pid" 2>/dev/null || true
+    while kill -0 "$pid" 2>/dev/null &&
+        [ "$waited" -lt $((FSL_PROBE_STOP_TIMEOUT * 10)) ]; do
+        sleep 0.1
+        waited=$((waited + 1))
+    done
+    kill -KILL "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+}
+
 # Invoked by the EXIT trap, including signal-triggered exits.
 # shellcheck disable=SC2329
 cleanup() {
     if [ -n "$WEBSOCAT_PID" ]; then
-        kill "$WEBSOCAT_PID" 2>/dev/null || true
-        wait "$WEBSOCAT_PID" 2>/dev/null || true
+        stop_process "$WEBSOCAT_PID"
     fi
     if [ -n "$INPUT_PID" ]; then
-        kill "$INPUT_PID" 2>/dev/null || true
-        wait "$INPUT_PID" 2>/dev/null || true
+        stop_process "$INPUT_PID"
     fi
     rm -rf "$PROBE_DIR"
 }
@@ -117,11 +138,9 @@ done
 
 # Stop both sides of the pipe, reap them, and then take the authoritative final
 # snapshot. A completion frame written as websocat exits is visible here.
-kill "$WEBSOCAT_PID" 2>/dev/null || true
-wait "$WEBSOCAT_PID" 2>/dev/null || true
+stop_process "$WEBSOCAT_PID"
 WEBSOCAT_PID=""
-kill "$INPUT_PID" 2>/dev/null || true
-wait "$INPUT_PID" 2>/dev/null || true
+stop_process "$INPUT_PID"
 INPUT_PID=""
 
 FSL_OUTPUT=$(terminal_output)
