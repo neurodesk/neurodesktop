@@ -74,23 +74,7 @@ static int connect_host(void) {
     address.svm_family = AF_VSOCK;
     address.svm_cid = VMADDR_CID_HOST;
     address.svm_port = CLIPBOARD_PORT;
-    if (connect(fd, (struct sockaddr *)&address, sizeof(address)) != 0) {
-        if (errno != EINPROGRESS) {
-            close(fd);
-            return -1;
-        }
-        struct pollfd pending = {.fd = fd, .events = POLLOUT};
-        int error = 0;
-        socklen_t error_length = sizeof(error);
-        // Bound reconnect work so an unavailable relay cannot stall X requests.
-        if (poll(&pending, 1, 100) <= 0 ||
-            getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &error_length) != 0 || error != 0) {
-            close(fd);
-            return -1;
-        }
-    }
-    int flags = fcntl(fd, F_GETFL);
-    if (flags < 0 || fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) != 0) {
+    if (connect(fd, (struct sockaddr *)&address, sizeof(address)) != 0 && errno != EINPROGRESS) {
         close(fd);
         return -1;
     }
@@ -176,6 +160,7 @@ static void answer_selection(
 
 static int run_bridge(Display *display, Window window, Atom clipboard, Atom targets, Atom utf8, Atom property) {
     int fd = -1;
+    int connecting = 0;
     int64_t next_connect = 0;
     unsigned char *owned = NULL;
     size_t owned_length = 0;
@@ -191,11 +176,12 @@ static int run_bridge(Display *display, Window window, Atom clipboard, Atom targ
     for (;;) {
         if (fd < 0 && monotonic_ms() >= next_connect) {
             fd = connect_host();
+            connecting = fd >= 0;
             next_connect = monotonic_ms() + 250;
         }
         struct pollfd pollfds[] = {
             {.fd = xfd, .events = POLLIN},
-            {.fd = fd, .events = POLLIN},
+            {.fd = fd, .events = connecting ? POLLOUT : POLLIN},
         };
         int ready = poll(pollfds, 2, 200);
         if (ready < 0 && errno != EINTR) {
@@ -204,7 +190,19 @@ static int run_bridge(Display *display, Window window, Atom clipboard, Atom targ
         if (pollfds[1].revents & (POLLERR | POLLHUP | POLLNVAL)) {
             goto disconnected;
         }
-        if (pollfds[1].revents & POLLIN) {
+        if (connecting && (pollfds[1].revents & POLLOUT)) {
+            int error = 0;
+            socklen_t error_length = sizeof(error);
+            if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &error_length) != 0 || error != 0) {
+                goto disconnected;
+            }
+            int flags = fcntl(fd, F_GETFL);
+            if (flags < 0 || fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) != 0) {
+                goto disconnected;
+            }
+            connecting = 0;
+        }
+        if (!connecting && (pollfds[1].revents & POLLIN)) {
             uint32_t encoded = 0;
             if (read_full(fd, &encoded, sizeof(encoded)) != 0) {
                 goto disconnected;
@@ -285,7 +283,7 @@ static int run_bridge(Display *display, Window window, Atom clipboard, Atom targ
         if (pending_owner != None && (now >= deadline || owner != pending_owner)) {
             pending_owner = None;
         }
-        if (fd >= 0 && owner != None && owner != window && pending_owner == None && now >= next_sample) {
+        if (fd >= 0 && !connecting && owner != None && owner != window && pending_owner == None && now >= next_sample) {
             // A server timestamp distinguishes late replies from a timed-out sample.
             XChangeProperty(display, window, clock_property, utf8, 8, PropModeReplace, NULL, 0);
             XEvent timestamp;
@@ -304,6 +302,7 @@ static int run_bridge(Display *display, Window window, Atom clipboard, Atom targ
     disconnected:
         close(fd);
         fd = -1;
+        connecting = 0;
         next_connect = monotonic_ms() + 250;
         pending_owner = None;
         next_sample = 0;
