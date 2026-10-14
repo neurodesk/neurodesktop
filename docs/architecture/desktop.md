@@ -22,6 +22,9 @@ Singularity sessions, the RDP launcher entry is hidden because starting or
 reconfiguring xrdp requires root/sudo permissions; the VNC launcher remains
 available. Configuration lives in
 [`config/lxde/`](../../config/lxde/) and [`config/guacamole/`](../../config/guacamole/).
+The image installs the pre-rendered `config/lxde/background.png` wallpaper;
+`config/lxde/background.svg` is its editable source and does not ship in the
+runtime image.
 The RDP and VNC proxy entries use backend-specific Guacamole state directories
 under `~/.neurodesk` (`guacamole-*`, `tomcat-*`, and `runtime-*`) so one backend
 does not reuse the other backend's cached connection mapping. Firefox launches

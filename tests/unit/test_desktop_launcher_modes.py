@@ -470,6 +470,27 @@ def test_every_guacamole_source_is_consumed_by_the_image_build():
     assert unused == []
 
 
+def test_every_lxde_runtime_source_is_consumed_by_the_image_build():
+    """Checked-in runtime config must not be hidden by the bind mount."""
+    dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
+    lxde_dir = repo_path("config/lxde")
+    source_only = {"background.svg": "background.png"}
+
+    for source, rendered in source_only.items():
+        assert (lxde_dir / source).is_file()
+        assert f"/tmp/lxde/{rendered}" in dockerfile
+
+    unused = sorted(
+        path.name
+        for path in lxde_dir.iterdir()
+        if path.is_file()
+        and path.name not in source_only
+        and f"/tmp/lxde/{path.name}" not in dockerfile
+    )
+
+    assert unused == []
+
+
 def test_vncserver_uses_mesa_only_for_virtual_x_server_startup():
     wrapper = repo_path("config/lxde/Xtigervnc").read_text(encoding="utf-8")
     dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
