@@ -505,6 +505,180 @@ def test_opencode_removes_an_instructions_key_left_empty(tmp_path):
     user_config = json.loads(config_path.read_text(encoding="utf-8"))
     assert "instructions" not in user_config
 
+
+def _run_opencode_with_model_profile(test_wrapper, env, cwd, profile="neurodesk"):
+    """Run the wrapper non-interactively against the fake LiteLLM server."""
+    env = {
+        **env,
+        "NEURODESK_API_KEY": "neurodesk-test-key",
+        "OPENCODE_MODEL_PROFILE": profile,
+    }
+    return run_pty_command([str(test_wrapper)], "n\n", cwd=cwd, env=env)
+
+
+def test_opencode_model_refresh_preserves_user_settings_across_runs(tmp_path):
+    """Refreshing detected models keeps user-owned configuration intact.
+
+    The refresh owns only the model lists and endpoints of the three managed
+    providers. Other providers, MCP servers, user instructions, per-model
+    customisations and extra provider options must survive, models the
+    server no longer lists must disappear, and a second run must not change
+    the file again.
+    """
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    env["FAKE_OLLAMA_MODELS"] = "1"
+    env["OLLAMA_HOST"] = "http://127.0.0.1:9"
+    config_path = home_dir / ".config" / "opencode" / "opencode.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        json.dumps({
+            "theme": "tokyonight",
+            "model": "neurodesk/retired-model",
+            "instructions": ["./docs/my-rules.md"],
+            "mcp": {"custom": {"type": "local", "command": ["my-mcp"]}},
+            "provider": {
+                "anthropic": {"options": {"apiKey": "{env:ANTHROPIC_API_KEY}"}},
+                "neurodesk": {
+                    "name": "Old name",
+                    "options": {
+                        "baseURL": "https://stale.example/openai",
+                        "apiKey": "{env:MY_NEURODESK_KEY}",
+                        "timeout": 5,
+                    },
+                    "models": {
+                        "model-alpha": {
+                            "name": "Alpha (custom)",
+                            "limit": {"context": 1000, "output": 10},
+                        },
+                        "retired-model": {"name": "retired-model"},
+                    },
+                },
+                "ollama": {
+                    "models": {
+                        "local-model:latest": {
+                            "limit": {"context": 4096, "output": 99999}
+                        }
+                    }
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    returncode, output = _run_opencode_with_model_profile(
+        test_wrapper, env, tmp_path
+    )
+    assert returncode == 0, output
+    first = config_path.read_text(encoding="utf-8")
+    cfg = json.loads(first)
+
+    assert cfg["theme"] == "tokyonight"
+    assert cfg["instructions"] == ["./docs/my-rules.md"]
+    assert cfg["mcp"]["custom"] == {"type": "local", "command": ["my-mcp"]}
+    assert cfg["provider"]["anthropic"] == {
+        "options": {"apiKey": "{env:ANTHROPIC_API_KEY}"}
+    }
+    assert cfg["model"] == "neurodesk/model-alpha"
+
+    neurodesk = cfg["provider"]["neurodesk"]
+    assert neurodesk["name"] == "Neurodesk LLMs"
+    assert neurodesk["options"] == {
+        "baseURL": "https://llm.neurodesk.org/openai",
+        "apiKey": "{env:MY_NEURODESK_KEY}",
+        "timeout": 5,
+    }
+    assert neurodesk["models"] == {
+        "model-alpha": {
+            "name": "Alpha (custom)",
+            "limit": {"context": 1000, "output": 10},
+        },
+        "openai/gpt-4.1-mini": {"name": "openai/gpt-4.1-mini"},
+    }
+
+    ollama = cfg["provider"]["ollama"]
+    assert ollama["options"]["baseURL"] == "http://127.0.0.1:9/v1"
+    # The output budget may never exceed the model's context window.
+    assert ollama["models"] == {
+        "local-model:latest": {
+            "limit": {"context": 4096, "output": 4096},
+            "name": "local-model:latest",
+        }
+    }
+    # Jetstream is unreachable in the fixture, so it keeps no models.
+    assert cfg["provider"]["jetstream"]["models"] == {}
+
+    returncode, output = _run_opencode_with_model_profile(
+        test_wrapper, env, tmp_path
+    )
+    assert returncode == 0, output
+    assert config_path.read_text(encoding="utf-8") == first
+
+
+def test_opencode_model_refresh_seeds_providers_and_ollama_limits(tmp_path):
+    """A fresh config gains every managed provider with usable defaults.
+
+    The Neurodesk provider is seeded from the image default config, the
+    providers missing there use built-in definitions, and an Ollama model
+    whose context cannot be probed receives the wrapper's fallback limits.
+    """
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    env["FAKE_OLLAMA_MODELS"] = "1"
+    env["OLLAMA_HOST"] = "http://127.0.0.1:9"
+
+    returncode, output = _run_opencode_with_model_profile(
+        test_wrapper, env, tmp_path, profile="ollama"
+    )
+
+    assert returncode == 0, output
+    assert "OpenCode default model set to ollama/local-model:latest." in output
+    cfg = json.loads(
+        (home_dir / ".config" / "opencode" / "opencode.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert cfg["$schema"] == "https://opencode.ai/config.json"
+    assert cfg["model"] == "ollama/local-model:latest"
+    assert cfg["provider"]["ollama"] == {
+        "npm": "@ai-sdk/openai-compatible",
+        "name": "Local Ollama",
+        "options": {"baseURL": "http://127.0.0.1:9/v1"},
+        "models": {
+            "local-model:latest": {
+                "name": "local-model:latest",
+                "limit": {"context": 32768, "output": 8192},
+            }
+        },
+    }
+    assert cfg["provider"]["jetstream"] == {
+        "npm": "@ai-sdk/openai-compatible",
+        "name": "JetStream",
+        "options": {"baseURL": "https://llm.jetstream-cloud.org/v1"},
+        "models": {},
+    }
+    neurodesk = cfg["provider"]["neurodesk"]
+    assert neurodesk["npm"] == "@ai-sdk/openai-compatible"
+    assert neurodesk["options"]["apiKey"] == "{env:NEURODESK_API_KEY}"
+    assert list(neurodesk["models"]) == ["model-alpha", "openai/gpt-4.1-mini"]
+
+
+def test_opencode_corrupt_config_is_left_untouched_and_opencode_starts(tmp_path):
+    """A config the refresh cannot parse is never overwritten or truncated."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    config_path = home_dir / ".config" / "opencode" / "opencode.json"
+    config_path.parent.mkdir(parents=True)
+    corrupt = '{"model": "neurodesk/model-alpha", "provider": {'
+    config_path.write_text(corrupt, encoding="utf-8")
+
+    returncode, output = _run_opencode_with_model_profile(
+        test_wrapper, env, tmp_path
+    )
+
+    assert returncode == 0, output
+    assert "FAKE_OPENCODE:" in output
+    assert config_path.read_text(encoding="utf-8") == corrupt
+    assert not config_path.with_name("opencode.json.tmp").exists()
+
+
 def test_opencode_neurodesk_profile_prefers_the_curated_alias_model(tmp_path):
     """OPENCODE_MODEL_PROFILE=neurodesk must pick the "neurodesk" alias model.
 
