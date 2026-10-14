@@ -49,6 +49,9 @@ The read-only CPU-information bind and the user's MATLAB cache remain available.
 The clipboard helper samples an external X11 clipboard owner every 200 ms,
 so copying new text from the same application updates the host clipboard.
 A requesting window can close during a paste without terminating the helper.
+Clipboard conversions use direct X11 properties and reject text that exceeds
+the X server's request capacity. Incremental (`INCR`) selection transfers are
+outside this experimental implementation.
 
 ## Jupyter and security
 
