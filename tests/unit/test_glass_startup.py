@@ -55,6 +55,9 @@ def test_access_url_watcher_keeps_glass_token_out_of_inherited_logs(tmp_path, ru
 def test_scientific_options(tmp_path, runtime, hpc, macos, has_cpuinfo, expected):
     home = tmp_path / "home"
     home.mkdir()
+    cache_marker = home / ".cache/neurodesktop-mcr/previous-session"
+    cache_marker.parent.mkdir(parents=True)
+    cache_marker.write_text("keep compiled MATLAB cache")
     state = tmp_path / "runtime" / "neurodesktop"
     state.mkdir(parents=True)
     cpuinfo = state / "cpuinfo"
@@ -79,6 +82,7 @@ def test_scientific_options(tmp_path, runtime, hpc, macos, has_cpuinfo, expected
         expected = [*expected, "--bind", f"{cpuinfo}:/proc/cpuinfo:ro"]
     assert shlex.split(options) == expected
     assert not (state / "apptainer_overlay").exists()
+    assert cache_marker.read_text() == "keep compiled MATLAB cache"
     if runtime == "glass":
         assert cache == apptainer_cache == singularity_cache == str(home / ".cache/neurodesktop-mcr")
         assert (home / ".cache/neurodesktop-mcr").stat().st_mode & 0o777 == 0o700
