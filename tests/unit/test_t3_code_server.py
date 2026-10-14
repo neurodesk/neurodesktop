@@ -251,7 +251,7 @@ def test_extension_package_and_image_install_contract():
     assert "/opt/t3-code/node_modules/.bin/t3" in dockerfile
     assert "extensions/t3-code-server" in dockerfile
     assert '"neurodesk_t3_code": true' in config
-    assert "_start_jupyter_server_extension(self, _serverapp)" in server_extension
+    assert "async def _start_jupyter_server_extension(self, _serverapp" in server_extension
 
 
 def test_convenience_docker_run_publishes_the_direct_pairing_port():

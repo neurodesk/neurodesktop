@@ -20,37 +20,44 @@ class NeurodeskT3CodeApp(ExtensionApp):
     name = "neurodesk_t3_code"
     load_other_extensions = True
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
         self._supervisor: T3Supervisor | None = None
         self._connect: ConnectManager | None = None
         self._readiness_task: asyncio.Task[None] | None = None
 
     def initialize_handlers(self) -> None:
-        self.handlers.extend([
-            (r"/neurodesk-t3-status", T3StatusHandler, {"t3_app": self}),
-            (r"/neurodesk-t3/_session", T3SessionHandler, {"t3_app": self}),
-            (r"/neurodesk-t3/_connect", T3ConnectHandler, {"t3_app": self}),
-            (r"/neurodesk-t3/(.*)", T3ProxyHandler, {"t3_app": self}),
-        ])
+        self.handlers.extend(
+            [
+                (r"/neurodesk-t3-status", T3StatusHandler, {"t3_app": self}),
+                (r"/neurodesk-t3/_session", T3SessionHandler, {"t3_app": self}),
+                (r"/neurodesk-t3/_connect", T3ConnectHandler, {"t3_app": self}),
+                (r"/neurodesk-t3/(.*)", T3ProxyHandler, {"t3_app": self}),
+            ]
+        )
 
-    async def _start_jupyter_server_extension(self, _serverapp) -> None:
+    async def _start_jupyter_server_extension(self, _serverapp: object) -> None:
         try:
             policy = policy_from_environment(os.environ)
         except ConfigError as error:
             self.log.warning("T3 Code sidecar was not started: %s", error)
             return
 
-        self._supervisor = T3Supervisor(policy, logger=self.log)
-        self._supervisor.start()
-        self._connect = ConnectManager(self._supervisor)
-        self._readiness_task = asyncio.create_task(self._report_readiness())
+        supervisor = T3Supervisor(policy, logger=self.log)
+        supervisor.start()
+        connect = ConnectManager(supervisor)
+        self._supervisor = supervisor
+        self._connect = connect
+        self._readiness_task = asyncio.create_task(
+            self._report_readiness(supervisor, connect)
+        )
 
-    async def _report_readiness(self) -> None:
-        assert self._supervisor is not None
+    async def _report_readiness(
+        self, supervisor: T3Supervisor, connect: ConnectManager
+    ) -> None:
         try:
-            await self._supervisor.wait_ready()
-            await self._connect.restore()
+            await supervisor.wait_ready()
+            await connect.restore()
         except (TimeoutError, RuntimeError) as error:
             self.log.warning("T3 Code sidecar startup did not complete: %s", error)
 

@@ -13,7 +13,10 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 PYTHON_FORMAT_SCOPE = (
     "config/agents/provider_security.py",
+    "extensions/t3-code-server/neurodesk_t3_code/__init__.py",
     "extensions/t3-code-server/neurodesk_t3_code/naming.py",
+    "extensions/t3-code-server/neurodesk_t3_code/serverext.py",
+    "extensions/t3-code-server/neurodesk_t3_code/supervisor.py",
 )
 SHELL_FORMAT_SCOPE = (
     "scripts/check_quality.sh",
