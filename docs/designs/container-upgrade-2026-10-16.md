@@ -60,6 +60,12 @@ amd64 binary passed the installed ACP and T3 checks; fresh and legacy T3
 defaults reported the new version and the same expected authentication-required
 state as 2.1.301 in an empty credential store.
 
+The installed T3 test now waits for Claude's asynchronous health result.
+Independent review exposed a race because unchecked and completed results can
+both be warnings. The test distinguishes those states using the installed
+flag. A real CLI delayed by six seconds passes, while malformed versions and
+failed initialization remain rejected.
+
 ## Base image and Notebook Intelligence
 
 The new base contains Ubuntu 26.04, Python 3.13, and JupyterLab 4.6. The desktop
@@ -78,6 +84,14 @@ RDP probe exposed an xrdp package configuration mismatch: its daemon runs as
 Setting `SessionSockdirGroup=xrdp` restored transport without granting other
 users access. A thin image overlay passed actual desktop pixels, a command
 launched through Guacamole keyboard input, and private socket checks.
+
+Independent review later rejected the RDP test's readiness assumptions after
+a combined test run failed its keyboard-command marker. The test now observes
+the window manager and panel before Alt+F2, then waits for a mapped, active
+Run dialog with child focus before typing. All input still travels through Guacamole.
+With a controlled eight-second WM startup delay, the old gates acted too early
+and failed; the new waits passed. This establishes a test fault without proving
+the original intermittent failure's cause.
 
 TigerVNC 1.15 requires an RFB endpoint even for local X11 display tests. The
 shared test driver now supplies a private Unix socket while keeping TCP

@@ -1,5 +1,3 @@
-"""Read-only X11 observations for the Guacamole RDP keyboard acceptance test."""
-
 import ctypes as c
 import ctypes.util
 import json
