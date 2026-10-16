@@ -43,15 +43,17 @@ def start_display(log, geometry="1280x1024"):
     # Some sandboxes refuse abstract Unix sockets (Xtrans "local"), so no display
     # qualifies; retry with the file socket alone. Keep the abstract listener
     # otherwise, so a host-network container cannot reuse a host display's name.
+    # A relative RFB socket avoids the Unix path limit in deep pytest temp dirs.
     for disabled in (("tcp",), ("tcp", "local")):
         reader, writer = os.pipe()
         try:
             process = subprocess.Popen(
                 ["/usr/local/bin/Xtigervnc", "-displayfd", str(writer),
                  "-geometry", geometry, "-depth", "24", "-SecurityTypes", "None",
-                 "-rfbport", "-1"] + [arg for name in disabled for arg in ("-nolisten", name)],
+                 "-rfbport", "-1", "-rfbunixpath", Path(log.name).name + ".rfb",
+                 "-rfbunixmode", "0600"] + [arg for name in disabled for arg in ("-nolisten", name)],
                 pass_fds=(writer,), stdout=log, stderr=subprocess.STDOUT,
-                start_new_session=True,
+                start_new_session=True, cwd=Path(log.name).parent,
             )
         finally:
             os.close(writer)

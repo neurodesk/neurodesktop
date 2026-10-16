@@ -259,7 +259,14 @@ if [ "${_start_vnc}" -eq 1 ]; then
     echo "[DEBUG] Contents of ${HOME}/.vnc:"
     ls -la "${HOME}/.vnc/" 2>&1 || echo "[DEBUG] .vnc directory does not exist!"
 
-    mkdir -p "${HOME}/.vnc"
+    # TigerVNC migrates .vnc into its XDG directory but requires the parent to
+    # exist. Leave the tigervnc leaf to its migration so saved settings survive.
+    _vnc_config_home="${HOME}/.config"
+    case "${XDG_CONFIG_HOME:-}" in
+        /*) _vnc_config_home="${XDG_CONFIG_HOME}" ;;
+    esac
+    mkdir -p "${_vnc_config_home}" "${HOME}/.vnc" || exit 1
+    unset _vnc_config_home
     if [ -z "${NEURODESKTOP_VNC_PASSWORD:-}" ]; then
         echo "[ERROR] NEURODESKTOP_VNC_PASSWORD is empty - init_secrets.sh did not run?" >&2
         exit 1

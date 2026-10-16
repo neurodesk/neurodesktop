@@ -316,7 +316,11 @@ late Explorer layout change cannot invalidate recorded screen coordinates.
 input, then requires the same edit and authenticated save to complete.
 These tests start their own Xtigervnc display through
 [native_desktop_driver.py](../tests/container/native_desktop_driver.py), so they
-need no running desktop. If the container refuses abstract Unix sockets, the
+need no running desktop. The driver supplies a mode-0600 RFB Unix socket
+beside its log while keeping both RFB and X11 TCP listeners disabled.
+TigerVNC 1.15 requires an incoming RFB
+endpoint even for local X11-only tests. The strict WebGL fixture uses this
+same driver. If the container refuses abstract Unix sockets, the
 driver retries with only the `/tmp/.X11-unix` file socket. It waits for the
 complete newline-terminated `-displayfd` announcement before closing the pipe;
 closing after the digits alone can make Xtigervnc abort its final write.
@@ -351,6 +355,8 @@ remain writable by the desktop user and cannot accept a prior result. A login
 screen alone does not satisfy this check. Enable it only in disposable test
 containers with `NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1`. The HPC
 profile skips RDP because unprivileged startup does not provision that service.
+The same test checks that sesman's private session directory and mode-0660
+Xorg sockets grant the `xrdp` group access while excluding other users.
 
 Pull-request CI runs the checkout tier and native image acceptance. Release
 workflows also validate installed applications before promotion. Neither a
@@ -687,8 +693,11 @@ cleanup of code-server when the launcher is killed, and an orphan from a
 timed-out launch shutting down while the next launch starts.
 
 Desktop smoke tests keep Guacamole, Tomcat, VNC, and credential state in
-temporary per-test homes by default. Tests that need to start the global xrdp
-service are skipped unless
+temporary per-test homes by default. VNC tunnel cases cover fresh and legacy
+homes without the XDG config parent, an absolute override, and an ignored
+relative override. They require saved settings to survive TigerVNC's migration
+and actual desktop frames to arrive over the authenticated tunnel.
+Tests that need to start the global xrdp service are skipped unless
 `NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1` is set. The build scripts and
 GitHub Actions set this only for disposable test containers; do not set it in a
 live user desktop unless stopping or reconfiguring xrdp is acceptable.

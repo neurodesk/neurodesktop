@@ -4,7 +4,7 @@ description: LXDE desktop over VNC/RDP through Guacamole, clipboard sync,
   per-display Firefox profiles, and office file associations
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-13"
+last-reviewed: "2026-10-16"
 ---
 
 # Desktop Environment
@@ -40,6 +40,12 @@ The image puts a small `Xtigervnc` launcher beside a link to the distribution's
 server child to Mesa's EGL vendor so NVIDIA Container Toolkit driver injection
 cannot make it load an incompatible host NVIDIA EGL library. The parent launcher
 and LXDE applications retain the deployment's normal EGL vendor selection.
+
+Before invoking `vncserver`, Guacamole startup creates the TigerVNC config
+parent: an absolute `XDG_CONFIG_HOME`, or `~/.config` otherwise. TigerVNC then
+migrates the legacy `~/.vnc` directory itself and leaves a compatibility
+symlink. Startup does not pre-create the `tigervnc` leaf, which would bypass
+that migration and leave saved configuration and credentials behind.
 
 ## GPU rendering prerequisites
 
@@ -93,6 +99,12 @@ still start when their launcher opens. Local Slurm and CVMFS retain their root
 startup worker. Guacamole web and VNC credentials remain separate per-user
 secrets. See [startup privileges](../environment-variables.md#startup-privileges)
 for the package-only sudo policy.
+
+The packaged xrdp daemon runs as `xrdp`. The image sets sesman's
+`SessionSockdirGroup=xrdp` so that daemon can reach the notebook user's Xorg
+and channel-server sockets. Their parent directory excludes other users, and
+the sockets remain mode `0660`. Leaving the group at `root` prevents xrdp from
+forwarding the desktop even after authentication succeeds.
 
 The SSH daemon used only for Guacamole's VNC SFTP side-channel listens on
 `127.0.0.1`. Startup checks every effective listener address, including addresses

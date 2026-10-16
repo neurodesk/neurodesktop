@@ -142,12 +142,16 @@ RUN mkdir -p /opt/glass/bin \
     && rm -rf /tmp/glass
 
 # Build Guacamole server
-RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
+# GUACAMOLE-2328, upstream commit ab36756b596520ae2a94cd4d25e406e0b5aa820b.
+RUN --mount=type=bind,source=config/guacamole/guacamole-1.6.0-GUACAMOLE-2328.patch,target=/tmp/guacamole/guacamole-1.6.0-GUACAMOLE-2328.patch,ro \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
     "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/source/guacamole-server-${GUACAMOLE_VERSION}.tar.gz" \
     -o /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz \
     && tar xvf /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz -C /tmp \
     && rm /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz \
     && cd /tmp/guacamole-server-${GUACAMOLE_VERSION} \
+    && echo 'aee31274ae1a17ced186b2ea4a54fb4f9d2ce76992c156b7371f6a540ee41461  /tmp/guacamole/guacamole-1.6.0-GUACAMOLE-2328.patch' | sha256sum -c - \
+    && patch --batch --fuzz=0 -p1 < /tmp/guacamole/guacamole-1.6.0-GUACAMOLE-2328.patch \
     && CFLAGS="-std=gnu17 -Wno-error=deprecated-declarations" ./configure --with-init-dir=/etc/init.d \
     && grep -qx '#define _XOPEN_SOURCE 700' config.h \
     && sed -i '/^#define _XOPEN_SOURCE 700$/d' config.h \
@@ -273,6 +277,11 @@ RUN apt-install-retry \
     && DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade --yes \
     && usermod -a -G ssl-cert xrdp \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# The packaged daemon runs as xrdp; sesman must give that group access to Xorg.
+RUN grep -qx '#SessionSockdirGroup=root' /etc/xrdp/sesman.ini \
+    && sed -i 's/^#SessionSockdirGroup=root$/SessionSockdirGroup=xrdp/' /etc/xrdp/sesman.ini \
+    && grep -qx 'SessionSockdirGroup=xrdp' /etc/xrdp/sesman.ini
 
 # Copy Guacamole server binaries and libraries from builder.
 # Use tar round-trip to preserve symlinks (cp/COPY dereference them, tripling

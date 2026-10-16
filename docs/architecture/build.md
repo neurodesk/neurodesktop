@@ -30,6 +30,17 @@ the matching FreeRDP 3 client libraries. Its build selects GNU C17 because
 [GCC 15 defaults to C23](https://gcc.gnu.org/gcc-15/porting_to.html).
 It accepts deprecated FreeRDP API declarations and requires the RDP plugin
 to exist after installation.
+
+The build backports [GUACAMOLE-2328](https://issues.apache.org/jira/browse/GUACAMOLE-2328)
+from upstream commit
+[`ab36756b596520ae2a94cd4d25e406e0b5aa820b`](https://github.com/apache/guacamole-server/commit/ab36756b596520ae2a94cd4d25e406e0b5aa820b).
+The hash-checked [patch](../../config/guacamole/guacamole-1.6.0-GUACAMOLE-2328.patch)
+moves GDI initialization and its dependent rendering handlers to PostConnect,
+after FreeRDP creates the connection cache. This prevents the RDP worker crash
+with FreeRDP 3.31 and later. The 1.6.0 backport preserves its existing RAIL and
+static-channel loading in PreConnect. The installed RDP test requires desktop
+pixels and a command executed through the authenticated Guacamole tunnel.
+
 The generated Guacamole header drops its fixed `_XOPEN_SOURCE` definition;
 its `_GNU_SOURCE` definition lets libc choose the matching feature level.
 The bounded substring helper casts `memchr`'s result to preserve Guacamole's
