@@ -73,7 +73,6 @@ OLLAMA_REPLACEMENT = (
 )
 
 # The command registration as emitted by the current minifier:
-# NBI 6.2 selects an optional settings tab before showing the panel.
 COMMAND_PATTERN = re.compile(
     r'label:"Notebook Intelligence Settings",'
     r"execute:(?P<arg>\w+)=>\{"

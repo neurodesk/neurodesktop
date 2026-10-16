@@ -47,7 +47,6 @@ BUNDLE_FIXTURE = (
     "e.shell.activateById(U.id)}})"
 )
 
-# The context lookup sits inside the client context manager in NBI 6.2.
 OLLAMA_FIXTURE = (
     "class OllamaLLMProvider:\n"
     "    def update_chat_model_list(self):\n"

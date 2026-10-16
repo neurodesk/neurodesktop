@@ -766,7 +766,6 @@ RUN test "$(command -v astra)" = "/opt/conda/bin/astra" \
 
 # NBI 6.2's published frontend supports the image's JupyterLab launcher.
 # Keep one bundle copy and apply the settings/Ollama patches to that release.
-# The builder pin is used by the collaboration rebuild below.
 ARG NBI_JUPYTERLAB_BUILDER_VERSION="4.5.11"
 RUN --mount=type=bind,source=config/agents/patch_nbi.py,target=/tmp/patch_nbi.py,ro \
     NBI_PACKAGE_DIR="$(/opt/conda/bin/pip show notebook_intelligence | awk '/^Location:/ {print $2 "/notebook_intelligence"}')" \
