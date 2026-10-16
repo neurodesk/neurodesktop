@@ -34,7 +34,12 @@ def _fixture(tmp_path, module_status=0):
     ))
     lmod_init = _write(tmp_path / "lmod/init/bash", (
         "module() {\n"
-        '    marker=no; [ -f "$HOME/.lmod.d/.cache/invalidated" ] && marker=yes\n'
+        '    local cache_dir="${LMOD_TEST_CACHE_DIR:-$HOME/.cache/lmod}"\n'
+        '    if [ "$1" = "--config-json" ]; then\n'
+        '        printf \'{"configT":{"usrCacheDir":"%s"}}\\n\' "$cache_dir" >&2\n'
+        '        return 0\n'
+        '    fi\n'
+        '    marker=no; [ -f "$cache_dir/invalidated" ] && marker=yes\n'
         f'    printf "%s|%s|%s|%s|%s\\n" "$(id -un)" "$LMOD_SHORT_TIME" "$MODULEPATH" '
         f'"$marker" "$*" >> "{calls}"\n'
         f"    return {module_status}\n"
@@ -74,7 +79,23 @@ def test_builds_a_fresh_user_cache_for_the_cvmfs_modulepath(tmp_path):
     assert invalidated == "yes"
     assert modulepath == str(modules)
     assert args == "--quiet avail"
-    assert (home / ".lmod.d/.cache").is_dir()
+    assert (home / ".cache/lmod").is_dir()
+    assert (home / ".cache/lmod").stat().st_mode & 0o777 == 0o700
+
+
+def test_uses_the_cache_directory_reported_by_initialized_lmod(tmp_path):
+    env, calls, _, home = _fixture(tmp_path)
+    cache_dir = tmp_path / "custom cache/lmod"
+    with open(env["NEURODESKTOP_WARM_ENV_SCRIPT"], "a") as script:
+        script.write(f'export LMOD_TEST_CACHE_DIR="{cache_dir}"\n')
+    result = _run(env)
+    assert result.returncode == 0, result.stderr
+    assert "cache built" in result.stdout
+    assert calls.read_text().strip().split("|")[3] == "yes"
+    assert (cache_dir / "invalidated").is_file()
+    assert (cache_dir / "invalidated").stat().st_mode & 0o777 == 0o600
+    assert not (home / ".cache/lmod").exists()
+    assert not (home / ".lmod.d").exists()
 
 
 def test_skips_without_mounted_cvmfs_modules(tmp_path):
@@ -131,7 +152,7 @@ def test_root_builds_as_the_notebook_user_with_a_clean_environment(tmp_path):
     assert f"HOME={home}" in invocation
     assert "STARTUP_SECRET" not in invocation
     assert calls.read_text().count("--quiet avail") == 1
-    assert (home / ".lmod.d/.cache").is_dir()
+    assert (home / ".cache/lmod").is_dir()
 
 
 def test_deferred_startup_launches_warmup_without_delaying_done(tmp_path):

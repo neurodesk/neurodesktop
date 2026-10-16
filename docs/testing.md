@@ -522,6 +522,7 @@ non-obvious tiers protect.
 | Object-storage inventory health | `pytest tests/unit/test_objectstorage_check.py` | Live `Test Objectstorage` workflow |
 | Nightly JupyterHub probe (terminal creation, FSL commands) | `pytest tests/unit/test_jupyter_terminal_creation.py tests/unit/test_github_workflows.py` | Live `JupyterHub API Testing` workflow |
 | Lmod extension listing default | `pytest tests/unit/test_lmod_extensions.py` | `pytest /opt/tests/test_lmod_avail_extensions.py` |
+| Lmod cache warm-up | `pytest tests/unit/test_warm_module_cache.py` | `pytest /opt/tests/test_lmod_cache_warmup.py` |
 | Interactive module banner | `pytest tests/unit/test_module_banner.py` | — |
 | Apptainer NVIDIA auto-configuration | `pytest tests/unit/test_apptainer_nv.py` | — |
 | Access-URL banner (`print_access_url.sh`) | `pytest tests/unit/test_print_access_url.py` | — |
@@ -1202,6 +1203,13 @@ in the regular and native profiles still fail the probe. Native CC acceptance
 remains in [the Glass deployment contract](architecture/glass.md#acceptance).
 
 ### Shared startup regressions
+
+The Lmod cache checks use a local module tree with the installed Lmod. They
+verify the reported cache directory under a custom `HOME`, with and without
+`XDG_CACHE_HOME`, private cache permissions and ownership, and discovery of new
+modules after warm-up invalidates an existing cache. Modulefiles record their
+evaluations so an unchanged warm `module avail` must reuse the cache without
+evaluating them again. These checks need no CVMFS server or network access.
 
 The menu-update and startup-ownership checks run with:
 
