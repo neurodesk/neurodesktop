@@ -171,6 +171,27 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
         else:
             raise AssertionError("T3 did not finish its Codex provider probe within 30 seconds")
 
+        claude = tmp_path / ".t3/caches/claudeAgent.json"
+        image_claude_version = subprocess.check_output(
+            ["/opt/jovyan_defaults/.local/bin/claude", "--version"],
+            env=environment, text=True, timeout=20,
+        ).split()[0]
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            assert process.poll() is None, "T3 exited before its Claude provider probe completed"
+            if claude.exists():
+                snapshot = json.loads(claude.read_text())
+                if snapshot.get("status") in {"ready", "warning", "error"}:
+                    assert snapshot["installed"] is True
+                    assert snapshot["version"] == image_claude_version, snapshot
+                    assert snapshot["status"] == "ready" or snapshot["message"] == (
+                        "Claude Code is not authenticated. Run `claude auth login` and try again."
+                    ), snapshot
+                    break
+            time.sleep(0.1)
+        else:
+            raise AssertionError("T3 did not finish its Claude provider probe within 30 seconds")
+
         # T3 ships the OpenCode driver disabled. Without the seeded instance
         # this snapshot reads `"enabled": false` with the message below, and no
         # OpenCode reaches the chat model picker. T3 probes this driver lazily,

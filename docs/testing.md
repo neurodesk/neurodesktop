@@ -808,6 +808,11 @@ accepted only after the expected CLI invocation is observed. Other errors,
 process exits, and timeouts fail the test. This check covers adapter upgrades
 that use an image CLI outside the adapter's declared dependency range.
 
+The installed T3 startup cases exercise fresh and legacy defaults. They wait
+for Claude's completed health probe, compare its version with the image CLI,
+and require either a ready provider or the expected sign-in requirement for
+an empty credential store.
+
 The Jupyter AI image test also imports Notebook Intelligence and the MCP v1
 ``mcp.server.fastmcp`` API. ``jupyter server extension list`` returns success
 even when an individual extension reports an import error, so its process exit
