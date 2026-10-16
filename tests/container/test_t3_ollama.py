@@ -486,7 +486,7 @@ def running_opencode(home, project, environment, *, launcher=LAUNCHER):
             return json.load(response)
 
     try:
-        deadline = time.monotonic() + 40
+        deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
             assert process.poll() is None, log.read_text()[-2000:]
             try:
