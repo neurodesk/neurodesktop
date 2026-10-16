@@ -735,7 +735,10 @@ Run `pytest tests/unit/test_lightcone_modules.py tests/unit/test_lightcone_evide
  tests/unit/test_astra_view_graph.py` from the checkout. The evidence fixture
 contains real local-worker 0.5 status, manifests, and RO-Crate. Lifecycle unit
 cases double the native CLI and prove ownership and failure propagation, not
-live Slurm compatibility.
+live Slurm compatibility. Viewer cases prevent canonical root evidence from
+attaching to a child output with the same name. Generated module rerun commands
+execute in an isolated test interpreter and refuse missing or changed engines
+before invoking the worker.
 
 In the built image, run `pytest /opt/tests/test_astra_lc_run_image.py` with Slurm
 enabled. This executes a real native allocation, a Python probe, materialization,
@@ -744,6 +747,9 @@ In the privileged science profile, also set
 `NEURODESKTOP_TEST_LIGHTCONE_SCIENCE=1`. That test requires pinned FSL through
 CVMFS and nested Apptainer on a real Lightcone worker, compares every output
 voxel, and checks the manifest's module pins and `fs: open` attestation.
+It then executes the generated record with `datalad rerun`, compares every voxel
+again, and requires a new execution timestamp with the same environment identity
+and module attestation.
 The image runtime driver's `acceptance` mode sets this flag, so the amd64
 PR image job runs the science gate after mounting CVMFS.
 Repeat the installed tests on native arm64. Missing live services leave these

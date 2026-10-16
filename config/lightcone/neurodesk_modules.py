@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import platform
 import re
+import shlex
 import subprocess
+import sys
 import tomllib
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -15,10 +19,50 @@ class ModuleProfile:
 
     def identity(self) -> bytes:
         return json.dumps(
-            {"execution": "modules", "modules": self.modules},
+            {
+                "execution": "modules",
+                "modules": self.modules,
+                "engine": engine_identity(),
+            },
             sort_keys=True,
             separators=(",", ":"),
         ).encode()
+
+
+def engine_identity() -> str:
+    """Bind module runs to the installed adapter and the engine it adapts."""
+    package = Path(__file__).parent
+    digest = hashlib.sha256(
+        f"{platform.python_implementation()}:{platform.python_version()}".encode()
+    )
+    for path in sorted(package.rglob("*.py")):
+        name = path.relative_to(package).as_posix().encode()
+        content = path.read_bytes()
+        for value in (name, content):
+            digest.update(len(value).to_bytes(8, "big"))
+            digest.update(value)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def rerun_command(target: str) -> str:
+    bootstrap = """import sys
+try:
+    from lightcone.neurodesk_modules import engine_identity
+except ImportError:
+    sys.exit("Required Neurodesk Lightcone adapter is absent; use the original Neurodesktop image")
+if engine_identity() != sys.argv[1]:
+    sys.exit("Neurodesk Lightcone engine identity mismatch; use the original Neurodesktop image")
+from lightcone.engine.worker import main
+sys.exit(main(sys.argv[2:]))
+"""
+    python = shlex.quote(sys.executable)
+    command = shlex.join(
+        [sys.executable, "-I", "-c", bootstrap, engine_identity(), target]
+    )
+    return (
+        f"if ! test -x {python}; then echo 'Required Neurodesk Lightcone runtime is absent; "
+        "use the original Neurodesktop image' >&2; exit 127; fi; " + command
+    )
 
 
 def profile(root: Path, *, committed: bool = False) -> ModuleProfile | None:

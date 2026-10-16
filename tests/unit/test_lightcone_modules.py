@@ -1,8 +1,10 @@
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 from types import SimpleNamespace
+import venv
 
 import pytest
 
@@ -302,3 +304,75 @@ def test_profile_refusal_cleans_allocated_task_home(modules, tmp_path):
     with pytest.raises(ProjectError, match="commit"):
         modules.policy_for(runtime, ordinary)
     assert not home.exists()
+
+
+@pytest.fixture
+def rerun_runtime(modules, tmp_path, monkeypatch):
+    runtime = tmp_path / "image runtime"
+    venv.EnvBuilder(with_pip=False).create(runtime)
+    package = next(runtime.glob("lib/python*/site-packages")) / "lightcone"
+    (package / "engine").mkdir(parents=True)
+    adapter = package / "neurodesk_modules.py"
+    shutil.copyfile(modules.__file__, adapter)
+    worker = package / "engine/worker.py"
+    worker.write_text(
+        "import json\nfrom pathlib import Path\n"
+        "def main(argv):\n"
+        "    Path('executed.json').write_text(json.dumps(argv))\n"
+        "    return 0\n"
+    )
+    python = runtime / "bin/python"
+    monkeypatch.setattr(modules, "__file__", str(adapter))
+    monkeypatch.setattr(modules, "sys", SimpleNamespace(executable=str(python)))
+    return python, adapter, worker
+
+
+@pytest.mark.parametrize(
+    "change", [None, "adapter", "worker", "missing-adapter", "missing-runtime"]
+)
+def test_generated_rerun_requires_recorded_engine(
+    modules, tmp_path, rerun_runtime, change
+):
+    python, adapter, worker = rerun_runtime
+    declared = modules.ModuleProfile(("neurodesk-fixture/1.1",))
+    before = declared.identity()
+    command = modules.rerun_command("baseline/answer").format()
+    if change in {"adapter", "worker"}:
+        path = adapter if change == "adapter" else worker
+        path.write_text(path.read_text() + "\n")
+        assert declared.identity() != before
+    elif change == "missing-adapter":
+        adapter.unlink()
+    elif change == "missing-runtime":
+        python.unlink()
+    result = subprocess.run(
+        command, shell=True, cwd=tmp_path, capture_output=True, text=True
+    )
+    if change:
+        assert result.returncode != 0
+        assert "Neurodesk Lightcone" in result.stderr
+        assert "use the original Neurodesktop image" in result.stderr
+        assert not (tmp_path / "executed.json").exists()
+    else:
+        assert result.returncode == 0, result.stderr
+        assert json.loads((tmp_path / "executed.json").read_text()) == [
+            "baseline/answer"
+        ]
+
+
+def test_engine_identity_is_independent_of_install_location(
+    modules, tmp_path, rerun_runtime, monkeypatch
+):
+    _, adapter, _ = rerun_runtime
+    before = modules.engine_identity()
+    relocated = tmp_path / "relocated"
+    shutil.copytree(adapter.parent, relocated)
+    monkeypatch.setattr(modules, "__file__", str(relocated / adapter.name))
+    assert modules.engine_identity() == before
+
+
+def test_interpreter_version_changes_module_identity(modules, rerun_runtime, monkeypatch):
+    declared = modules.ModuleProfile(("neurodesk-fixture/1.1",))
+    before = declared.identity()
+    monkeypatch.setattr(modules.platform, "python_version", lambda: "0.0.0")
+    assert declared.identity() != before

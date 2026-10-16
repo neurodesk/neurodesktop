@@ -115,8 +115,10 @@ with `lc compute resources --json` and `lc compute launch --dry-run --json`.
 Driver and workers need the same project, interpreter, and connection root.
 
 The adapter reloads the committed exact module pins on each worker. It includes
-the ordered pins in `env_version`, so a pin change reports `behind` and
-`--refresh` remakes the output. Module recipes intentionally use the upstream
+the ordered pins and a digest of the engine's Python version and installed
+Lightcone sources, including the adapter, in `env_version`. A pin or engine
+change reports `behind`, and `--refresh` remakes the output.
+Module recipes intentionally use the upstream
 open backend. The manifest records `mechanism: none`, `fs: open`, and the
 module pins. Per-task HOME, scratch, and GPU masks remain in effect, and
 inherited Bash initialization cannot override the loaded environment.
@@ -124,6 +126,13 @@ This is neither filesystem isolation nor cryptographic verification of CVMFS
 packages. Unprofiled projects retain upstream sandbox behavior. Module profiles
 cannot also declare `[tool.lightcone.image]`; ASTRA `container:` is a software
 label and does not select a runtime image.
+
+Module run records make `datalad rerun` use the image-owned Lightcone interpreter
+and check its engine digest before executing the worker. Keep the original
+Neurodesktop image available for reruns. A missing interpreter or adapter, or a
+different engine digest, fails with a request to use that image. The rerun does
+not download an adapted engine from PyPI. Ordinary projects retain upstream's
+pinned `uv run --no-project --with 'lightcone-cli==…'` engine reconstruction.
 
 For ordinary uv projects, use `lc compute launch`, `lc run CLUSTER -- COMMAND`,
 `lc materialize CLUSTER TARGET`, and `lc compute down CLUSTER` directly.
@@ -134,8 +143,11 @@ The viewer reads `ro-crate-metadata.json` through structured action, result, and
 manifest relationships. Canonical manifests establish historical execution.
 Status snapshots are supported explicitly and retain `current`, `behind`, and
 `stale` distinctions, but a snapshot without a matching canonical manifest does
-not establish execution. Unmatched universes and never-materialized records
-stay grey. Preview files must remain inside the project and match their recorded
+not establish execution. Canonical 0.5 output IDs must match the exact analysis
+scope. A root `answer` never supplies evidence for a child's `answer`.
+Generic legacy manifests still allow an unambiguous local output ID.
+Unmatched universes and never-materialized records stay grey.
+Preview files must remain inside the project and match their recorded
 hashes, including annex symlinks. Missing annex content means no preview.
 No 0.5 status, manifest, crate, or sandbox attestation supplies passing output
 verification, so this path reaches amber and never synthesizes green.

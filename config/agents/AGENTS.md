@@ -338,8 +338,10 @@ native allocation and cleanup. Set `LC_COMPUTE_CONFIG` for a host cluster or a
 resource shape different from the installed two-CPU, 8-GiB Slurm offer.
 
 This profile reloads pinned modules on workers and records `fs: open`; do not
-claim sandbox isolation or verified CVMFS package bytes. Pin changes make
-outputs `behind`; `--refresh` remakes them. Unprofiled projects use the stock
+claim sandbox isolation or verified CVMFS package bytes. Pin or adapted engine
+changes make outputs `behind`; `--refresh` remakes them. Keep the original
+Neurodesktop image for `datalad rerun`; module records require its installed
+interpreter and matching engine source digest. Unprofiled projects use the stock
 sandbox and native `lc compute launch`, `lc materialize CLUSTER TARGET`, and
 `lc compute down CLUSTER`. `lc run CLUSTER -- COMMAND` probes the environment.
 Never reuse removed `lc run --universe` or `--jobs` flags.

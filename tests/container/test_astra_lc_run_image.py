@@ -200,3 +200,14 @@ def test_fsl_module_materializes_through_real_worker(tmp_path):
     assert not graph["errors"]
     assert graph["trust"]["level"] == "executed-unverified"
     assert not (root / "status.json").exists()
+    run_commit = command(
+        root, "git", "log", "-1", "--format=%H", "--grep=^\\[DATALAD RUNCMD\\]"
+    ).strip()
+    assert run_commit
+    command(root, "datalad", "rerun", run_commit, env=env, timeout=900)
+    rerun = json.loads((root / "results/baseline/.answer.manifest.json").read_text())
+    np.testing.assert_array_equal(nib.load(output).get_fdata(), data * 2)
+    assert rerun["started_at"] != manifest["started_at"]
+    assert rerun["env_version"] == manifest["env_version"]
+    assert rerun["hermeticity"]["modules"] == ["fsl/6.0.7.22"]
+    assert rerun["hermeticity"]["fs"] == "open"

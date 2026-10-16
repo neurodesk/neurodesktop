@@ -136,6 +136,57 @@ def test_nested_ids_are_not_reduced_to_basename(project):
     assert overlay["trust"]["level"] == "spec-only"
 
 
+@pytest.fixture
+def child_project(project):
+    (project / "astra.yaml").write_text(
+        'version: "0.0.14"\nname: Root\ninputs: []\noutputs: []\n'
+        "analyses:\n  child:\n    inputs:\n      - id: seed\n        type: data\n"
+        "    outputs:\n"
+        "      - id: answer\n        type: data\n        format: txt\n"
+        '        recipe:\n          command: "echo child > {output}"\n'
+    )
+    return project
+
+
+@pytest.mark.parametrize("evidence", ["crate", "status", "manifest"])
+def test_canonical_root_evidence_never_attaches_to_child(child_project, evidence):
+    paths = {
+        "crate": child_project / "ro-crate-metadata.json",
+        "status": FIXTURE / "current.json",
+        "manifest": child_project / "results/baseline/.answer.manifest.json",
+    }
+    result = graph(child_project, paths[evidence])
+    assert not result["errors"]
+    child = next(n for n in result["nodes"] if n["id"] == "output:root/child/answer")
+    assert child["status"] == "unknown"
+    assert not child["published"]
+    assert not child["artifact"]
+    assert "run" not in child
+    assert result["trust"]["level"] == "spec-only"
+
+
+def test_canonical_nested_scope_matches_exactly(child_project):
+    path = child_project / "results/baseline/.answer.manifest.json"
+    data = json.loads(path.read_text())
+    data["output_id"] = "child/answer"
+    path.write_text(json.dumps(data))
+    result = graph(child_project, path)
+    assert not result["errors"]
+    child = next(n for n in result["nodes"] if n["id"] == "output:root/child/answer")
+    assert child["status"] == "ok"
+    assert result["trust"]["level"] == "executed-unverified"
+
+
+def test_legacy_unique_local_id_still_matches_child(child_project):
+    path = child_project / "legacy.json"
+    path.write_text(json.dumps({"outputs": [{"output_id": "answer", "status": "ok"}]}))
+    result = graph(child_project, path)
+    assert not result["errors"]
+    child = next(n for n in result["nodes"] if n["id"] == "output:root/child/answer")
+    assert child["status"] == "ok"
+    assert result["trust"]["level"] == "executed-unverified"
+
+
 def test_duplicate_crate_entities_and_manifest_tampering_fail_closed(project):
     crate = project / "ro-crate-metadata.json"
     data = json.loads(crate.read_text())

@@ -54,6 +54,15 @@ def patch(source: Path) -> None:
         "        if declared else _sandbox_line(result.mode)\n"
         "    )",
     )
+    materialize = materialize.replace(
+        '    if runtime.mode == "containerized":\n        info["extra_inputs"]',
+        "    from lightcone import neurodesk_modules\n\n"
+        "    if neurodesk_modules.profile(root, committed=True):\n"
+        '        info["cmd"] = neurodesk_modules.rerun_command(\n'
+        '            f"{task.universe_id}/{task.output_id}"\n'
+        "        )\n"
+        '    if runtime.mode == "containerized":\n        info["extra_inputs"]',
+    )
     (engine / "materialize.py").write_text(materialize)
     shutil.copyfile(
         Path(__file__).with_name("neurodesk_modules.py"),
