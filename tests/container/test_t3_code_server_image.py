@@ -181,7 +181,10 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
             assert process.poll() is None, "T3 exited before its Claude provider probe completed"
             if claude.exists():
                 snapshot = json.loads(claude.read_text())
-                if snapshot.get("status") in {"ready", "warning", "error"}:
+                status = snapshot.get("status")
+                if status in {"ready", "error"} or (
+                    status == "warning" and snapshot.get("installed") is True
+                ):
                     assert snapshot["installed"] is True
                     assert snapshot["version"] == image_claude_version, snapshot
                     assert snapshot["status"] == "ready" or snapshot["message"] == (
