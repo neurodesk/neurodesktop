@@ -140,6 +140,8 @@ RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20
     && rm /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz \
     && cd /tmp/guacamole-server-${GUACAMOLE_VERSION} \
     && CFLAGS="-Wno-error=deprecated-declarations" ./configure --with-init-dir=/etc/init.d \
+    && grep -qx '#define _XOPEN_SOURCE 700' config.h \
+    && sed -i '/^#define _XOPEN_SOURCE 700$/d' config.h \
     && make \
     && make install \
     && test -e /usr/local/lib/libguac-client-rdp.so \

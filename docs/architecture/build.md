@@ -28,6 +28,8 @@ architectures. A date tag never substitutes for building the run's source SHA.
 The base image uses Ubuntu 26.04. Guacamole builds against FreeRDP 3 and ships
 the matching FreeRDP 3 client libraries. Its build accepts deprecated FreeRDP
 API declarations and requires the RDP plugin to exist after installation.
+The generated Guacamole header drops its fixed `_XOPEN_SOURCE` definition;
+its `_GNU_SOURCE` definition lets libc choose the matching feature level.
 CVMFS uses the release packages built for Ubuntu 26.04.
 
 ## Bundled code-server dependencies
