@@ -660,6 +660,12 @@ compares its custom endpoint, model limits, and selection with native OpenCode.
 Environment and file canaries must never appear in discovered model metadata;
 intentional user configuration references must still resolve.
 
+The ACP stdout check sets `npm_config_offline=true` for its child process. Its
+local Ollama plugin needs no npm packages. This keeps the 40-second protocol
+check independent of OpenCode's first-use registry installation while still
+loading the installed plugin and executing the real image binary. Other
+first-use and completion checks retain native dependency installation.
+
 For the live gate, run the image on a Docker network where an Ollama server with
 a downloaded model is reachable as `host.docker.internal:11434`. Set
 `NEURODESKTOP_TEST_OLLAMA_MODEL` to that model ID, then run

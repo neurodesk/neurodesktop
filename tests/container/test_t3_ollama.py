@@ -633,6 +633,8 @@ def test_quiet_acp_initialization_keeps_stdout_as_json(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     environment = isolated_environment(home)
+    # Native plugin startup awaits npm even though this plugin uses only Node built-ins.
+    environment["npm_config_offline"] = "true"
     with fake_ollama() as (host, _):
         environment["OLLAMA_HOST"] = host
         process = subprocess.Popen(
