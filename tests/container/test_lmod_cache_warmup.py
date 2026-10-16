@@ -1,9 +1,3 @@
-"""Prove the installed Lmod honors the module-cache warm-up contract.
-
-The unit tests use a stub ``module``. These tests check the installed Lmod's
-cache location, private ownership, reuse, and refresh after module changes.
-"""
-
 import json
 import os
 import subprocess

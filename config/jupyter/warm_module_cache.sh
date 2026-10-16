@@ -18,7 +18,6 @@ build_cache() {
     source "$ENV_SCRIPT" >/dev/null 2>&1
     # shellcheck source=/dev/null
     source "$LMOD_INIT"
-    # The cache location depends on the installed Lmod and site configuration.
     cache_dir=$(module --config-json 2>&1 | python3 -c \
         'import json, sys; print(json.load(sys.stdin)["configT"]["usrCacheDir"])') || return 1
     umask 077
