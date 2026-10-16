@@ -212,7 +212,6 @@ RUN set -eux; \
     npm cache clean --force
 
 
-# Build only the pinned Slurm login-environment function for the local worker.
 FROM builder AS slurm-env-builder
 ARG SLURM_ENV_VERSION="25.11.2"
 ARG SLURM_ENV_SHA256="9bfd844f746c1268d6e0cb14bda586b548b1c4b12f8c72181397d0cec9ce5d39"
