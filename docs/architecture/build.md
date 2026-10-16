@@ -26,10 +26,16 @@ architectures. A date tag never substitutes for building the run's source SHA.
 ## Base image dependencies
 
 The base image uses Ubuntu 26.04. Guacamole builds against FreeRDP 3 and ships
-the matching FreeRDP 3 client libraries. Its build accepts deprecated FreeRDP
-API declarations and requires the RDP plugin to exist after installation.
+the matching FreeRDP 3 client libraries. Its build selects GNU C17 because
+[GCC 15 defaults to C23](https://gcc.gnu.org/gcc-15/porting_to.html).
+It accepts deprecated FreeRDP API declarations and requires the RDP plugin
+to exist after installation.
 The generated Guacamole header drops its fixed `_XOPEN_SOURCE` definition;
 its `_GNU_SOURCE` definition lets libc choose the matching feature level.
+The bounded substring helper casts `memchr`'s result to preserve Guacamole's
+existing mutable-pointer return type with libc's const-aware declaration.
+The guaclog key lookup and copy helpers retain const pointers to their static
+key table before producing an owned copy.
 CVMFS uses the release packages built for Ubuntu 26.04.
 
 ## Bundled code-server dependencies

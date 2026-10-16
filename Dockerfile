@@ -139,9 +139,18 @@ RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20
     && tar xvf /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz -C /tmp \
     && rm /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz \
     && cd /tmp/guacamole-server-${GUACAMOLE_VERSION} \
-    && CFLAGS="-Wno-error=deprecated-declarations" ./configure --with-init-dir=/etc/init.d \
+    && CFLAGS="-std=gnu17 -Wno-error=deprecated-declarations" ./configure --with-init-dir=/etc/init.d \
     && grep -qx '#define _XOPEN_SOURCE 700' config.h \
     && sed -i '/^#define _XOPEN_SOURCE 700$/d' config.h \
+    && test "$(grep -Fc 'chr = memchr(haystack + off, needle[0], len - off)' src/libguac/string.c)" -eq 1 \
+    && sed -i 's/chr = memchr(haystack + off,/chr = (char*) memchr(haystack + off,/' src/libguac/string.c \
+    && grep -Fqx 'static guaclog_keydef* guaclog_get_known_key(int keysym) {' src/guaclog/keydef.c \
+    && grep -Fqx 'static guaclog_keydef* guaclog_copy_key(guaclog_keydef* keydef) {' src/guaclog/keydef.c \
+    && test "$(grep -Fxc '    guaclog_keydef* keydef;' src/guaclog/keydef.c)" -eq 1 \
+    && sed -i \
+       -e 's/^static guaclog_keydef\* guaclog_get_known_key/static const guaclog_keydef* guaclog_get_known_key/' \
+       -e 's/guaclog_copy_key(guaclog_keydef\* keydef)/guaclog_copy_key(const guaclog_keydef* keydef)/' \
+       -e 's/^    guaclog_keydef\* keydef;$/    const guaclog_keydef* keydef;/' src/guaclog/keydef.c \
     && make \
     && make install \
     && test -e /usr/local/lib/libguac-client-rdp.so \
