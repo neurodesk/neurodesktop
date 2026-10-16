@@ -6,6 +6,7 @@ import json
 import logging
 import pwd
 import time
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -158,10 +159,12 @@ def test_sbatch_completes_and_writes_output(tmp_path):
 
 
 @pytest.mark.parametrize("environment_options", [
+    ["--export=ALL"],
+    ["--export=NIL"],
     ["--export=NONE"],
     ["--export=ND_SLURM_TEST_VALUE=selected"],
     ["--export=ALL", "--get-user-env"],
-], ids=["none", "selected", "get-user-env"])
+], ids=["all", "nil", "none", "selected", "get-user-env"])
 def test_sbatch_environment_retrieval_keeps_worker_alive(tmp_path, environment_options):
     """Login-environment requests must not kill a namespace-restricted worker."""
     _skip_if_slurm_not_expected()
@@ -244,6 +247,43 @@ def test_sbatch_environment_retrieval_keeps_worker_alive(tmp_path, environment_o
     finally:
         for job_id in job_ids:
             subprocess.run(["scancel", job_id], capture_output=True, timeout=10)
+
+
+@pytest.mark.parametrize("cancel", [False, True], ids=["completed", "cancelled"])
+def test_sbatch_accounting_retains_submission_comment(tmp_path, cancel):
+    """Lightcone must be able to verify its token after an allocation ends."""
+    _skip_if_slurm_not_expected()
+    token = f"lightcone:{uuid.uuid4().hex}"
+    job_id = subprocess.run(
+        ["sbatch", "--parsable", "--comment", token, "--time=00:01:00",
+         "--ntasks=1", "--mem=64M", "--export=ALL",
+         "--partition", os.environ.get("NEURODESKTOP_SLURM_PARTITION", "neurodesktop"),
+         "--output", str(tmp_path / "comment-%j.out"),
+         "--wrap", "sleep 50" if cancel else "true"],
+        capture_output=True, text=True, check=True, timeout=10,
+    ).stdout.strip().split(";")[0]
+    assert job_id.isdigit(), job_id
+    try:
+        if cancel:
+            subprocess.run(["scancel", job_id], check=True, timeout=10)
+        deadline = time.monotonic() + 60
+        rows = []
+        while time.monotonic() < deadline:
+            accounting = subprocess.run(
+                ["sacct", "--allocations", "--noheader", "--parsable2",
+                 "--jobs", job_id, "--format=JobIDRaw,User,State,Comment"],
+                capture_output=True, text=True, check=True, timeout=10,
+            )
+            rows = [line.split("|") for line in accounting.stdout.splitlines()]
+            if rows and rows[0][2].startswith("CANCELLED" if cancel else "COMPLETED"):
+                break
+            time.sleep(0.5)
+        assert len(rows) == 1, rows
+        assert rows[0][:2] == [job_id, pwd.getpwuid(os.geteuid()).pw_name], rows
+        assert rows[0][2].startswith("CANCELLED" if cancel else "COMPLETED"), rows
+        assert rows[0][3] == token, rows
+    finally:
+        subprocess.run(["scancel", job_id], capture_output=True, timeout=10)
 
 
 def test_installed_shell_environment_configures_host_slurm(tmp_path):

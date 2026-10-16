@@ -1005,7 +1005,7 @@ cleanup cancels the submitted job if needed.
 
 The Slurm environment-retrieval regression completes a small job, submits a
 larger job with an `afterok` dependency, then completes another small job on
-the same worker. It covers `--export=NONE`, selected-variable exports, and
+the same worker. It covers `--export=ALL`, `NIL`, `NONE`, selected-variable exports, and
 explicit `--get-user-env`, checks job ID, hostname, process identity and supplied
 variables in the output, and fails immediately if the worker exits. Requests
 use 1 CPU/1 GB followed by 4 CPUs/12 GB when the configured node has capacity;
@@ -1014,7 +1014,14 @@ without `CAP_SYS_ADMIN` under the default seccomp policy to cover the denied
 PID-namespace path. Privileged image checks alone cannot exercise that denial.
 `bash scripts/verify_slurm_image.sh IMAGE` creates a disposable container with
 default Docker permissions, bootstraps local Slurm as root, runs the Slurm tests
-as the notebook user, and removes the container on success or failure. PR image
+as the notebook user, then runs `test_slurm_multiuser.py` as root. That test creates
+two temporary users with distinct login profiles, checks all export modes and
+submitted-value precedence, verifies the compatibility library stays out of job
+processes, and repeats after a real worker reconfiguration. A failing login profile
+must requeue and hold the job without killing the worker. The test removes its users
+and accounting associations. The notebook-user suite also verifies that completed
+and cancelled batch jobs retain their exact Lightcone-style comment in `sacct`.
+The script removes the container on success or failure. PR image
 acceptance runs this check on both amd64 and native arm64 candidates.
 
 Both `/home/jovyan` and `/neurodesktop-storage` are required writable directories

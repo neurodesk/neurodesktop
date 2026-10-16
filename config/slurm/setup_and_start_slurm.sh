@@ -55,6 +55,11 @@ if ! command -v slurmctld >/dev/null 2>&1 || ! command -v slurmd >/dev/null 2>&1
     exit 0
 fi
 
+if ! sha256sum --check --status /opt/neurodesktop/slurm-env/compatibility.sha256; then
+    echo "[ERROR] Slurm packages changed after the environment compatibility build. Rebuild the image before starting local Slurm." >&2
+    exit 1
+fi
+
 if ! id slurm >/dev/null 2>&1; then
     useradd --system --home-dir /var/lib/slurm --shell /usr/sbin/nologin slurm
 fi
@@ -632,9 +637,6 @@ if [ "${DEF_MEM_PER_CPU}" -lt 1 ]; then
     DEF_MEM_PER_CPU=1
 fi
 
-# Slurm 23.11 login-environment retrieval creates a PID namespace and calls
-# fatal() if container policy denies clone(). Use its cache-only path instead;
-# without a cache Slurm runs the job with the submitted environment.
 cat > "${SLURM_CONF_PATH}" <<EOF
 ClusterName=neurodesktop
 SlurmctldHost=${NODE_HOSTNAME}
@@ -647,6 +649,7 @@ TaskPlugin=${TASK_PLUGIN}
 JobAcctGatherType=${JOBACCT_GATHER_TYPE}
 AccountingStorageType=${ACCOUNTING_STORAGE_TYPE}
 ${ACCOUNTING_STORAGE_HOST}
+AccountingStoreFlags=job_comment
 SelectType=select/cons_tres
 SelectTypeParameters=CR_Core_Memory
 SchedulerType=sched/backfill
@@ -663,7 +666,6 @@ SlurmdPort=6818
 
 SlurmctldTimeout=120
 SlurmdTimeout=300
-GetEnvTimeout=0
 InactiveLimit=0
 MinJobAge=30
 KillWait=30
@@ -863,7 +865,7 @@ start_slurmd() {
         fi
     fi
 
-    if /usr/sbin/slurmd -N "${NODE_HOSTNAME}" -f "${SLURM_CONF_PATH}" -L /var/log/slurm/slurmd.log; then
+    if /opt/neurodesktop/slurm-env/slurmd -N "${NODE_HOSTNAME}" -f "${SLURM_CONF_PATH}" -L /var/log/slurm/slurmd.log; then
         log_slurmd_fallback_success_if_needed
         log_slurmd_legacy_cgroup_compat_success_if_needed
         return 0
@@ -873,7 +875,7 @@ start_slurmd() {
         SLURMD_FALLBACK_ATTEMPTED=1
         echo "[WARN] slurmd failed with cgroup errors; falling back to non-cgroup mode and retrying."
         switch_to_non_cgroup_mode "auto fallback after slurmd cgroup startup failure"
-        if /usr/sbin/slurmd -N "${NODE_HOSTNAME}" -f "${SLURM_CONF_PATH}" -L /var/log/slurm/slurmd.log; then
+        if /opt/neurodesktop/slurm-env/slurmd -N "${NODE_HOSTNAME}" -f "${SLURM_CONF_PATH}" -L /var/log/slurm/slurmd.log; then
             log_slurmd_fallback_success_if_needed
             log_slurmd_legacy_cgroup_compat_success_if_needed
             return 0
@@ -883,7 +885,7 @@ start_slurmd() {
     if [ "${SLURMD_LEGACY_CGROUP_COMPAT_ATTEMPTED}" -eq 0 ] && slurmd_log_indicates_disabled_plugin_unsupported; then
         SLURMD_LEGACY_CGROUP_COMPAT_ATTEMPTED=1
         switch_to_legacy_cgroup_compat_mode "auto compatibility fallback after unsupported CgroupPlugin=disabled"
-        if /usr/sbin/slurmd -N "${NODE_HOSTNAME}" -f "${SLURM_CONF_PATH}" -L /var/log/slurm/slurmd.log; then
+        if /opt/neurodesktop/slurm-env/slurmd -N "${NODE_HOSTNAME}" -f "${SLURM_CONF_PATH}" -L /var/log/slurm/slurmd.log; then
             log_slurmd_fallback_success_if_needed
             log_slurmd_legacy_cgroup_compat_success_if_needed
             return 0

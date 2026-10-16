@@ -1,0 +1,49 @@
+--- a/src/common/env.c
++++ b/src/common/env.c
+@@ -2094,7 +2094,7 @@
+ static int _clone_env_child(child_args_t *child_args)
+ {
+ 	char *child_stack;
+-	int rc = 0;
++	int rc = 0, saved_errno;
+ 	child_stack = mmap(NULL, STACK_SIZE, PROT_READ | PROT_WRITE,
+ 			   MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
+ 	if (child_stack == MAP_FAILED) {
+@@ -2112,9 +2112,11 @@
+ 	 */
+ 	rc = clone(_child_fn, child_stack + STACK_SIZE,
+ 		   (SIGCHLD|CLONE_NEWPID|CLONE_NEWNS), child_args);
++	saved_errno = errno;
+ 	/* Memory deallocated only in parent address space, child unaffected */
+ 	if (munmap(child_stack, STACK_SIZE))
+ 		error("%s: failed to munmap child stack: %m", __func__);
++	errno = saved_errno;
+ 	return rc;
+ }
+ 
+@@ -2265,7 +2267,9 @@
+ 	 * CLONE_NEWNS), we need to know if they are disabled . If they are,
+ 	 * we must fall back to fork and warn the user about the risks.
+ 	 */
+-	if (_ns_disabled()) {
++	if (_ns_disabled() ||
++	    (((child = _clone_env_child(&child_args)) == -1) &&
++	     (errno == EPERM))) {
+ 		warning("%s: pid or mnt namespaces are disabled, avoiding clone and falling back to fork. This can produce orphan/unconstrained processes!",
+ 			__func__);
+ 		child_args.perform_mount = false;
+@@ -2276,11 +2280,9 @@
+ 		}
+ 		if (child == 0)
+ 			_child_fn(&child_args);
+-	} else {
+-		if ((child = _clone_env_child(&child_args)) == -1) {
+-			fatal("clone: %m");
+-			return NULL;
+-		}
++	} else if (child == -1) {
++		fatal("clone: %m");
++		return NULL;
+ 	}
+ #endif
+ 	xfree(cmdstr);

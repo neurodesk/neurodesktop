@@ -212,6 +212,19 @@ RUN set -eux; \
     npm cache clean --force
 
 
+# Build only the pinned Slurm login-environment function for the local worker.
+FROM builder AS slurm-env-builder
+ARG SLURM_ENV_VERSION="25.11.2"
+ARG SLURM_ENV_SHA256="9bfd844f746c1268d6e0cb14bda586b548b1c4b12f8c72181397d0cec9ce5d39"
+RUN apt-install-retry patchelf \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+COPY config/slurm/build_env_compat.sh config/slurm/user-env-25.11.2.patch /tmp/slurm-env/
+RUN curl -fsSL --retry 5 "https://download.schedmd.com/slurm/slurm-${SLURM_ENV_VERSION}.tar.bz2" -o /tmp/slurm.tar.bz2 \
+    && echo "${SLURM_ENV_SHA256}  /tmp/slurm.tar.bz2" | sha256sum --check --strict \
+    && mkdir /tmp/slurm-source \
+    && tar -xjf /tmp/slurm.tar.bz2 -C /tmp/slurm-source --strip-components=1 \
+    && bash /tmp/slurm-env/build_env_compat.sh /tmp/slurm-source /opt/slurm-env \
+    && rm -rf /tmp/slurm.tar.bz2 /tmp/slurm-source /tmp/slurm-env
 
 ###############################################################################
 # Stage 2: Final runtime image
@@ -1507,7 +1520,9 @@ RUN apt-install-retry systemd systemd-sysv xauth xserver-xorg-core \
 # Install local runtime configuration late. This layer intentionally sits after
 # neurocommand so launcher/webapp config edits do not invalidate Guacamole,
 # defaults, CVMFS, or the neurocommand clone/install layer.
+COPY --from=slurm-env-builder /opt/slurm-env/ /opt/neurodesktop/slurm-env/
 RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
+    --mount=type=bind,from=slurm-env-builder,source=/usr/bin/patchelf,target=/tmp/patchelf,ro \
     --mount=type=bind,source=config/guacamole,target=/tmp/guacamole,ro \
     --mount=type=bind,source=config/ssh,target=/tmp/ssh,ro \
     --mount=type=bind,source=config/slurm,target=/tmp/slurm,ro \
@@ -1579,6 +1594,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh \
     && install -m 0755 /tmp/ssh/ensure_ssh_keys.sh /opt/neurodesktop/ensure_ssh_keys.sh \
     && install -m 0755 /tmp/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh \
+    && bash /tmp/slurm/install_env_compat.sh /tmp/patchelf \
     && install -m 0755 /tmp/slurm/neurodesk-lc-materialize /usr/local/bin/neurodesk-lc-materialize \
     && install -m 0644 /tmp/slurm/lightcone_materialize.py /opt/neurodesktop/lightcone_materialize.py \
     && install -m 0644 /tmp/slurm/lightcone-compute.yaml /opt/neurodesktop/lightcone-compute.yaml \
