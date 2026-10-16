@@ -15,6 +15,8 @@ import re
 import shutil
 from pathlib import Path
 
+import yaml
+
 from testlib import run_cmd
 
 
@@ -385,12 +387,11 @@ def test_provenance_helper_runs_from_its_own_shebang(tmp_path):
     project = tmp_path / "project"
     shutil.copytree(BET_PROJECT, project)
     spec = project / "astra.yaml"
+    specification = yaml.safe_load(spec.read_text(encoding="utf-8"))
+    for declared_output in specification["outputs"]:
+        declared_output["recipe"]["container"] = "neurodesk fsl/6.0.7.22"
     spec.write_text(
-        spec.read_text(encoding="utf-8").replace(
-            '      resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}',
-            '      container: "neurodesk fsl/6.0.7.22"\n'
-            '      resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}',
-        ),
+        yaml.safe_dump(specification, sort_keys=False),
         encoding="utf-8",
     )
 
