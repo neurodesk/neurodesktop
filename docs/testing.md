@@ -630,7 +630,9 @@ provider settings intact.
 `tests/unit/test_opencode_ollama.py` drives shared discovery against local HTTP
 fixtures and executes quiet launchers with fresh homes. It covers the total
 deadline, metadata fallback, empty and failed listings, credential isolation,
-concurrent process-local overlays, preserved configuration, and `--version`.
+concurrent process-local observations, preserved configuration, interpolation
+rejection, and `--version`. The plugin driver executes the actual native config
+hook against resolved fixture objects.
 
 Inside the image, `pytest /opt/tests/test_t3_ollama.py` starts a private T3 server
 with the image-owned OpenCode path. It authenticates through T3's bearer-session
@@ -640,7 +642,11 @@ model in T3's picker and a completed assistant result in the durable projection.
 The persistent OpenCode config must retain its original bytes. A concurrent
 quiet launch during the controlled turn must leave that turn on its original
 attempt. The same module tests native JSONC merge precedence, saved offline
-configuration, and ACP stdout as JSON.
+configuration, successful empty catalogs, and ACP stdout as JSON. It starts an
+OpenCode server outside a project, creates that project after startup, and
+compares its custom endpoint, model limits, and selection with native OpenCode.
+Environment and file canaries must never appear in discovered model metadata;
+intentional user configuration references must still resolve.
 
 For the live gate, run the image on a Docker network where an Ollama server with
 a downloaded model is reachable as `host.docker.internal:11434`. Set

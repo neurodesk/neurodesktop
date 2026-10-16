@@ -11,6 +11,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 import uuid
 
 import pytest
@@ -36,6 +37,22 @@ def free_port():
 
 
 def isolated_environment(home):
+    plugin = home / ".config/opencode/plugins/ollama-config.js"
+    if not plugin.exists():
+        plugin.parent.mkdir(parents=True, exist_ok=True)
+        source = resolve_source(
+            "/opt/jovyan_defaults/.config/opencode/plugins/ollama-config.js",
+            "config/agents/opencode_ollama_config.js",
+        )
+        helper = resolve_source(
+            "/opt/neurodesktop/opencode_update_config.py",
+            "config/agents/opencode_update_config.py",
+        )
+        plugin.write_text(
+            source.read_text().replace(
+                "/opt/neurodesktop/opencode_update_config.py", str(helper)
+            )
+        )
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -203,12 +220,21 @@ def running_t3(home, ollama_host, *, inline=None):
 
 
 @contextmanager
-def fake_ollama(completion_started=None, completion_release=None):
+def fake_ollama(completion_started=None, completion_release=None, *, names=None):
     calls = []
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
-            self.reply({"models": [{"name": "neurodesk-controlled:latest"}]})
+            self.reply(
+                {
+                    "models": [
+                        {"name": name}
+                        for name in (
+                            ["neurodesk-controlled:latest"] if names is None else names
+                        )
+                    ]
+                }
+            )
 
         def do_POST(self):
             payload = json.loads(
@@ -399,7 +425,8 @@ def test_t3_first_use_discovers_and_completes_without_interactive_warmup(tmp_pat
                     "T3 never reached the completion endpoint"
                 )
                 environment = {**isolated_environment(home), "OLLAMA_HOST": host}
-                with running_opencode(home, home, environment) as config:
+                with running_opencode(home, home, environment) as read_config:
+                    config = read_config()
                     assert (
                         "neurodesk-controlled:latest"
                         in config["provider"]["ollama"]["models"]
@@ -432,33 +459,45 @@ def test_t3_completes_with_an_actual_ollama_server_at_the_docker_default(tmp_pat
 
 
 @contextmanager
-def running_opencode(home, project, environment):
+def running_opencode(home, project, environment, *, launcher=LAUNCHER):
     port = free_port()
-    log = home / "opencode.log"
+    log = home / f"opencode-{port}.log"
     with log.open("w") as stream:
         process = subprocess.Popen(
-            [LAUNCHER, "serve", "--hostname=127.0.0.1", f"--port={port}"],
+            [launcher, "serve", "--hostname=127.0.0.1", f"--port={port}"],
             cwd=project,
             env=environment,
             stdout=stream,
             stderr=stream,
             start_new_session=True,
         )
+
+    def read_config(directory=None):
+        query = (
+            ""
+            if directory is None
+            else "?" + urllib.parse.urlencode({"directory": str(directory)})
+        )
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/config{query}", timeout=15
+        ) as response:
+            return json.load(response)
+
     try:
         deadline = time.monotonic() + 40
         while time.monotonic() < deadline:
             assert process.poll() is None, log.read_text()[-2000:]
             try:
-                with urllib.request.urlopen(
-                    f"http://127.0.0.1:{port}/config", timeout=0.5
-                ) as response:
-                    config = json.load(response)
-                assert "opencode server listening on" in log.read_text()
-                yield config
-                return
+                read_config()
+                break
             except (urllib.error.URLError, TimeoutError, ConnectionError):
                 time.sleep(0.1)
-        pytest.fail("OpenCode did not announce and serve its resolved configuration")
+        else:
+            pytest.fail(
+                "OpenCode did not announce and serve its resolved configuration"
+            )
+        assert "opencode server listening on" in log.read_text()
+        yield read_config
     finally:
         stop_process(process)
 
@@ -475,11 +514,12 @@ def test_installed_opencode_merge_precedence_and_quiet_overlay(tmp_path):
         "limit": {"context": 4096, "output": 512},
     }
     defaults["instructions"] = ["global-rules.md"]
-    global_config.write_text(json.dumps(defaults))
+    global_config.write_text("// User global JSONC.\n" + json.dumps(defaults))
     before = global_config.read_bytes()
-    explicit = tmp_path / "explicit.json"
+    explicit = tmp_path / "explicit.jsonc"
     explicit.write_text(
-        json.dumps(
+        "// Explicit config JSONC.\n"
+        + json.dumps(
             {"$schema": "https://opencode.ai/config.json", "model": "ollama/from-file"}
         )
     )
@@ -496,7 +536,8 @@ def test_installed_opencode_merge_precedence_and_quiet_overlay(tmp_path):
     environment["OPENCODE_CONFIG"] = str(explicit)
     with fake_ollama() as (host, _):
         environment["OLLAMA_HOST"] = host
-        with running_opencode(home, project, environment) as config:
+        with running_opencode(home, project, environment) as read_config:
+            config = read_config()
             assert config["model"] == "ollama/user-saved"
             assert config["instructions"] == ["global-rules.md", "project-rules.md"]
             provider = config["provider"]["ollama"]
@@ -517,13 +558,14 @@ def test_installed_opencode_merge_precedence_and_quiet_overlay(tmp_path):
                 '"options": {"baseURL": "http://project.example/v1"}, "models": {"project-saved"',
             )
         )
-        with running_opencode(home, project, environment) as config:
+        with running_opencode(home, project, environment) as read_config:
+            config = read_config()
             assert (
                 config["provider"]["ollama"]["options"]["baseURL"]
                 == "http://project.example/v1"
             )
             assert "whitelist" not in config["provider"]["ollama"]
-        environment["OPENCODE_CONFIG_CONTENT"] = json.dumps(
+        environment["OPENCODE_CONFIG_CONTENT"] = "// Inline JSONC.\n" + json.dumps(
             {
                 "model": "ollama/from-inline",
                 "provider": {
@@ -534,7 +576,8 @@ def test_installed_opencode_merge_precedence_and_quiet_overlay(tmp_path):
                 },
             }
         )
-        with running_opencode(home, project, environment) as config:
+        with running_opencode(home, project, environment) as read_config:
+            config = read_config()
             assert config["model"] == "ollama/from-inline"
             provider = config["provider"]["ollama"]
             assert provider["options"]["baseURL"] == "http://inline.example/v1"
@@ -544,9 +587,40 @@ def test_installed_opencode_merge_precedence_and_quiet_overlay(tmp_path):
                 "project-saved",
                 "inline-saved",
             }
+        environment["USER_MODEL_NAME"] = "Intentional-{env:SECOND_PASS}"
+        environment["SECOND_PASS"] = "must-not-expand-twice"
+        environment["OPENCODE_CONFIG_CONTENT"] = (
+            "// Inline managed provider.\n"
+            + json.dumps(
+                {
+                    "model": "ollama/neurodesk-controlled:latest",
+                    "provider": {
+                        "ollama": {
+                            "options": {"baseURL": host + "/v1"},
+                            "models": {
+                                "neurodesk-controlled:latest": {
+                                    "name": "{env:USER_MODEL_NAME}",
+                                    "limit": {"context": 2048, "output": 512},
+                                }
+                            },
+                        }
+                    },
+                }
+            )
+        )
+        with running_opencode(home, project, environment) as read_config:
+            config = read_config()
+            assert config["model"] == "ollama/neurodesk-controlled:latest"
+            provider = config["provider"]["ollama"]
+            assert provider["models"]["neurodesk-controlled:latest"] == {
+                "name": "Intentional-{env:SECOND_PASS}",
+                "limit": {"context": 2048, "output": 512},
+            }
+            assert "user-saved" in provider["whitelist"]
     environment.pop("OPENCODE_CONFIG_CONTENT")
     environment["OLLAMA_HOST"] = "http://127.0.0.1:1"
-    with running_opencode(home, project, environment) as config:
+    with running_opencode(home, project, environment) as read_config:
+        config = read_config()
         assert config["model"] == "ollama/user-saved"
         assert "whitelist" not in config["provider"]["ollama"]
         assert "user-saved" in config["provider"]["ollama"]["models"]
@@ -588,3 +662,150 @@ def test_quiet_acp_initialization_keeps_stdout_as_json(tmp_path):
             assert result["result"]["protocolVersion"] == 1
         finally:
             stop_process(process)
+
+
+@pytest.mark.parametrize("custom_endpoint", [True, False])
+def test_quiet_server_resolves_later_project_config(tmp_path, custom_endpoint):
+    home, project = tmp_path / "home", tmp_path / "later-project"
+    home.mkdir()
+    global_config = home / ".config/opencode/opencode.json"
+    global_config.parent.mkdir(parents=True)
+    shutil.copy(DEFAULTS, global_config)
+    saved = global_config.read_bytes()
+    environment = isolated_environment(home)
+    with fake_ollama() as (host, _):
+        environment["OLLAMA_HOST"] = host
+        with running_opencode(home, home, environment) as read_config:
+            project.mkdir()
+            provider = {
+                "models": {
+                    "neurodesk-controlled:latest": {
+                        "limit": {"context": 2048, "output": 512}
+                    },
+                    "project-selected": {"name": "Selected offline model"},
+                },
+            }
+            if custom_endpoint:
+                provider["options"] = {"baseURL": "http://project.example/v1"}
+            project_config = project / "opencode.jsonc"
+            project_config.write_text(
+                "// Created after the server started outside this directory.\n"
+                + json.dumps(
+                    {
+                        "$schema": "https://opencode.ai/config.json",
+                        "model": "ollama/project-selected",
+                        "provider": {"ollama": provider},
+                    }
+                )
+            )
+            before = project_config.read_bytes()
+            actual = read_config(project)
+            with running_opencode(
+                home,
+                home,
+                environment,
+                launcher=os.environ.get(
+                    "NEURODESKTOP_TEST_OPENCODE_BIN", "/usr/bin/opencode"
+                ),
+            ) as native_config:
+                expected = native_config(project)
+            assert actual["model"] == expected["model"] == "ollama/project-selected"
+            ollama = actual["provider"]["ollama"]
+            if custom_endpoint:
+                assert ollama == expected["provider"]["ollama"]
+            else:
+                assert ollama["models"]["neurodesk-controlled:latest"]["limit"] == {
+                    "context": 2048,
+                    "output": 512,
+                }
+                assert "project-selected" in ollama["whitelist"]
+                assert (
+                    read_config()["provider"]["ollama"]["models"][
+                        "neurodesk-controlled:latest"
+                    ]["limit"]["context"]
+                    == 65536
+                )
+            assert project_config.read_bytes() == before
+    assert global_config.read_bytes() == saved
+
+
+@pytest.mark.parametrize("reference", ["env", "file"])
+def test_discovered_model_cannot_interpolate_private_config(tmp_path, reference):
+    home = tmp_path / "home"
+    home.mkdir()
+    secret = "canary-discovered-model-private-9a831"
+    secret_file = home / "private-key"
+    secret_file.write_text(secret)
+    malicious = "probe-" + (
+        "{env:NEURODESK_API_KEY}"
+        if reference == "env"
+        else "{file:" + str(secret_file) + "}"
+    )
+    config_path = home / ".config/opencode/opencode.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                "$schema": "https://opencode.ai/config.json",
+                "provider": {
+                    "ollama": {
+                        "npm": "@ai-sdk/openai-compatible",
+                        "models": {
+                            "user-model": {
+                                "name": "{env:USER_MODEL_NAME}",
+                                "limit": {"context": 2048, "output": 512},
+                            },
+                        },
+                    }
+                },
+                "model": "ollama/user-model",
+            }
+        )
+    )
+    saved = config_path.read_bytes()
+    environment = isolated_environment(home)
+    environment.update(
+        NEURODESK_API_KEY=secret, USER_MODEL_NAME="Intentional user reference"
+    )
+    with fake_ollama(names=[malicious]) as (host, _):
+        environment["OLLAMA_HOST"] = host
+        with running_opencode(home, home, environment) as read_config:
+            provider = read_config()["provider"]["ollama"]
+            assert secret not in json.dumps(provider)
+            assert malicious not in provider["models"]
+            assert (
+                provider["models"]["user-model"]["name"] == "Intentional user reference"
+            )
+    assert config_path.read_bytes() == saved
+
+
+@pytest.mark.parametrize("online", [True, False])
+def test_quiet_empty_catalog_and_offline_saved_models(tmp_path, online):
+    home = tmp_path / "home"
+    home.mkdir()
+    path = home / ".config/opencode/opencode.json"
+    path.parent.mkdir(parents=True)
+    config = json.loads(DEFAULTS.read_text())
+    config["model"] = "ollama/user-saved"
+    config["provider"]["ollama"]["models"]["user-saved"] = {
+        "name": "Saved",
+        "limit": {"context": 2048, "output": 512},
+    }
+    path.write_text(json.dumps(config))
+    before = path.read_bytes()
+    environment = isolated_environment(home)
+    with fake_ollama(names=[]) as (host, _):
+        environment["OLLAMA_HOST"] = host if online else "http://127.0.0.1:1"
+        with running_opencode(home, home, environment) as read_config:
+            actual = read_config()
+            assert actual["model"] == "ollama/user-saved"
+            ollama = actual["provider"]["ollama"]
+            assert (
+                ollama["models"]["user-saved"]
+                == config["provider"]["ollama"]["models"]["user-saved"]
+            )
+            if online:
+                assert ollama["whitelist"] == ["user-saved"]
+            else:
+                assert ollama == config["provider"]["ollama"]
+    assert path.read_bytes() == before

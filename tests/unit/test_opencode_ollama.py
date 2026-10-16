@@ -126,6 +126,8 @@ def test_deadline_covers_all_model_metadata_requests():
         "https://example.org?token=secret",
         "http://x:bad",
         "not a URL",
+        "http://example.org/{env:NEURODESK_API_KEY}",
+        "http://example.org/{file:/tmp/private}",
     ],
 )
 def test_discovery_rejects_credentialed_and_invalid_endpoints(endpoint):
@@ -134,13 +136,27 @@ def test_discovery_rejects_credentialed_and_invalid_endpoints(endpoint):
 
 @pytest.fixture
 def quiet_launcher(tmp_path):
+    plugin = tmp_path / "ollama-config.mjs"
+    plugin.write_text(
+        repo_path("config/agents/opencode_ollama_config.js")
+        .read_text()
+        .replace(
+            "/opt/neurodesktop/opencode_update_config.py",
+            str(repo_path("config/agents/opencode_update_config.py")),
+        )
+    )
+    driver = tmp_path / "config-driver.mjs"
+    driver.write_text("""import { OllamaConfig } from './ollama-config.mjs';
+const config = JSON.parse(process.env.TEST_RESOLVED_CONFIG || '{}');
+const hooks = await OllamaConfig({});
+if (hooks.config) await hooks.config(config);
+process.stdout.write(JSON.stringify(config));
+""")
     binary = tmp_path / "opencode-real"
-    binary.write_text("""#!/usr/bin/env python3
-import json,os,sys
-if sys.argv[1:3] == ["debug", "config"]:
-    print(os.environ.get("TEST_RESOLVED_CONFIG", "{}"))
-else:
-    print(json.dumps({"argv":sys.argv[1:],"inline":os.environ.get("OPENCODE_CONFIG_CONTENT")}))
+    binary.write_text(f"""#!/usr/bin/env python3
+import json,os,sys,subprocess
+resolved = subprocess.check_output(["node", {str(driver)!r}],text=True)
+print(json.dumps({{"argv":sys.argv[1:],"inline":os.environ.get("OPENCODE_CONFIG_CONTENT"),"resolved":json.loads(resolved)}}))
 """)
     binary.chmod(0o755)
     defaults = repo_path("config/agents/opencode_config.json")
@@ -180,7 +196,7 @@ def test_fresh_quiet_serve_discovers_without_global_writes_or_setup(quiet_launch
     launcher, home = quiet_launcher
     with ollama_server() as (host, calls):
         result = run_quiet(launcher, home, OLLAMA_HOST=host)
-    provider = json.loads(result["inline"])["provider"]["ollama"]
+    provider = result["resolved"]["provider"]["ollama"]
     assert provider["models"]["actual:latest"]["limit"] == {
         "context": 4096,
         "output": 4096,
@@ -232,6 +248,7 @@ def test_custom_resolved_provider_survives(quiet_launcher):
             launcher, home, OLLAMA_HOST=host, TEST_RESOLVED_CONFIG=json.dumps(resolved)
         )
     assert result["inline"] is None
+    assert result["resolved"] == resolved
 
 
 def test_offline_preserves_saved_configs_and_inline_settings(quiet_launcher):
@@ -246,13 +263,13 @@ def test_offline_preserves_saved_configs_and_inline_settings(quiet_launcher):
     assert config.read_text() == '{"model":"ollama/saved"}'
 
 
-def test_concurrent_quiet_launches_have_independent_overlays(quiet_launcher):
+def test_concurrent_quiet_launches_have_independent_observations(quiet_launcher):
     launcher, home = quiet_launcher
     with ollama_server() as (host, _), ThreadPoolExecutor() as pool:
         results = list(
             pool.map(lambda _: run_quiet(launcher, home, OLLAMA_HOST=host), range(4))
         )
-    assert len({result["inline"] for result in results}) == 1
+    assert len({json.dumps(result["resolved"]) for result in results}) == 1
     assert not list(home.iterdir())
 
 
@@ -306,7 +323,7 @@ def test_model_ids_remain_data_at_the_shell_boundary(quiet_launcher):
     model = "-model;$(touch injected)"
     with ollama_server(tags={"models": [{"name": model}]}) as (host, _):
         result = run_quiet(launcher, home, OLLAMA_HOST=host)
-    assert model in json.loads(result["inline"])["provider"]["ollama"]["models"]
+    assert model in result["resolved"]["provider"]["ollama"]["models"]
     assert not (home / "injected").exists()
 
 
@@ -336,3 +353,37 @@ def test_interactive_refresh_preserves_custom_ollama_provider():
 def test_discovery_bounds_model_ids_catalog_and_response_size(tags):
     with ollama_server(tags=tags) as (host, _):
         assert ouc.discover_ollama(host) is None
+
+
+@pytest.mark.parametrize(
+    "name", ["probe-{env:NEURODESK_API_KEY}", "probe-{file:/private}"]
+)
+def test_discovered_interpolation_is_rejected_before_show_and_config(name):
+    with ollama_server(tags={"models": [{"name": name}]}) as (host, calls):
+        assert ouc.discover_ollama(host) is None
+    assert [path for path, _ in calls] == ["/api/tags"]
+
+
+@pytest.mark.parametrize("field", ["model", "endpoint"])
+def test_interactive_refresh_rejects_interpolation_in_observed_values(field):
+    existing = {
+        "provider": {"ollama": {"models": {"saved": {"name": "{env:USER_NAME}"}}}}
+    }
+    models = ouc.DetectedModels(models={"ollama": ["fresh"]})
+    if field == "model":
+        models.models["ollama"] = ["{env:NEURODESK_API_KEY}"]
+    else:
+        models.base_urls["ollama"] = "http://example.org/{file:/private}"
+    assert ouc.update_config(existing, {}, models)["provider"] == existing["provider"]
+
+
+def test_ollama_config_plugin_is_installed_with_home_defaults():
+    dockerfile = repo_path("Dockerfile").read_text()
+    assert (
+        "--mount=type=bind,source=config/agents/opencode_ollama_config.js,target=/tmp/agents/opencode_ollama_config.js,ro"
+        in dockerfile
+    )
+    assert (
+        "install -D -m 0644 /tmp/agents/opencode_ollama_config.js /opt/jovyan_defaults/.config/opencode/plugins/ollama-config.js"
+        in dockerfile
+    )

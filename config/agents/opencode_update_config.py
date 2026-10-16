@@ -14,7 +14,8 @@ stderr and the exit status is 1. Config updates write nothing to stdout.
 
 ``--discover-ollama`` emits one successful catalog as JSON for the interactive
 wrapper. ``--quiet-exec BINARY DEFAULTS ARGS...`` supplies a process-local
-Ollama overlay before exec, without prompts or config writes.
+Ollama observation for the native per-directory config hook, without prompts
+or config writes.
 
 Usage::
 
@@ -53,6 +54,7 @@ FALLBACK_OLLAMA_OUTPUT_LIMIT = 8192
 DEFAULT_OLLAMA_HOST = "http://host.docker.internal:11434"
 OLLAMA_DISCOVERY_SECONDS = 6.0
 OLLAMA_DISCOVERY_CONTEXT_LIMIT = 32768
+OLLAMA_SNAPSHOT_ENV = "NEURODESKTOP_OPENCODE_OLLAMA_SNAPSHOT"
 
 
 @dataclass(frozen=True)
@@ -63,8 +65,14 @@ class OllamaSnapshot:
     contexts: dict[str, int]
 
 
+def has_config_reference(value: str) -> bool:
+    return "{env:" in value or "{file:" in value
+
+
 def ollama_base_url(host: str) -> str | None:
     """Normalize an unauthenticated Ollama endpoint to its OpenAI base URL."""
+    if has_config_reference(host):
+        return None
     try:
         parsed = urlsplit(host)
         if (
@@ -171,6 +179,7 @@ def discover_ollama(
             not isinstance(name, str)
             or not name
             or len(name) > 512
+            or has_config_reference(name)
             or any(ord(c) < 32 for c in name)
         ):
             return None
@@ -355,6 +364,11 @@ def _refresh_provider(
     provider_key: str,
     models: DetectedModels,
 ) -> None:
+    if has_config_reference(models.base_urls[provider_key]) or any(
+        isinstance(name, str) and has_config_reference(name)
+        for name in models.models.get(provider_key, [])
+    ):
+        return
     provider_cfg = providers.get(provider_key)
     if not isinstance(provider_cfg, dict):
         default_provider = default_providers.get(provider_key)
@@ -515,59 +529,41 @@ def detected_models_from_args(args: argparse.Namespace) -> DetectedModels:
 
 
 def exec_quiet_opencode(binary: str, defaults_path: Path, argv: list[str]) -> None:
+    os.environ.pop(OLLAMA_SNAPSHOT_ENV, None)
     if argv and argv[0] in ("serve", "acp"):
-        try:
-            inline = json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT") or "{}")
-            if not isinstance(inline, dict):
-                raise ValueError("inline config is not an object")
-            # Ask the installed parser about JSONC, environment substitution,
-            # project files and custom config paths. Never re-emit its redacted
-            # secrets or copy its resolved top-level values into inline config.
-            probe = subprocess.run(
-                [binary, "debug", "config", "--pure"],
-                env={
-                    **os.environ,
-                    "OPENCODE_CONFIG_CONTENT": os.environ.get("OPENCODE_CONFIG_CONTENT")
-                    or "{}",
-                },
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=True,
+        snapshot = discover_ollama(os.environ.get("OLLAMA_HOST") or DEFAULT_OLLAMA_HOST)
+        if snapshot is not None:
+            content = json.dumps(
+                {
+                    "base_url": snapshot.base_url,
+                    "contexts": snapshot.contexts,
+                    "defaults": str(defaults_path),
+                }
             )
-            existing = json.loads(probe.stdout)
-            if not isinstance(existing, dict):
-                raise ValueError("resolved config is not an object")
-            snapshot = discover_ollama(
-                os.environ.get("OLLAMA_HOST") or DEFAULT_OLLAMA_HOST
-            )
-            if snapshot is not None:
-                defaults = (
-                    load_json_object(defaults_path) if defaults_path.exists() else {}
-                )
-                overlay = quiet_ollama_overlay(snapshot, existing, defaults)
-                if overlay:
-                    providers = inline.setdefault("provider", {})
-                    if "ollama" not in providers:
-                        providers["ollama"] = overlay["provider"]["ollama"]
-                        content = json.dumps(inline)
-                        if len(content.encode()) <= 65536:
-                            os.environ["OPENCODE_CONFIG_CONTENT"] = content
-        except (
-            ConfigError,
-            OSError,
-            subprocess.SubprocessError,
-            ValueError,
-            TypeError,
-        ):
-            pass
+            if len(content.encode()) <= 65536:
+                os.environ[OLLAMA_SNAPSHOT_ENV] = content
     os.execv(binary, [binary, *argv])
+
+
+def quiet_overlay_from_stdin() -> JsonObject:
+    try:
+        observation = json.loads(os.environ[OLLAMA_SNAPSHOT_ENV])
+        snapshot = OllamaSnapshot(observation["base_url"], observation["contexts"])
+        defaults_path = Path(observation["defaults"])
+        defaults = load_json_object(defaults_path) if defaults_path.exists() else {}
+        existing = json.load(sys.stdin)
+        return quiet_ollama_overlay(snapshot, existing, defaults)
+    except (ConfigError, OSError, ValueError, TypeError, KeyError):
+        return {}
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] == "--quiet-exec":
         exec_quiet_opencode(argv[1], Path(argv[2]), argv[3:])
+        return 0
+    if argv == ["--quiet-overlay"]:
+        print(json.dumps(quiet_overlay_from_stdin()))
         return 0
     if argv == ["--discover-ollama"]:
         snapshot = discover_ollama(os.environ.get("OLLAMA_HOST") or DEFAULT_OLLAMA_HOST)

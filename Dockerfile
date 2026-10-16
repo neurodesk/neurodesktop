@@ -1324,6 +1324,7 @@ RUN --mount=type=bind,source=config/itksnap/UserPreferences.xml,target=/tmp/itks
     --mount=type=bind,source=config/agents/claude_settings.local.json,target=/tmp/agents/claude_settings.local.json,ro \
     --mount=type=bind,source=config/agents/claude_mcp_config.json,target=/tmp/agents/claude_mcp_config.json,ro \
     --mount=type=bind,source=config/agents/opencode_config.json,target=/tmp/agents/opencode_config.json,ro \
+    --mount=type=bind,source=config/agents/opencode_ollama_config.js,target=/tmp/agents/opencode_ollama_config.js,ro \
     --mount=type=bind,source=config/agents/opencode_lightcone_hooks.js,target=/tmp/agents/opencode_lightcone_hooks.js,ro \
     --mount=type=bind,source=config/agents/codex_config.toml,target=/tmp/agents/codex_config.toml,ro \
     --mount=type=bind,source=config/agents/AGENTS_nbi.md,target=/tmp/agents/AGENTS_nbi.md,ro \
@@ -1362,6 +1363,7 @@ RUN --mount=type=bind,source=config/itksnap/UserPreferences.xml,target=/tmp/itks
     && install -m 0644 /tmp/agents/claude_settings.local.json /opt/jovyan_defaults/.claude/settings.local.json \
     && install -m 0644 /tmp/agents/claude_mcp_config.json /opt/jovyan_defaults/.claude/mcp_config.json \
     && install -m 0644 /tmp/agents/opencode_config.json /opt/jovyan_defaults/.config/opencode/opencode.json \
+    && install -D -m 0644 /tmp/agents/opencode_ollama_config.js /opt/jovyan_defaults/.config/opencode/plugins/ollama-config.js \
     && install -D -m 0644 /tmp/agents/opencode_lightcone_hooks.js /opt/jovyan_defaults/.config/opencode/plugins/lightcone-hooks.js \
     && install -m 0644 /tmp/agents/codex_config.toml /opt/jovyan_defaults/.codex/config.toml \
     && install -m 0644 /tmp/sshd_config /opt/jovyan_defaults/.ssh/sshd_config \
