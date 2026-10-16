@@ -39,7 +39,13 @@ Lightcone 0.5.0 uses native compute allocation and materialization. The image
 verifies its source archive and pins ASTRA to the viewer's versions without
 changing upstream dependency declarations. It carries no isolated Snakemake
 or packaging override. A separate source-anchored adapter enables only the
-explicit external-module profile described below.
+explicit external-module profile described below. The image also places default
+compute connection material in `/tmp/neurodesk-lightcone-<uid>`, with mode 0700.
+The image's group-writable home cannot satisfy upstream's ancestor checks.
+Those ownership, symlink, and permission checks remain intact. A user compute
+catalog can still set `connection_root`; remote Slurm workers require a shared
+path that satisfies the same checks. The default state is local to the
+container and is discarded when the container is recreated.
 
 ## Recording what ran
 
@@ -69,11 +75,18 @@ declared string carries no version token the tool actually reported. Version
 tokens are compared whole, so `2.5.1` does not satisfy a declared `12.5.10`.
 That is the completion check agents run, and it needs no judgment.
 
-The two paths are mutually exclusive by design: the optional `lc` path below
-refuses a declared `container:` for the same reason the viewer paints a
-declared-image-plus-`runtime: none` manifest red.
+In the native Lightcone path, ASTRA's `container:` is a software label, not a
+runtime selection. Module profiles cannot also declare `[tool.lightcone.image]`.
+Keep software labels and inspect the actual execution attestation. Legacy
+manifests that claim a container with `runtime: none` remain a provenance
+mismatch in the viewer.
 
 ## Executing an analysis with `lc`
+
+Lightcone 0.5 materializes root outputs only. ASTRA resolves child outputs with
+dots, which this release rejects when naming artifacts. Keep executable recipes
+at the project's root analysis or use the plain Slurm flow for child analyses.
+The viewer rejects fabricated slash or dotted output IDs in 0.5 evidence.
 
 The default Neurodesktop flow is one plain `sbatch` script per analysis step
 with `module load` pinning each tool. It produces no manifest, so the viewer

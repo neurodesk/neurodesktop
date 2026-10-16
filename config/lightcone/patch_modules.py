@@ -10,12 +10,20 @@ def patch(source: Path) -> None:
         "container.py": "7426b7cff4529b255fd060daee6757600a25ca7dec0d8140735e568610a14674",
         "identity.py": "8cb15288dc4d234cc4c5664b58f5ef14864258386348f602f06fc3d1181a9337",
         "materialize.py": "cde7a7b1f673f75c84176a09ad7e8d8f2e8148711887c2072a3da86b78fe67a9",
+        "compute/runtime.py": "ac3331bb9e7f1f45715ac43d29ec92cdd5efa460975e177ff4504d052c717928",
     }
     for name, digest in expected.items():
         if hashlib.sha256((engine / name).read_bytes()).hexdigest() != digest:
             raise ValueError(
                 f"Lightcone 0.5.0 source drift in {name}; review module seams"
             )
+    runtime_path = engine / "compute/runtime.py"
+    runtime_path.write_text(
+        runtime_path.read_text().replace(
+            'DEFAULT_CONNECTION_ROOT = "~/.lightcone/compute"',
+            'DEFAULT_CONNECTION_ROOT = f"/tmp/neurodesk-lightcone-{os.getuid()}"',
+        )
+    )
     container = (engine / "container.py").read_text()
     anchor = '    if runtime.mode == "direct":\n        return sandbox.detect()'
     container = container.replace(

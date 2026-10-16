@@ -236,6 +236,15 @@ def _digest(value: Any) -> str:
     return value.removeprefix("sha256:")
 
 
+def _v05_output_id(value: Any) -> str:
+    value = _identifier(value)
+    if "/" in value or "." in value:
+        raise RunManifestError(
+            "Lightcone 0.5 output id must be one component without dots"
+        )
+    return value
+
+
 def _canonical_record(path: Path, root: Path) -> dict[str, Any] | None:
     # Unfetched annex objects retain their identity but cannot supply evidence bytes.
     if not path.exists():
@@ -248,7 +257,7 @@ def _canonical_record(path: Path, root: Path) -> dict[str, Any] | None:
     data = _load_json(path)
     if not isinstance(data, dict) or data.get("schema_version") != 1:
         raise RunManifestError("unsupported Lightcone canonical manifest")
-    output = _identifier(data.get("output_id"))
+    output = _v05_output_id(data.get("output_id"))
     universe = _identifier(data.get("universe_id"))
     if "/" in universe:
         raise RunManifestError("invalid Lightcone universe")
@@ -291,6 +300,7 @@ def _status_v05(data: dict[str, Any], root: Path) -> list[dict[str, Any]]:
             raise RunManifestError(
                 f"malformed or duplicate Lightcone output {qualified}"
             )
+        _v05_output_id(output)
         seen.add(qualified)
         if row.get("status") not in {"current", "behind", "stale"}:
             raise RunManifestError("invalid Lightcone freshness state")

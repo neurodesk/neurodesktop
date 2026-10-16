@@ -330,6 +330,8 @@ with `git init` and `lc init`, configure the user's Git identity, declare an
 appropriate `[project].license`, and commit the project before execution.
 Each executable output needs `format`. Put walltime on the allocation, not
 `recipe.resources.time_limit`.
+Keep Lightcone-executable outputs in the root analysis. Version 0.5 rejects
+ASTRA's qualified child-output IDs; never fabricate slash IDs as run evidence.
 
 For module recipes, commit `[tool.neurodesk.lightcone]` with `execution =
 "modules"` and exact pins such as `modules = ["fsl/6.0.7.22"]`. Run

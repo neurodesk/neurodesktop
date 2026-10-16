@@ -13,15 +13,24 @@ ARG CVMFS_RELEASE_SHA256=88f4bb658c2c85e77aec39181f61dea8ab641b3481a0db2b00f453b
 ARG NPM_VERSION=12.2.1
 ARG JUPYTER_BUILDER_VERSION=1.2.3
 
-FROM golang:${APPTAINER_GO_VERSION}-bookworm AS apptainer
+FROM golang:${APPTAINER_GO_VERSION}-bookworm AS go-toolchain
+
+FROM quay.io/jupyter/base-notebook:${BASE_IMAGE_TAG} AS apptainer
+
+USER root
+COPY --from=go-toolchain /usr/local/go /usr/local/go
+ENV GOPATH=/go GOTOOLCHAIN=local
+ENV PATH=/usr/local/go/bin:/go/bin:${PATH}
 
 ARG APPTAINER_VERSION
+ARG APPTAINER_GO_VERSION
 ARG APPTAINER_GRPC_VERSION
 ARG APPTAINER_CRYPTO_VERSION
 
 COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
 
-RUN apt-install-retry \
+RUN test "$(go env GOVERSION)" = "go${APPTAINER_GO_VERSION}" \
+    && apt-install-retry \
     autoconf \
     automake \
     build-essential \
@@ -297,6 +306,7 @@ COPY --from=apptainer /opt/apptainer /opt/apptainer
 # "proot: error while loading shared libraries: libtalloc.so.2 / libprotobuf-c.so.1".
 RUN ln -sf /opt/apptainer/bin/apptainer /usr/local/bin/apptainer \
     && ln -sf /opt/apptainer/bin/singularity /usr/local/bin/singularity \
+    && /opt/apptainer/bin/apptainer --version \
     && sed -i 's/^allow setuid = yes/allow setuid = no/' /opt/apptainer/etc/apptainer/apptainer.conf \
     && apt-install-retry fuse-overlayfs squashfuse libtalloc2 libprotobuf-c1 \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \

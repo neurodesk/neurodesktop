@@ -69,6 +69,12 @@ environment retains Conda's compatible release. A disposable image probe
 passed `pip check` and executed a real Snakemake workflow after this split.
 Installed-image dependency consistency is now a required container test.
 
+The science probe also found that the Debian-built Apptainer required
+`libsubid.so.4`, whereas the Ubuntu 26 runtime supplies `libsubid.so.5`.
+Apptainer now compiles on the same Ubuntu base as the runtime, using the
+pinned official Go SDK. The final runtime layer starts the executable to
+reject an incompatible library set during the build.
+
 Notebook Intelligence 6.2 accepts the ACP protocol range used by Jupyter AI's
 current client. Its published launcher bundle supports this JupyterLab, so the
 obsolete source rebuild and large checked-in lockfile are removed. One package
@@ -100,6 +106,13 @@ spec-only. It validates artifact confinement and available content hashes and
 does not infer verification from a completed action. Captured real-worker
 artifacts live in [the 0.5 fixture](../../tests/fixtures/lightcone-0.5/README.md).
 See [ASTRA architecture](../architecture/astra.md) for usage.
+
+Independent review rejected invented nested-output evidence. Lightcone 0.5
+rejects ASTRA's dotted child IDs itself, so the viewer enforces that producer
+boundary and leaves child analyses unexecuted rather than translating IDs.
+Native image testing also exposed incompatible default connection storage
+under the image's group-writable home. The image uses a private per-user
+temporary root while preserving upstream ownership and ancestor checks.
 
 ## T3 and local Ollama
 

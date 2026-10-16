@@ -241,7 +241,11 @@ anchor fails the image build and requires the patch to be reassessed.
 ## Apptainer
 
 The Dockerfile builds Apptainer from upstream source in a dedicated build stage
-and copies `/opt/apptainer` into the runtime image. The build is controlled by
+on the runtime's Ubuntu base and copies `/opt/apptainer` into the runtime image.
+It copies the pinned Go SDK from the official Go image. Matching the runtime
+distribution keeps native dependencies such as `libsubid` on the same ABI;
+the runtime layer executes `apptainer --version` to catch missing libraries.
+The build is controlled by
 `APPTAINER_VERSION`, `APPTAINER_GO_VERSION`, `APPTAINER_GRPC_VERSION`, and
 `APPTAINER_CRYPTO_VERSION` so the image can move to scanner-fixed Go toolchain
 and module versions before a matching upstream multi-arch runtime image is

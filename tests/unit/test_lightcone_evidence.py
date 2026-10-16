@@ -126,14 +126,14 @@ def test_status_boundary(project, mutation):
         assert result["errors"]
 
 
-def test_nested_ids_are_not_reduced_to_basename(project):
+@pytest.mark.parametrize("output", ["sub/deeper/answer", "child.answer"])
+def test_status_rejects_output_ids_the_producer_cannot_materialize(project, output):
     data = json.loads((FIXTURE / "never.json").read_text())
-    data["outputs"][0]["output"] = "baseline/sub/deeper/answer"
+    data["outputs"][0]["output"] = f"baseline/{output}"
     path = project / "snapshot.json"
     path.write_text(json.dumps(data))
-    overlay = load_run(path, project_root=project, universe_id="baseline")
-    assert "sub/deeper/answer" in overlay["records"]
-    assert overlay["trust"]["level"] == "spec-only"
+    with pytest.raises(RunManifestError, match="output id"):
+        load_run(path, project_root=project, universe_id="baseline")
 
 
 @pytest.fixture
@@ -165,16 +165,15 @@ def test_canonical_root_evidence_never_attaches_to_child(child_project, evidence
     assert result["trust"]["level"] == "spec-only"
 
 
-def test_canonical_nested_scope_matches_exactly(child_project):
+@pytest.mark.parametrize("output", ["child/answer", "child.answer"])
+def test_canonical_rejects_impossible_nested_execution(child_project, output):
     path = child_project / "results/baseline/.answer.manifest.json"
     data = json.loads(path.read_text())
-    data["output_id"] = "child/answer"
+    data["output_id"] = output
     path.write_text(json.dumps(data))
     result = graph(child_project, path)
-    assert not result["errors"]
-    child = next(n for n in result["nodes"] if n["id"] == "output:root/child/answer")
-    assert child["status"] == "ok"
-    assert result["trust"]["level"] == "executed-unverified"
+    assert result["errors"]
+    assert result["trust"]["level"] == "spec-only"
 
 
 def test_legacy_unique_local_id_still_matches_child(child_project):

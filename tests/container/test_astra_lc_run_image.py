@@ -85,6 +85,36 @@ def test_lc05_installed_native_contract():
     )
 
 
+def test_lc05_connections_are_private_without_changing_home():
+    before = Path.home().stat().st_mode
+    command(
+        Path.cwd(),
+        "/opt/uv/tools/lightcone-cli/bin/python",
+        "-c",
+        """import os, stat, tempfile
+from pathlib import Path
+from lightcone.engine.compute.runtime import DEFAULT_CONNECTION_ROOT, private_directory
+from lightcone.engine.compute.model import ComputeError
+root = Path(DEFAULT_CONNECTION_ROOT)
+assert root == Path('/tmp') / f'neurodesk-lightcone-{os.getuid()}'
+private_directory(root, create=True)
+assert root.stat().st_uid == os.getuid()
+assert stat.S_IMODE(root.stat().st_mode) == 0o700
+with tempfile.TemporaryDirectory() as scratch:
+    unsafe = Path(scratch) / 'shared'
+    unsafe.mkdir()
+    unsafe.chmod(0o777)
+    try:
+        private_directory(unsafe / 'connections', create=True)
+    except ComputeError:
+        pass
+    else:
+        raise AssertionError('writable ancestors must still be rejected')
+""",
+    )
+    assert Path.home().stat().st_mode == before
+
+
 def test_native_slurm_materializes_and_rebuilds(tmp_path):
     from neurodesk_astra_view.graph import build_graph
 
