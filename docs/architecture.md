@@ -4,7 +4,7 @@ description: Startup flow, services, directory layout, and the map of
   per-subsystem architecture pages
 parent: index.md
 status: current
-last-reviewed: "2026-10-14"
+last-reviewed: "2026-10-16"
 ---
 
 # Architecture
@@ -39,7 +39,11 @@ The startup sequence follows this order (per
 1. [`config/jupyter/start_notebook.sh`](../config/jupyter/start_notebook.sh)
    sets ownership permissions for the home directory.
 2. [`config/jupyter/before_notebook.sh`](../config/jupyter/before_notebook.sh)
-   configures the environment, sources
+   initializes `.bashrc` under `HOME`, falling back to `/home/${NB_USER}`.
+   After writing, root startup repairs that file's ownership to `NB_UID:NB_GID`
+   without following a symbolic link or traversing the home directory. This
+   best-effort repair skips Apptainer and Singularity and warns on failure.
+   The hook configures the environment, sources
    [`detect_resource_limits.sh`](../config/jupyter/detect_resource_limits.sh)
    and calls `detect_resource_limits` to export `MEM_LIMIT` and `CPU_LIMIT`
    from cgroup v2/v1 files, or from the Slurm allocation inside a Slurm job,

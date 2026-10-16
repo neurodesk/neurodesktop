@@ -1,5 +1,3 @@
-"""Execute the startup bashrc writer against temporary homes."""
-
 import os
 import subprocess
 import tempfile

@@ -270,6 +270,12 @@ EOF
 fi
 # fi
 
+if [ "$EUID" -eq 0 ] && ! is_apptainer_runtime; then
+    if ! chown -h "${NB_UID}:${NB_GID}" "$BASHRC_FILE"; then
+        echo "[WARN] Failed to fix ownership of $BASHRC_FILE."
+    fi
+fi
+
 # Note: environment_variables.sh is sourced via /etc/bash.bashrc (set in Dockerfile)
 
 # Read cgroup and Slurm allocation limits and export MEM_LIMIT/CPU_LIMIT for
