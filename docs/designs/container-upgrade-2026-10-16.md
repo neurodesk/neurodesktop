@@ -16,7 +16,7 @@ authorities and compatibility policy. This record captures the migration.
 
 ## Release decisions
 
-The live audit on 16 October checked 59 direct declarations. After the upgrade,
+The live audit on 16 October checked 60 direct declarations. After the upgrade,
 it reported no available compatible updates and no registry errors. The CVMFS
 repository bootstrap remains a manual review entry. Its release 4.9 supports
 the new Ubuntu repository, which supplies the selected CVMFS client package.
@@ -74,6 +74,9 @@ The science probe also found that the Debian-built Apptainer required
 Apptainer now compiles on the same Ubuntu base as the runtime, using the
 pinned official Go SDK. The final runtime layer starts the executable to
 reject an incompatible library set during the build.
+The matching builder and runtime passed a CVMFS FSL arithmetic probe with
+every output voxel checked. Native Lightcone science acceptance remains a
+separate gate below.
 
 Notebook Intelligence 6.2 accepts the ACP protocol range used by Jupyter AI's
 current client. Its published launcher bundle supports this JupyterLab, so the
