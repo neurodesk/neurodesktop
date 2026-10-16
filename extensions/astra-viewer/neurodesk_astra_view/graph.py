@@ -152,6 +152,8 @@ def _match_run_records(
         scope = tuple(output["scope"])[1:]
         qualified = ".".join((*scope, output["local_id"]))
         by_qualified[qualified].append(output["id"])
+        if scope:
+            by_qualified["/".join((*scope, output["local_id"]))].append(output["id"])
 
     matched: dict[str, dict[str, Any]] = {}
     canonical_run_ids: set[str] = set()
@@ -304,6 +306,10 @@ def _build_valid_graph(project: dict[str, Any], run_path: str | Path | None):
         matched, canonical_run_ids = _match_run_records(
             project["outputs"], overlay["records"]
         )
+        if overlay["source"] == "lightcone-0.5" and not any(
+            record.get("executed") for record in matched.values()
+        ):
+            overlay["trust"] = spec_only_trust()
         for output_id, record in matched.items():
             node = output_nodes[output_id]
             node["status"] = record["status"]
@@ -318,6 +324,9 @@ def _build_valid_graph(project: dict[str, Any], run_path: str | Path | None):
                     "command",
                     "container",
                     "log_excerpt",
+                    "source_commit",
+                    "foreign_write",
+                    "hermeticity",
                 )
                 if record.get(key) is not None
             }

@@ -1,0 +1,15 @@
+version: "0.0.14"
+name: "Lightcone 0.5 execution evidence"
+inputs: []
+outputs:
+  - id: answer
+    type: data
+    format: txt
+    recipe:
+      command: "python -c \"from pathlib import Path; Path('{output}').write_text('42\\n')\""
+      resources: {cpus: 1, memory: "256Mi"}
+  - id: pending
+    type: data
+    format: txt
+    recipe:
+      command: "python -c \"from pathlib import Path; Path('{output}').write_text('pending\\n')\""

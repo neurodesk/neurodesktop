@@ -1067,36 +1067,33 @@ RUN npm_config_cache=/tmp/npm-acp-cache retry npm install -g \
     && command -v codex-acp && command -v claude-agent-acp \
     && test "$(du -sm "$(npm root -g)/@agentclientprotocol" | cut -f1)" -lt 100
 
-# Lightcone runs as a second isolated tool so its Dask/Snakemake dependency
+# Lightcone runs as a second isolated tool so its Dask dependency
 # graph cannot perturb JupyterLab. Keep this after all frontend rebuilds: its
-# dependency updates are runtime-only. A batch job must prepend this
-# environment's bin directory so `lc` and its `dask worker` share one runtime.
+# dependency updates are runtime-only. Native compute catalogs name this
+# environment's Python so the driver and workers share one runtime.
 # ASTRA_SPEC_VERSION and ASTRA_TOOLS_VERSION are still in scope from their
 # single declaration above; do not redeclare them here.
-ARG LIGHTCONE_CLI_VERSION="0.4.2"
-ARG LIGHTCONE_CLI_SHA256="f3105f04b6f6ea6cb049a6e2240ca3461c7aa999930344d7ff9bdbef422fbcae"
-RUN --mount=type=bind,source=config/agents/patch_lightcone_cli.py,target=/tmp/patch_lightcone_cli.py,ro \
+ARG LIGHTCONE_CLI_VERSION="0.5.0"
+ARG LIGHTCONE_CLI_SHA256="ebac3ebd1cf5e5466c38af54286590fedbe5c6ba3dede3bd204e53bb7d6c3bfd"
+RUN --mount=type=bind,source=config/lightcone,target=/tmp/lightcone-adapter,ro \
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 \
     "https://files.pythonhosted.org/packages/source/l/lightcone-cli/lightcone_cli-${LIGHTCONE_CLI_VERSION}.tar.gz" \
     -o /tmp/lightcone-cli.tar.gz \
     && echo "${LIGHTCONE_CLI_SHA256}  /tmp/lightcone-cli.tar.gz" | sha256sum -c - \
     && mkdir -p /tmp/lightcone-cli-src \
     && tar -xzf /tmp/lightcone-cli.tar.gz -C /tmp/lightcone-cli-src --strip-components=1 \
-    && /opt/conda/bin/python /tmp/patch_lightcone_cli.py \
-    /tmp/lightcone-cli-src "${ASTRA_TOOLS_VERSION}" \
+    && /opt/conda/bin/python /tmp/lightcone-adapter/patch_modules.py /tmp/lightcone-cli-src \
     && UV_TOOL_DIR=/opt/uv/tools UV_TOOL_BIN_DIR=/usr/local/bin \
     /opt/conda/bin/uv tool install /tmp/lightcone-cli-src \
     --with "astra-tools==${ASTRA_TOOLS_VERSION}" \
     --with "astra-spec==${ASTRA_SPEC_VERSION}" \
-    --with "snakemake==${SNAKEMAKE_VERSION}" \
-    --with "packaging==25.0" \
     # --no-cache keeps uv's wheel cache out of this layer; without it the
-    # Dask/Snakemake graph would be baked into the image a second time.
+    # Dask graph would be baked into the image a second time.
     --no-cache \
     --python /opt/conda/bin/python --no-python-downloads \
     && test "$(lc --version)" = "lc, version ${LIGHTCONE_CLI_VERSION}" \
     && /opt/uv/tools/lightcone-cli/bin/python -c \
-    "import importlib.metadata as m; assert m.version('astra-tools') == '${ASTRA_TOOLS_VERSION}'; assert m.version('astra-spec') == '${ASTRA_SPEC_VERSION}'; assert m.version('snakemake') == '${SNAKEMAKE_VERSION}'; assert m.version('packaging') == '25.0'" \
+    "import importlib.metadata as m; assert m.version('astra-tools') == '${ASTRA_TOOLS_VERSION}'; assert m.version('astra-spec') == '${ASTRA_SPEC_VERSION}'" \
     && PATH=/opt/uv/tools/lightcone-cli/bin:${PATH} dask --version \
     && rm -rf /tmp/lightcone-cli-src /tmp/lightcone-cli.tar.gz
 
@@ -1385,8 +1382,8 @@ RUN git init -q /opt/neurodesktop/agent-skills \
     && retry git -C /opt/neurodesktop/agent-skills fetch --depth 1 origin "${AGENT_SKILLS_REF}" \
     && git -C /opt/neurodesktop/agent-skills checkout --detach FETCH_HEAD \
     && test "$(git -C /opt/neurodesktop/agent-skills rev-parse HEAD)" = "${AGENT_SKILLS_REF}" \
-    # This is the last reviewed reproduction plugin. Newer upstream commits
-    # removed it in favour of a Lightcone 0.5 release-candidate workflow.
+    # This reviewed plugin teaches ASTRA specifications, not lc execution.
+    # The image analysis contract supplies the native Lightcone 0.5 workflow.
     # Keep its resolver pins aligned with the image's current ASTRA packages.
     && ASTRA_PINS=/opt/neurodesktop/agent-skills/plugins/reproduction/hooks/scripts/astra-pins.sh \
     && grep -qx 'ASTRA_TOOLS_PIN="0.2.11"' "${ASTRA_PINS}" \
@@ -1568,9 +1565,9 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/ssh/ensure_sftp_sshd.sh /opt/neurodesktop/ensure_sftp_sshd.sh \
     && install -m 0755 /tmp/ssh/ensure_ssh_keys.sh /opt/neurodesktop/ensure_ssh_keys.sh \
     && install -m 0755 /tmp/slurm/setup_and_start_slurm.sh /opt/neurodesktop/setup_and_start_slurm.sh \
-    # Optional `lc` execution path: submitted with sbatch, so `lc run` finds
-    # itself inside an allocation and dispatches Dask workers with srun.
-    && install -m 0644 /tmp/slurm/astra_lc_run.sbatch /opt/neurodesktop/astra_lc_run.sbatch \
+    && install -m 0755 /tmp/slurm/neurodesk-lc-materialize /usr/local/bin/neurodesk-lc-materialize \
+    && install -m 0644 /tmp/slurm/lightcone_materialize.py /opt/neurodesktop/lightcone_materialize.py \
+    && install -m 0644 /tmp/slurm/lightcone-compute.yaml /opt/neurodesktop/lightcone-compute.yaml \
     # Only the container tier ships: tests/unit/ asserts on repository sources
     # and runs in CI on a checkout, so it has nothing to say inside the image.
     && cp -a /tmp/tests/container /opt/tests \

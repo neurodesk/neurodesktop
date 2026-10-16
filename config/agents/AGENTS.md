@@ -325,19 +325,32 @@ JupyterLab opens them in the main panel. State separately:
   `spec-only` in the viewer even when the scripts succeeded; the sidecars are
   the record of what ran, not a badge.
 
-The optional `lc` path refuses a spec that declares `container:`, because
-Neurodesk has no container runtime `lc` supports and the declared image would
-be recorded as used without ever running. The two are mutually exclusive. If
-the user explicitly asks for an ASTRA execution badge, say that it costs the
-software declaration and ask before adapting the project:
+For optional Lightcone execution, use the installed 0.5 lifecycle. Initialize
+with `git init` and `lc init`, configure the user's Git identity, declare an
+appropriate `[project].license`, and commit the project before execution.
+Each executable output needs `format`. Put walltime on the allocation, not
+`recipe.resources.time_limit`.
 
-```bash
-cd /home/jovyan/my-analysis
-mkdir -p logs
-NEURODESK_ASTRA_MODULES="fsl/6.0.7.22" \
-NEURODESK_ASTRA_UNIVERSE="baseline" \
-  sbatch /opt/neurodesktop/astra_lc_run.sbatch
-```
+For module recipes, commit `[tool.neurodesk.lightcone]` with `execution =
+"modules"` and exact pins such as `modules = ["fsl/6.0.7.22"]`. Run
+`neurodesk-lc-materialize baseline/OUTPUT` outside `sbatch`. The helper owns
+native allocation and cleanup. Set `LC_COMPUTE_CONFIG` for a host cluster or a
+resource shape different from the installed two-CPU, 8-GiB Slurm offer.
 
-That path writes `status.json` and reaches amber "Executed, unverified"; it
-cannot produce a green verified record. Do not use it by default.
+This profile reloads pinned modules on workers and records `fs: open`; do not
+claim sandbox isolation or verified CVMFS package bytes. Pin changes make
+outputs `behind`; `--refresh` remakes them. Unprofiled projects use the stock
+sandbox and native `lc compute launch`, `lc materialize CLUSTER TARGET`, and
+`lc compute down CLUSTER`. `lc run CLUSTER -- COMMAND` probes the environment.
+Never reuse removed `lc run --universe` or `--jobs` flags.
+
+Keep actual software declarations in the ASTRA spec. `container:` there is a
+label, not a Lightcone runtime selection. The module profile refuses a
+simultaneous `[tool.lightcone.image]` declaration. Do not remove software
+labels to obtain an execution badge.
+
+Read `ro-crate-metadata.json` as the viewer's execution evidence. Do not write
+an automatic competing `status.json`. `lc status --json` is a report;
+`lc materialize --check TARGET` is the freshness gate. Neither establishes
+passing verification. Canonical manifests establish historical execution,
+which the viewer displays as amber, never synthesized green.

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "output_id": "answer",
+  "universe_id": "baseline",
+  "recipe": "external-answer results/baseline/answer.txt",
+  "definition_version": "sha256:af423d3d3630148c69d41793465a69bc8c8692b1c71f12a62874d9843f343116",
+  "env_version": "sha256:9990057ce98f9377428c6c5f4527ba6373f7662683570a868bd13aba18146cf1",
+  "data_version": "sha256:2a800268f93eb81fedf18f0a0c35492986999fb5c8f81e4415ef1cf0dae12408",
+  "decisions": {},
+  "input_versions": {},
+  "git_sha": "820118c5dfa43aee3c6d553f391b91a3a7bb4eaa",
+  "git_remote": "",
+  "lc_version": "0.5.0",
+  "hermeticity": {
+    "mechanism": "none",
+    "fs": "open",
+    "network": "allowed",
+    "landlock_abi": null,
+    "exec_allowlist_version": null,
+    "modules": [
+      "neurodesk-fixture/1.0"
+    ]
+  },
+  "started_at": "2026-10-16T15:12:13.930+00:00",
+  "finished_at": "2026-10-16T15:12:13.969+00:00",
+  "uv_version": "0.12.18",
+  "image": null
+}

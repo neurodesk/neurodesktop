@@ -533,7 +533,7 @@ non-obvious tiers protect.
 | Jupyter Server Proxy response limits | `pytest tests/unit/test_jupyter_server_proxy_limits.py` | `pytest /opt/tests/test_jupyter_server_proxy_limits.py` |
 | ASTRA viewer core (adapter, graph, widget, previews) | `pytest tests/unit/test_astra_view_graph.py tests/unit/test_astra_view_packaging.py tests/unit/test_astra_view_renderer.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py tests/unit/test_astra_view_http.py` | `pytest /opt/tests/test_astra_view_image.py` |
-| `astra`/`lc` installs, Lightcone skills and hooks | `pytest tests/unit/test_astra_jupyter_ai_tooling.py tests/unit/test_lightcone_cli_patch.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
+| `astra`/`lc` installs, Lightcone skills and hooks | `pytest tests/unit/test_astra_jupyter_ai_tooling.py tests/unit/test_lightcone_modules.py tests/unit/test_lightcone_evidence.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
 | ASTRA run provenance sidecars and the spec agreement check | `pytest tests/unit/test_astra_provenance.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
 | Jupyter AI, ACP personas, collaboration/widget compatibility and server patches | see [below](#jupyter-ai-and-acp-personas) | `pytest /opt/tests/test_astra_jupyter_ai_image.py /opt/tests/test_widget_compatibility_image.py` |
 | Notebook Intelligence / MyST and standalone RISE | `pytest tests/unit/test_nbi_settings_patch.py tests/unit/test_myst_build_workaround.py tests/unit/test_jupyterlab_rise_patch.py` | `pytest /opt/tests/test_nbi_labextension_patch.py /opt/tests/test_rise_slides_image.py` |
@@ -701,6 +701,24 @@ schema version the installed `astra validate` speaks, and restores a throwaway
 home to prove all four reproduction skills reach OpenCode. It also drives the
 OpenCode adapter directly and checks that session, read, and edit hook context
 is returned to the model-facing system prompt or tool output.
+
+### Lightcone 0.5 native execution
+
+Run `pytest tests/unit/test_lightcone_modules.py tests/unit/test_lightcone_evidence.py
+ tests/unit/test_astra_view_graph.py` from the checkout. The evidence fixture
+contains real local-worker 0.5 status, manifests, and RO-Crate. Lifecycle unit
+cases double the native CLI and prove ownership and failure propagation, not
+live Slurm compatibility.
+
+In the built image, run `pytest /opt/tests/test_astra_lc_run_image.py` with Slurm
+enabled. This executes a real native allocation, a Python probe, materialization,
+a no-op, freshness checks, a recipe rebuild, viewer ingestion, and cleanup.
+In the privileged science profile, also set
+`NEURODESKTOP_TEST_LIGHTCONE_SCIENCE=1`. That test requires pinned FSL through
+CVMFS and nested Apptainer on a real Lightcone worker, compares every output
+voxel, and checks the manifest's module pins and `fs: open` attestation.
+Repeat the installed tests on native arm64. Missing live services leave these
+gates unverified; the local-worker fixtures do not substitute for them.
 
 ### Jupyter AI and ACP personas
 

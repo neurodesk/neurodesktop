@@ -40,43 +40,47 @@ outputs:
   - id: bet_brain
     label: "BET-extracted brain"
     type: data
+    format: nii.gz
     inputs: [t1w]
     decisions: [bet_fractional_threshold]
     recipe:
       command: >-
         bash src/materialize-bet-output.sh bet_brain
         {inputs.t1w} {decisions.bet_fractional_threshold} {output}
-      resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}
+      resources: {cpus: 1, memory: "4Gi"}
   - id: bet_mask
     label: "BET brain mask"
     type: data
+    format: nii.gz
     inputs: [t1w]
     decisions: [bet_fractional_threshold]
     recipe:
       command: >-
         bash src/materialize-bet-output.sh bet_mask
         {inputs.t1w} {decisions.bet_fractional_threshold} {output}
-      resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}
+      resources: {cpus: 1, memory: "4Gi"}
   - id: mask_volume
     label: "Brain-mask volume"
     type: metric
+    format: json
     inputs: [t1w]
     decisions: [bet_fractional_threshold]
     recipe:
       command: >-
         bash src/materialize-bet-output.sh mask_volume
         {inputs.t1w} {decisions.bet_fractional_threshold} {output}
-      resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}
+      resources: {cpus: 1, memory: "4Gi"}
   - id: boundary_qc
     label: "BET boundary overlay"
     type: figure
+    format: png
     inputs: [t1w]
     decisions: [bet_fractional_threshold]
     recipe:
       command: >-
         bash src/materialize-bet-output.sh boundary_qc
         {inputs.t1w} {decisions.bet_fractional_threshold} {output}
-      resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}
+      resources: {cpus: 1, memory: "4Gi"}
 
 findings:
   boundary_is_inspectable:

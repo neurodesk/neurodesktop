@@ -63,6 +63,22 @@ The session home is `/home/kasm-user`; persist that path instead of overriding
 - `OFFLINE_MODULES`: local Lmod module path derived from
   `NEURODESKTOP_LOCAL_CONTAINERS`
 
+## Lightcone execution
+
+- `LC_COMPUTE_CONFIG`: upstream native compute catalog path. The module helper
+  honors an explicit value or `~/.lightcone/compute.yaml`, otherwise it selects
+  `/opt/neurodesktop/lightcone-compute.yaml` with local fallback disabled.
+- `NEURODESKTOP_TEST_LIGHTCONE_SCIENCE=1`: requires the installed-image test to
+  run real native Slurm, pinned FSL, CVMFS, and nested Apptainer execution.
+  The test fails if those prerequisites are absent.
+
+Module execution is selected only by the committed project profile, never an
+environment toggle. The removed `NEURODESK_ASTRA_PROJECT`,
+`NEURODESK_ASTRA_MODULES`, `NEURODESK_ASTRA_UNIVERSE`, and
+`NEURODESK_ASTRA_JOBS` wrapper variables have no 0.5 meaning. Use helper
+arguments and `[tool.neurodesk.lightcone]` instead. See
+[ASTRA integration](architecture/astra.md).
+
 ## Startup privileges
 
 - `GRANT_SUDO`: defaults to `packages` when the container starts as root.
