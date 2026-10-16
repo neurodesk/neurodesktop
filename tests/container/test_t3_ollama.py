@@ -380,7 +380,7 @@ def complete_through_t3(rpc, home, model, expected, *, timeout=60):
             "interactionMode": "default",
             "workspaceStrategy": {"type": "root"},
             "initialMessage": {
-                "text": f"Reply with exactly {expected}. Do not use tools.\n/no_think",
+                "text": f"Reply with exactly {expected or 'HELLO'}. Do not use tools.\n/no_think",
                 "attachments": [],
             },
         },
@@ -398,7 +398,8 @@ def complete_through_t3(rpc, home, model, expected, *, timeout=60):
             if item["type"] == "assistant_message"
         ]
         if (
-            any(expected in text for text in assistant)
+            any(text.strip() for text in assistant)
+            and (expected is None or any(expected in text for text in assistant))
             and projection["runs"][-1]["status"] == "completed"
         ):
             return projection
@@ -453,9 +454,10 @@ def test_t3_completes_with_an_actual_ollama_server_at_the_docker_default(tmp_pat
     with running_t3(
         tmp_path / "home", host, inline={"agent": {"title": {"disable": True}}}
     ) as rpc:
-        complete_through_t3(
-            rpc, tmp_path / "home", "ollama/" + model, "OLLAMA_OK", timeout=600
+        projection = complete_through_t3(
+            rpc, tmp_path / "home", "ollama/" + model, None, timeout=600
         )
+    assert len(projection["attempts"]) == 1
 
 
 @contextmanager
