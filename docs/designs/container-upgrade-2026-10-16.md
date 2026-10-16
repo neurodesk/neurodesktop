@@ -117,10 +117,14 @@ temporary root while preserving upstream ownership and ancestor checks.
 ## T3 and local Ollama
 
 The interactive OpenCode wrapper and T3's quiet launcher share bounded Ollama
-tags and context discovery. Quiet `serve` and ACP launches pass a process-local
-configuration overlay. They preserve custom endpoints, explicit model choices,
-saved offline settings, and inline configuration precedence. They do not write
-the user's configuration during a chat or print discovery responses.
+tags and context discovery. Quiet `serve` and ACP launches pass a bounded
+observation to a native config hook that runs separately for each project.
+The hook replaces shared provider maps so opening a later project preserves
+its custom endpoint, model limits, and selected models. It leaves inline
+configuration unchanged and never sends resolved values through interpolation
+again. Discovered names and endpoints containing config references are rejected.
+Neither path writes the user's configuration during a chat or prints discovery
+responses.
 
 A real T3 0.1.0 chat completed through OpenCode 1.19.3 and the official Ollama
 0.40.5 Docker image. It discovered `qwen3:0.6b` using the default
