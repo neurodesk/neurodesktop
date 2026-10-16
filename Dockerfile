@@ -636,7 +636,6 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     niwrap \
     nbdev \
     nf-core \
-    snakemake==${SNAKEMAKE_VERSION} \
     pydra==1.0a11 \
     nipoppy \
     matplotlib \
@@ -700,9 +699,6 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     # before an HS256 verifier can reuse the public key as its HMAC secret
     # (CVE-2026-102268). Keep this transitive dependency on the fixed release.
     PyJWT==${PYJWT_VERSION} \
-    # Snakemake 9.27.0 declares packaging<26. Keep its newest compatible
-    # release rather than silently backtracking the user-facing workflow CLI.
-    "packaging==25.0" \
     "requests>=2.34.2" \
     "chardet<8" \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade "litellm>=1.105.1" \
@@ -768,6 +764,13 @@ USER root
 RUN test "$(command -v astra)" = "/opt/conda/bin/astra" \
     && test "$(astra --version)" = "astra, version ${ASTRA_TOOLS_VERSION}" \
     && test "$(/opt/conda/bin/python -c 'import importlib.metadata as m; print(m.version("astra-spec"))')" = "${ASTRA_SPEC_VERSION}"
+
+# Snakemake's packaging<26 conflicts with the base image's Conda requirement.
+RUN UV_TOOL_DIR=/opt/uv/tools UV_TOOL_BIN_DIR=/usr/local/bin \
+    /opt/conda/bin/uv tool install "snakemake==${SNAKEMAKE_VERSION}" \
+    --with "packaging==25.0" --no-cache \
+    --python /opt/conda/bin/python --no-python-downloads \
+    && test "$(snakemake --version)" = "${SNAKEMAKE_VERSION}"
 
 # The from-source labextension rebuilds below are the most expensive
 # layers in the image. They live here — before neurocommand, the local

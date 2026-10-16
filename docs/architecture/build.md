@@ -104,10 +104,12 @@ layer upgrades every direct requested distribution while retaining explicit
 compatibility holds. Resolver-selected dependencies inherit the new base and
 fresh direct solves; the build does not run an unbounded post-solve pip or
 conda upgrade that could replace the base image's tested Jupyter environment.
-Where two current direct packages conflict, the user-facing tool wins: both
-the main image environment and Lightcone's isolated tool environment install
-Snakemake 9.27.0 and hold its infrastructure dependency `packaging` at the
-newest allowed release, 25.0.
+Snakemake 9.27.0 has an isolated tool environment because its `packaging<26`
+requirement conflicts with the base image's Conda requirement of
+`packaging>=26.3`. Its private environment uses `packaging` 25.0 and exposes the
+normal `snakemake` command through `/usr/local/bin`. The main environment
+retains Conda's compatible release. Lightcone has its own isolated environment
+and does not install Snakemake.
 
 The ipyniivue patch is one deliberate exception: its version-coupled source is
 mounted into the pip layer because that layer must replace the installed 5 MB

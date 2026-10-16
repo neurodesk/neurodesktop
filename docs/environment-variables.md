@@ -352,9 +352,9 @@ reviewed; the Dockerfile itself is authoritative.
   installed in the image; defaults to `0.13.1`, `0.2.18`, `0.0.14`, `0.11.0`,
   `0.5.0`, and the verified SHA-256 of that Lightcone source archive
 - `SNAKEMAKE_VERSION`: user-facing Snakemake workflow release; defaults to
-  `9.27.0` in the main Python environment. Its current
-  metadata requires `packaging<26`, so the image holds that infrastructure
-  library at the newest compatible release, `25.0`
+  `9.27.0` in an isolated tool environment. Its metadata requires
+  `packaging<26`, so that environment holds `packaging` at `25.0`.
+  The main Python environment retains Conda's compatible `packaging` release
 - `PYJWT_VERSION`: exact PyJWT release installed into the main Python
   environment; defaults to `2.15.1`. It retains the rejection of non-canonical
   public-key PEM encodings introduced in `2.14.0`, preventing their reuse as

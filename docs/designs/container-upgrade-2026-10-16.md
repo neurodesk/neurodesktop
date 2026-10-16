@@ -61,6 +61,14 @@ needs C17 mode, const-aware libc source changes, and removal of its conflicting
 feature-test macro. The builder verifies that the RDP plugin exists.
 See [build-time behavior](../architecture/build.md) for the current contract.
 
+The first installed-image `pip check` found a conflict that the standalone
+Python solve missed. Conda 26.9.2 requires `packaging>=26.3`, whereas
+Snakemake and its interface packages require `<26`. Snakemake now uses the
+existing isolated-tool mechanism with its private `packaging` 25.0. The main
+environment retains Conda's compatible release. A disposable image probe
+passed `pip check` and executed a real Snakemake workflow after this split.
+Installed-image dependency consistency is now a required container test.
+
 Notebook Intelligence 6.2 accepts the ACP protocol range used by Jupyter AI's
 current client. Its published launcher bundle supports this JupyterLab, so the
 obsolete source rebuild and large checked-in lockfile are removed. One package

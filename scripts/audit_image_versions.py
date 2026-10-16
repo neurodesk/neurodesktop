@@ -137,7 +137,7 @@ CATALOG = (
         "pypi:packaging",
         "pypi",
         "<26",
-        "The pinned Snakemake release requires packaging below 26.",
+        "Snakemake's isolated tool environment requires packaging below 26; the main environment keeps Conda's compatible release.",
     ),
     CatalogEntry("requirement:pypi:requests", "pypi:requests", "pypi"),
     CatalogEntry("requirement:pypi:litellm", "pypi:litellm", "pypi"),
