@@ -142,7 +142,6 @@ RUN mkdir -p /opt/glass/bin \
     && rm -rf /tmp/glass
 
 # Build Guacamole server
-# GUACAMOLE-2328, upstream commit ab36756b596520ae2a94cd4d25e406e0b5aa820b.
 RUN --mount=type=bind,source=config/guacamole/guacamole-1.6.0-GUACAMOLE-2328.patch,target=/tmp/guacamole/guacamole-1.6.0-GUACAMOLE-2328.patch,ro \
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
     "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/source/guacamole-server-${GUACAMOLE_VERSION}.tar.gz" \
