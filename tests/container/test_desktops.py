@@ -19,6 +19,7 @@ import urllib.request
 import pytest
 import websocket
 from native_desktop_driver import start_display
+from rdp_keyboard_target import RdpKeyboardTarget
 
 
 def run_cmd(cmd):
@@ -1372,6 +1373,7 @@ def test_guac_rdp_tunnel():
         )
         rdp_connection_id = _connection_id_by_protocol(connections, "rdp")
 
+        keyboard_target = RdpKeyboardTarget(account.pw_uid)
         tunnel = _open_guacamole_tunnel(
             process.tomcat_port,
             auth_response["authToken"],
@@ -1379,6 +1381,7 @@ def test_guac_rdp_tunnel():
             rdp_connection_id,
         )
         _collect_guacamole_desktop_frames(tunnel)
+        keyboard_target.wait(tunnel)
 
         def key(keysym, pressed):
             value = str(keysym)
@@ -1388,7 +1391,7 @@ def test_guac_rdp_tunnel():
         key(65471, True)
         key(65471, False)
         key(65513, False)
-        _collect_guacamole_desktop_frames(tunnel, timeout_seconds=10)
+        keyboard_target.wait(tunnel, run_dialog=True, timeout_seconds=10)
         output = Path(home_dir) / "rdp-command.txt"
         assert not output.exists(), "RDP command output must be new for this session"
         command = "sh -c " + shlex.quote(

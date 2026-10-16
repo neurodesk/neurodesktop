@@ -348,9 +348,14 @@ checks both handlers after the closed driver has been garbage-collected.
 from silently skipping when CVMFS is disabled.
 
 The RDP test uses the service provisioned by root startup. It runs as the
-notebook user without unrestricted sudo, waits for desktop pixels, then launches
-a command through Guacamole keyboard input and checks its output file. The
-marker lives in a fresh, session-owned temporary directory, so root-run tests
+notebook user without unrestricted sudo and requires pixels over Guacamole.
+A read-only X11 probe identifies the new notebook-user XRDP process and its
+display and authority file. Before Alt+F2, it waits for WM registration and a
+mapped LXDE panel. Before typing, it requires a mapped, active Run dialog with
+one of its children holding keyboard focus. These bounded waits also read the
+Guacamole tunnel and fail on disconnects or protocol errors. The test launches
+a command entirely through Guacamole keyboard input and checks its output file.
+The marker lives in a fresh, session-owned temporary directory, so root-run tests
 remain writable by the desktop user and cannot accept a prior result. A login
 screen alone does not satisfy this check. Enable it only in disposable test
 containers with `NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1`. The HPC
