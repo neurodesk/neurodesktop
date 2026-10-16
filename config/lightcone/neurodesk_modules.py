@@ -1,5 +1,3 @@
-"""Explicit external-module execution for the image's pinned Lightcone."""
-
 from __future__ import annotations
 
 import json

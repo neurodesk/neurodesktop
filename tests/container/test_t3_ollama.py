@@ -1,5 +1,3 @@
-"""Real T3 first-use discovery and completion through the quiet image launcher."""
-
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import http.server

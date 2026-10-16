@@ -1,5 +1,3 @@
-"""Ollama observation and quiet-launch behavior through subprocess boundaries."""
-
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import http.server

@@ -1,5 +1,3 @@
-"""Viewer behavior against artifacts captured from a real Lightcone 0.5 worker."""
-
 import json
 from pathlib import Path
 import shutil

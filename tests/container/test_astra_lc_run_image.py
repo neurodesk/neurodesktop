@@ -1,5 +1,3 @@
-"""Installed Lightcone 0.5 execution, including native Slurm and CVMFS gates."""
-
 import json
 import os
 from pathlib import Path

@@ -1,5 +1,3 @@
-"""Module declaration and native lifecycle behavior, with native CLIs doubled."""
-
 import importlib.util
 import json
 import subprocess

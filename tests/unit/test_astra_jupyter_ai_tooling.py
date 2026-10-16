@@ -201,7 +201,6 @@ def test_upstream_checkouts_are_pinned_to_an_exact_commit():
 
 
 def test_reproduction_plugin_keeps_reviewed_spec_guidance_and_current_astra_pins():
-    """The retained plugin teaches ASTRA; native execution is image-owned guidance."""
     assert (
         'ARG AGENT_SKILLS_REF="4ded682be8487d8aa05831678ef84ef12068d50d"'
         in DOCKERFILE

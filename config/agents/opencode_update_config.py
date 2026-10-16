@@ -547,8 +547,6 @@ def exec_quiet_opencode(binary: str, defaults_path: Path, argv: list[str]) -> No
                 )
                 overlay = quiet_ollama_overlay(snapshot, existing, defaults)
                 if overlay:
-                    # The delta only fills managed provider data. Explicit
-                    # inline provider choices always retain highest priority.
                     providers = inline.setdefault("provider", {})
                     if "ollama" not in providers:
                         providers["ollama"] = overlay["provider"]["ollama"]

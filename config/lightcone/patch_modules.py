@@ -1,5 +1,3 @@
-"""Install the explicit module seam against verified Lightcone 0.5.0 sources."""
-
 import hashlib
 from pathlib import Path
 import shutil
