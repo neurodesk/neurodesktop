@@ -971,7 +971,7 @@ RUN echo "Installing neurocommand ref ${NEUROCOMMAND_REF}" \
 # drives this install via CODEX_PATH. Validate CLI upgrades with the actual T3
 # and ACP initialization probes, especially outside the adapter dependency range.
 ARG CODEX_CLI_VERSION="0.163.0"
-ARG CLAUDE_CODE_VERSION="2.1.301"
+ARG CLAUDE_CODE_VERSION="2.1.302"
 RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_CLI_VERSION}" \
     && find "$(npm root -g)/@openai" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
     && rm -rf /root/.npm /tmp/npm-root-cache /home/${NB_USER}/.npm \

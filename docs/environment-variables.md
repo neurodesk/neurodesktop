@@ -335,7 +335,7 @@ reviewed; the Dockerfile itself is authoritative.
   `1.19.3`). Override to bump the pin, or set it to an empty value to
   install the latest release
 - `CLAUDE_CODE_VERSION`: exact Claude Code native release installed as the
-  image fallback; defaults to `2.1.301`. The direct-version audit compares the
+  image fallback; defaults to `2.1.302`. The direct-version audit compares the
   pin with the official `@anthropic-ai/claude-code` release stream
 - `CVMFS_VERSION`: exact Ubuntu CVMFS client package version;
   defaults to `2.14.1+ubuntu26.04`

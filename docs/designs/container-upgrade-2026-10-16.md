@@ -31,7 +31,7 @@ selected CVMFS client package. The Slurm source must match the installed ABI.
 | Lightcone | 0.4.2 | 0.5.0 |
 | Notebook Intelligence | 5.3.1 | 6.2.0 |
 | Codex | 0.155.1 | 0.163.0 |
-| Claude Code | 2.1.278 | 2.1.301 |
+| Claude Code | 2.1.278 | 2.1.302 |
 | OpenCode | 1.18.31 | 1.19.3 |
 | Codex ACP | 1.12.0 | 2.2.2 |
 | Claude ACP | 0.79.0 | 0.92.0 |
@@ -53,6 +53,12 @@ no version hold. Codex 0.163 exceeds Codex ACP 2.2.2's declared `^0.160.1`
 dependency range. The image deliberately removes the adapter's bundled agent
 and selects the global executable; real ACP and T3 initialization are required
 checks for this exception.
+
+The final audit detected Claude Code 2.1.302 after the initial image build.
+Both native architecture binaries matched the official manifest. The updated
+amd64 binary passed the installed ACP and T3 checks; fresh and legacy T3
+defaults reported the new version and the same expected authentication-required
+state as 2.1.301 in an empty credential store.
 
 ## Base image and Notebook Intelligence
 
