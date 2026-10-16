@@ -62,6 +62,32 @@ needs C17 mode, const-aware libc source changes, and removal of its conflicting
 feature-test macro. The builder verifies that the RDP plugin exists.
 See [build-time behavior](../architecture/build.md) for the current contract.
 
+Native amd64 and arm64 acceptance then exposed a FreeRDP 3.32.1 crash before
+the RDP session could draw. The build backports
+[GUACAMOLE-2328](https://github.com/apache/guacamole-server/commit/ab36756b596520ae2a94cd4d25e406e0b5aa820b)
+to initialize GDI and its dependent handlers after the connection cache exists.
+The adapted patch preserves Guacamole 1.6.0's channel-loading order. The next
+RDP probe exposed an xrdp package configuration mismatch: its daemon runs as
+`xrdp`, but sesman assigned the private session socket directory to `root`.
+Setting `SessionSockdirGroup=xrdp` restored transport without granting other
+users access. A thin image overlay passed actual desktop pixels, a command
+launched through Guacamole keyboard input, and private socket checks.
+
+TigerVNC 1.15 requires an RFB endpoint even for local X11 display tests. The
+shared test driver now supplies a private Unix socket while keeping TCP
+disabled. Guacamole startup also creates the config parent before TigerVNC
+migrates legacy homes. Installed tests cover fresh homes, saved settings,
+absolute and relative XDG overrides, and localhost-only listener bindings.
+The strict WebGL journey passed with the repaired display driver.
+
+Lmod 8.7.60 moved its user cache while startup still invalidated the legacy
+directory. The helper now queries Lmod's actual configuration and creates
+new cache files with a private umask. Real tests with two notebook users and
+a site override verified cache reuse, discovery after module changes,
+ownership, and separation from root's environment. The installed provenance
+fixture also now edits YAML declarations instead of relying on an obsolete
+resource-line substitution. Independent review approved both fixes.
+
 The first installed-image `pip check` found a conflict that the standalone
 Python solve missed. Conda 26.9.2 requires `packaging>=26.3`, whereas
 Snakemake and its interface packages require `<26`. Snakemake now uses the
@@ -152,6 +178,15 @@ CPU-backed test focused on chat completion. A controlled backend separately
 proved completion while another quiet server starts, without changing the
 persistent configuration or restarting the active attempt.
 
+The immutable integrated image later completed another live T3 turn with
+assistant text `HELLO!`, one completed run, and one completed attempt. It used
+the same default Docker hostname and unchanged official backend configuration.
+The backend was warm from a direct probe. Earlier final-image attempts timed
+out, and the successful run still logged prompt truncation; the timeout's
+cause remains unproved. Model-advertised context and Ollama's effective
+OpenAI-compatible context are separate settings. This result establishes a
+completed live integration, not cold-start or large-context performance.
+
 ## Verification record
 
 Before integration, the full unit suite passed 1,688 tests with one expected
@@ -164,7 +199,14 @@ The Guacamole builder completed. A real library probe exercised six bounded
 string-search cases and loaded the RDP plugin. Both official T3 platform
 archives passed integrity verification, and the x64 executable reported 0.1.0.
 
-The integrated full image, installed Slurm and CVMFS science checks,
-final unit and quality checks, and native arm64 PR image
-acceptance remain delivery gates. Passing local-worker fixtures does not
-establish those results. The PR records their final outcomes.
+The first integrated image built successfully. Its 1,767-unit suite and all
+quality gates passed. Installed inventory verified 450 main Python packages,
+515 Conda records, 909 OS packages, five global npm packages, and the isolated
+Lightcone and Snakemake environments. All three Python dependency checks passed.
+
+Native regular acceptance failed the same 14 tests on local amd64 and both CI
+architectures. Those failures produced the desktop, cache, and fixture fixes
+above. The repaired thin overlays passed their relevant runtime checks; a full
+rebuild, integrated unit and quality checks, all native profiles, and current
+arm64 CI remain delivery gates. Passing overlay checks does not establish
+those results. The PR records their final outcomes.
