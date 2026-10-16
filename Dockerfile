@@ -122,7 +122,7 @@ RUN apt-install-retry \
     wget \
     curl \
     && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-    && apt-install-retry nodejs yarn \
+    && apt-install-retry nodejs \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Build the small Glass vsock/X11 helpers for the target architecture.
