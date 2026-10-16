@@ -7,7 +7,7 @@ ARG APPTAINER_VERSION=1.5.4
 ARG APPTAINER_GO_VERSION=1.27.2
 ARG APPTAINER_GRPC_VERSION=1.84.0
 ARG APPTAINER_CRYPTO_VERSION=0.58.0
-ARG CVMFS_VERSION=2.14.1+ubuntu24.04
+ARG CVMFS_VERSION=2.14.1+ubuntu26.04
 ARG CVMFS_RELEASE_VERSION=4.9
 ARG CVMFS_RELEASE_SHA256=88f4bb658c2c85e77aec39181f61dea8ab641b3481a0db2b00f453beabb05395
 ARG NPM_VERSION=12.2.1
@@ -107,7 +107,7 @@ FROM quay.io/jupyter/base-notebook:${BASE_IMAGE_TAG} AS builder
 
 USER root
 
-ARG BUILD_ONLY_APT_PACKAGES="build-essential libcairo2-dev libjpeg-turbo8-dev libpng-dev libtool-bin freerdp2-dev libvncserver-dev libssl-dev libwebp-dev libssh2-1-dev libpango1.0-dev"
+ARG BUILD_ONLY_APT_PACKAGES="build-essential libcairo2-dev libjpeg-turbo8-dev libpng-dev libtool-bin freerdp3-dev libvncserver-dev libssl-dev libwebp-dev libssh2-1-dev libpango1.0-dev"
 ARG GUACAMOLE_VERSION="1.6.0"
 ARG CODE_SERVER_VERSION="4.141.0"
 ARG SHELL_QUOTE_VERSION="1.12.0"
@@ -139,9 +139,10 @@ RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20
     && tar xvf /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz -C /tmp \
     && rm /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz \
     && cd /tmp/guacamole-server-${GUACAMOLE_VERSION} \
-    && ./configure --with-init-dir=/etc/init.d \
+    && CFLAGS="-Wno-error=deprecated-declarations" ./configure --with-init-dir=/etc/init.d \
     && make \
     && make install \
+    && test -e /usr/local/lib/libguac-client-rdp.so \
     && ldconfig \
     && rm -r /tmp/guacamole-server-${GUACAMOLE_VERSION}
 
@@ -201,7 +202,7 @@ LABEL maintainer="Neurodesk Project <www.neurodesk.org>"
 
 USER root
 
-ARG GUACAMOLE_RUNTIME_APT_PACKAGES="libfreerdp2-2t64 libfreerdp-client2-2t64 libwinpr2-2t64 libvncclient1"
+ARG GUACAMOLE_RUNTIME_APT_PACKAGES="libfreerdp3-3 libfreerdp-client3-3 libwinpr3-3 libvncclient1"
 
 COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
 # Generic retry wrapper for flaky non-apt external downloads (curl|bash

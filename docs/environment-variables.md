@@ -322,7 +322,7 @@ reviewed; the Dockerfile itself is authoritative.
   image fallback; defaults to `2.1.301`. The direct-version audit compares the
   pin with the official `@anthropic-ai/claude-code` release stream
 - `CVMFS_VERSION`: exact Ubuntu CVMFS client package version;
-  defaults to `2.14.1+ubuntu24.04`
+  defaults to `2.14.1+ubuntu26.04`
 - `CVMFS_RELEASE_VERSION`, `CVMFS_RELEASE_SHA256`: expected
   version and SHA-256 digest of the CVMFS apt repository bootstrap package;
   defaults to release `4.9` and its validated digest

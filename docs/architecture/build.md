@@ -23,6 +23,13 @@ candidates for a specific run and attempt, test and scan them, and then promote
 the same candidates to release tags. Native runtime checks cover both image
 architectures. A date tag never substitutes for building the run's source SHA.
 
+## Base image dependencies
+
+The base image uses Ubuntu 26.04. Guacamole builds against FreeRDP 3 and ships
+the matching FreeRDP 3 client libraries. Its build accepts deprecated FreeRDP
+API declarations and requires the RDP plugin to exist after installation.
+CVMFS uses the release packages built for Ubuntu 26.04.
+
 ## Bundled code-server dependencies
 
 The builder replaces VS Code's nested `shell-quote` package at
