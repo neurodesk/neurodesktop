@@ -59,10 +59,11 @@ def test_wheel_frontends_are_removed_in_the_pip_install_layer():
     assert "/opt/conda/bin/python /tmp/sanitize_anthropic_examples.py" in layer
     assert 'rm -rf "${SITE_PACKAGES}/${package}/labextension"' in layer
     for package in (
-        "notebook_intelligence", "jupyterlab_myst",
+        "jupyterlab_myst",
         "jupyter_collaboration_ui", "jupyter_docprovider",
     ):
         assert package in layer.split("for package in ", 1)[1].split(";", 1)[0]
+    assert "notebook_intelligence" not in layer.split("for package in ", 1)[1].split(";", 1)[0]
     for extension in (
         "@plmbr/notebook-intelligence", "jupyterlab-myst",
         "@jupyter/collaboration-extension", "@jupyter/docprovider-extension",

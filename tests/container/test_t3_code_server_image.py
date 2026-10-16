@@ -27,13 +27,13 @@ def platform_package():
 
 
 def test_t3_code_runtime_and_native_terminal_support_are_installed():
-    assert subprocess.check_output(["t3", "--version"], text=True).strip() == "t3 v0.0.45"
+    assert subprocess.check_output(["t3", "--version"], text=True).strip() == "t3 v0.1.0"
     major, minor, *_ = map(int, subprocess.check_output(["node", "--version"], text=True).strip()[1:].split("."))
     assert (major, minor) >= (24, 10)
     assert shutil.which("codex")
     assert shutil.which("claude")
     assert shutil.which("opencode")
-    assert "2026.9.1" in subprocess.check_output(["cloudflared", "--version"], text=True)
+    assert "2026.10.1" in subprocess.check_output(["cloudflared", "--version"], text=True)
 
     build = platform_package()
     machine = {"x86_64": "x64", "aarch64": "arm64"}[os.uname().machine]
@@ -170,6 +170,30 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
             time.sleep(0.1)
         else:
             raise AssertionError("T3 did not finish its Codex provider probe within 30 seconds")
+
+        claude = tmp_path / ".t3/caches/claudeAgent.json"
+        image_claude_version = subprocess.check_output(
+            ["/opt/jovyan_defaults/.local/bin/claude", "--version"],
+            env=environment, text=True, timeout=20,
+        ).split()[0]
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            assert process.poll() is None, "T3 exited before its Claude provider probe completed"
+            if claude.exists():
+                snapshot = json.loads(claude.read_text())
+                status = snapshot.get("status")
+                if status in {"ready", "error"} or (
+                    status == "warning" and snapshot.get("installed") is True
+                ):
+                    assert snapshot["installed"] is True
+                    assert snapshot["version"] == image_claude_version, snapshot
+                    assert snapshot["status"] == "ready" or snapshot["message"] == (
+                        "Claude Code is not authenticated. Run `claude auth login` and try again."
+                    ), snapshot
+                    break
+            time.sleep(0.1)
+        else:
+            raise AssertionError("T3 did not finish its Claude provider probe within 30 seconds")
 
         # T3 ships the OpenCode driver disabled. Without the seeded instance
         # this snapshot reads `"enabled": false` with the message below, and no

@@ -4,7 +4,7 @@ description: Claude Code and Codex installation, the OpenCode terminal wrapper,
   and OpenCode session pruning
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-14"
+last-reviewed: "2026-10-16"
 ---
 
 # Coding agents
@@ -121,20 +121,66 @@ exec-ing the real binary as a TUI. Its Lightcone reproduction skills and the
 native adapter for their ASTRA hooks are described in
 [ASTRA integration](astra.md#lightcone-agent-skills).
 
-The `opencode.json` rewrite is a separate module,
+The shared model helper,
 [`config/agents/opencode_update_config.py`](../../config/agents/opencode_update_config.py),
-installed as `/opt/neurodesktop/opencode_update_config.py`. The wrapper runs it
-with `python3` from the notebook user's `PATH`. It passes the user config path,
-the image default config, the selected model, and each detected model and
-endpoint as `--option=value` arguments. The helper manages only the `jetstream`,
-`ollama`, and `neurodesk` providers. It removes models a provider no longer
-lists and caps each Ollama output limit at the model's context window. It keeps
-other providers, MCP servers, user instructions, per-model settings, and extra
-provider options, and drops only the legacy `/opt/AGENTS.md` instruction. The
-helper replaces the file atomically and keeps its mode. If the config is
-missing, corrupt, or not a JSON object, the helper leaves the file unchanged,
-writes one line to stderr, and exits with status 1. The wrapper then continues
-to launch OpenCode. The helper writes nothing to stdout.
+is installed as `/opt/neurodesktop/opencode_update_config.py`. Both the terminal
+wrapper and T3's quiet launcher use its Ollama discovery. The default endpoint
+is `http://host.docker.internal:11434`. Docker launchers supply
+`--add-host=host.docker.internal:host-gateway`; the host must run Ollama and
+permit connections from the container. `OLLAMA_HOST` can select another server
+and can include a trailing `/v1`.
+
+Discovery reads `/api/tags` and `/api/show` within one six-second deadline.
+Each response is limited to 2 MiB. Catalogs are limited to 256 model IDs of at
+most 512 characters. The process-local observation is limited to 64 KiB.
+Explicit `num_ctx` parameters take precedence over architecture context metadata.
+Missing metadata falls back to a 32768-token context and an output allowance of
+8192 tokens, capped to the context. Requests have bounded response sizes, do not
+follow redirects, and carry no Neurodesk or Brain Researcher credentials.
+A failed or malformed listing leaves saved models available. A successful empty
+listing is an empty catalog. Discovered names and endpoints containing
+`{env:` or `{file:` are rejected before config generation. User-authored
+configuration references remain under OpenCode's native interpolation rules.
+
+The terminal wrapper passes the observed models, endpoints, and selected model
+to the helper as `--option=value` arguments. Only observed managed providers are
+refreshed. Ollama providers with a custom SDK or endpoint are preserved. The
+helper keeps unrelated providers, MCP servers, instructions, model options, and
+explicit default models. It drops the legacy `/opt/AGENTS.md` instruction and
+replaces the JSON file atomically, keeping its mode. A corrupt config remains
+unchanged and produces one diagnostic on stderr. The wrapper still launches
+OpenCode.
+
+T3's `serve` and the terminal wrapper's `acp` command use the helper's
+`--quiet-exec` path. It observes Ollama once and carries the bounded snapshot in
+a private process environment variable. It leaves `OPENCODE_CONFIG_CONTENT`
+unchanged, including JSONC and user-authored interpolation references.
+
+The image installs
+[`opencode_ollama_config.js`](../../config/agents/opencode_ollama_config.js)
+under the default home's `.config/opencode/plugins/`. Startup restores this
+plugin alongside the existing Lightcone plugin. OpenCode discovers it in the
+user's global plugin directory even when `OPENCODE_CONFIG` or
+`OPENCODE_CONFIG_DIR` selects additional config. It activates only when the quiet
+launcher supplies an observation.
+
+OpenCode 1.19.3 [resolves configuration before initializing plugins](https://github.com/anomalyco/opencode/blob/v1.19.3/packages/opencode/src/project/bootstrap.ts)
+for each directory and awaits each plugin's `config` hook before other services. The hook
+passes that directory's Ollama settings and selected models to the shared
+helper through stdin. The helper returns only missing model metadata and the
+managed endpoint delta. The plugin applies these fields directly to native
+config objects, replacing the provider map because native config merges can
+share nested objects between directories. It never serializes them back through OpenCode's interpolation
+parser or writes user config. T3 can therefore use one OpenCode server for
+projects opened after server startup, each with its own settings.
+
+OpenCode merges global, explicit-file, project, and inline configuration in
+that order, with managed administrator configuration last. Provider model maps
+deep-merge. The quiet hook uses the provider's `whitelist` to hide an unchanged
+image seed while preserving user models, model limits, selected defaults, and
+explicit filters. A custom endpoint or SDK remains user-owned. No quiet launch
+prompts, copies project instructions, refreshes NBI, or restarts an active chat.
+`--version` executes the real binary before any setup.
 
 `nbi_setup.sh` mirrors the OpenCode model selection into Notebook Intelligence
 with

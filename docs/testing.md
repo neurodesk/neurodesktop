@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-14"
+last-reviewed: "2026-10-16"
 ---
 
 # Testing
@@ -213,7 +213,6 @@ These substantive heredocs remain:
 | File | Block | Lines |
 | --- | --- | --- |
 | `config/agents/nbi_setup.sh` | Repair wiped NBI endpoint settings | ~80 |
-| `config/agents/opencode` | Probe Ollama model context windows | ~80 |
 | `config/agents/nbi_setup.sh` | Inject the Neurodesk API key into NBI | ~70 |
 | `config/agents/nbi_setup.sh` | Refresh a running NBI server | ~50 |
 | `config/agents/nbi_setup.sh` | Sync the Brain Researcher MCP entry | ~40 |
@@ -221,8 +220,8 @@ These substantive heredocs remain:
 | `Dockerfile` | Wrap kernel specs to re-source the environment | ~30 |
 | `config/agents/opencode` | Seed the TUI sidebar default | ~25 |
 
-The OpenCode wrapper's two 13-line JSON listing parsers remain inline
-because extracting them would not add a useful testing boundary.
+The OpenCode wrapper's Neurodesk model-list parser remains inline.
+Ollama tags, show metadata, and context limits share the typed helper.
 
 The workflow uses stable job names so repository rules can require each check.
 Unit and installed image tests remain necessary for authentication, startup
@@ -317,7 +316,11 @@ late Explorer layout change cannot invalidate recorded screen coordinates.
 input, then requires the same edit and authenticated save to complete.
 These tests start their own Xtigervnc display through
 [native_desktop_driver.py](../tests/container/native_desktop_driver.py), so they
-need no running desktop. If the container refuses abstract Unix sockets, the
+need no running desktop. The driver supplies a mode-0600 RFB Unix socket
+beside its log while keeping both RFB and X11 TCP listeners disabled.
+TigerVNC 1.15 requires an incoming RFB
+endpoint even for local X11-only tests. The strict WebGL fixture uses this
+same driver. If the container refuses abstract Unix sockets, the
 driver retries with only the `/tmp/.X11-unix` file socket. It waits for the
 complete newline-terminated `-displayfd` announcement before closing the pipe;
 closing after the digits alone can make Xtigervnc abort its final write.
@@ -345,13 +348,20 @@ checks both handlers after the closed driver has been garbage-collected.
 from silently skipping when CVMFS is disabled.
 
 The RDP test uses the service provisioned by root startup. It runs as the
-notebook user without unrestricted sudo, waits for desktop pixels, then launches
-a command through Guacamole keyboard input and checks its output file. The
-marker lives in a fresh, session-owned temporary directory, so root-run tests
+notebook user without unrestricted sudo and requires pixels over Guacamole.
+A read-only X11 probe identifies the new notebook-user XRDP process and its
+display and authority file. Before Alt+F2, it waits for WM registration and a
+mapped LXDE panel. Before typing, it requires a mapped, active Run dialog with
+one of its children holding keyboard focus. These bounded waits also read the
+Guacamole tunnel and fail on disconnects or protocol errors. The test launches
+a command entirely through Guacamole keyboard input and checks its output file.
+The marker lives in a fresh, session-owned temporary directory, so root-run tests
 remain writable by the desktop user and cannot accept a prior result. A login
 screen alone does not satisfy this check. Enable it only in disposable test
 containers with `NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1`. The HPC
 profile skips RDP because unprivileged startup does not provision that service.
+The same test checks that sesman's private session directory and mode-0660
+Xorg sockets grant the `xrdp` group access while excluding other users.
 
 Pull-request CI runs the checkout tier and native image acceptance. Release
 workflows also validate installed applications before promotion. Neither a
@@ -523,6 +533,7 @@ non-obvious tiers protect.
 | Object-storage inventory health | `pytest tests/unit/test_objectstorage_check.py` | Live `Test Objectstorage` workflow |
 | Nightly JupyterHub probe (terminal creation, FSL commands) | `pytest tests/unit/test_jupyter_terminal_creation.py tests/unit/test_github_workflows.py` | Live `JupyterHub API Testing` workflow |
 | Lmod extension listing default | `pytest tests/unit/test_lmod_extensions.py` | `pytest /opt/tests/test_lmod_avail_extensions.py` |
+| Lmod cache warm-up | `pytest tests/unit/test_warm_module_cache.py` | `pytest /opt/tests/test_lmod_cache_warmup.py` |
 | Interactive module banner | `pytest tests/unit/test_module_banner.py` | — |
 | Apptainer NVIDIA auto-configuration | `pytest tests/unit/test_apptainer_nv.py` | — |
 | Access-URL banner (`print_access_url.sh`) | `pytest tests/unit/test_print_access_url.py` | — |
@@ -533,7 +544,7 @@ non-obvious tiers protect.
 | Jupyter Server Proxy response limits | `pytest tests/unit/test_jupyter_server_proxy_limits.py` | `pytest /opt/tests/test_jupyter_server_proxy_limits.py` |
 | ASTRA viewer core (adapter, graph, widget, previews) | `pytest tests/unit/test_astra_view_graph.py tests/unit/test_astra_view_packaging.py tests/unit/test_astra_view_renderer.py` | `pytest /opt/tests/test_astra_view_image.py` |
 | File-browser ASTRA viewer (server extension, file type/factory) | `pytest tests/unit/test_astra_view_filebrowser.py tests/unit/test_astra_view_http.py` | `pytest /opt/tests/test_astra_view_image.py` |
-| `astra`/`lc` installs, Lightcone skills and hooks | `pytest tests/unit/test_astra_jupyter_ai_tooling.py tests/unit/test_lightcone_cli_patch.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
+| `astra`/`lc` installs, Lightcone skills and hooks | `pytest tests/unit/test_astra_jupyter_ai_tooling.py tests/unit/test_lightcone_modules.py tests/unit/test_lightcone_evidence.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
 | ASTRA run provenance sidecars and the spec agreement check | `pytest tests/unit/test_astra_provenance.py` | `pytest /opt/tests/test_astra_agent_skills_image.py` |
 | Jupyter AI, ACP personas, collaboration/widget compatibility and server patches | see [below](#jupyter-ai-and-acp-personas) | `pytest /opt/tests/test_astra_jupyter_ai_image.py /opt/tests/test_widget_compatibility_image.py` |
 | Notebook Intelligence / MyST and standalone RISE | `pytest tests/unit/test_nbi_settings_patch.py tests/unit/test_myst_build_workaround.py tests/unit/test_jupyterlab_rise_patch.py` | `pytest /opt/tests/test_nbi_labextension_patch.py /opt/tests/test_rise_slides_image.py` |
@@ -626,6 +637,46 @@ After an image build, pair the matching T3 Code desktop release through port
 home volume, and confirm that the environment reconnects with its project and
 provider settings intact.
 
+### T3 and Ollama completion
+
+`tests/unit/test_opencode_ollama.py` drives shared discovery against local HTTP
+fixtures and executes quiet launchers with fresh homes. It covers the total
+deadline, metadata fallback, empty and failed listings, credential isolation,
+concurrent process-local observations, preserved configuration, interpolation
+rejection, and `--version`. The plugin driver executes the actual native config
+hook against resolved fixture objects.
+
+Inside the image, `pytest /opt/tests/test_t3_ollama.py` starts a private T3 server
+with the image-owned OpenCode path. It authenticates through T3's bearer-session
+CLI and uses the pinned RPC schemas to refresh the provider, create a project,
+and complete a turn with a controlled Ollama fixture. It requires the discovered
+model in T3's picker and a completed assistant result in the durable projection.
+The persistent OpenCode config must retain its original bytes. A concurrent
+quiet launch during the controlled turn must leave that turn on its original
+attempt. The same module tests native JSONC merge precedence, saved offline
+configuration, successful empty catalogs, and ACP stdout as JSON. It starts an
+OpenCode server outside a project, creates that project after startup, and
+compares its custom endpoint, model limits, and selection with native OpenCode.
+Environment and file canaries must never appear in discovered model metadata;
+intentional user configuration references must still resolve.
+
+The ACP stdout check sets `npm_config_offline=true` for its child process. Its
+local Ollama plugin needs no npm packages. This keeps the 40-second protocol
+check independent of OpenCode's first-use registry installation while still
+loading the installed plugin and executing the real image binary. Other
+first-use and completion checks retain native dependency installation.
+
+For the live gate, run the image on a Docker network where an Ollama server with
+a downloaded model is reachable as `host.docker.internal:11434`. Set
+`NEURODESKTOP_TEST_OLLAMA_MODEL` to that model ID, then run
+`pytest /opt/tests/test_t3_ollama.py`. The live case always uses the default URL.
+For a host-installed Ollama, Docker also needs
+`--add-host=host.docker.internal:host-gateway`. The live case skips when no model
+ID is supplied. It allows ten minutes for CPU inference and disables OpenCode's
+auxiliary title agent in that test's inline configuration, so the live request
+measures the chat completion. The controlled fixture also covers title requests.
+The controlled completion remains required without external services.
+
 ### Desktop tests
 
 The private VS Code socket check in
@@ -653,8 +704,11 @@ cleanup of code-server when the launcher is killed, and an orphan from a
 timed-out launch shutting down while the next launch starts.
 
 Desktop smoke tests keep Guacamole, Tomcat, VNC, and credential state in
-temporary per-test homes by default. Tests that need to start the global xrdp
-service are skipped unless
+temporary per-test homes by default. VNC tunnel cases cover fresh and legacy
+homes without the XDG config parent, an absolute override, and an ignored
+relative override. They require saved settings to survive TigerVNC's migration
+and actual desktop frames to arrive over the authenticated tunnel.
+Tests that need to start the global xrdp service are skipped unless
 `NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1` is set. The build scripts and
 GitHub Actions set this only for disposable test containers; do not set it in a
 live user desktop unless stopping or reconfiguring xrdp is acceptable.
@@ -702,6 +756,34 @@ home to prove all four reproduction skills reach OpenCode. It also drives the
 OpenCode adapter directly and checks that session, read, and edit hook context
 is returned to the model-facing system prompt or tool output.
 
+### Lightcone 0.5 native execution
+
+Run `pytest tests/unit/test_lightcone_modules.py tests/unit/test_lightcone_evidence.py
+ tests/unit/test_astra_view_graph.py` from the checkout. The evidence fixture
+contains real local-worker 0.5 status, manifests, and RO-Crate. Lifecycle unit
+cases double the native CLI and prove ownership and failure propagation, not
+live Slurm compatibility. Viewer cases prevent canonical root evidence from
+attaching to a child output with the same name. Generated module rerun commands
+execute in an isolated test interpreter and refuse missing or changed engines
+before invoking the worker.
+
+In the built image, run `pytest /opt/tests/test_astra_lc_run_image.py` with Slurm
+enabled. This executes a real native allocation, a Python probe, materialization,
+a no-op, freshness checks, a recipe rebuild, viewer ingestion, and cleanup.
+It also verifies private per-user connection storage without changing home
+permissions and retains rejection of writable connection-path ancestors.
+In the privileged science profile, also set
+`NEURODESKTOP_TEST_LIGHTCONE_SCIENCE=1`. That test requires pinned FSL through
+CVMFS and nested Apptainer on a real Lightcone worker, compares every output
+voxel, and checks the manifest's module pins and `fs: open` attestation.
+It then executes the generated record with `datalad rerun`, compares every voxel
+again, and requires a new execution timestamp with the same environment identity
+and module attestation.
+The image runtime driver's `acceptance` mode sets this flag, so the amd64
+PR image job runs the science gate after mounting CVMFS.
+Repeat the installed tests on native arm64. Missing live services leave these
+gates unverified; the local-worker fixtures do not substitute for them.
+
 ### Jupyter AI and ACP personas
 
 ```bash
@@ -736,6 +818,11 @@ successful session or the protocol's authentication-required response is
 accepted only after the expected CLI invocation is observed. Other errors,
 process exits, and timeouts fail the test. This check covers adapter upgrades
 that use an image CLI outside the adapter's declared dependency range.
+
+The installed T3 startup cases exercise fresh and legacy defaults. They wait
+for Claude's completed health probe, compare its version with the image CLI,
+and require either a ready provider or the expected sign-in requirement for
+an empty credential store.
 
 The Jupyter AI image test also imports Notebook Intelligence and the MCP v1
 ``mcp.server.fastmcp`` API. ``jupyter server extension list`` returns success
@@ -944,7 +1031,7 @@ cleanup cancels the submitted job if needed.
 
 The Slurm environment-retrieval regression completes a small job, submits a
 larger job with an `afterok` dependency, then completes another small job on
-the same worker. It covers `--export=NONE`, selected-variable exports, and
+the same worker. It covers `--export=ALL`, `NIL`, `NONE`, selected-variable exports, and
 explicit `--get-user-env`, checks job ID, hostname, process identity and supplied
 variables in the output, and fails immediately if the worker exits. Requests
 use 1 CPU/1 GB followed by 4 CPUs/12 GB when the configured node has capacity;
@@ -953,7 +1040,14 @@ without `CAP_SYS_ADMIN` under the default seccomp policy to cover the denied
 PID-namespace path. Privileged image checks alone cannot exercise that denial.
 `bash scripts/verify_slurm_image.sh IMAGE` creates a disposable container with
 default Docker permissions, bootstraps local Slurm as root, runs the Slurm tests
-as the notebook user, and removes the container on success or failure. PR image
+as the notebook user, then runs `test_slurm_multiuser.py` as root. That test creates
+two temporary users with distinct login profiles, checks all export modes and
+submitted-value precedence, verifies the compatibility library stays out of job
+processes, and repeats after a real worker reconfiguration. A failing login profile
+must requeue and hold the job without killing the worker. The test removes its users
+and accounting associations. The notebook-user suite also verifies that completed
+and cancelled batch jobs retain their exact Lightcone-style comment in `sacct`.
+The script removes the container on success or failure. PR image
 acceptance runs this check on both amd64 and native arm64 candidates.
 
 Both `/home/jovyan` and `/neurodesktop-storage` are required writable directories
@@ -1134,6 +1228,13 @@ in the regular and native profiles still fail the probe. Native CC acceptance
 remains in [the Glass deployment contract](architecture/glass.md#acceptance).
 
 ### Shared startup regressions
+
+The Lmod cache checks use a local module tree with the installed Lmod. They
+verify the reported cache directory under a custom `HOME`, with and without
+`XDG_CACHE_HOME`, private cache permissions and ownership, and discovery of new
+modules after warm-up invalidates an existing cache. Modulefiles record their
+evaluations so an unchanged warm `module avail` must reuse the cache without
+evaluating them again. These checks need no CVMFS server or network access.
 
 The menu-update and startup-ownership checks run with:
 

@@ -1,0 +1,11 @@
+allow_local: false
+offers:
+  - name: neurodesktop
+    provider: slurm
+    resources: {cpus: 2, memory: 8}
+    max_nodes: 1
+    time: {default: 2h}
+    config:
+      partition: neurodesktop
+      python: /opt/uv/tools/lightcone-cli/bin/python
+      task_slots_per_node: 1

@@ -1,10 +1,19 @@
 import subprocess
 import os
 import re
+import sys
 import pytest
 
 
 NOTEBOOK_SUDOERS_PATH = "/etc/sudoers.d/notebook"
+
+
+def test_python_dependencies_are_consistent():
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "check"],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def run_cmd(cmd):

@@ -81,31 +81,20 @@ This means `sbatch`/`srun` jobs submitted inside the container stay inside the c
 
 ### Running an ASTRA analysis with `lc`
 
-`astra_lc_run.sbatch` (installed at `/opt/neurodesktop/astra_lc_run.sbatch`) submits an ASTRA project
-through `lc run`. `lc` does not submit to Slurm itself — it dispatches through Dask and launches its
-workers with `srun` once it finds itself inside an allocation — so this template puts it inside one:
+Run `neurodesk-lc-materialize baseline/OUTPUT` from a committed Lightcone 0.5
+project with an explicit `[tool.neurodesk.lightcone]` module profile. The helper
+owns native Slurm allocation, readiness, materialization, and cleanup. Do not
+submit it through `sbatch`. It consumes the project's exact module pins and
+leaves Lightcone's maintained `ro-crate-metadata.json` as execution evidence.
 
-```bash
-cd /home/jovyan/my-analysis        # the directory holding astra.yaml
-mkdir -p logs
-NEURODESK_ASTRA_MODULES="fsl/6.0.7.22" \
-NEURODESK_ASTRA_UNIVERSE="baseline" \
-  sbatch /opt/neurodesktop/astra_lc_run.sbatch
-```
+The installed catalog requests two CPUs and 8 GiB in partition `neurodesktop`.
+Set `LC_COMPUTE_CONFIG` or provide `~/.lightcone/compute.yaml` for other resource
+shapes or host clusters. Local fallback is disabled in the installed catalog.
+See [ASTRA integration](../../docs/architecture/astra.md) for project setup,
+worker module execution, open-filesystem attestation, and viewer trust.
 
-It writes `status.json` beside `astra.yaml`; open the spec in JupyterLab and press **Refresh** to see
-the run. The trust badge becomes amber "Executed, unverified" and stays there — see
-[docs/architecture/astra.md](../../docs/architecture/astra.md) for why it cannot reach green.
-
-This is optional. The default flow remains one plain `sbatch` script per analysis step, which writes
-no manifest and leaves the viewer reading "Not executed".
-
-| Variable | Meaning |
-| --- | --- |
-| `NEURODESK_ASTRA_PROJECT` | directory holding `astra.yaml` (default: the submitting directory) |
-| `NEURODESK_ASTRA_MODULES` | space-separated `module load` arguments, each with an explicit version |
-| `NEURODESK_ASTRA_UNIVERSE` | universe to materialize (default: every universe) |
-| `NEURODESK_ASTRA_JOBS` | parallel jobs passed to `lc run` (default: 1) |
+The default plain `sbatch` workflow remains available. It writes provenance
+sidecars and does not establish Lightcone execution evidence.
 
 ### Environment variables
 
@@ -152,20 +141,43 @@ In non-cgroup mode, cgroup constraints are disabled (no CPU/RAM/SWAP enforcement
 
 ### Batch job environments
 
-The local scheduler sets `GetEnvTimeout=0`. Slurm 23.11's live login-environment
-lookup uses `clone(CLONE_NEWPID)`, which requires permissions that ordinary
-Docker containers do not have. A denied lookup exits `slurmd` with
-`fatal: clone: Operation not permitted` before the batch script starts. The
-controller can continue reporting that allocation as running until it detects
-the missing worker. Increasing CPU or memory requests does not itself invoke
-this lookup.
+Slurm 25.11.2 ignores the obsolete `GetEnvTimeout` setting. Its
+[login-environment implementation](https://github.com/SchedMD/slurm/blob/slurm-25-11-2-1/src/common/env.c)
+uses PID and mount namespaces, with an existing `fork()` fallback when the
+kernel disables those namespaces. Ordinary Docker containers deny the namespace
+`clone()` with `EPERM` even when the kernel namespace limits are nonzero.
+Unpatched Slurm treats that denial as fatal and exits the worker.
 
-`--get-user-env`, `--export=NONE`, and exports containing only selected variables
-request login-environment retrieval. In local mode, Slurm consults its existing
-environment cache instead of launching a login shell. If no cache exists, it
-logs the missing cache and runs with the submitted environment. Neurodesktop
-does not populate that cache or promise a fresh login environment for these
-options. Host mode uses the host cluster's configuration.
+The image applies [a narrow source patch](user-env-25.11.2.patch) that routes
+this permission denial through Slurm's existing fallback. Successful namespace
+creation and other clone errors keep their upstream behavior. The build verifies
+the release archive and complete `env.c` SHA-256 before applying the patch.
+It compiles that source into a library exporting only `env_array_user_default`.
+Only the private `/opt/neurodesktop/slurm-env/slurmd` executable links this library.
+The packaged worker, clients, plugins, and job processes remain unchanged.
+No `LD_PRELOAD`, syscall override, environment cache, or extra capability is used.
+Worker reconfiguration re-executes the private executable. Startup refuses to
+use it if the packaged daemon or Slurm library has changed since the build.
+
+`--get-user-env`, `--export=NONE`, and selected-variable exports retrieve the
+job owner's actual login environment through upstream `su - <user>`, parsing,
+and merge logic. Explicitly exported values take precedence over login values.
+`ALL` inherits the submission environment. `NIL` omits that environment and
+does not request a login environment. Failed retrieval retains Slurm 25.11's
+requeue-and-hold behavior. The upstream 120-second retrieval timeout remains.
+Host mode skips this local setup and uses the host cluster's policy.
+
+The fallback logs upstream's warning about orphan or unconstrained processes.
+It cannot contain background processes started by login scripts in a separate
+PID namespace. Keep login scripts limited to environment setup. Slurm's normal
+per-user credentials still apply, and one user's login environment is never
+reused for another user.
+
+The local controller sets `AccountingStoreFlags=job_comment`, supported by the
+[25.11 configuration manual](https://github.com/SchedMD/slurm/blob/slurm-25-11-2-1/doc/man/man5/slurm.conf.5).
+Accounting retains a completed or cancelled allocation's `lightcone:<token>`
+comment so Lightcone can verify its identity through `sacct`. No environment or
+job-script accounting flags are enabled.
 
 Use `--export=ALL` to inherit the submitting environment. For a clean environment,
 use `--export=NIL` and initialize what the job needs inside its script, for example:

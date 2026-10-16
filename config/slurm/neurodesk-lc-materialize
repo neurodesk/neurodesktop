@@ -1,0 +1,3 @@
+#!/bin/bash
+set -euo pipefail
+exec /opt/uv/tools/lightcone-cli/bin/python /opt/neurodesktop/lightcone_materialize.py "$@"

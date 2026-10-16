@@ -142,7 +142,10 @@ def _edge(
 
 
 def _match_run_records(
-    outputs: list[dict[str, Any]], records: dict[str, dict[str, Any]]
+    outputs: list[dict[str, Any]],
+    records: dict[str, dict[str, Any]],
+    *,
+    exact_scope: bool,
 ) -> tuple[dict[str, dict[str, Any]], set[str]]:
     by_local: dict[str, list[str]] = defaultdict(list)
     by_qualified: dict[str, list[str]] = defaultdict(list)
@@ -152,14 +155,21 @@ def _match_run_records(
         scope = tuple(output["scope"])[1:]
         qualified = ".".join((*scope, output["local_id"]))
         by_qualified[qualified].append(output["id"])
+        if scope:
+            by_qualified["/".join((*scope, output["local_id"]))].append(output["id"])
 
     matched: dict[str, dict[str, Any]] = {}
     canonical_run_ids: set[str] = set()
     for run_id, record in records.items():
-        canonical = run_id if run_id in output_ids else None
-        if canonical is None and len(by_local.get(run_id, [])) == 1:
+        candidate = f"output:root/{run_id}" if exact_scope else run_id
+        canonical = candidate if candidate in output_ids else None
+        if not exact_scope and canonical is None and len(by_local.get(run_id, [])) == 1:
             canonical = by_local[run_id][0]
-        if canonical is None and len(by_qualified.get(run_id, [])) == 1:
+        if (
+            not exact_scope
+            and canonical is None
+            and len(by_qualified.get(run_id, [])) == 1
+        ):
             canonical = by_qualified[run_id][0]
         if canonical is None:
             canonical_run_ids.add(f"run:{run_id}")
@@ -302,8 +312,14 @@ def _build_valid_graph(project: dict[str, Any], run_path: str | Path | None):
             universe_id=project["universe_id"],
         )
         matched, canonical_run_ids = _match_run_records(
-            project["outputs"], overlay["records"]
+            project["outputs"],
+            overlay["records"],
+            exact_scope=overlay["source"] == "lightcone-0.5",
         )
+        if overlay["source"] == "lightcone-0.5" and not any(
+            record.get("executed") for record in matched.values()
+        ):
+            overlay["trust"] = spec_only_trust()
         for output_id, record in matched.items():
             node = output_nodes[output_id]
             node["status"] = record["status"]
@@ -318,6 +334,9 @@ def _build_valid_graph(project: dict[str, Any], run_path: str | Path | None):
                     "command",
                     "container",
                     "log_excerpt",
+                    "source_commit",
+                    "foreign_write",
+                    "hermeticity",
                 )
                 if record.get(key) is not None
             }

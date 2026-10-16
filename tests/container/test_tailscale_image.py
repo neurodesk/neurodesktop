@@ -18,7 +18,7 @@ def binary(name):
 def test_tailscale_cli_and_daemon_versions_match():
     client = subprocess.check_output([binary("tailscale"), "version"], text=True, timeout=10)
     daemon = subprocess.check_output([binary("tailscaled"), "--version"], text=True, timeout=10)
-    assert client.splitlines()[0] == daemon.splitlines()[0] == "1.102.4"
+    assert client.splitlines()[0] == daemon.splitlines()[0] == "1.104.1"
 
 
 def test_tailscaled_starts_as_unprivileged_user_without_tun():

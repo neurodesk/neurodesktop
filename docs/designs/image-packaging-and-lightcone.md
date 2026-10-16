@@ -65,7 +65,7 @@ The starting dependency list is published in
 [Lightcone 0.4.2's package metadata](https://pypi.org/pypi/lightcone-cli/0.4.2/json).
 
 The verified Lightcone source archive was patched with the existing
-[ASTRA compatibility patch](../../config/agents/patch_lightcone_cli.py).
+[ASTRA compatibility patch](https://github.com/neurodesk/neurodesktop/blob/98a129f48ebafd3f8aad829096529e56fd2f8172/config/agents/patch_lightcone_cli.py).
 Two `pip install --dry-run --upgrade --report` solves ran against the new
 Python 3.13 base: one with the Dockerfile's main Python requirements and one
 with the same requirements plus patched Lightcone. Both included the later
@@ -109,7 +109,7 @@ the `uv tool install` and its environment in the same change. Do not retain the
 old tree or use `--system-site-packages`, which would keep two package lookup
 paths and make runtime ownership less clear.
 
-Change the [Slurm template](../../config/slurm/astra_lc_run.sbatch) to prepend
+Change the [Slurm template](https://github.com/neurodesk/neurodesktop/blob/98a129f48ebafd3f8aad829096529e56fd2f8172/config/slurm/astra_lc_run.sbatch) to prepend
 `/opt/conda/bin`, and migrate its unit and image tests together. Confirm that
 `lc`, `dask`, `snakemake`, and `astra` all resolve from that directory. Run
 `pip check`, `lc init`, the example's `lc status --json` viewer round trip,

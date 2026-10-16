@@ -16,6 +16,7 @@ def image(tmp_path):
         for index, path in enumerate([
             "/opt/neurodesktop/agent_shell_setup.sh",
             "/opt/neurodesktop/agent_bash_env.sh",
+            "/opt/neurodesktop/opencode_update_config.py",
             "/opt/neurodesktop/environment_variables.sh",
             "/etc/profile.d/lmod.sh",
             "/usr/share/module.sh",
@@ -37,6 +38,7 @@ def image(tmp_path):
 
     for name in ("agent_shell_setup.sh", "agent_bash_env.sh"):
         install(f"config/agents/{name}", paths[f"/opt/neurodesktop/{name}"])
+    install("config/agents/opencode_update_config.py", paths["/opt/neurodesktop/opencode_update_config.py"])
     paths["/opt/neurodesktop/environment_variables.sh"].write_text(
         'echo environment-banner\n: "$UNSET_ENVIRONMENT_VARIABLE"\n'
         'export MODULEPATH=/test/catalogue\n'

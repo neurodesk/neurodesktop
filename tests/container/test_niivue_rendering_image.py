@@ -2,7 +2,6 @@ import base64
 import io
 import json
 import os
-from pathlib import Path
 import subprocess
 import time
 
@@ -11,6 +10,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from native_desktop_driver import start_display
 from test_widget_compatibility_image import (
     _stop,
     _unused_port, _wait_for_server, _start_firefox_with_webgl_probe,
@@ -67,25 +67,11 @@ def _kernel_crosshair(bidi, context, timeout=90):
 
 @pytest.fixture
 def graphics_display(tmp_path, monkeypatch):
-    display_number = next(
-        number for number in range(177, 277)
-        if not Path(f"/tmp/.X11-unix/X{number}").exists()
-    )
     log_path = tmp_path / "display.log"
     with log_path.open("w") as log:
-        display = subprocess.Popen(
-            ["/usr/local/bin/Xtigervnc", f":{display_number}",
-             "-geometry", "1280x1024", "-depth", "24", "-SecurityTypes", "None",
-             "-rfbport", "-1", "-nolisten", "tcp"],
-            stdout=log, stderr=subprocess.STDOUT,
-        )
+        display, display_name = start_display(log)
         try:
-            deadline = time.monotonic() + 15
-            while not Path(f"/tmp/.X11-unix/X{display_number}").exists():
-                assert display.poll() is None, log_path.read_text()
-                assert time.monotonic() < deadline, log_path.read_text()
-                time.sleep(0.1)
-            monkeypatch.setenv("DISPLAY", f":{display_number}")
+            monkeypatch.setenv("DISPLAY", display_name)
             yield
         finally:
             _stop(display)

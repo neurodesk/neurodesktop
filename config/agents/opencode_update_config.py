@@ -10,7 +10,12 @@ Other providers, MCP servers, user instructions, per-model customisations and
 extra provider options are preserved. Models a provider no longer lists are
 dropped. The config is replaced atomically and keeps its file mode; on any
 error the existing file is left untouched, a one-line diagnostic is written to
-stderr and the exit status is 1. Nothing is written to stdout.
+stderr and the exit status is 1. Config updates write nothing to stdout.
+
+``--discover-ollama`` emits one successful catalog as JSON for the interactive
+wrapper. ``--quiet-exec BINARY DEFAULTS ARGS...`` supplies a process-local
+Ollama observation for the native per-directory config hook, without prompts
+or config writes.
 
 Usage::
 
@@ -30,8 +35,13 @@ from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
+import re
+import subprocess
 import sys
+import tempfile
+import time
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 JsonObject = dict[str, Any]
 
@@ -41,6 +51,210 @@ NEURODESK_PROVIDER_NAME = "Neurodesk LLMs"
 NEURODESK_API_KEY_REF = "{env:NEURODESK_API_KEY}"
 FALLBACK_OLLAMA_CONTEXT_LIMIT = 16384
 FALLBACK_OLLAMA_OUTPUT_LIMIT = 8192
+DEFAULT_OLLAMA_HOST = "http://host.docker.internal:11434"
+OLLAMA_DISCOVERY_SECONDS = 6.0
+OLLAMA_DISCOVERY_CONTEXT_LIMIT = 32768
+OLLAMA_SNAPSHOT_ENV = "NEURODESKTOP_OPENCODE_OLLAMA_SNAPSHOT"
+
+
+@dataclass(frozen=True)
+class OllamaSnapshot:
+    """A successful listing, including an intentionally empty catalog."""
+
+    base_url: str
+    contexts: dict[str, int]
+
+
+def has_config_reference(value: str) -> bool:
+    return "{env:" in value or "{file:" in value
+
+
+def ollama_base_url(host: str) -> str | None:
+    """Normalize an unauthenticated Ollama endpoint to its OpenAI base URL."""
+    if has_config_reference(host):
+        return None
+    try:
+        parsed = urlsplit(host)
+        if (
+            parsed.scheme not in ("http", "https")
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            return None
+        _ = parsed.port
+    except ValueError:
+        return None
+    path = parsed.path.rstrip("/")
+    if not path.endswith("/v1"):
+        path += "/v1"
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
+
+def _ollama_json(url: str, deadline: float, body: JsonObject | None = None) -> Any:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return None
+    # curl bounds DNS, transfer time and response size. Never follow redirects
+    # or attach the credentials exported for unrelated providers.
+    with tempfile.TemporaryFile() as response:
+        args = [
+            "curl",
+            "--disable",
+            "--silent",
+            "--fail",
+            "--max-time",
+            str(remaining),
+            "--max-filesize",
+            "2097152",
+            "--proto",
+            "=http,https",
+        ]
+        if body is not None:
+            args += [
+                "--header",
+                "Content-Type: application/json",
+                "--data-binary",
+                json.dumps(body),
+            ]
+        args += [url]
+        try:
+            result = subprocess.run(
+                args,
+                stdout=response,
+                stderr=subprocess.DEVNULL,
+                timeout=remaining,
+                check=False,
+            )
+            if result.returncode:
+                return None
+            response.seek(0)
+            return json.loads(response.read(2097153))
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            return None
+
+
+def ollama_context(payload: object) -> int | None:
+    """Read native show metadata and explicit num_ctx model parameters."""
+    data = _object(payload)
+    fields = ("context_length", "num_ctx", "max_context_length", "max_sequence_length")
+    # A model's explicit num_ctx overrides its architecture's trained window.
+    for key in ("parameters", "modelfile"):
+        raw = data.get(key)
+        if isinstance(raw, str):
+            match = re.search(
+                r"(?im)^\s*(?:parameter\s+)?(?:num_ctx|context_length)\s+(\d+)\s*$", raw
+            )
+            if match and (value := positive_int(match[1])):
+                return value
+    for section in (
+        data,
+        _object(data.get("details")),
+        _object(data.get("model_info")),
+    ):
+        for key, raw_value in section.items():
+            if key in fields or key.endswith(".context_length"):
+                if value := positive_int(raw_value):
+                    return value
+    return None
+
+
+def discover_ollama(
+    host: str, *, deadline_seconds: float = OLLAMA_DISCOVERY_SECONDS
+) -> OllamaSnapshot | None:
+    """Bound the entire tags/show observation. None preserves saved state."""
+    base_url = ollama_base_url(host)
+    if base_url is None:
+        return None
+    deadline = time.monotonic() + deadline_seconds
+    payload = _ollama_json(base_url.removesuffix("/v1") + "/api/tags", deadline)
+    if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):
+        return None
+    names: dict[str, None] = {}
+    for model in payload["models"]:
+        name = _object(model).get("name")
+        if (
+            not isinstance(name, str)
+            or not name
+            or len(name) > 512
+            or has_config_reference(name)
+            or any(ord(c) < 32 for c in name)
+        ):
+            return None
+        names[name] = None
+    if len(names) > 256:
+        return None
+    contexts = {}
+    for name in names:
+        show = _ollama_json(
+            base_url.removesuffix("/v1") + "/api/show", deadline, {"name": name}
+        )
+        contexts[name] = ollama_context(show) or OLLAMA_DISCOVERY_CONTEXT_LIMIT
+    return OllamaSnapshot(base_url, contexts)
+
+
+def ollama_is_managed(provider: JsonObject, base_url: str) -> bool:
+    options = _object(provider.get("options"))
+    managed_endpoints = {
+        ollama_base_url(DEFAULT_OLLAMA_HOST),
+        "http://127.0.0.1:11434/v1",
+        "http://localhost:11434/v1",
+        base_url,
+    }
+    if provider.get(
+        "npm", "@ai-sdk/openai-compatible"
+    ) != "@ai-sdk/openai-compatible" or (
+        options.get("baseURL") and options["baseURL"] not in managed_endpoints
+    ):
+        return False
+    return True
+
+
+def quiet_ollama_overlay(
+    snapshot: OllamaSnapshot, existing: JsonObject, defaults: JsonObject
+) -> JsonObject:
+    """Supply only missing Ollama data, keeping caller configuration in place."""
+    provider = _object(_object(existing.get("provider")).get("ollama"))
+    if not ollama_is_managed(provider, snapshot.base_url):
+        return {}
+    saved = _object(provider.get("models"))
+    seeds = _object(
+        _object(_object(defaults.get("provider")).get("ollama")).get("models")
+    )
+    models: JsonObject = {}
+    for name, context in snapshot.contexts.items():
+        current = _object(saved.get(name))
+        limits = _object(current.get("limit"))
+        if current == seeds.get(name):
+            limits = {}
+        context = positive_int(limits.get("context")) or context
+        output = min(
+            positive_int(limits.get("output")) or FALLBACK_OLLAMA_OUTPUT_LIMIT, context
+        )
+        models[name] = {"limit": {"context": context, "output": output}}
+        if "name" not in current:
+            models[name]["name"] = name
+    delta: JsonObject = {"models": models}
+    if not provider.get("npm"):
+        delta["npm"] = "@ai-sdk/openai-compatible"
+    if not provider.get("name"):
+        delta["name"] = "Local Ollama"
+    delta["options"] = {"baseURL": snapshot.base_url}
+    if "whitelist" not in provider:
+        # OpenCode deep-merges model maps. A whitelist hides the image's stale
+        # seed while retaining user models and explicit default selections.
+        visible = dict.fromkeys(snapshot.contexts)
+        visible.update(
+            {name: None for name, model in saved.items() if model != seeds.get(name)}
+        )
+        for key in ("model", "small_model"):
+            selected = existing.get(key)
+            if isinstance(selected, str) and selected.startswith("ollama/"):
+                visible[selected.removeprefix("ollama/")] = None
+        delta["whitelist"] = list(visible)
+    return {"provider": {"ollama": delta}}
 
 
 class ConfigError(Exception):
@@ -150,6 +364,11 @@ def _refresh_provider(
     provider_key: str,
     models: DetectedModels,
 ) -> None:
+    if has_config_reference(models.base_urls[provider_key]) or any(
+        isinstance(name, str) and has_config_reference(name)
+        for name in models.models.get(provider_key, [])
+    ):
+        return
     provider_cfg = providers.get(provider_key)
     if not isinstance(provider_cfg, dict):
         default_provider = default_providers.get(provider_key)
@@ -158,6 +377,11 @@ def _refresh_provider(
         else:
             provider_cfg = builtin_provider(provider_key, models)
         providers[provider_key] = provider_cfg
+
+    if provider_key == "ollama" and not ollama_is_managed(
+        provider_cfg, models.base_urls["ollama"]
+    ):
+        return
 
     options = provider_cfg.get("options")
     if not isinstance(options, dict):
@@ -206,23 +430,23 @@ def update_config(
     """Return ``cfg`` with refreshed managed providers and default model.
 
     ``selected_model`` becomes the default when it names a known model.
-    Otherwise a still-valid current default is kept, and an invalid one is
-    replaced with the first model of the first managed provider that has any.
+    Otherwise an explicit current default is kept, including offline models.
+    A missing default uses the first observed managed provider with models.
     """
     cfg = copy.deepcopy(cfg)
     drop_legacy_global_instruction(cfg)
 
     providers = _object(cfg.get("provider"))
     default_providers = _object(default_cfg.get("provider"))
-    for provider_key in MANAGED_PROVIDERS:
+    for provider_key in models.models:
         _refresh_provider(providers, default_providers, provider_key, models)
     cfg["provider"] = providers
 
     if selected_model and _model_exists(providers, selected_model):
         cfg["model"] = selected_model
-    elif not _model_exists(providers, cfg.get("model")):
+    elif not isinstance(cfg.get("model"), str) or not cfg["model"]:
         for provider_key in MANAGED_PROVIDERS:
-            models_cfg = providers[provider_key]["models"]
+            models_cfg = _object(_object(providers.get(provider_key)).get("models"))
             if models_cfg:
                 cfg["model"] = f"{provider_key}/{next(iter(models_cfg))}"
                 break
@@ -265,6 +489,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("config", type=Path, help="user opencode.json to update")
     parser.add_argument("defaults", type=Path, help="image default opencode.json")
     parser.add_argument("--select", default="", metavar="PROVIDER/MODEL")
+    parser.add_argument(
+        "--observed-provider", action="append", choices=MANAGED_PROVIDERS, default=[]
+    )
     for provider_key in MANAGED_PROVIDERS:
         parser.add_argument(
             f"--{provider_key}-model",
@@ -287,7 +514,11 @@ def detected_models_from_args(args: argparse.Namespace) -> DetectedModels:
         if base_url:
             base_urls[provider_key] = base_url
     return DetectedModels(
-        models={key: getattr(args, f"{key}_models") for key in MANAGED_PROVIDERS},
+        models={
+            key: getattr(args, f"{key}_models")
+            for key in MANAGED_PROVIDERS
+            if getattr(args, f"{key}_models") or key in args.observed_provider
+        },
         base_urls=base_urls,
         ollama_contexts=parse_ollama_contexts(args.ollama_contexts),
         ollama_default_context=positive_int(args.ollama_default_context)
@@ -297,8 +528,52 @@ def detected_models_from_args(args: argparse.Namespace) -> DetectedModels:
     )
 
 
+def exec_quiet_opencode(binary: str, defaults_path: Path, argv: list[str]) -> None:
+    os.environ.pop(OLLAMA_SNAPSHOT_ENV, None)
+    if argv and argv[0] in ("serve", "acp"):
+        snapshot = discover_ollama(os.environ.get("OLLAMA_HOST") or DEFAULT_OLLAMA_HOST)
+        if snapshot is not None:
+            content = json.dumps(
+                {
+                    "base_url": snapshot.base_url,
+                    "contexts": snapshot.contexts,
+                    "defaults": str(defaults_path),
+                }
+            )
+            if len(content.encode()) <= 65536:
+                os.environ[OLLAMA_SNAPSHOT_ENV] = content
+    os.execv(binary, [binary, *argv])
+
+
+def quiet_overlay_from_stdin() -> JsonObject:
+    try:
+        observation = json.loads(os.environ[OLLAMA_SNAPSHOT_ENV])
+        snapshot = OllamaSnapshot(observation["base_url"], observation["contexts"])
+        defaults_path = Path(observation["defaults"])
+        defaults = load_json_object(defaults_path) if defaults_path.exists() else {}
+        existing = json.load(sys.stdin)
+        return quiet_ollama_overlay(snapshot, existing, defaults)
+    except (ConfigError, OSError, ValueError, TypeError, KeyError):
+        return {}
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(sys.argv[1:] if argv is None else argv)
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "--quiet-exec":
+        exec_quiet_opencode(argv[1], Path(argv[2]), argv[3:])
+        return 0
+    if argv == ["--quiet-overlay"]:
+        print(json.dumps(quiet_overlay_from_stdin()))
+        return 0
+    if argv == ["--discover-ollama"]:
+        snapshot = discover_ollama(os.environ.get("OLLAMA_HOST") or DEFAULT_OLLAMA_HOST)
+        if snapshot is None:
+            return 1
+        print(
+            json.dumps({"base_url": snapshot.base_url, "contexts": snapshot.contexts})
+        )
+        return 0
+    args = parse_args(argv)
     try:
         cfg = load_json_object(args.config)
         default_cfg = load_json_object(args.defaults) if args.defaults.exists() else {}

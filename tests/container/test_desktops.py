@@ -2,6 +2,7 @@ import subprocess
 import sys
 import inspect
 import os
+import grp
 import pwd
 import re
 import signal
@@ -18,6 +19,7 @@ import urllib.request
 import pytest
 import websocket
 from native_desktop_driver import start_display
+from rdp_keyboard_target import RdpKeyboardTarget
 
 
 def run_cmd(cmd):
@@ -718,6 +720,30 @@ print("driver survived")
     assert "driver survived" in result.stdout
 
 
+def test_native_desktop_display_uses_private_rfb_socket(tmp_path):
+    with (tmp_path / "display.log").open("w") as log:
+        server, _ = start_display(log)
+        try:
+            path = tmp_path / "display.log.rfb"
+            deadline = time.monotonic() + 10
+            while not path.exists() and time.monotonic() < deadline:
+                assert server.poll() is None, (tmp_path / "display.log").read_text()
+                time.sleep(0.05)
+            assert path.is_socket()
+            assert path.stat().st_mode & 0o777 == 0o600
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(5)
+                client.connect(str(path))
+                assert client.recv(12).startswith(b"RFB ")
+            listeners = subprocess.run(
+                ["ss", "-H", "-lntp"], capture_output=True, text=True, check=True,
+            ).stdout
+            assert f"pid={server.pid}," not in listeners, listeners
+        finally:
+            server.terminate()
+            server.wait(timeout=10)
+
+
 @pytest.mark.parametrize("fault", ["protocol", "connection"])
 def test_native_desktop_driver_restores_x_handlers(tmp_path, fault):
     if not os.path.exists("/usr/local/bin/Xtigervnc"):
@@ -1182,7 +1208,8 @@ def test_xrdp_tls_key_access():
     )
 
 
-def test_guac_vnc_tunnel():
+@pytest.mark.parametrize("home_layout", ["fresh", "legacy", "xdg", "relative-xdg"])
+def test_guac_vnc_tunnel(home_layout, monkeypatch):
     """End-to-end VNC smoke test through Guacamole - auth + desktop render.
 
     Authentication errors may follow the initial sync handshake.
@@ -1192,10 +1219,32 @@ def test_guac_vnc_tunnel():
     dynamic port."""
     nb_user, home_dir, _, guacamole_home = _prepare_guacamole_runtime()
 
+    config_home = Path(home_dir) / ".config"
+    if home_layout == "xdg":
+        config_home = Path(home_dir) / "custom" / "config"
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    elif home_layout == "relative-xdg":
+        monkeypatch.setenv("XDG_CONFIG_HOME", "relative-config-is-ignored")
+    else:
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    assert not config_home.exists()
+    legacy = Path(home_dir) / ".vnc"
+    saved_config = '$geometry = "1024x768";\n'
+    if home_layout == "fresh":
+        shutil.rmtree(legacy)
+    else:
+        (legacy / "tigervnc.conf").write_text(saved_config)
+        saved_startup = (legacy / "xstartup").read_bytes()
+
     process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home, backend="vnc")
     tunnel = None
     try:
         _guacamole_ready(process.tomcat_port, home_dir=home_dir, process=process)
+        assert legacy.resolve() == config_home / "tigervnc"
+        assert legacy.stat().st_uid == pwd.getpwnam(nb_user).pw_uid
+        if home_layout != "fresh":
+            assert (legacy / "tigervnc.conf").read_text() == saved_config
+            assert (legacy / "xstartup").read_bytes() == saved_startup
         _guacd_port = _read_runtime_port(home_dir, "guacd_port", default=4822)
         _wait_for_tcp_port(_guacd_port)
 
@@ -1324,6 +1373,7 @@ def test_guac_rdp_tunnel():
         )
         rdp_connection_id = _connection_id_by_protocol(connections, "rdp")
 
+        keyboard_target = RdpKeyboardTarget(account.pw_uid)
         tunnel = _open_guacamole_tunnel(
             process.tomcat_port,
             auth_response["authToken"],
@@ -1331,6 +1381,7 @@ def test_guac_rdp_tunnel():
             rdp_connection_id,
         )
         _collect_guacamole_desktop_frames(tunnel)
+        keyboard_target.wait(tunnel)
 
         def key(keysym, pressed):
             value = str(keysym)
@@ -1340,7 +1391,7 @@ def test_guac_rdp_tunnel():
         key(65471, True)
         key(65471, False)
         key(65513, False)
-        _collect_guacamole_desktop_frames(tunnel, timeout_seconds=10)
+        keyboard_target.wait(tunnel, run_dialog=True, timeout_seconds=10)
         output = Path(home_dir) / "rdp-command.txt"
         assert not output.exists(), "RDP command output must be new for this session"
         command = "sh -c " + shlex.quote(
@@ -1356,6 +1407,16 @@ def test_guac_rdp_tunnel():
             time.sleep(0.1)
         assert output.is_file(), "RDP desktop did not execute the keyboard-launched command"
         assert output.read_text() == "desktop-ready"
+        session_sockets = Path("/run/xrdp/sockdir") / str(account.pw_uid)
+        assert session_sockets.stat().st_uid == account.pw_uid
+        assert session_sockets.stat().st_gid == grp.getgrnam("xrdp").gr_gid
+        assert session_sockets.stat().st_mode & 0o007 == 0
+        xorg_sockets = list(session_sockets.glob("xrdp_display_*"))
+        assert xorg_sockets, "No Xorg session socket was created"
+        for path in xorg_sockets:
+            assert path.is_socket()
+            assert path.stat().st_gid == grp.getgrnam("xrdp").gr_gid
+            assert path.stat().st_mode & 0o777 == 0o660
 
         if root_cmds_available:
             xrdp_log = _read_xrdp_log()

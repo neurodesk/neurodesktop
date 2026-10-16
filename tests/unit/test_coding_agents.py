@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 import pytest
 
-from testlib import resolve_source
+from testlib import repo_path, resolve_source
 
 def run_cmd(cmd):
     """Utility to run a shell command and return its exit code and output."""
@@ -53,7 +53,7 @@ def test_dockerfile_pins_the_native_claude_install():
         encoding="utf-8"
     )
 
-    assert 'ARG CLAUDE_CODE_VERSION="2.1.278"' in dockerfile
+    assert 'ARG CLAUDE_CODE_VERSION="2.1.302"' in dockerfile
     assert "bash -s -- ${CLAUDE_CODE_VERSION}" in dockerfile
     assert "bash -s -- stable" not in dockerfile
 
@@ -151,6 +151,7 @@ def test_opencode_machine_commands_bypass_interactive_setup(tmp_path, args):
     test_wrapper = tmp_path / "opencode-wrapper-test"
     wrapper_contents = opencode_wrapper_path().read_text(encoding="utf-8")
     wrapper_contents = wrapper_contents.replace("/usr/bin/opencode", str(fake_opencode))
+    wrapper_contents = wrapper_contents.replace("/opt/neurodesktop/opencode_update_config.py", str(repo_path("config/agents/opencode_update_config.py")))
     test_wrapper.write_text(wrapper_contents, encoding="utf-8")
     test_wrapper.chmod(0o755)
 
@@ -277,6 +278,9 @@ def make_opencode_litellm_wrapper(tmp_path):
     fake_curl = fake_bin_dir / "curl"
     fake_curl.write_text(
         """#!/bin/sh
+case "$*" in
+    */api/show*) exec /usr/bin/curl "$@" ;;
+esac
 outfile=""
 auth=""
 url=""
@@ -304,14 +308,19 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ -z "$outfile" ]; then
-    outfile="/dev/null"
+    outfile="/dev/stdout"
+    status_output="/dev/null"
+else
+    status_output="/dev/stdout"
 fi
+exec 3>"$status_output"
+
 
 case "$url" in
     https://llm.neurodesk.org/openai/models)
         if [ "${FAKE_NEURODESK_MODELS_HTTP:-}" = "404" ] && [ -z "$auth" ]; then
             printf '%s' '{"detail":"Not Found"}' > "$outfile"
-            printf '404'
+            printf '404' >&3
             exit 0
         fi
         case "$auth" in
@@ -321,60 +330,60 @@ case "$url" in
                 else
                     printf '%s' '{"data":[{"id":"model-alpha"},{"id":"openai/gpt-4.1-mini"}]}' > "$outfile"
                 fi
-                printf '200'
+                printf '200' >&3
                 ;;
             *)
                 printf '%s' '{"error":{"message":"Authentication Error, No api key passed in."}}' > "$outfile"
-                printf '401'
+                printf '401' >&3
                 ;;
         esac
         ;;
     *llm.neurodesk.org*)
         printf '%s' '{"error":{"message":"unexpected Neurodesk URL"}}' > "$outfile"
-        printf '302'
+        printf '302' >&3
         ;;
     *llm.jetstream-cloud.org*)
         printf '%s' '{"error":"unavailable"}' > "$outfile"
-        printf '503'
+        printf '503' >&3
         ;;
     *127.0.0.1:11434/api/tags*)
         if [ "${FAKE_OLLAMA_MODELS:-}" = "1" ]; then
             printf '%s' '{"models":[{"name":"local-model:latest"}]}' > "$outfile"
-            printf '200'
+            printf '200' >&3
         else
             printf '%s' '{}' > "$outfile"
-            printf '000'
+            printf '000' >&3
         fi
         ;;
     *127.0.0.1:9/api/tags*)
         if [ "${FAKE_OLLAMA_MODELS:-}" = "1" ]; then
             printf '%s' '{"models":[{"name":"local-model:latest"}]}' > "$outfile"
-            printf '200'
+            printf '200' >&3
         else
             printf '%s' '{}' > "$outfile"
-            printf '000'
+            printf '000' >&3
         fi
         ;;
     *host.docker.internal:11434/api/tags*)
         if [ "${FAKE_OLLAMA_MODELS:-}" = "1" ]; then
             printf '%s' '{"models":[{"name":"local-model:latest"}]}' > "$outfile"
-            printf '200'
+            printf '200' >&3
         else
             printf '%s' '{}' > "$outfile"
-            printf '000'
+            printf '000' >&3
         fi
         ;;
     *127.0.0.1:"${FAKE_OLLAMA_SHOW_PORT:-none}"/api/tags*)
         printf '%s' '{"models":[{"name":"local-model:latest"}]}' > "$outfile"
-        printf '200'
+        printf '200' >&3
         ;;
     *api/tags*)
         printf '%s' '{}' > "$outfile"
-        printf '000'
+        printf '000' >&3
         ;;
     *)
         printf '%s' '{}' > "$outfile"
-        printf '000'
+        printf '000' >&3
         ;;
 esac
 """,
@@ -401,6 +410,7 @@ esac
         f'OPENCODE_UPDATE_CONFIG_HELPER="{opencode_update_config_path()}"',
     )
     wrapper_contents = wrapper_contents.replace("/usr/bin/opencode", str(fake_opencode))
+    wrapper_contents = wrapper_contents.replace("/opt/neurodesktop/opencode_update_config.py", str(repo_path("config/agents/opencode_update_config.py")))
     test_wrapper.write_text(wrapper_contents, encoding="utf-8")
     test_wrapper.chmod(0o755)
 
@@ -624,7 +634,7 @@ def test_opencode_model_refresh_preserves_user_settings_across_runs(tmp_path):
         }
     }
     # Jetstream is unreachable in the fixture, so it keeps no models.
-    assert cfg["provider"]["jetstream"]["models"] == {}
+    assert "jetstream" not in cfg["provider"]
 
     returncode, output = _run_opencode_with_model_profile(
         test_wrapper, env, tmp_path
@@ -668,12 +678,7 @@ def test_opencode_model_refresh_seeds_providers_and_ollama_limits(tmp_path):
             }
         },
     }
-    assert cfg["provider"]["jetstream"] == {
-        "npm": "@ai-sdk/openai-compatible",
-        "name": "JetStream",
-        "options": {"baseURL": "https://llm.jetstream-cloud.org/v1"},
-        "models": {},
-    }
+    assert "jetstream" not in cfg["provider"]
     neurodesk = cfg["provider"]["neurodesk"]
     assert neurodesk["npm"] == "@ai-sdk/openai-compatible"
     assert neurodesk["options"]["apiKey"] == "{env:NEURODESK_API_KEY}"

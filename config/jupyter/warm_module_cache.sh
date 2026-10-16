@@ -12,16 +12,19 @@ TIMEOUT_SECONDS="${NEURODESKTOP_WARM_TIMEOUT_SECONDS:-900}"
 log() { echo "[module-cache] $*"; }
 
 build_cache() {
-    local cache_dir="${HOME}/.lmod.d/.cache"
-    mkdir -p "$cache_dir" || return 1
-    # Lmod reuses a user cache for a day. Invalidate it so every start lists
-    # tools published since; Lmod removes the marker after it rebuilds.
-    : > "${cache_dir}/invalidated"
+    local cache_dir
     unset NEURODESKTOP_ENV_SOURCED
     # shellcheck source=/dev/null
     source "$ENV_SCRIPT" >/dev/null 2>&1
     # shellcheck source=/dev/null
     source "$LMOD_INIT"
+    cache_dir=$(module --config-json 2>&1 | python3 -c \
+        'import json, sys; print(json.load(sys.stdin)["configT"]["usrCacheDir"])') || return 1
+    umask 077
+    mkdir -p "$cache_dir" || return 1
+    # Lmod reuses a user cache for a day. Invalidate it so every start lists
+    # tools published since; Lmod removes the marker after it rebuilds.
+    : > "${cache_dir}/invalidated" || return 1
     # A short build would otherwise not be written to the user cache.
     LMOD_SHORT_TIME=0 module --quiet avail >/dev/null 2>&1
 }

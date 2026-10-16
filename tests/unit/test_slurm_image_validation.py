@@ -55,6 +55,8 @@ sys.exit(37 if stage == os.environ["FAIL_STAGE"] else 0)
     if failure not in ("run", "bootstrap"):
         assert calls[2] == ["exec", "--user", "jovyan", name,
                             "pytest", "/opt/tests/test_slurm.py", "-v"]
+    if failure not in ("run", "bootstrap", "tests"):
+        assert calls[3] == ["exec", name, "pytest", "/opt/tests/test_slurm_multiuser.py", "-v"]
     assert result.returncode == (1 if failure == "cleanup" else 37 if failure else 0)
 
 

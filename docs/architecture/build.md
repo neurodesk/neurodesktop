@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-14"
+last-reviewed: "2026-10-16"
 ---
 
 # Build-Time Behaviors
@@ -22,6 +22,32 @@ The [image release workflows](../testing.md#image-release-validation) build
 candidates for a specific run and attempt, test and scan them, and then promote
 the same candidates to release tags. Native runtime checks cover both image
 architectures. A date tag never substitutes for building the run's source SHA.
+
+## Base image dependencies
+
+The base image uses Ubuntu 26.04. Guacamole builds against FreeRDP 3 and ships
+the matching FreeRDP 3 client libraries. Its build selects GNU C17 because
+[GCC 15 defaults to C23](https://gcc.gnu.org/gcc-15/porting_to.html).
+It accepts deprecated FreeRDP API declarations and requires the RDP plugin
+to exist after installation.
+
+The build backports [GUACAMOLE-2328](https://issues.apache.org/jira/browse/GUACAMOLE-2328)
+from upstream commit
+[`ab36756b596520ae2a94cd4d25e406e0b5aa820b`](https://github.com/apache/guacamole-server/commit/ab36756b596520ae2a94cd4d25e406e0b5aa820b).
+The hash-checked [patch](../../config/guacamole/guacamole-1.6.0-GUACAMOLE-2328.patch)
+moves GDI initialization and its dependent rendering handlers to PostConnect,
+after FreeRDP creates the connection cache. This prevents the RDP worker crash
+with FreeRDP 3.31 and later. The 1.6.0 backport preserves its existing RAIL and
+static-channel loading in PreConnect. The installed RDP test requires desktop
+pixels and a command executed through the authenticated Guacamole tunnel.
+
+The generated Guacamole header drops its fixed `_XOPEN_SOURCE` definition;
+its `_GNU_SOURCE` definition lets libc choose the matching feature level.
+The bounded substring helper casts `memchr`'s result to preserve Guacamole's
+existing mutable-pointer return type with libc's const-aware declaration.
+The guaclog key lookup and copy helpers retain const pointers to their static
+key table before producing an owned copy.
+CVMFS uses the release packages built for Ubuntu 26.04.
 
 ## Bundled code-server dependencies
 
@@ -89,10 +115,12 @@ layer upgrades every direct requested distribution while retaining explicit
 compatibility holds. Resolver-selected dependencies inherit the new base and
 fresh direct solves; the build does not run an unbounded post-solve pip or
 conda upgrade that could replace the base image's tested Jupyter environment.
-Where two current direct packages conflict, the user-facing tool wins: both
-the main image environment and Lightcone's isolated tool environment install
-Snakemake 9.27.0 and hold its infrastructure dependency `packaging` at the
-newest allowed release, 25.0.
+Snakemake 9.27.0 has an isolated tool environment because its `packaging<26`
+requirement conflicts with the base image's Conda requirement of
+`packaging>=26.3`. Its private environment uses `packaging` 25.0 and exposes the
+normal `snakemake` command through `/usr/local/bin`. The main environment
+retains Conda's compatible release. Lightcone has its own isolated environment
+and does not install Snakemake.
 
 The ipyniivue patch is one deliberate exception: its version-coupled source is
 mounted into the pip layer because that layer must replace the installed 5 MB
@@ -141,9 +169,9 @@ The image follows these rules:
   tree in its pip install layer, so the replaced package copy does not remain
   in image history.
 
-The pip layer removes the original NBI, MyST, collaboration, and document-provider
+The pip layer removes the original MyST, collaboration, and document-provider
 frontend bundles before the later source builds replace them. NBI and MyST each
-expose one rebuilt package bundle through a symlink in Jupyter's extension
+expose one package bundle through a symlink in Jupyter's extension
 directory. Guacamole's WAR is downloaded, migrated, extracted, patched, and
 deleted in one layer. Apptainer's unused CNI plugins are removed in its builder
 before the runtime tree is copied.
@@ -193,14 +221,12 @@ build when a `notebook_intelligence` upgrade changes it, so the workarounds
 cannot silently regress; re-verify and update (or drop) them when bumping
 the pin.
 
-Notebook Intelligence 5.3.1's published frontend targets JupyterLab 4.2.
-The Dockerfile therefore rebuilds the matching source tag, replaces its older
-dependency graph with the checked-in, JupyterLab
-4.6-compatible Yarn lockfile, installs that graph immutably, installs the
-resulting federated extension, and only then applies the settings patch. The
-build asserts that a `remoteEntry` bundle exists before continuing. Regenerate
-`config/jupyter/notebook-intelligence-5.3.1.yarn.lock` when changing the NBI or
-JupyterLab builder pins.
+Notebook Intelligence 6.2.0's published frontend accepts the image's JupyterLab
+4.6 launcher. The image uses that bundle directly and checks that a
+`remoteEntry` exists before applying the patches. The settings patch preserves
+the optional tab selection after refreshing capabilities. The Ollama patch
+matches the lookup's exact nesting inside the provider's bounded client.
+The obsolete 5.3.1 source rebuild and its Yarn lockfile are removed.
 
 ## MyST and RISE Extension Build
 
@@ -226,7 +252,11 @@ anchor fails the image build and requires the patch to be reassessed.
 ## Apptainer
 
 The Dockerfile builds Apptainer from upstream source in a dedicated build stage
-and copies `/opt/apptainer` into the runtime image. The build is controlled by
+on the runtime's Ubuntu base and copies `/opt/apptainer` into the runtime image.
+It copies the pinned Go SDK from the official Go image. Matching the runtime
+distribution keeps native dependencies such as `libsubid` on the same ABI;
+the runtime layer executes `apptainer --version` to catch missing libraries.
+The build is controlled by
 `APPTAINER_VERSION`, `APPTAINER_GO_VERSION`, `APPTAINER_GRPC_VERSION`, and
 `APPTAINER_CRYPTO_VERSION` so the image can move to scanner-fixed Go toolchain
 and module versions before a matching upstream multi-arch runtime image is

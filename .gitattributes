@@ -7,3 +7,4 @@
 *.png binary
 *.run binary
 .github/workflows/*.lock.yml linguist-generated=true merge=ours
+config/guacamole/guacamole-1.6.0-GUACAMOLE-2328.patch whitespace=-blank-at-eol

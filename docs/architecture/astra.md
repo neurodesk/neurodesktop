@@ -28,20 +28,24 @@ environment receives the exact same ASTRA pin, but does not expose a second
 viewer. The build asserts that exactly `/opt/conda/bin/astra` answers there.
 
 `lc` (`lightcone-cli`) is installed as an isolated `uv` tool under
-`/opt/uv/tools/lightcone-cli` and linked onto `PATH`, so its Dask and Snakemake
+`/opt/uv/tools/lightcone-cli` and linked onto `PATH`, so its Dask
 dependency graph cannot perturb JupyterLab. `uv` itself is on `PATH` for that
 reason; ordinary `uv tool` operations stay user-local at runtime. The image
 build selects `/opt/conda/bin/python` explicitly and disables uv-managed Python
 downloads, so changes to uv's default Python release cannot change the
 Lightcone interpreter.
 
-The latest stable Lightcone release, 0.4.2, still pins ASTRA Tools 0.2.11
-because ASTRA 0.2.14 added required arguments to the idempotent `astra init`
-callback. The image verifies the Lightcone source archive, updates that one
-dependency declaration, and adapts its one callback before building the tool.
-Both edits use exact anchors so a changed upstream release stops the build and
-forces the workaround to be reassessed. This keeps the stable Lightcone
-pipeline on the same current ASTRA release used by the viewer and agent skill.
+Lightcone 0.5.0 uses native compute allocation and materialization. The image
+verifies its source archive and pins ASTRA to the viewer's versions without
+changing upstream dependency declarations. It carries no isolated Snakemake
+or packaging override. A separate source-anchored adapter enables only the
+explicit external-module profile described below. The image also places default
+compute connection material in `/tmp/neurodesk-lightcone-<uid>`, with mode 0700.
+The image's group-writable home cannot satisfy upstream's ancestor checks.
+Those ownership, symlink, and permission checks remain intact. A user compute
+catalog can still set `connection_root`; remote Slurm workers require a shared
+path that satisfies the same checks. The default state is local to the
+container and is discarded when the container is recreated.
 
 ## Recording what ran
 
@@ -71,46 +75,95 @@ declared string carries no version token the tool actually reported. Version
 tokens are compared whole, so `2.5.1` does not satisfy a declared `12.5.10`.
 That is the completion check agents run, and it needs no judgment.
 
-The two paths are mutually exclusive by design: the optional `lc` path below
-refuses a declared `container:` for the same reason the viewer paints a
-declared-image-plus-`runtime: none` manifest red.
+In the native Lightcone path, ASTRA's `container:` is a software label, not a
+runtime selection. Module profiles cannot also declare `[tool.lightcone.image]`.
+Keep software labels and inspect the actual execution attestation. Legacy
+manifests that claim a container with `runtime: none` remain a provenance
+mismatch in the viewer.
 
 ## Executing an analysis with `lc`
+
+Lightcone 0.5 materializes root outputs only. ASTRA resolves child outputs with
+dots, which this release rejects when naming artifacts. Keep executable recipes
+at the project's root analysis or use the plain Slurm flow for child analyses.
+The viewer rejects fabricated slash or dotted output IDs in 0.5 evidence.
 
 The default Neurodesktop flow is one plain `sbatch` script per analysis step
 with `module load` pinning each tool. It produces no manifest, so the viewer
 reads `spec-only` — see [the trust ladder](#astra-provenance-viewer) — and that
 is the honest reading, not a defect.
 
-`/opt/neurodesktop/astra_lc_run.sbatch` is the optional second path, for a
-project that wants the badge to reflect a real run. `lc run` never submits to
-Slurm itself: it always dispatches through Dask, and when `SLURM_JOB_ID` is set
-it starts an in-process scheduler and launches one `dask worker` per allocated
-node with `srun`. So `lc` goes *inside* an allocation rather than in front of
-one, which is all the template is. Released `lightcone-cli` 0.4.2 has no
-`--async` or `sbatch` submission of its own.
+`neurodesk-lc-materialize` is the optional Lightcone 0.5 module path. Run it
+from the project root, outside an existing allocation. It uses native
+`lc compute launch`, waits for readiness, runs `lc materialize`, and releases
+only the full cluster ID allocated by this invocation. It does not retry an
+ambiguous submission. After an interrupted submission, inspect `lc compute
+status` before submitting again.
 
-The template exports `/opt/uv/tools/lightcone-cli/bin` onto `PATH` because `lc`
-shells out to the `dask` CLI for those workers and neither is on the default
-`PATH`; that omission is the most likely way the path breaks. It writes
-`lc status --json` to `status.json` beside `astra.yaml`, renaming it into place
-so a half-written manifest never becomes evidence, and refuses to write at all
-when another recognised manifest is already there, since two beside one spec
-fail closed and blank the graph.
+Prepare the repository explicitly with `git init` and `lc init`. Configure your
+Git identity, supply the scientific inputs and scripts, and commit the project.
+Each executable output needs `format`, such as `nii.gz`. Put walltime on the
+allocation, not `recipe.resources.time_limit`. Declare a license appropriate to
+your project in `[project].license` to enable Lightcone's maintained RO-Crate.
+The helper refuses a missing license, dirty project, uncommitted module profile,
+or competing `status.json`, `manifest.json`, or `run-manifest.json` evidence.
+It never commits author edits or chooses a license or author for you.
 
-Two things it deliberately refuses. A spec that declares a `container:` is
-rejected: Apptainer is not one of `lc`'s runtimes (`docker`, `podman`,
-`podman-hpc`, Kubernetes), so the declared image would be recorded as used
-without ever running — the red `provenance-mismatch` the viewer exists to
-expose. And a `module load` without an explicit version is refused, matching
-the standing agent rule.
+```toml
+[tool.neurodesk.lightcone]
+execution = "modules"
+modules = ["fsl/6.0.7.22"]
+```
 
-This path tops out at amber `executed-unverified` and cannot reach green.
-`lc verify` prints its result to the console and stamps nothing into the
-manifest, and Neurodesktop does not synthesize a verification record it did not
-earn. The [integration record](../designs/astra-lightcone-integration.md)
-covers why execution was left out of the first pass and what upstream work
-would raise the ceiling.
+```bash
+neurodesk-lc-materialize --cpus 2 --memory 8 --time 2h baseline/bet_brain
+```
+
+The installed `/opt/neurodesktop/lightcone-compute.yaml` offers one native Slurm
+node with two CPUs, 8 GiB, partition `neurodesktop`, and the isolated Lightcone
+Python. It disables local fallback. This is a requested resource shape, not a
+capacity probe. A smaller container or host cluster needs a suitable user
+`~/.lightcone/compute.yaml` or explicit `LC_COMPUTE_CONFIG`. Inspect the catalog
+with `lc compute resources --json` and `lc compute launch --dry-run --json`.
+Driver and workers need the same project, interpreter, and connection root.
+
+The adapter reloads the committed exact module pins on each worker. It includes
+the ordered pins and a digest of the engine's Python version and installed
+Lightcone sources, including the adapter, in `env_version`. A pin or engine
+change reports `behind`, and `--refresh` remakes the output.
+Module recipes intentionally use the upstream
+open backend. The manifest records `mechanism: none`, `fs: open`, and the
+module pins. Per-task HOME, scratch, and GPU masks remain in effect, and
+inherited Bash initialization cannot override the loaded environment.
+This is neither filesystem isolation nor cryptographic verification of CVMFS
+packages. Unprofiled projects retain upstream sandbox behavior. Module profiles
+cannot also declare `[tool.lightcone.image]`; ASTRA `container:` is a software
+label and does not select a runtime image.
+
+Module run records make `datalad rerun` use the image-owned Lightcone interpreter
+and check its engine digest before executing the worker. Keep the original
+Neurodesktop image available for reruns. A missing interpreter or adapter, or a
+different engine digest, fails with a request to use that image. The rerun does
+not download an adapted engine from PyPI. Ordinary projects retain upstream's
+pinned `uv run --no-project --with 'lightcone-cli==…'` engine reconstruction.
+
+For ordinary uv projects, use `lc compute launch`, `lc run CLUSTER -- COMMAND`,
+`lc materialize CLUSTER TARGET`, and `lc compute down CLUSTER` directly.
+`lc materialize --check TARGET` is the freshness gate. `lc status --json` is a
+read-only report whose successful exit does not mean outputs are current.
+
+The viewer reads `ro-crate-metadata.json` through structured action, result, and
+manifest relationships. Canonical manifests establish historical execution.
+Status snapshots are supported explicitly and retain `current`, `behind`, and
+`stale` distinctions, but a snapshot without a matching canonical manifest does
+not establish execution. Canonical 0.5 output IDs must match the exact analysis
+scope. A root `answer` never supplies evidence for a child's `answer`.
+Generic legacy manifests still allow an unambiguous local output ID.
+Unmatched universes and never-materialized records stay grey.
+Preview files must remain inside the project and match their recorded
+hashes, including annex symlinks. Missing annex content means no preview.
+No 0.5 status, manifest, crate, or sandbox attestation supplies passing output
+verification, so this path reaches amber and never synthesizes green.
 
 ## Lightcone agent skills
 
@@ -121,8 +174,10 @@ provides `astra`, `assess-reproducibility`, `reproduce`, and
 without a first-run marketplace download:
 
 The checkout stays at the last reviewed commit that contains that plugin.
-Newer upstream commits removed it and introduced a `lightcone` plugin written
-for the incompatible 0.5.0 release candidate. During the image build, exact
+The retained plugin teaches ASTRA specifications and reproduction, not the
+Lightcone execution lifecycle. Its skills and hooks at this exact commit contain
+no obsolete `lc run` flags or Lightcone manifest parsing. The image analysis
+contract supplies the native 0.5 execution guidance. During the image build, exact
 anchors update the retained plugin's `astra-pins.sh` from its historical
 versions to the image's current ASTRA Tools and ASTRA Spec pins. This preserves
 the stable reproduction workflow without letting its validator schema drift.

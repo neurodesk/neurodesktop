@@ -4,7 +4,7 @@ description: CVMFS server selection and mount configuration, and the
   neurocommand CLI/module system for neuroimaging tools
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-13"
+last-reviewed: "2026-10-16"
 ---
 
 # CVMFS and Neurocommand
@@ -168,8 +168,12 @@ sets that cost, so it is largest for users far from every mirror.
 After the deferred worker's CVMFS attempt, it launches
 [`warm_module_cache.sh`](../../config/jupyter/warm_module_cache.sh) in the
 background. The script runs as the notebook user with a clean environment and
-`nice -n 10`. It invalidates any existing Lmod user cache in `~/.lmod.d/.cache`,
-so a restart lists tools published since the last build, then runs
+`nice -n 10`. After initializing the user's environment, it reads the cache
+directory from `module --config-json` and invalidates that cache so a restart
+lists tools published since the last build. The installed Lmod 8.7.60 uses
+`~/.cache/lmod` and does not honor `XDG_CACHE_HOME`; the warm-up follows Lmod's
+reported directory, including site overrides. It creates cache directories and
+files with a private umask, then runs
 `module avail` with `LMOD_SHORT_TIME=0` so Lmod writes the cache even when the
 build is quick. The build does not delay the worker's completion marker or
 Slurm. It is skipped when CVMFS modules are unavailable or when

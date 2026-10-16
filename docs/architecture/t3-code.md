@@ -4,7 +4,7 @@ description: T3 Code in JupyterLab, server lifecycle, provider paths, persistent
   state, and desktop connection procedures
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-09"
+last-reviewed: "2026-10-16"
 ---
 
 # T3 Code remote access
@@ -361,7 +361,16 @@ copies `/opt/AGENTS.md` into a project when `AGENTS.md` is absent. The OpenCode
 launcher exports `NEURODESK_API_KEY` from `~/.bashrc` when the environment
 lacks it. The interactive wrapper stores that key there, T3 execs the launcher
 without a login shell, and the image's default OpenCode provider authenticates
-with it.
+with it. On first provider use, the quiet OpenCode launcher discovers Ollama
+models and their context limits. Select `ollama/<model>` in T3's model picker.
+No terminal OpenCode launch is needed. The default server is
+`http://host.docker.internal:11434`, using Docker's host-gateway mapping.
+The [shared discovery contract](coding-agents.md#opencode-terminal-wrapper)
+describes deadlines, custom configuration, offline behavior, and process-local
+configuration. Discovery runs only when starting a new OpenCode server or ACP
+process. A native config plugin applies the observation separately after each
+project's settings resolve, including projects opened later in the same server.
+Existing chats keep their running server and selected model.
 
 T3 reloads the login-shell `PATH` at startup, which can put the interactive
 Codex wrapper before the quiet directory. When `T3CODE_HOME` is set, that
@@ -384,7 +393,7 @@ than using T3's systemd service installer or self-update flow.
 
 ## Build and architecture limits
 
-T3 0.0.45 publishes one self-contained executable per platform, with its web
+T3 0.1.0 publishes one self-contained executable per platform, with its web
 client, its `node-pty` prebuild and its other native modules bundled beside it.
 The PTY binding lives under `node_modules/node-pty/prebuilds/linux-x64/pty.node`
 on amd64 and `node_modules/node-pty/prebuilds/linux-arm64/pty.node` on arm64.
@@ -403,6 +412,6 @@ same guarantee instead — the manifest pins `t3`, `t3` pins each
 its own tarball.
 
 Both amd64 and arm64 images must pass the installed server and PTY checks.
-0.0.45 ships a resource monitor for both Linux architectures, so arm64 no
+0.1.0 ships a resource monitor for both Linux architectures, so arm64 no
 longer omits resource telemetry; server, terminal, pairing, and provider
 behavior must still pass.

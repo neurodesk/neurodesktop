@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 
+if [ "${1:-}" = "--version" ]; then
+    exec /usr/bin/opencode "$@"
+fi
+
 if [ -r /opt/neurodesktop/agent_shell_setup.sh ]; then
     # Image-installed dependency is unavailable in the checkout.
     # shellcheck source=/dev/null
@@ -23,4 +27,12 @@ if [ -z "${NEURODESK_API_KEY:-}" ] && [ -f "${HOME:-}/.bashrc" ]; then
     fi
 fi
 
-exec /usr/bin/opencode "$@"
+case "${1:-}" in
+    serve|acp)
+        exec python3 /opt/neurodesktop/opencode_update_config.py --quiet-exec /usr/bin/opencode \
+            /opt/jovyan_defaults/.config/opencode/opencode.json "$@"
+        ;;
+    *)
+        exec /usr/bin/opencode "$@"
+        ;;
+esac

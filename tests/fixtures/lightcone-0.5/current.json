@@ -1,0 +1,46 @@
+{
+  "mode": "direct",
+  "image": null,
+  "sandbox": "landlock (fs: declared, network: allowed)",
+  "crate": "up to date with the outputs",
+  "counts": {
+    "current": 1,
+    "behind": 0,
+    "stale": 3
+  },
+  "outputs": [
+    {
+      "output": "alternative/answer",
+      "status": "stale",
+      "why": "no manifest \u2014 it has never been materialized",
+      "git_sha": "",
+      "data_version": "",
+      "foreign_write": ""
+    },
+    {
+      "output": "alternative/pending",
+      "status": "stale",
+      "why": "no manifest \u2014 it has never been materialized",
+      "git_sha": "",
+      "data_version": "",
+      "foreign_write": ""
+    },
+    {
+      "output": "baseline/answer",
+      "status": "current",
+      "why": "",
+      "git_sha": "a20290b9362fbf31a5ed12fda74fc64dc5c5bb46",
+      "data_version": "sha256:084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0",
+      "foreign_write": ""
+    },
+    {
+      "output": "baseline/pending",
+      "status": "stale",
+      "why": "no manifest \u2014 it has never been materialized",
+      "git_sha": "",
+      "data_version": "",
+      "foreign_write": ""
+    }
+  ],
+  "warnings": []
+}

@@ -24,3 +24,4 @@ docker run -d --init --user root --name "$slurm_container" \
     --entrypoint /bin/bash "$image_ref" -c 'sleep infinity'
 docker exec "$slurm_container" /opt/neurodesktop/setup_and_start_slurm.sh
 docker exec --user jovyan "$slurm_container" pytest /opt/tests/test_slurm.py -v
+docker exec "$slurm_container" pytest /opt/tests/test_slurm_multiuser.py -v

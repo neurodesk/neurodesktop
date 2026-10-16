@@ -1,0 +1,46 @@
+{
+  "mode": "direct",
+  "image": null,
+  "sandbox": "landlock (fs: declared, network: allowed)",
+  "crate": "not maintained \u2014 declare [project].license to enable it",
+  "counts": {
+    "current": 0,
+    "behind": 0,
+    "stale": 4
+  },
+  "outputs": [
+    {
+      "output": "alternative/answer",
+      "status": "stale",
+      "why": "no manifest \u2014 it has never been materialized",
+      "git_sha": "",
+      "data_version": "",
+      "foreign_write": ""
+    },
+    {
+      "output": "alternative/pending",
+      "status": "stale",
+      "why": "no manifest \u2014 it has never been materialized",
+      "git_sha": "",
+      "data_version": "",
+      "foreign_write": ""
+    },
+    {
+      "output": "baseline/answer",
+      "status": "stale",
+      "why": "no manifest \u2014 it has never been materialized",
+      "git_sha": "",
+      "data_version": "",
+      "foreign_write": ""
+    },
+    {
+      "output": "baseline/pending",
+      "status": "stale",
+      "why": "no manifest \u2014 it has never been materialized",
+      "git_sha": "",
+      "data_version": "",
+      "foreign_write": ""
+    }
+  ],
+  "warnings": []
+}

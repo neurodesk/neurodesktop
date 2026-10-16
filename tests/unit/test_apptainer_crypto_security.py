@@ -20,7 +20,7 @@ def test_apptainer_crypto_override_is_fixed_and_applied_to_both_builds():
     assert tuple(map(int, match.groups())) >= MINIMUM_CRYPTO_VERSION
 
     apptainer_stage = dockerfile.split(
-        "FROM golang:${APPTAINER_GO_VERSION}-bookworm AS apptainer",
+        " AS apptainer\n",
         maxsplit=1,
     )[1].split("FROM quay.io/jupyter/base-notebook", maxsplit=1)[0]
 
@@ -36,3 +36,12 @@ def test_apptainer_crypto_override_is_fixed_and_applied_to_both_builds():
         in apptainer_stage
     )
     assert "go mod vendor" in apptainer_stage
+
+
+def test_apptainer_build_uses_the_runtime_base_abi():
+    dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
+    assert (
+        "FROM quay.io/jupyter/base-notebook:${BASE_IMAGE_TAG} AS apptainer"
+        in dockerfile
+    )
+    assert "COPY --from=go-toolchain /usr/local/go /usr/local/go" in dockerfile

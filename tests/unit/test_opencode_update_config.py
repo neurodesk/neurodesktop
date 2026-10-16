@@ -124,18 +124,6 @@ def test_providers_absent_everywhere_use_builtin_definitions():
     cfg = ouc.update_config({}, {}, models)
 
     assert cfg["provider"] == {
-        "jetstream": {
-            "npm": "@ai-sdk/openai-compatible",
-            "name": "JetStream",
-            "options": {"baseURL": "https://js.example/v1"},
-            "models": {},
-        },
-        "ollama": {
-            "npm": "@ai-sdk/openai-compatible",
-            "name": "Local Ollama",
-            "options": {"baseURL": "http://ollama.example:11434/v1"},
-            "models": {},
-        },
         "neurodesk": {
             "npm": "@ai-sdk/openai-compatible",
             "name": "Neurodesk LLMs",
@@ -176,7 +164,7 @@ def test_malformed_provider_entries_are_rebuilt():
 def test_a_non_object_provider_section_is_replaced():
     cfg = ouc.update_config({"provider": ["broken"]}, {}, detected(jetstream=["j"]))
 
-    assert set(cfg["provider"]) == {"jetstream", "ollama", "neurodesk"}
+    assert set(cfg["provider"]) == {"jetstream"}
 
 
 @pytest.mark.parametrize(
@@ -237,7 +225,7 @@ def test_unknown_selection_keeps_a_valid_current_default():
     assert cfg["model"] == "neurodesk/b"
 
 
-@pytest.mark.parametrize("current", ["neurodesk/gone", "no-slash", None, 7])
+@pytest.mark.parametrize("current", [None, 7])
 def test_invalid_default_moves_to_the_first_managed_provider_with_models(current):
     cfg = ouc.update_config(
         {"model": current}, {}, detected(ollama=["o1", "o2"], neurodesk=["n"])

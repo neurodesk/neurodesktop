@@ -55,7 +55,7 @@ export default [
   },
   // OpenCode imports plugins as ES modules.
   {
-    files: ["config/agents/opencode_lightcone_hooks.js"],
+    files: ["config/agents/opencode_lightcone_hooks.js", "config/agents/opencode_ollama_config.js"],
     languageOptions: nodeModule,
   },
   // anywidget imports the viewer as an ES module in the notebook page.

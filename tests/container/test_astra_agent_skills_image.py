@@ -15,6 +15,8 @@ import re
 import shutil
 from pathlib import Path
 
+import yaml
+
 from testlib import run_cmd
 
 
@@ -87,14 +89,14 @@ def test_pinned_astra_cli_wins_with_one_image_owned_install():
     assert output == f"astra, version {ASTRA_TOOLS_VERSION}"
 
     # uv remains installed: `lc` is deliberately kept in its own uv tool
-    # environment so its Dask/Snakemake graph cannot perturb JupyterLab.
+    # environment so its Dask graph cannot perturb JupyterLab.
     code, output = run_cmd("uv --version")
     assert code == 0, output
-    assert output.startswith("uv 0.13.0")
+    assert output.startswith("uv 0.13.1")
 
     code, output = run_cmd("UV_TOOL_DIR=/opt/uv/tools uv tool list")
     assert code == 0, output
-    assert "lightcone-cli v0.4.2" in output
+    assert "lightcone-cli v0.5.0" in output
     assert "- lc" in output
 
 
@@ -385,12 +387,11 @@ def test_provenance_helper_runs_from_its_own_shebang(tmp_path):
     project = tmp_path / "project"
     shutil.copytree(BET_PROJECT, project)
     spec = project / "astra.yaml"
+    specification = yaml.safe_load(spec.read_text(encoding="utf-8"))
+    for declared_output in specification["outputs"]:
+        declared_output["recipe"]["container"] = "neurodesk fsl/6.0.7.22"
     spec.write_text(
-        spec.read_text(encoding="utf-8").replace(
-            '      resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}',
-            '      container: "neurodesk fsl/6.0.7.22"\n'
-            '      resources: {cpus: 1, memory: "4Gi", time_limit: "15m"}',
-        ),
+        yaml.safe_dump(specification, sort_keys=False),
         encoding="utf-8",
     )
 
@@ -418,3 +419,12 @@ def test_provenance_helper_runs_from_its_own_shebang(tmp_path):
     assert code == 1, output
     assert "bet_brain: declared 'neurodesk fsl/6.0.7.22' but" in output
     assert "recorded versions" in output
+
+
+def test_retained_plugin_has_no_obsolete_lightcone_execution_guidance():
+    root = Path("/opt/neurodesktop/agent-skills/plugins/reproduction")
+    bodies = [path.read_text() for path in root.rglob("*")
+              if path.is_file() and path.suffix in {".md", ".sh"}]
+    assert bodies
+    for obsolete in ("lc run --universe", "lc run --jobs", "lc verify", ".lightcone-manifest.json"):
+        assert not any(obsolete in body for body in bodies), obsolete

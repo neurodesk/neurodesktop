@@ -39,11 +39,16 @@ validates and renders without shipping data or an FSL environment:
   example does not ship. Write it (or replace the commands outright) before
   you execute anything; `astra validate` checks the specification, not the
   existence of the commands it names.
-- no recipe declares `container:`, because this example is also the fixture
-  for the optional `lc` path, which refuses a declared image. Your copy runs
-  real software, so add one to every recipe naming the version you read out
-  of the tool. `astra validate` will not ask for it;
-  `neurodesk-astra-provenance check` will.
+- no recipe declares a software `container:` label. Add the actual software
+  version after inspecting the tool you run. That label does not select a
+  Lightcone runtime. For Lightcone module execution, commit the exact pins
+  in `[tool.neurodesk.lightcone]`; see
+  [the native execution guide](../../../docs/architecture/astra.md).
+
+Each output has its 0.5 file `format`. Put walltime on the native allocation,
+not on a recipe. A project license enables the maintained RO-Crate. Run
+`neurodesk-lc-materialize bet-f-0-5/bet_brain` after preparing and committing
+those files. Plain `sbatch` execution remains available.
 
 Before running your copy, remove the illustrative `findings:` entry. It
 demonstrates the schema and is not an observation from your data. Add findings

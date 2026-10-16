@@ -1,0 +1,346 @@
+{
+ "@context": [
+  "https://w3id.org/ro/crate/1.3/context",
+  "https://w3id.org/ro/terms/workflow-run"
+ ],
+ "@graph": [
+  {
+   "@id": "./",
+   "@type": "Dataset",
+   "author": {
+    "@id": "mailto:lightcone-fixture@example.invalid"
+   },
+   "conformsTo": [
+    {
+     "@id": "https://w3id.org/ro/wfrun/process/0.5"
+    },
+    {
+     "@id": "https://w3id.org/ro/wfrun/workflow/0.5"
+    },
+    {
+     "@id": "https://w3id.org/ro/wfrun/provenance/0.5"
+    },
+    {
+     "@id": "https://w3id.org/workflowhub/workflow-ro-crate/1.0"
+    }
+   ],
+   "datePublished": "2026-10-16T15:03:42.914+00:00",
+   "description": "ASTRA analysis `Lightcone 0.5 execution evidence`, materialized by lightcone-cli.",
+   "hasPart": [
+    {
+     "@id": "astra.yaml"
+    },
+    {
+     "@id": "pyproject.toml"
+    },
+    {
+     "@id": "uv.lock"
+    },
+    {
+     "@id": ".python-version"
+    },
+    {
+     "@id": "universes/alternative.yaml"
+    },
+    {
+     "@id": "universes/baseline.yaml"
+    },
+    {
+     "@id": "results/baseline/answer.txt"
+    },
+    {
+     "@id": "results/baseline/.answer.manifest.json"
+    }
+   ],
+   "license": {
+    "@id": "#license"
+   },
+   "mainEntity": {
+    "@id": "astra.yaml"
+   },
+   "mentions": [
+    {
+     "@id": "urn:uuid:5f951480-17b2-5013-9513-ae73e833a153"
+    },
+    {
+     "@id": "urn:uuid:89ef19f6-4257-582a-8e2f-1551bae5d01f"
+    }
+   ],
+   "name": "Lightcone 0.5 execution evidence"
+  },
+  {
+   "@id": "ro-crate-metadata.json",
+   "@type": "CreativeWork",
+   "about": {
+    "@id": "./"
+   },
+   "conformsTo": [
+    {
+     "@id": "https://w3id.org/ro/crate/1.1"
+    },
+    {
+     "@id": "https://w3id.org/ro/crate/1.2"
+    }
+   ]
+  },
+  {
+   "@id": "#astra",
+   "@type": "ComputerLanguage",
+   "alternateName": "Agentic Schema for Transparent Research Analysis",
+   "name": "ASTRA",
+   "url": "https://pypi.org/project/astra-tools/"
+  },
+  {
+   "@id": "astra.yaml",
+   "@type": [
+    "File",
+    "SoftwareSourceCode",
+    "ComputationalWorkflow",
+    "HowTo"
+   ],
+   "conformsTo": {
+    "@id": "https://bioschemas.org/profiles/ComputationalWorkflow/1.0-RELEASE"
+   },
+   "creator": {
+    "@id": "mailto:lightcone-fixture@example.invalid"
+   },
+   "dateCreated": "2026-10-16",
+   "encodingFormat": "application/yaml",
+   "hasPart": [
+    {
+     "@id": "urn:uuid:a1e6f775-aed2-5349-b3c1-98600bc9bc8e"
+    },
+    {
+     "@id": "urn:uuid:915c2877-e8b5-5646-af9e-087407df7a6c"
+    }
+   ],
+   "license": {
+    "@id": "#license"
+   },
+   "name": "Lightcone 0.5 execution evidence",
+   "programmingLanguage": {
+    "@id": "#astra"
+   },
+   "step": [
+    {
+     "@id": "#step-answer"
+    },
+    {
+     "@id": "#step-pending"
+    }
+   ],
+   "version": "a20290b"
+  },
+  {
+   "@id": "https://w3id.org/workflowhub/workflow-ro-crate/1.1",
+   "@type": [
+    "CreativeWork",
+    "Profile"
+   ],
+   "name": "Workflow RO-Crate",
+   "version": "1.1"
+  },
+  {
+   "@id": "#license",
+   "@type": "CreativeWork",
+   "name": "MIT"
+  },
+  {
+   "@id": "mailto:lightcone-fixture@example.invalid",
+   "@type": "Person",
+   "email": "lightcone-fixture@example.invalid",
+   "name": "Neurodesk Lightcone fixture"
+  },
+  {
+   "@id": "urn:uuid:a1e6f775-aed2-5349-b3c1-98600bc9bc8e",
+   "@type": "SoftwareApplication",
+   "description": "the recipe of output `answer`",
+   "name": "answer",
+   "softwareVersion": "a20290b"
+  },
+  {
+   "@id": "#step-answer",
+   "@type": "HowToStep",
+   "position": 0,
+   "workExample": {
+    "@id": "urn:uuid:a1e6f775-aed2-5349-b3c1-98600bc9bc8e"
+   }
+  },
+  {
+   "@id": "urn:uuid:915c2877-e8b5-5646-af9e-087407df7a6c",
+   "@type": "SoftwareApplication",
+   "description": "the recipe of output `pending`",
+   "name": "pending",
+   "softwareVersion": "a20290b"
+  },
+  {
+   "@id": "#step-pending",
+   "@type": "HowToStep",
+   "position": 1,
+   "workExample": {
+    "@id": "urn:uuid:915c2877-e8b5-5646-af9e-087407df7a6c"
+   }
+  },
+  {
+   "@id": "pyproject.toml",
+   "@type": "File",
+   "contentSize": "145",
+   "encodingFormat": "application/toml",
+   "sha256": "c5cd584837644fd7b67166e0d962c8b612e0eae6a9a871d3207c7a2859d8c0d0"
+  },
+  {
+   "@id": "uv.lock",
+   "@type": "File",
+   "contentSize": "127",
+   "encodingFormat": "application/toml",
+   "sha256": "826e92c82acac89a197db2d265a437e3cad216b351de0fe75d716d7d00f3a864"
+  },
+  {
+   "@id": ".python-version",
+   "@type": "File",
+   "contentSize": "8",
+   "encodingFormat": "text/plain",
+   "sha256": "861b3dd8083d28f336ef70f6755bc399538ddad627b1d095820ca34cb953cf14"
+  },
+  {
+   "@id": "universes/alternative.yaml",
+   "@type": "File",
+   "contentSize": "30",
+   "encodingFormat": "application/yaml",
+   "sha256": "d4d3cedfc30d78a99621795b3db3f8a993e7b2843878f5393c951c2dc9f01bbf"
+  },
+  {
+   "@id": "universes/baseline.yaml",
+   "@type": "File",
+   "contentSize": "86",
+   "encodingFormat": "application/yaml",
+   "sha256": "0c9bca53497dd63019b6f8d42ceaaaa9690f0d821cfe5ebbc2b2d009520db51c"
+  },
+  {
+   "@id": "results/baseline/answer.txt",
+   "@type": "File",
+   "contentSize": "3",
+   "description": "output `answer` materialized under `baseline`",
+   "encodingFormat": "text/plain",
+   "name": "answer (universe baseline)",
+   "sha256": "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0",
+   "subjectOf": {
+    "@id": "results/baseline/.answer.manifest.json"
+   },
+   "version": "sha256:084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0"
+  },
+  {
+   "@id": "results/baseline/.answer.manifest.json",
+   "@type": "File",
+   "about": {
+    "@id": "results/baseline/answer.txt"
+   },
+   "contentSize": "919",
+   "encodingFormat": "application/json",
+   "sha256": "a7fb541956b3b3f1ec444e40174ff052a510b19543921b4a04e25be4a67d30aa"
+  },
+  {
+   "@id": "urn:uuid:5f951480-17b2-5013-9513-ae73e833a153",
+   "@type": "CreateAction",
+   "actionStatus": "http://schema.org/CompletedActionStatus",
+   "agent": {
+    "@id": "mailto:lightcone-fixture@example.invalid"
+   },
+   "description": "python -c \"from pathlib import Path; Path('results/baseline/answer.txt').write_text('42\\n')\"",
+   "endTime": "2026-10-16T15:03:42.914+00:00",
+   "instrument": {
+    "@id": "urn:uuid:a1e6f775-aed2-5349-b3c1-98600bc9bc8e"
+   },
+   "name": "run of `answer` in universe `baseline`",
+   "object": [
+    {
+     "@id": "pyproject.toml"
+    },
+    {
+     "@id": "uv.lock"
+    },
+    {
+     "@id": ".python-version"
+    }
+   ],
+   "result": {
+    "@id": "results/baseline/answer.txt"
+   },
+   "startTime": "2026-10-16T15:03:42.628+00:00"
+  },
+  {
+   "@id": "#control-baseline-answer",
+   "@type": "ControlAction",
+   "instrument": {
+    "@id": "#step-answer"
+   },
+   "name": "orchestration of `answer` in universe `baseline`",
+   "object": {
+    "@id": "urn:uuid:5f951480-17b2-5013-9513-ae73e833a153"
+   }
+  },
+  {
+   "@id": "https://pypi.org/project/lightcone-cli/0.5.0/",
+   "@type": "SoftwareApplication",
+   "name": "lightcone-cli",
+   "softwareVersion": "0.5.0",
+   "url": "https://pypi.org/project/lightcone-cli/0.5.0/"
+  },
+  {
+   "@id": "urn:uuid:89ef19f6-4257-582a-8e2f-1551bae5d01f",
+   "@type": "CreateAction",
+   "actionStatus": "http://schema.org/CompletedActionStatus",
+   "agent": {
+    "@id": "mailto:lightcone-fixture@example.invalid"
+   },
+   "description": "one materialization run, starting from commit a20290b9362fbf31a5ed12fda74fc64dc5c5bb46",
+   "endTime": "2026-10-16T15:03:42.914+00:00",
+   "instrument": {
+    "@id": "astra.yaml"
+   },
+   "name": "lc materialize at a20290b",
+   "result": {
+    "@id": "results/baseline/answer.txt"
+   },
+   "startTime": "2026-10-16T15:03:42.628+00:00"
+  },
+  {
+   "@id": "#organize-a20290b",
+   "@type": "OrganizeAction",
+   "instrument": {
+    "@id": "https://pypi.org/project/lightcone-cli/0.5.0/"
+   },
+   "name": "scheduling of the run at a20290b",
+   "object": {
+    "@id": "#control-baseline-answer"
+   },
+   "result": {
+    "@id": "urn:uuid:89ef19f6-4257-582a-8e2f-1551bae5d01f"
+   }
+  },
+  {
+   "@id": "https://w3id.org/ro/wfrun/process/0.5",
+   "@type": "CreativeWork",
+   "name": "Process Run Crate 0.5",
+   "version": "0.5"
+  },
+  {
+   "@id": "https://w3id.org/ro/wfrun/workflow/0.5",
+   "@type": "CreativeWork",
+   "name": "Workflow Run Crate 0.5",
+   "version": "0.5"
+  },
+  {
+   "@id": "https://w3id.org/ro/wfrun/provenance/0.5",
+   "@type": "CreativeWork",
+   "name": "Provenance Run Crate 0.5",
+   "version": "0.5"
+  },
+  {
+   "@id": "https://w3id.org/workflowhub/workflow-ro-crate/1.0",
+   "@type": "CreativeWork",
+   "name": "Workflow RO-Crate 1.0",
+   "version": "1.0"
+  }
+ ]
+}

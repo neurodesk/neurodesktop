@@ -200,8 +200,7 @@ def test_upstream_checkouts_are_pinned_to_an_exact_commit():
         assert f'rev-parse HEAD)" = "${{{reference}}}"' in DOCKERFILE, reference
 
 
-def test_reproduction_plugin_stays_on_the_last_stable_lightcone_workflow():
-    """The replacement upstream plugin requires the unreleased Lightcone 0.5 CLI."""
+def test_reproduction_plugin_keeps_reviewed_spec_guidance_and_current_astra_pins():
     assert (
         'ARG AGENT_SKILLS_REF="4ded682be8487d8aa05831678ef84ef12068d50d"'
         in DOCKERFILE

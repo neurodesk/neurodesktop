@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "output_id": "answer",
+  "universe_id": "baseline",
+  "recipe": "python -c \"from pathlib import Path; Path('results/baseline/answer.txt').write_text('42\\n')\"",
+  "definition_version": "sha256:b0f4967271f42494c28796da714211138b7e32049fa735fcd711bab15dd9cadb",
+  "env_version": "sha256:fcd4e476cfdd960687a23c6003c4660271d3c2335f5778ed8ce36fc6412c1566",
+  "data_version": "sha256:084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0",
+  "decisions": {},
+  "input_versions": {},
+  "git_sha": "a20290b9362fbf31a5ed12fda74fc64dc5c5bb46",
+  "git_remote": "",
+  "lc_version": "0.5.0",
+  "hermeticity": {
+    "mechanism": "landlock",
+    "fs": "declared",
+    "network": "allowed",
+    "landlock_abi": 1,
+    "exec_allowlist_version": 1
+  },
+  "started_at": "2026-10-16T15:03:42.628+00:00",
+  "finished_at": "2026-10-16T15:03:42.914+00:00",
+  "uv_version": "0.12.18",
+  "image": null
+}
