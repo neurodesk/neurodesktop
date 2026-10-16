@@ -437,6 +437,7 @@ def test_acceptance_requires_applications_and_graphics_and_propagates_failure(va
     assert result.returncode == 37, result.stderr
     calls = pytest_calls(records)
     assert any("NEURODESKTOP_REQUIRE_APPLICATIONS=1" in call for call in calls)
+    assert any("NEURODESKTOP_TEST_LIGHTCONE_SCIENCE=1" in call for call in calls)
     assert any("NEURODESKTOP_REQUIRE_WEBGL=1" in call and
                "/opt/tests/test_niivue_rendering_image.py" in call for call in calls)
     assert records[-1]["args"] == ["rm", "-f", "neurodesktop-test"]

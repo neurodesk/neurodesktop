@@ -93,7 +93,7 @@ if [ "$mode" != hpc ]; then
   fi
   acceptance_env=()
   if [ "$mode" = acceptance ]; then
-    acceptance_env=(-e NEURODESKTOP_REQUIRE_APPLICATIONS=1)
+    acceptance_env=(-e NEURODESKTOP_REQUIRE_APPLICATIONS=1 -e NEURODESKTOP_TEST_LIGHTCONE_SCIENCE=1)
   fi
   docker exec "${acceptance_env[@]}" -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 \
     -u jovyan neurodesktop-test pytest /opt/tests/ -v

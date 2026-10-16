@@ -17,6 +17,7 @@ current behavior see [Architecture](../architecture.md),
 
 | Record | Status | What it decided |
 | --- | --- | --- |
+| [Container package and Lightcone upgrade, 16 October 2026](container-upgrade-2026-10-16.md) | implemented | Upgrade direct packages, port the Ubuntu 26 desktop build, and adopt native Lightcone 0.5 execution with explicit scientific module profiles |
 | [Globus pipelines assessment](globus-pipelines-assessment.md) | proposed | Plan analyses in Neurodesk and coordinate transfers and scheduled HPC execution through Globus Flows and Compute |
 | [GPU tool integration checklist](gpu-tool-integration.md) | proposed | Install VirtualGL in the FreeSurfer image, preserve injected driver libraries, and explicitly forward rendering controls through Neurocommand's clean environment |
 | [GPU desktop session assessment](gpu-desktop-sessions.md) | proposed | Assess VirtualGL EGL with existing VNC/Guacamole, nested Apptainer launch requirements, GPU allocation, and hardware acceptance gates |

@@ -717,6 +717,8 @@ In the privileged science profile, also set
 `NEURODESKTOP_TEST_LIGHTCONE_SCIENCE=1`. That test requires pinned FSL through
 CVMFS and nested Apptainer on a real Lightcone worker, compares every output
 voxel, and checks the manifest's module pins and `fs: open` attestation.
+The image runtime driver's `acceptance` mode sets this flag, so the amd64
+PR image job runs the science gate after mounting CVMFS.
 Repeat the installed tests on native arm64. Missing live services leave these
 gates unverified; the local-worker fixtures do not substitute for them.
 
