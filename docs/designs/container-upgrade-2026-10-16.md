@@ -16,10 +16,11 @@ authorities and compatibility policy. This record captures the migration.
 
 ## Release decisions
 
-The live audit on 16 October checked 60 direct declarations. After the upgrade,
+The live audit on 16 October checked 61 direct declarations. After the upgrade,
 it reported no available compatible updates and no registry errors. The CVMFS
-repository bootstrap remains a manual review entry. Its release 4.9 supports
-the new Ubuntu repository, which supplies the selected CVMFS client package.
+repository bootstrap and Slurm compatibility source require manual review.
+Bootstrap release 4.9 supports the new Ubuntu repository, which supplies the
+selected CVMFS client package. The Slurm source must match the installed ABI.
 
 | Component | Previous | Selected |
 | --- | --- | --- |
@@ -78,6 +79,16 @@ The matching builder and runtime passed a CVMFS FSL arithmetic probe with
 every output voxel checked. Native Lightcone science acceptance remains a
 separate gate below.
 
+Slurm 25.11 ignores the old login-environment timeout setting and terminated
+its worker when ordinary Docker permissions denied namespace creation. A
+source-anchored compatibility library routes that denial to upstream's existing
+per-user fork fallback. Only a private local worker links it; package hashes
+guard its ABI, and host-mode clients retain their original executables.
+The configuration also stores job comments so Lightcone can verify ownership
+after an allocation ends. Default-permission tests cover export rules,
+two users, reconfiguration, retrieval failures, and completed/cancelled tokens.
+See [the local Slurm contract](../../config/slurm/README.md).
+
 Notebook Intelligence 6.2 accepts the ACP protocol range used by Jupyter AI's
 current client. Its published launcher bundle supports this JupyterLab, so the
 obsolete source rebuild and large checked-in lockfile are removed. One package
@@ -116,6 +127,9 @@ boundary and leaves child analyses unexecuted rather than translating IDs.
 Native image testing also exposed incompatible default connection storage
 under the image's group-writable home. The image uses a private per-user
 temporary root while preserving upstream ownership and ancestor checks.
+Committed module profiles are read relative to their project directory,
+including projects nested inside a larger Git repository. A real nested
+producer, worker, and DataLad rerun passed independent review.
 
 ## T3 and local Ollama
 
