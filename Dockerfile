@@ -306,9 +306,9 @@ COPY --from=apptainer /opt/apptainer /opt/apptainer
 # "proot: error while loading shared libraries: libtalloc.so.2 / libprotobuf-c.so.1".
 RUN ln -sf /opt/apptainer/bin/apptainer /usr/local/bin/apptainer \
     && ln -sf /opt/apptainer/bin/singularity /usr/local/bin/singularity \
-    && /opt/apptainer/bin/apptainer --version \
     && sed -i 's/^allow setuid = yes/allow setuid = no/' /opt/apptainer/etc/apptainer/apptainer.conf \
-    && apt-install-retry fuse-overlayfs squashfuse libtalloc2 libprotobuf-c1 \
+    && apt-install-retry fuse-overlayfs squashfuse libtalloc2 libprotobuf-c1 uidmap \
+    && /opt/apptainer/bin/apptainer --version \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && rm -rf /root/.cache && rm -rf /home/${NB_USER}/.cache
 
@@ -478,7 +478,6 @@ RUN apt-install-retry \
     tk \
     tmux \
     tree \
-    uidmap \
     vim \
     xdg-utils \
     zip \
