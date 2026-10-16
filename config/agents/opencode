@@ -43,6 +43,10 @@ load_bashrc_export_silently() {
     fi
 }
 
+if [ "${1:-}" = "--version" ]; then
+    exec /usr/bin/opencode "$@"
+fi
+
 if [ -r /opt/neurodesktop/agent_shell_setup.sh ]; then
     # Image-installed dependency is unavailable in the checkout.
     # shellcheck source=/dev/null
@@ -50,13 +54,11 @@ if [ -r /opt/neurodesktop/agent_shell_setup.sh ]; then
 fi
 
 case "${1:-}" in
-    --version)
-        exec /usr/bin/opencode "$@"
-        ;;
     acp)
         load_bashrc_export_silently NEURODESK_API_KEY
         load_bashrc_export_silently BR_MCP_TOKEN
-        exec /usr/bin/opencode "$@"
+        exec python3 /opt/neurodesktop/opencode_update_config.py --quiet-exec /usr/bin/opencode \
+            /opt/jovyan_defaults/.config/opencode/opencode.json "$@"
         ;;
 esac
 
@@ -83,7 +85,7 @@ if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
     OPENCODE_COLOR_ENABLED=1
 fi
 
-OLLAMA_HOST_CLEAN="${OLLAMA_HOST:-http://127.0.0.1:11434}"
+OLLAMA_HOST_CLEAN="${OLLAMA_HOST:-http://host.docker.internal:11434}"
 OLLAMA_HOST_CLEAN="${OLLAMA_HOST_CLEAN%/}"
 OLLAMA_HOST_CLEAN="${OLLAMA_HOST_CLEAN%/v1}"
 
@@ -647,158 +649,22 @@ check_jetstream_model_api() {
 
 # Step 2: Check local Ollama and list available local models.
 check_local_ollama_models() {
-    local response_file
-    local http_code
+    local snapshot
     local model_name
-
     OLLAMA_RUNNING=0
     OLLAMA_MODELS=()
     OLLAMA_MODEL_CONTEXTS_JSON="{}"
-
-    if ! command -v curl >/dev/null 2>&1; then
-        OLLAMA_STATUS="curl not found"
-        return 1
-    fi
-
-    response_file=$(mktemp) || {
-        OLLAMA_STATUS="failed to create temporary file"
-        return 1
-    }
-
-    http_code=$(curl -sS -m 8 -o "${response_file}" -w "%{http_code}" \
-        "${OLLAMA_HOST_CLEAN}/api/tags" 2>/dev/null || true)
-
-    if [ "${http_code}" = "200" ]; then
-        OLLAMA_RUNNING=1
-
-        if command -v python3 >/dev/null 2>&1; then
-            while IFS= read -r model_name; do
-                if [ -n "${model_name}" ]; then
-                    OLLAMA_MODELS+=("${model_name}")
-                fi
-            done < <(python3 - "${response_file}" <<'PY'
-import json
-import sys
-
-try:
-    with open(sys.argv[1], "r", encoding="utf-8") as f:
-        payload = json.load(f)
-except Exception:
-    raise SystemExit(0)
-
-for model in payload.get("models", []):
-    name = model.get("name")
-    if isinstance(name, str) and name:
-        print(name)
-PY
-            )
-
-            if [ "${#OLLAMA_MODELS[@]}" -gt 0 ]; then
-                OLLAMA_MODEL_CONTEXTS_JSON=$(python3 - "${OLLAMA_HOST_CLEAN}" "${OLLAMA_DEFAULT_CONTEXT_LIMIT}" "${OLLAMA_MODELS[@]}" <<'PY'
-import json
-import re
-import sys
-from urllib import error, request
-
-base_url = sys.argv[1].rstrip("/")
-fallback_context = int(sys.argv[2])
-model_ids = sys.argv[3:]
-
-def positive_int(value):
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed > 0 else None
-
-def extract_context(payload):
-    if not isinstance(payload, dict):
-        return None
-
-    candidates = []
-
-    for field in ("context_length", "num_ctx", "max_context_length", "max_sequence_length"):
-        candidates.append(payload.get(field))
-
-    details = payload.get("details")
-    if isinstance(details, dict):
-        for field in ("context_length", "num_ctx", "max_context_length", "max_sequence_length"):
-            candidates.append(details.get(field))
-
-    model_info = payload.get("model_info")
-    if isinstance(model_info, dict):
-        for key, value in model_info.items():
-            if key in ("context_length", "num_ctx", "max_context_length", "max_sequence_length"):
-                candidates.append(value)
-                continue
-            if isinstance(key, str) and key.endswith(".context_length"):
-                candidates.append(value)
-
-    for raw in (payload.get("parameters"), payload.get("modelfile")):
-        if not isinstance(raw, str):
-            continue
-        match = re.search(r"(?im)^\\s*(?:parameter\\s+)?(?:num_ctx|context_length)\\s+([0-9]+)\\s*$", raw)
-        if match:
-            candidates.append(match.group(1))
-
-    for value in candidates:
-        parsed = positive_int(value)
-        if parsed is not None:
-            return parsed
-    return None
-
-def fetch_show_payload(model_id):
-    endpoint = f"{base_url}/api/show"
-    body = json.dumps({"name": model_id}).encode("utf-8")
-    req = request.Request(endpoint, data=body, method="POST")
-    req.add_header("Content-Type", "application/json")
-    with request.urlopen(req, timeout=6) as resp:
-        if resp.status != 200:
-            return None
-        data = resp.read()
-    return json.loads(data.decode("utf-8"))
-
-contexts = {}
-for model_id in model_ids:
-    if not isinstance(model_id, str) or not model_id:
-        continue
-    context_limit = None
-    try:
-        show_payload = fetch_show_payload(model_id)
-        context_limit = extract_context(show_payload)
-    except (error.URLError, TimeoutError, ValueError, json.JSONDecodeError):
-        context_limit = None
-
-    parsed_context = positive_int(context_limit)
-    if parsed_context is None:
-        parsed_context = fallback_context
-
-    contexts[model_id] = parsed_context
-
-print(json.dumps(contexts))
-PY
-                )
-            fi
-        fi
-
-        if [ "${#OLLAMA_MODELS[@]}" -gt 0 ]; then
-            OLLAMA_STATUS="running with ${#OLLAMA_MODELS[@]} model(s): ${OLLAMA_MODELS[*]}"
-        else
-            OLLAMA_STATUS="running but no local models are available"
-        fi
-
-        rm -f "${response_file}"
-        return 0
-    fi
-
-    if [ -n "${http_code}" ] && [ "${http_code}" != "000" ]; then
-        OLLAMA_STATUS="not running or unreachable at ${OLLAMA_HOST_CLEAN} (HTTP ${http_code})"
-    else
+    if ! snapshot=$(python3 "${OPENCODE_UPDATE_CONFIG_HELPER}" --discover-ollama); then
         OLLAMA_STATUS="not running or unreachable at ${OLLAMA_HOST_CLEAN}"
+        return 1
     fi
-
-    rm -f "${response_file}"
-    return 1
+    OLLAMA_RUNNING=1
+    OLLAMA_MODEL_CONTEXTS_JSON=$(python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["contexts"]))' <<<"${snapshot}")
+    while IFS= read -r model_name; do
+        [ -z "${model_name}" ] || OLLAMA_MODELS+=("${model_name}")
+    done < <(python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)["contexts"]))' <<<"${snapshot}")
+    OLLAMA_HOST_CLEAN=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["base_url"].removesuffix("/v1"))' <<<"${snapshot}")
+    OLLAMA_STATUS="running with ${#OLLAMA_MODELS[@]} model(s)"
 }
 
 # Step 3: Check llm.neurodesk.org endpoint status.
@@ -1003,6 +869,9 @@ update_opencode_config() {
     for model_name in "${JETSTREAM_MODELS[@]}"; do
         helper_args+=("--jetstream-model=${model_name}")
     done
+    if [ "${OLLAMA_RUNNING}" -eq 1 ]; then
+        helper_args+=("--observed-provider=ollama")
+    fi
     for model_name in "${OLLAMA_MODELS[@]}"; do
         helper_args+=("--ollama-model=${model_name}")
     done

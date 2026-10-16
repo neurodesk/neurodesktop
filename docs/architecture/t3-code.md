@@ -361,7 +361,14 @@ copies `/opt/AGENTS.md` into a project when `AGENTS.md` is absent. The OpenCode
 launcher exports `NEURODESK_API_KEY` from `~/.bashrc` when the environment
 lacks it. The interactive wrapper stores that key there, T3 execs the launcher
 without a login shell, and the image's default OpenCode provider authenticates
-with it.
+with it. On first provider use, the quiet OpenCode launcher discovers Ollama
+models and their context limits. Select `ollama/<model>` in T3's model picker.
+No terminal OpenCode launch is needed. The default server is
+`http://host.docker.internal:11434`, using Docker's host-gateway mapping.
+The [shared discovery contract](coding-agents.md#opencode-terminal-wrapper)
+describes deadlines, custom configuration, offline behavior, and process-local
+configuration. Discovery runs only when starting a new OpenCode server or ACP
+process. Existing chats keep their running server and selected model.
 
 T3 reloads the login-shell `PATH` at startup, which can put the interactive
 Codex wrapper before the quiet directory. When `T3CODE_HOME` is set, that

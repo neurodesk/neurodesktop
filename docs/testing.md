@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-14"
+last-reviewed: "2026-10-16"
 ---
 
 # Testing
@@ -213,7 +213,6 @@ These substantive heredocs remain:
 | File | Block | Lines |
 | --- | --- | --- |
 | `config/agents/nbi_setup.sh` | Repair wiped NBI endpoint settings | ~80 |
-| `config/agents/opencode` | Probe Ollama model context windows | ~80 |
 | `config/agents/nbi_setup.sh` | Inject the Neurodesk API key into NBI | ~70 |
 | `config/agents/nbi_setup.sh` | Refresh a running NBI server | ~50 |
 | `config/agents/nbi_setup.sh` | Sync the Brain Researcher MCP entry | ~40 |
@@ -221,8 +220,8 @@ These substantive heredocs remain:
 | `Dockerfile` | Wrap kernel specs to re-source the environment | ~30 |
 | `config/agents/opencode` | Seed the TUI sidebar default | ~25 |
 
-The OpenCode wrapper's two 13-line JSON listing parsers remain inline
-because extracting them would not add a useful testing boundary.
+The OpenCode wrapper's Neurodesk model-list parser remains inline.
+Ollama tags, show metadata, and context limits share the typed helper.
 
 The workflow uses stable job names so repository rules can require each check.
 Unit and installed image tests remain necessary for authentication, startup
@@ -625,6 +624,34 @@ After an image build, pair the matching T3 Code desktop release through port
 3773. Start a harmless provider thread, restart the container with the same
 home volume, and confirm that the environment reconnects with its project and
 provider settings intact.
+
+### T3 and Ollama completion
+
+`tests/unit/test_opencode_ollama.py` drives shared discovery against local HTTP
+fixtures and executes quiet launchers with fresh homes. It covers the total
+deadline, metadata fallback, empty and failed listings, credential isolation,
+concurrent process-local overlays, preserved configuration, and `--version`.
+
+Inside the image, `pytest /opt/tests/test_t3_ollama.py` starts a private T3 server
+with the image-owned OpenCode path. It authenticates through T3's bearer-session
+CLI and uses the pinned RPC schemas to refresh the provider, create a project,
+and complete a turn with a controlled Ollama fixture. It requires the discovered
+model in T3's picker and a completed assistant result in the durable projection.
+The persistent OpenCode config must retain its original bytes. A concurrent
+quiet launch during the controlled turn must leave that turn on its original
+attempt. The same module tests native JSONC merge precedence, saved offline
+configuration, and ACP stdout as JSON.
+
+For the live gate, run the image on a Docker network where an Ollama server with
+a downloaded model is reachable as `host.docker.internal:11434`. Set
+`NEURODESKTOP_TEST_OLLAMA_MODEL` to that model ID, then run
+`pytest /opt/tests/test_t3_ollama.py`. The live case always uses the default URL.
+For a host-installed Ollama, Docker also needs
+`--add-host=host.docker.internal:host-gateway`. The live case skips when no model
+ID is supplied. It allows ten minutes for CPU inference and disables OpenCode's
+auxiliary title agent in that test's inline configuration, so the live request
+measures the chat completion. The controlled fixture also covers title requests.
+The controlled completion remains required without external services.
 
 ### Desktop tests
 

@@ -318,7 +318,7 @@ def _run_opencode_launcher(tmp_path, bashrc, environment):
     launcher.write_text(
         repo_path("config/agents/t3-provider-bin/opencode").read_text().replace(
             "/usr/bin/opencode", str(stub)
-        )
+        ).replace("/opt/neurodesktop/opencode_update_config.py", str(repo_path("config/agents/opencode_update_config.py")))
     )
     launcher.chmod(0o755)
     args = ["serve", "--port", "4096"]
