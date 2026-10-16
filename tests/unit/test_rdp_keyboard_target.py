@@ -189,6 +189,7 @@ def test_does_not_attach_to_a_previous_session(target_module, monkeypatch):
 def test_uses_new_session_authority_and_rejects_session_loss(target_module, monkeypatch):
     sessions = {42: (':19', '/home/user/.Xauthority')}
     monkeypatch.setattr(target_module, '_xrdp_sessions', lambda uid: dict(sessions))
+    monkeypatch.setattr(target_module.pwd, 'getpwuid', lambda uid: SimpleNamespace(pw_gid=100))
     target = target_module.RdpKeyboardTarget(1000)
     sessions[73] = (':27', '/home/user/custom-authority')
 
@@ -196,6 +197,7 @@ def test_uses_new_session_authority_and_rejects_session_loss(target_module, monk
         assert args == [sys.executable, target_module.__file__, ':27']
         assert kwargs['env']['XAUTHORITY'] == '/home/user/custom-authority'
         assert kwargs['user'] == 1000
+        assert kwargs['group'] == 100
         return SimpleNamespace(returncode=0, stdout='{"hotkey_ready":true}', stderr='')
 
     monkeypatch.setattr(target_module.subprocess, 'run', probe)
