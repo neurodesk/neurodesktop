@@ -72,6 +72,26 @@ def test_profile_is_explicit_committed_and_part_of_identity(modules, tmp_path):
         modules.profile(tmp_path)
 
 
+@pytest.mark.parametrize("project_path", [".", "analyses/project"])
+def test_committed_profile_follows_project_directory(modules, tmp_path, project_path):
+    root = tmp_path / project_path
+    root.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "pyproject.toml").write_text('[project]\nname="enclosing-repo"\n')
+    declaration(root)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+         "commit", "-qm", "committed profile"],
+        cwd=tmp_path,
+        check=True,
+    )
+    assert modules.profile(root, committed=True).modules == ("fsl/6.0.7.22",)
+    declaration(root, 'modules=["fsl/6.0.7.23"]')
+    with pytest.raises(ProjectError, match="commit"):
+        modules.profile(root, committed=True)
+
+
 @pytest.fixture
 def helper(tmp_path, monkeypatch, modules):
     root = tmp_path / "project"

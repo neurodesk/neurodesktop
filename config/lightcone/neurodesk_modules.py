@@ -104,7 +104,7 @@ def profile(root: Path, *, committed: bool = False) -> ModuleProfile | None:
         )
     if committed:
         saved = subprocess.run(
-            ["git", "show", "HEAD:pyproject.toml"],
+            ["git", "show", "HEAD:./pyproject.toml"],
             cwd=root,
             capture_output=True,
             check=False,
