@@ -102,13 +102,7 @@ CATALOG = (
         "The image intentionally follows Pydra's 1.0 prerelease line.",
     ),
     CatalogEntry("requirement:pypi:jupyter-server-proxy", "pypi:jupyter-server-proxy", "pypi"),
-    CatalogEntry(
-        "requirement:pypi:notebook-intelligence",
-        "pypi:notebook-intelligence",
-        "pypi",
-        "==5.3.1",
-        "Notebook Intelligence 5.4.0 conflicts with the ACP client's protocol dependency.",
-    ),
+    CatalogEntry("requirement:pypi:notebook-intelligence", "pypi:notebook-intelligence", "pypi"),
     CatalogEntry(
         "requirement:pypi:mcp",
         "pypi:mcp",

@@ -52,36 +52,35 @@ DEFAULT_OLLAMA_PROVIDER_GLOB = (
     "llm_providers/ollama_llm_provider.py"
 )
 
-# The context-window lookup as shipped in notebook_intelligence 5.3.1's
+# The context-window lookup as shipped in notebook_intelligence 6.2.0's
 # update_chat_model_list(); model_family comes from the `ollama list`
 # response and is empty for safetensors/mlx imports.
 OLLAMA_ANCHOR = (
-    '                    context_window = model_info[f"{model_family}.context_length"]\n'
+    '\n                        context_window = model_info[f"{model_family}.context_length"]\n'
 )
 
 OLLAMA_REPLACEMENT = (
-    f"                    # {OLLAMA_MARKER}: `ollama list` reports an empty\n"
-    "                    # details.family for safetensors/mlx imports; fall back\n"
-    "                    # to the modelinfo's *.context_length key so the model\n"
-    "                    # still registers instead of being dropped.\n"
-    '                    context_window = model_info.get(f"{model_family}.context_length")\n'
-    "                    if context_window is None:\n"
-    "                        context_window = next(\n"
-    "                            (value for key, value in model_info.items()\n"
-    '                             if key.endswith(".context_length")),\n'
-    "                            None,\n"
-    "                        )\n"
-    "                    if context_window is None:\n"
-    '                        raise KeyError(f"{model_family}.context_length")\n'
+    f"\n                        # {OLLAMA_MARKER}\n"
+    '                        context_window = model_info.get(f"{model_family}.context_length")\n'
+    "                        if context_window is None:\n"
+    "                            context_window = next(\n"
+    "                                (value for key, value in model_info.items()\n"
+    '                                 if key.endswith(".context_length")),\n'
+    "                                None,\n"
+    "                            )\n"
+    "                        if context_window is None:\n"
+    '                            raise KeyError(f"{model_family}.context_length")\n'
 )
 
 # The command registration as emitted by the current minifier:
-#   label:"Notebook Intelligence Settings",execute:t=>{U.isDisposed&&(U=O()),
-#   U.isAttached||e.shell.add(U,"main"),e.shell.activateById(U.id)}
+# NBI 6.2 selects an optional settings tab before showing the panel.
 COMMAND_PATTERN = re.compile(
     r'label:"Notebook Intelligence Settings",'
     r"execute:(?P<arg>\w+)=>\{"
+    r'const (?P<tab>\w+)="string"==typeof\(null==(?P=arg)\?void 0:(?P=arg)\.tab\)'
+    r'\?(?P=arg)\.tab:void 0;'
     r"(?P<widget>\w+)\.isDisposed&&\((?P=widget)=(?P<factory>\w+)\(\)\),"
+    r"(?P=tab)&&(?P=widget)\.content\.selectTab\((?P=tab)\),"
     r'(?P=widget)\.isAttached\|\|(?P<app>\w+)\.shell\.add\((?P=widget),"main"\),'
     r"(?P=app)\.shell\.activateById\((?P=widget)\.id\)\}"
 )
@@ -112,6 +111,7 @@ def patch_settings_bundle_text(text):
         )
 
     arg = command_match.group("arg")
+    tab = command_match.group("tab")
     widget = command_match.group("widget")
     factory = command_match.group("factory")
     app = command_match.group("app")
@@ -120,9 +120,11 @@ def patch_settings_bundle_text(text):
     replacement = (
         'label:"Notebook Intelligence Settings",'
         f"execute:async {arg}=>{{/*{SETTINGS_MARKER}*/"
+        f'const {tab}="string"==typeof(null=={arg}?void 0:{arg}.tab)?{arg}.tab:void 0;'
         f"{widget}.isDisposed||{widget}.dispose();"
         f"try{{await {api}.fetchCapabilities()}}catch(_){{}}"
-        f'{widget}={factory}(),{app}.shell.add({widget},"main"),'
+        f'{widget}={factory}(),{tab}&&{widget}.content.selectTab({tab}),'
+        f'{app}.shell.add({widget},"main"),'
         f"{app}.shell.activateById({widget}.id)}}"
     )
 
@@ -180,7 +182,7 @@ def patch_ollama_provider_text(text):
     if OLLAMA_MARKER in text:
         return text, False
 
-    if OLLAMA_ANCHOR not in text:
+    if text.count(OLLAMA_ANCHOR) != 1:
         raise ValueError(
             "the Ollama context_length anchor no longer matches. The "
             "notebook_intelligence provider changed; update patch_nbi.py (or "

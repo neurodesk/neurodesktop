@@ -53,7 +53,7 @@ def test_dockerfile_pins_the_native_claude_install():
         encoding="utf-8"
     )
 
-    assert 'ARG CLAUDE_CODE_VERSION="2.1.278"' in dockerfile
+    assert 'ARG CLAUDE_CODE_VERSION="2.1.301"' in dockerfile
     assert "bash -s -- ${CLAUDE_CODE_VERSION}" in dockerfile
     assert "bash -s -- stable" not in dockerfile
 

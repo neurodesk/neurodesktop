@@ -27,13 +27,13 @@ def platform_package():
 
 
 def test_t3_code_runtime_and_native_terminal_support_are_installed():
-    assert subprocess.check_output(["t3", "--version"], text=True).strip() == "t3 v0.0.45"
+    assert subprocess.check_output(["t3", "--version"], text=True).strip() == "t3 v0.1.0"
     major, minor, *_ = map(int, subprocess.check_output(["node", "--version"], text=True).strip()[1:].split("."))
     assert (major, minor) >= (24, 10)
     assert shutil.which("codex")
     assert shutil.which("claude")
     assert shutil.which("opencode")
-    assert "2026.9.1" in subprocess.check_output(["cloudflared", "--version"], text=True)
+    assert "2026.10.1" in subprocess.check_output(["cloudflared", "--version"], text=True)
 
     build = platform_package()
     machine = {"x86_64": "x64", "aarch64": "arm64"}[os.uname().machine]

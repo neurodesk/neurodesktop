@@ -191,7 +191,7 @@ def test_proxy_patch_refuses_tcp_anchor_drift(tmp_path):
 def test_dockerfile_pins_and_patches_jupyter_server_proxy():
     dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
 
-    package_pin = dockerfile.index("jupyter-server-proxy==4.5.0")
+    package_pin = dockerfile.index("jupyter-server-proxy==4.6.0")
     patch_install = dockerfile.index(
         "/opt/neurodesktop/patch_jupyter_server_proxy.py"
     )

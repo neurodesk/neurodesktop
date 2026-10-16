@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-14"
+last-reviewed: "2026-10-16"
 ---
 
 # Build-Time Behaviors
@@ -141,9 +141,9 @@ The image follows these rules:
   tree in its pip install layer, so the replaced package copy does not remain
   in image history.
 
-The pip layer removes the original NBI, MyST, collaboration, and document-provider
+The pip layer removes the original MyST, collaboration, and document-provider
 frontend bundles before the later source builds replace them. NBI and MyST each
-expose one rebuilt package bundle through a symlink in Jupyter's extension
+expose one package bundle through a symlink in Jupyter's extension
 directory. Guacamole's WAR is downloaded, migrated, extracted, patched, and
 deleted in one layer. Apptainer's unused CNI plugins are removed in its builder
 before the runtime tree is copied.
@@ -193,14 +193,12 @@ build when a `notebook_intelligence` upgrade changes it, so the workarounds
 cannot silently regress; re-verify and update (or drop) them when bumping
 the pin.
 
-Notebook Intelligence 5.3.1's published frontend targets JupyterLab 4.2.
-The Dockerfile therefore rebuilds the matching source tag, replaces its older
-dependency graph with the checked-in, JupyterLab
-4.6-compatible Yarn lockfile, installs that graph immutably, installs the
-resulting federated extension, and only then applies the settings patch. The
-build asserts that a `remoteEntry` bundle exists before continuing. Regenerate
-`config/jupyter/notebook-intelligence-5.3.1.yarn.lock` when changing the NBI or
-JupyterLab builder pins.
+Notebook Intelligence 6.2.0's published frontend accepts the image's JupyterLab
+4.6 launcher. The image uses that bundle directly and checks that a
+`remoteEntry` exists before applying the patches. The settings patch preserves
+the optional tab selection after refreshing capabilities. The Ollama patch
+matches the lookup's exact nesting inside the provider's bounded client.
+The obsolete 5.3.1 source rebuild and its Yarn lockfile are removed.
 
 ## MyST and RISE Extension Build
 

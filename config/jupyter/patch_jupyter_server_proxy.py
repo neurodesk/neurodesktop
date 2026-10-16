@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bound jupyter-server-proxy's buffered HTTP clients to 1024 MiB.
 
-``jupyter-server-proxy==4.5.0`` constructs ``SimpleAsyncHTTPClient`` directly
+``jupyter-server-proxy==4.6.0`` constructs ``SimpleAsyncHTTPClient`` directly
 for Unix sockets. That bypasses the ``AsyncHTTPClient`` factory defaults set by
 Neurodesktop. JupyterHub also replaces those mutable factory defaults later in
 single-user startup, which returns both proxy branches to Tornado's 100 MiB

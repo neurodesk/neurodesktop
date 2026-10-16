@@ -235,8 +235,8 @@ def test_extension_package_and_image_install_contract():
         / "jupyter-config/jupyter_server_config.d/neurodesk_t3_code.json"
     ).read_text(encoding="utf-8")
 
-    assert 'ARG T3_CODE_VERSION="0.0.45"' in dockerfile
-    assert package["dependencies"]["t3"] == "0.0.45"
+    assert 'ARG T3_CODE_VERSION="0.1.0"' in dockerfile
+    assert package["dependencies"]["t3"] == "0.1.0"
     # The self-contained build bundles its dependencies, so nothing is
     # compiled, no install script runs, and one platform build is installed.
     assert "npm install --omit=dev --ignore-scripts" in dockerfile

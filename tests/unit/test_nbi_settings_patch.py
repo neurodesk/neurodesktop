@@ -12,6 +12,8 @@ raises and the model is dropped from the chat model list. The patcher adds a
 fallback to the modelinfo's *.context_length key.
 """
 
+import json
+import subprocess
 import textwrap
 
 import pytest
@@ -27,7 +29,7 @@ def load_patcher_module():
     )
 
 
-# Verbatim excerpts matching the notebook_intelligence 5.3.1 source-built
+# Verbatim excerpts matching the notebook_intelligence 6.2.0 published
 # labextension bundle:
 # the NBI API class holding fetchCapabilities, and the settings command whose
 # execute callback shows a panel built from the stale client-side cache.
@@ -39,34 +41,34 @@ BUNDLE_FIXTURE = (
     "let U=O();"
     "e.commands.addCommand(pe.openConfigurationDialog,"
     '{label:"Notebook Intelligence Settings",'
-    "execute:t=>{U.isDisposed&&(U=O()),"
+    'execute:t=>{const n="string"==typeof(null==t?void 0:t.tab)?t.tab:void 0;'
+    "U.isDisposed&&(U=O()),n&&U.content.selectTab(n),"
     'U.isAttached||e.shell.add(U,"main"),'
     "e.shell.activateById(U.id)}})"
 )
 
-# Verbatim excerpt matching notebook_intelligence 5.3.1's
-# ollama_llm_provider.py update_chat_model_list().
+# The context lookup sits inside the client context manager in NBI 6.2.
 OLLAMA_FIXTURE = (
     "class OllamaLLMProvider:\n"
     "    def update_chat_model_list(self):\n"
     "        try:\n"
     "            import ollama\n"
-    "            response = ollama.list()\n"
-    "            models = response.models\n"
-    "            self._chat_models = []\n"
-    "            for model in models:\n"
-    "                try:\n"
-    "                    model_family = model.details.family\n"
-    "                    if model_family in OLLAMA_EMBEDDING_FAMILIES:\n"
-    "                        continue\n"
-    "                    model_show = ollama.show(model.model)\n"
-    "                    model_info = model_show.modelinfo\n"
-    '                    context_window = model_info[f"{model_family}.context_length"]\n'
-    "                    self._chat_models.append(\n"
-    "                        OllamaChatModel(self, model.model, model.model, context_window)\n"
-    "                    )\n"
-    "                except Exception as e:\n"
-    '                    log.error(f"Error getting Ollama model info {model}: {e}")\n'
+    "            with ollama.Client() as client:\n"
+    "                response = client.list()\n"
+    "                self._chat_models = []\n"
+    "                for model in response.models:\n"
+    "                    try:\n"
+    "                        model_family = model.details.family\n"
+    "                        if model_family in OLLAMA_EMBEDDING_FAMILIES:\n"
+    "                            continue\n"
+    "                        model_show = client.show(model.model)\n"
+    "                        model_info = model_show.modelinfo\n"
+    '                        context_window = model_info[f"{model_family}.context_length"]\n'
+    "                        self._chat_models.append(\n"
+    "                            OllamaChatModel(self, model.model, model.model, context_window)\n"
+    "                        )\n"
+    "                    except Exception as e:\n"
+    '                        log.error(f"Error getting Ollama model info {model}: {e}")\n'
     "        except Exception as e:\n"
     '            log.warning(f"Failed to update supported Ollama models: {e}")\n'
 )
@@ -98,6 +100,35 @@ def test_settings_patch_is_idempotent():
 
     assert not changed
     assert repatched == patched
+
+
+@pytest.mark.parametrize("arguments,selected_tab", [({}, None), ({"tab": "mcp"}, "mcp")])
+def test_settings_open_uses_fresh_capabilities_and_preserves_requested_tab(arguments, selected_tab):
+    patcher = load_patcher_module()
+    patched, _ = patcher.patch_settings_bundle_text(BUNDLE_FIXTURE)
+    command = patched[patched.index("e.commands.addCommand("):]
+    program = r'''
+let execute, capabilities = "old", disposed = false, shown;
+const T = {async fetchCapabilities() {
+    await Promise.resolve();
+    capabilities = "fresh";
+}};
+const O = () => ({
+    content: {model: capabilities, selectTab(tab) {this.tab = tab;}},
+    id: "nbi-settings"
+});
+let U = {isDisposed: false, dispose() {disposed = true;}};
+const pe = {openConfigurationDialog: "settings"};
+const e = {
+    commands: {addCommand(id, options) {execute = options.execute;}},
+    shell: {add(panel) {shown = panel;}, activateById() {}}
+};
+'''
+    program += command + ";\n"
+    program += "execute(" + json.dumps(arguments) + ").then(() => console.log(JSON.stringify({"
+    program += "disposed, model: shown.content.model, tab: shown.content.tab ?? null})));"
+    result = subprocess.run(["node", "-e", program], capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout) == {"disposed": True, "model": "fresh", "tab": selected_tab}
 
 
 def test_settings_patch_leaves_unrelated_text_alone():
@@ -146,6 +177,19 @@ def test_ollama_patch_is_idempotent():
 
     assert not changed
     assert repatched == patched
+
+
+@pytest.mark.parametrize("replacement", ["", "    "])
+def test_ollama_patch_rejects_changed_nesting(replacement):
+    patcher = load_patcher_module()
+    changed = OLLAMA_FIXTURE.replace(
+        '\n                        context_window =',
+        '\n' + replacement + '                    context_window =',
+    )
+    if replacement:
+        changed += patcher.OLLAMA_ANCHOR
+    with pytest.raises(ValueError, match="anchor no longer matches"):
+        patcher.patch_ollama_provider_text(changed)
 
 
 def test_ollama_patch_refuses_when_anchor_missing():
@@ -255,27 +299,14 @@ def test_main_without_args_patches_both_targets(tmp_path, monkeypatch):
     assert patcher.OLLAMA_MARKER in provider.read_text(encoding="utf-8")
 
 
-def test_dockerfile_rebuilds_the_nbi_531_frontend():
-    """The 5.3.1 wheel targets JupyterLab 4.2, so the image must rebuild the
-    tagged source for JupyterLab 4.6 before applying the settings patch.
-    """
+def test_dockerfile_patches_the_compatible_published_nbi_frontend():
     dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
 
-    assert "notebook_intelligence==5.3.1" in dockerfile
+    assert "notebook_intelligence==6.2.0" in dockerfile
     assert '"mcp>=1.30.0,<2"' in dockerfile
-    assert 'ARG NBI_JUPYTERLAB_BUILDER_VERSION="4.5.10"' in dockerfile
-    assert 'branch "v${NBI_VERSION}"' in dockerfile
-    assert "source=config/jupyter/notebook-intelligence-5.3.1.yarn.lock" in dockerfile
-    assert "install -m 0644 /tmp/nbi-yarn.lock yarn.lock" in dockerfile
-    assert "jlpm install --immutable" in dockerfile
-    assert 'npm pkg set "dependencies.@jupyterlab/launcher=^4.0.0"' in dockerfile
-    assert 'npm pkg set "devDependencies.@jupyterlab/builder=${NBI_JUPYTERLAB_BUILDER_VERSION}"' in dockerfile
-    assert "jlpm up" not in dockerfile
-    assert "cp -a /tmp/notebook-intelligence/notebook_intelligence/labextension" in dockerfile
+    assert 'ARG NBI_JUPYTERLAB_BUILDER_VERSION="4.5.11"' in dockerfile
+    assert "/tmp/nbi-yarn.lock" not in dockerfile
+    assert 'ln -s "${NBI_LABEXT_DIR}" "${APP_NBI_DIR}"' in dockerfile
     assert dockerfile.index("NBI_PACKAGE_DIR=") < dockerfile.index(
-        "&& cd /tmp/notebook-intelligence"
+        "/opt/conda/bin/python3 /tmp/patch_nbi.py"
     )
-
-    rebuild = dockerfile.index("# Rebuild Notebook Intelligence's frontend")
-    patch = dockerfile.index("/opt/neurodesktop/patch_nbi.py", rebuild)
-    assert rebuild < patch

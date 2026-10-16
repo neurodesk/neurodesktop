@@ -35,7 +35,7 @@ build selects `/opt/conda/bin/python` explicitly and disables uv-managed Python
 downloads, so changes to uv's default Python release cannot change the
 Lightcone interpreter.
 
-The latest stable Lightcone release, 0.4.2, still pins ASTRA Tools 0.2.11
+Lightcone 0.4.2 pins ASTRA Tools 0.2.11
 because ASTRA 0.2.14 added required arguments to the idempotent `astra init`
 callback. The image verifies the Lightcone source archive, updates that one
 dependency declaration, and adapts its one callback before building the tool.
