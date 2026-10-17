@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-from testlib import load_source_module
+from testlib import load_source_module, repo_path
 
 
 @pytest.fixture
@@ -930,3 +930,145 @@ def test_git_uses_ephemeral_publisher_auth(worker, monkeypatch, tmp_path, operat
     header = kwargs["env"]["GIT_CONFIG_VALUE_1"].split()[-1]
     assert base64.b64decode(header) == b"x-access-token:publisher-token"
     assert not list(tmp_path.iterdir())
+
+
+def test_stage_cli_copies_trusted_controller_and_locked_lint_context(tmp_path):
+    destination = tmp_path / "control"
+    destination.mkdir()
+
+    subprocess.run([
+        sys.executable, str(repo_path(".github/scripts/agentic_worker.py")), "stage",
+        "--workspace", str(repo_path(".")), "--directory", str(destination),
+    ], check=True, capture_output=True, text=True)
+
+    for script in ("agentic_worker.py", "check_agentic_sandbox.py", "check_agentic_readiness.py"):
+        assert (destination / ".github" / "scripts" / script).read_bytes() == repo_path(f".github/scripts/{script}").read_bytes()
+    for manifest in ("package.json", "package-lock.json"):
+        assert (destination / "config" / "agentic" / "javascript-lint" / manifest).read_bytes() == repo_path(f"tools/javascript-lint/{manifest}").read_bytes()
+    assert not (destination / "config" / "agentic" / "javascript-lint" / "node_modules").exists()
+    assert not (destination / ".git").exists()
+    assert not (destination / "tests").exists()
+
+
+def test_checkout_canary_uses_clean_disposable_head_and_offline_validator(worker, git_repo, monkeypatch, tmp_path):
+    tests = git_repo / "tests"
+    (tests / "unit").mkdir(parents=True)
+    (tests / "testlib.py").write_text("trusted helper\n")
+    (tests / "unit" / "test_subject.py").write_text("def test_subject():\n    assert True\n")
+    worker.git("add", "tests", cwd=git_repo)
+    worker.git("commit", "-m", "test baseline", cwd=git_repo)
+    original_head = worker.git("rev-parse", "HEAD", cwd=git_repo)
+    (git_repo / "file.txt").write_text("caller uncommitted edit\n")
+    (git_repo / "untracked").write_text("caller untracked file\n")
+    output, control = tmp_path / "canary-output", tmp_path / "control"
+    output.mkdir()
+    control.mkdir()
+    calls = []
+    original_command, original_run = worker.command, subprocess.run
+
+    def command(args, **kwargs):
+        if args[0] != "docker":
+            return original_command(args, **kwargs)
+        calls.append(args)
+        assert "--network=none" in args
+        assert not any("/codex" in arg or "CODEX_HOME" in arg or "unconfined" in arg for arg in args)
+        mounts = [arg for arg in args if arg.startswith("type=bind,src=")]
+        checkout = Path(next(arg.split(",src=", 1)[1].split(",dst=")[0] for arg in mounts if arg.endswith("dst=/workspace")))
+        baseline = Path(next(arg.split(",src=", 1)[1].split(",dst=")[0] for arg in mounts if arg.endswith("dst=/baseline,readonly")))
+        assert checkout.is_relative_to(output)
+        assert (checkout / ".git").is_dir()
+        assert worker.git("rev-parse", "HEAD", cwd=checkout) == original_head
+        assert (checkout / "file.txt").read_text() == "before\n"
+        assert not (checkout / "untracked").exists()
+        assert (baseline / "tests" / "testlib.py").read_text() == "trusted helper\n"
+        (checkout / "file.txt").write_text("validator side effect\n")
+        return "frozen_baseline passed\ncandidate passed\n2 passed\n"
+
+    def run(args, **kwargs):
+        if args[:3] == ["docker", "rm", "-f"]:
+            return subprocess.CompletedProcess(args, 0)
+        return original_run(args, **kwargs)
+
+    monkeypatch.setattr(worker, "command", command)
+    monkeypatch.setattr(worker.subprocess, "run", run)
+    monkeypatch.setenv("GH_TOKEN", "must-not-reach-canary")
+    monkeypatch.delenv("AGENTIC_CODEX_HOME", raising=False)
+    monkeypatch.setattr(sys, "argv", [
+        "agentic_worker.py", "canary", "--workspace", str(git_repo),
+        "--control", str(control), "--directory", str(output),
+    ])
+
+    worker.main()
+
+    assert len(calls) == 1
+    assert "2 passed" in (output / "canary-validation.txt").read_text()
+    assert (git_repo / "file.txt").read_text() == "caller uncommitted edit\n"
+    assert (git_repo / "untracked").is_file()
+    assert not (output / "result.json").exists()
+    assert not (output / "change.patch").exists()
+    assert not any(path.is_dir() for path in output.iterdir())
+
+
+def test_candidate_failure_keeps_both_suite_reports_in_result_and_publication_evidence(worker, candidate):
+    state, repo, control, output, auth, _ = candidate
+    report = (
+        "=== frozen_baseline output ===\n" + "early failure detail\n" * 300
+        + "=== candidate output ===\n" + "later candidate detail\n" * 300
+        + 'VALIDATION_SUMMARY [{"stage":"frozen_baseline","status":"failed"},'
+        + '{"stage":"candidate","status":"passed"}]\n'
+    )
+    state["validation_error"] = worker.CommandFailure(["docker", "run"], subprocess.CompletedProcess([], 1, report, ""))
+
+    worker.run_candidate({"kind": "issue", "validation_sha": state["base_sha"]}, repo, control, output, auth, "model")
+
+    result = json.loads((output / "result.json").read_text())
+    validation = (output / "validation.txt").read_text()
+    assert result["outcome"] == "blocked"
+    assert "frozen_baseline" in result["body"] and "candidate" in result["body"]
+    for text in (validation, worker.validation_evidence(result, validation)):
+        assert "frozen_baseline" in text and "candidate" in text
+        assert "early failure detail" in text and "later candidate detail" in text
+
+
+@pytest.mark.parametrize("partial_output", ["partial suite output", "VALIDATION_SUMMARY "])
+def test_candidate_outer_timeout_reports_incomplete_validation(worker, candidate, partial_output):
+    state, repo, control, output, auth, _ = candidate
+    state["validation_error"] = subprocess.TimeoutExpired("docker", 1800, output=partial_output)
+
+    worker.run_candidate({"kind": "issue", "validation_sha": state["base_sha"]}, repo, control, output, auth, "model")
+
+    assert "incomplete" in (output / "validation.txt").read_text().lower()
+    assert json.loads((output / "result.json").read_text())["outcome"] == "blocked"
+
+
+@pytest.mark.parametrize("failure", [
+    subprocess.TimeoutExpired("docker", 1800, output="canary partial output"),
+    subprocess.CalledProcessError(1, "unused"),
+])
+def test_canary_persists_validator_failure_without_candidate_artifacts(worker, candidate, failure):
+    state, repo, control, output, _, _ = candidate
+    if isinstance(failure, subprocess.CalledProcessError):
+        failure = worker.CommandFailure(["docker", "run"], subprocess.CompletedProcess([], 1, "canary suite failed", ""))
+    state["validation_error"] = failure
+
+    with pytest.raises(type(failure)):
+        worker.validate_checkout_canary(repo, control, output)
+
+    evidence = (output / "canary-validation.txt").read_text()
+    assert evidence.startswith("FAILED:")
+    assert "canary" in evidence
+    assert "frozen_baseline" in evidence and "candidate" in evidence
+    assert not (output / "result.json").exists()
+    assert not any(path.is_dir() for path in output.iterdir())
+
+
+def test_blocked_notice_fits_a_result_at_the_combined_publication_limit(worker, candidate):
+    state, repo, control, output, auth, _ = candidate
+    state["result"] = valid_result(body="B", pending_validation=["p" * 1000] * 49 + ["p" * 999])
+    state["validation_error"] = RuntimeError("validation failed")
+
+    worker.run_candidate({"kind": "issue", "validation_sha": state["base_sha"]}, repo, control, output, auth, "model")
+
+    result = worker.validate_result(json.loads((output / "result.json").read_text()))
+    assert result["outcome"] == "blocked"
+    assert "frozen_baseline" in result["body"] and "candidate" in result["body"]

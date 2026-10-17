@@ -140,3 +140,31 @@ def test_reporter_catalog_covers_each_top_level_test_deployment_and_agent_workfl
 def test_all_worker_checkouts_disable_persisted_credentials():
     workflow = source('agentic-worker.yml')
     assert workflow.count('persist-credentials: false') == workflow.count('uses: actions/checkout@')
+
+
+def test_worker_stages_trusted_build_inputs_before_upload():
+    workflow = source('agentic-worker.yml')
+    prepare = workflow.split('  candidate:\n', 1)[0]
+    assert 'agentic_worker.py stage' in prepare
+    assert prepare.index('agentic_worker.py stage') < prepare.index('name: Save trusted task and controller')
+    assert 'path: ${{ runner.temp }}/agentic-control/' in prepare
+
+
+def test_readiness_and_unit_ci_exercise_the_offline_validator():
+    import yaml
+
+    for filename, job_name in (('agentic-readiness.yml', 'readiness'), ('unit-tests.yml', 'worker-validation')):
+        job = yaml.safe_load(source(filename))['jobs'][job_name]
+        commands = '\n'.join(step.get('run', '') for step in job['steps'])
+        assert 'agentic_worker.py stage' in commands
+        assert 'agentic_worker.py canary' in commands
+        assert commands.index('agentic_worker.py stage') < commands.index('docker build')
+        assert commands.index('docker build') < commands.index('agentic_worker.py canary')
+        assert job['timeout-minutes'] >= 40
+        checkout = next(step for step in job['steps'] if step.get('uses', '').startswith('actions/checkout@'))
+        assert checkout['with']['ref'] == '${{ github.sha }}'
+        assert checkout['with']['persist-credentials'] is False
+
+    unit_job = yaml.safe_load(source('unit-tests.yml'))['jobs']['worker-validation']
+    assert 'secrets.' not in str(unit_job)
+    assert 'AGENTIC_CODEX_HOME' not in str(unit_job)

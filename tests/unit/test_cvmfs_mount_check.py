@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 
 import pytest
@@ -19,6 +20,9 @@ def run_health(
     readable=True,
     diagnostic="ok",
     hang_probe="",
+    first_read="",
+    first_mount=None,
+    clock_advances=(),
 ):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -31,6 +35,12 @@ def run_health(
     mount_table.write_text(
         f"{mount_source} {repository} {mount_type} defaults 0 0\n" if mounted else ""
     )
+    first_mount_table = tmp_path / "first-mounts"
+    if first_mount:
+        first_type, first_source = first_mount
+        first_mount_table.write_text(
+            f"{first_source} {repository} {first_type} defaults 0 0\n"
+        )
     calls = tmp_path / "calls"
     commands = {
         "sudo": """
@@ -52,12 +62,26 @@ done
 """,
         "ls": """
 [[ "$*" == "$CVMFS_REPOSITORY_ROOT" ]] || exit 99
+echo read >> "$CALLS"
+if [[ ! -e "$CALLS.read" ]]; then
+  touch "$CALLS.read"
+  case "$FIRST_READ" in
+    fail) exit 2 ;;
+    timeout) exec /bin/sleep 30 ;;
+  esac
+fi
 if [[ "$HANG_PROBE" == ls ]]; then trap '' TERM; exec /bin/sleep 30; fi
 exit "$READ_STATUS"
 """,
         "findmnt": """
 if [[ "$HANG_PROBE" == findmnt ]]; then trap '' TERM; exec /bin/sleep 30; fi
-exec /usr/bin/findmnt --fstab --tab-file "$MOUNT_TABLE" "$@"
+table="$MOUNT_TABLE"
+if [[ ! -e "$CALLS.mount" && -e "$FIRST_MOUNT_TABLE" ]]; then
+  table="$FIRST_MOUNT_TABLE"
+fi
+touch "$CALLS.mount"
+/usr/bin/findmnt --fstab --tab-file "$table" "$@" || exit $?
+echo verified >> "$CALLS"
 """,
         "dig": "exit 0",
         "curl": "exit 0",
@@ -67,8 +91,14 @@ exec /usr/bin/findmnt --fstab --tab-file "$MOUNT_TABLE" "$@"
         "timeout": """
 [[ "$1" == --kill-after=5s ]] || exit 99
 shift
-case "$1" in 10s|45s) ;; *) exit 99 ;; esac
+[[ "$1" =~ ^[1-9][0-9]*s$ ]] || exit 99
+duration="${1%s}"
 shift
+case "$1" in
+  ls) (( duration <= 45 )) || exit 99 ;;
+  *) (( duration <= 10 )) || exit 99 ;;
+esac
+printf 'limit %s %s\n' "$duration" "$1" >> "$CALLS"
 printf 'bounded %s\n' "$*" >> "$CALLS"
 exec /usr/bin/timeout --kill-after=0.1s 0.1s "$@"
 """,
@@ -86,6 +116,20 @@ esac
         tool = bin_dir / name
         tool.write_text("#!/bin/bash\n" + body)
         tool.chmod(0o755)
+    clock = tmp_path / "clock.sh"
+    clock.write_text(
+        """
+clock_step=0
+timeout() {
+  command timeout "$@"
+  local status=$?
+  local advances=($CLOCK_ADVANCES)
+  SECONDS=$((SECONDS + ${advances[clock_step]:-0}))
+  clock_step=$((clock_step + 1))
+  return "$status"
+}
+"""
+    )
     env = dict(
         os.environ,
         PATH=f"{bin_dir}:{os.environ['PATH']}",
@@ -93,6 +137,10 @@ esac
         CVMFS_INVENTORY_REPLICA_RETRY="true",
         CALLS=str(calls),
         MOUNT_TABLE=str(mount_table),
+        FIRST_MOUNT_TABLE=str(first_mount_table),
+        FIRST_READ=first_read,
+        BASH_ENV=str(clock),
+        CLOCK_ADVANCES=" ".join(str(value) for value in clock_advances),
         READ_STATUS="0" if readable else "2",
         DIAGNOSTIC=diagnostic,
         HANG_PROBE=hang_probe,
@@ -115,6 +163,7 @@ def test_unmounted_repository_stops_before_inventory(tmp_path, script):
     assert "inventory" not in calls
     assert "copy" not in calls
     assert "sleep" not in calls
+    assert calls.count("read\n") == 2
     assert "refresh" not in calls
     assert "cvmfs_config showconfig neurodesk.ardc.edu.au" in calls
     assert "cvmfs_config probe neurodesk.ardc.edu.au" in calls
@@ -132,6 +181,8 @@ def test_mounted_repository_keeps_inventory_and_file_read(tmp_path, script, moun
     assert "inventory\n" in calls
     assert "copy\n" in calls
     assert "sleep" not in calls
+    assert calls.count("read\n") == 1
+    assert calls.index("verified\n") < calls.index("inventory\n")
 
 
 @pytest.mark.parametrize("diagnostic", ("fail", "hang"))
@@ -149,9 +200,10 @@ def test_diagnostics_cannot_hide_or_hang_mount_failure(tmp_path, diagnostic):
         "tail -n 100 /var/log/syslog",
     )
     sudo_calls = [call for call in calls.splitlines() if call.startswith("sudo ")]
-    assert sudo_calls == [
+    assert len(sudo_calls) == len(commands)
+    assert set(sudo_calls) == {
         f"sudo -n timeout --kill-after=5s 10s {command}" for command in commands
-    ]
+    }
     for command in commands:
         assert f"bounded {command}\n" in calls
 
@@ -165,26 +217,34 @@ def test_diagnostics_cannot_hide_or_hang_mount_failure(tmp_path, diagnostic):
         ("fuse.cvmfs", "other-filesystem"),
     ),
 )
-def test_non_cvmfs_mount_is_not_healthy(tmp_path, mount_type, mount_source):
+@pytest.mark.parametrize("script", HEALTH_SCRIPTS)
+def test_non_cvmfs_mount_is_not_healthy(tmp_path, mount_type, mount_source, script):
     result, calls = run_health(
         tmp_path,
-        "check_cvmfs_mount.sh",
+        script,
         mounted=True,
         mount_type=mount_type,
         mount_source=mount_source,
     )
     assert result.returncode == 1
-    assert "::error title=CVMFS mount unavailable::" in result.stdout
+    assert result.stdout.count("::error title=CVMFS mount unavailable::") == 1
+    assert calls.count("read\n") == 2
     assert "probe" in calls
+    assert "inventory" not in calls
+    assert "copy" not in calls
 
 
-def test_unreadable_mount_is_not_healthy(tmp_path):
+@pytest.mark.parametrize("script", HEALTH_SCRIPTS)
+def test_unreadable_mount_is_not_healthy(tmp_path, script):
     result, calls = run_health(
-        tmp_path, "check_cvmfs_mount.sh", mounted=True, readable=False
+        tmp_path, script, mounted=True, readable=False
     )
     assert result.returncode == 1
-    assert "::error title=CVMFS mount unavailable::" in result.stdout
+    assert result.stdout.count("::error title=CVMFS mount unavailable::") == 1
+    assert calls.count("read\n") == 2
     assert "probe" in calls
+    assert "inventory" not in calls
+    assert "copy" not in calls
 
 
 @pytest.mark.parametrize("probe", ("ls", "findmnt"))
@@ -195,3 +255,89 @@ def test_mount_probe_is_bounded(tmp_path, probe):
     assert result.returncode == 1
     assert "::error title=CVMFS mount unavailable::" in result.stdout
     assert "probe" in calls
+
+
+@pytest.mark.parametrize("script", HEALTH_SCRIPTS)
+@pytest.mark.parametrize("first_read", ("fail", "timeout"))
+def test_initial_read_failure_recovers_before_inventory(tmp_path, script, first_read):
+    result, calls = run_health(
+        tmp_path, script, mounted=True, first_read=first_read
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "::error" not in result.stdout
+    assert "::warning" in result.stdout
+    assert "recovered" in result.stdout.lower()
+    status = 2 if first_read == "fail" else 124
+    assert re.search(rf"attempt=1 read_status={status} .*elapsed=\d+s", result.stdout)
+    assert re.search(r"attempt=2 read_status=0 findmnt_status=0 .*elapsed=\d+s", result.stdout)
+    assert calls.count("read\n") == 2
+    assert calls.index("verified\n") < calls.index("inventory\n")
+    assert "copy\n" in calls
+    assert "sleep" not in calls
+    assert "refresh" not in calls
+    assert "cvmfs_config probe" not in calls
+
+
+@pytest.mark.parametrize("first_mount", (("autofs", "cvmfs2"), ("fuse", "other")))
+def test_mount_verification_can_recover(tmp_path, first_mount):
+    result, calls = run_health(
+        tmp_path, "test_cvmfs.sh", mounted=True, first_mount=first_mount
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "::error" not in result.stdout
+    assert "::warning" in result.stdout
+    assert re.search(r"attempt=1 read_status=0 findmnt_status=1 .*elapsed=\d+s", result.stdout)
+    assert calls.count("read\n") == 2
+    assert calls.index("verified\n") < calls.index("inventory\n")
+
+
+@pytest.mark.parametrize("clock_advances", ((50, 15, 45), (50, 15, 50), (50, 30, 30)))
+def test_verification_deadline_reserves_kill_grace(tmp_path, clock_advances):
+    result, calls = run_health(
+        tmp_path,
+        "check_cvmfs_mount.sh",
+        mounted=True,
+        first_mount=("autofs", "cvmfs2"),
+        clock_advances=clock_advances,
+    )
+    limits = [
+        (int(duration), command)
+        for duration, command in re.findall(r"^limit (\d+) (ls|findmnt)$", calls, re.M)
+    ]
+    assert [command for _, command in limits[:3]] == ["ls", "findmnt", "ls"]
+    assert limits[2][0] <= min(45, 115 - sum(clock_advances[:2]))
+    if sum(clock_advances) == 110:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert len(limits) == 4
+        assert limits[-1][1] == "findmnt"
+        assert 0 < limits[-1][0] <= 5
+    else:
+        assert result.returncode == 1
+        assert len(limits) == 3
+        assert result.stdout.count("::error title=CVMFS mount unavailable::") == 1
+        assert "cvmfs_config probe" in calls
+
+
+def test_exhausted_deadline_does_not_start_another_read(tmp_path):
+    result, calls = run_health(
+        tmp_path,
+        "check_cvmfs_mount.sh",
+        mounted=True,
+        first_read="fail",
+        clock_advances=(115,),
+    )
+    assert result.returncode == 1
+    assert calls.count("read\n") == 1
+    assert "bounded findmnt" not in calls
+    assert result.stdout.count("::error title=CVMFS mount unavailable::") == 1
+    assert "cvmfs_config probe" in calls
+
+
+def test_mount_recovery_has_no_privileged_effects(tmp_path):
+    result, calls = run_health(
+        tmp_path, "check_cvmfs_mount.sh", mounted=True, first_read="fail"
+    )
+    assert result.returncode == 0
+    assert "sudo " not in calls
+    assert "sleep " not in calls
+    assert "systemctl restart" not in calls
