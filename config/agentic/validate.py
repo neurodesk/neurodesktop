@@ -78,13 +78,27 @@ def run(label, argv, *, cwd, env=None, timeout=STAGE_TIMEOUT):
     tail = bytearray()
     total = 0
     status = None
+    drain_deadline = None
+    drain_expired = False
     assert process.stdout is not None
     with selectors.DefaultSelector() as selector, process.stdout:
         selector.register(process.stdout, selectors.EVENT_READ)
-        while selector.get_map() or process.poll() is None:
-            remaining = timeout - (time.monotonic() - started)
+        while True:
+            if process.poll() is not None and drain_deadline is None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                drain_deadline = time.monotonic() + 1
+            if not selector.get_map() and process.returncode is not None:
+                break
+            deadline = drain_deadline if drain_deadline is not None else started + timeout
+            remaining = deadline - time.monotonic()
             if remaining <= 0:
-                status = "timed_out"
+                if drain_deadline is None:
+                    status = "timed_out"
+                else:
+                    drain_expired = True
                 break
             for key, _ in selector.select(min(remaining, 0.1)):
                 chunk = os.read(key.fileobj.fileno(), 64 * 1024)
@@ -99,20 +113,22 @@ def run(label, argv, *, cwd, env=None, timeout=STAGE_TIMEOUT):
                     break
             if status is not None:
                 break
-        if status is not None:
+        if drain_deadline is None:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
         process.wait(timeout=5)
-    output = tail.decode(errors="replace").encode()[-STAGE_TAIL_BYTES:].decode(errors="ignore")
+    decoded_tail = tail.decode(errors="replace")
+    bounded_utf8 = decoded_tail.encode()[-STAGE_TAIL_BYTES:]
+    output = bounded_utf8.decode(errors="ignore")
     return {
         "stage": label,
         "status": status or ("passed" if process.returncode == 0 else "failed"),
         "returncode": process.returncode,
         "elapsed_seconds": round(time.monotonic() - started, 3),
         "output_tail": output,
-        "output_truncated": total > STAGE_TAIL_BYTES or status == "output_limit",
+        "output_truncated": total > STAGE_TAIL_BYTES or status == "output_limit" or drain_expired,
     }
 
 

@@ -95,8 +95,8 @@ The [agentic setup guide](agentic-maintenance.md#verify-setup-with-one-issue)
 provides the local canary command. Frozen and candidate suite results are
 reported separately, and both must pass.
 
-Install those with the interpreter's own site packages rather than `pip install
---user`. `tests/unit/test_agentic_validation.py` runs
+Install the Python test dependencies in the interpreter's own site packages
+rather than with `pip install --user`. `tests/unit/test_agentic_validation.py` runs
 `config/agentic/validate.py`, which starts the frozen baseline with `python -I`
 so a candidate patch cannot reach it through the environment. Isolated mode
 also drops user site packages, so a `--user` install of `pytest` or of its
@@ -253,6 +253,11 @@ bypass. It also requires these check contexts from GitHub Actions
 | Unit tests | `pytest tests/unit` |
 | PR image acceptance | `Installed image (amd64)` |
 | PR image acceptance | `Installed image (arm64)` |
+
+The `pytest tests/unit` context keeps its existing name and now aggregates
+`Checkout unit tests` and `Offline worker validation`, which run in parallel.
+It succeeds only when both jobs succeed. A failed, cancelled, skipped, or missing
+dependency result fails the aggregate. No ruleset change is needed.
 
 Branches need not be up to date with `main` before merging. A missing, pending,
 or cancelled required check blocks a normal merge. Every pull request to `main`

@@ -128,9 +128,10 @@ mount-failure annotation and stops before inventory download, replica propagatio
 waits, or the FSL file copy.
 The checker permits at most two read-and-mount checks within a shared
 120-second verification budget. Each command's timeout is limited by the
-remaining budget, including its five-second kill grace. A failed first check
-records command exit status and elapsed time before the second attempt. A
-recovered check is visible in the log. Both attempts use the same configured
+remaining budget, reserving five seconds for kill grace and one second for
+Bash's whole-second clock rounding. A failed first check records command exit
+status and elapsed time before the second attempt. A recovered check is visible
+in the log. Both attempts use the same configured
 mirror and repository; the checker does not restart autofs or change servers.
 Failure diagnostics include effective client configuration, the repository probe
 and status, autofs status and journal, and client logs. Each diagnostic has a

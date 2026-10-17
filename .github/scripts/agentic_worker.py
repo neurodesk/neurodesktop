@@ -23,6 +23,8 @@ CATEGORIES = ("updates", "security", "dead-code", "test-coverage", "refactoring"
 IMAGE = "neurodesktop-agentic:codex-0.153.4"
 MAX_COMMAND_OUTPUT = 8 * 1024 * 1024
 MAX_PATCH = 2 * 1024 * 1024
+MAX_RESULT_BODY = 30000
+MAX_RESULT_TEXT = 50000
 MAX_REVIEW_COMMITS = 3
 REVIEW_COMMIT = "[agentic-review]"
 GIT_ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
@@ -242,14 +244,14 @@ def validate_result(result):
         raise ValueError("Invalid Codex outcome")
     if not all(isinstance(result[k], str) and result[k].strip() for k in ("title", "body")):
         raise ValueError("Codex title and body must be nonempty strings")
-    if len(result["title"]) > 160 or len(result["body"]) > 30000:
+    if len(result["title"]) > 160 or len(result["body"]) > MAX_RESULT_BODY:
         raise ValueError("Codex result exceeds publication limits")
     pending = result["pending_validation"]
     if not isinstance(pending, list) or len(pending) > 50 or not all(
         isinstance(item, str) and len(item) <= 1000 for item in pending
     ):
         raise ValueError("Invalid pending validation")
-    if len(result["body"]) + sum(len(item) for item in pending) > 50000:
+    if len(result["body"]) + sum(len(item) for item in pending) > MAX_RESULT_TEXT:
         raise ValueError("Codex result leaves insufficient room for GitHub validation evidence")
     return result
 
@@ -485,7 +487,7 @@ def snapshot_validation_baseline(workspace, base_sha, destination):
 def stage_worker_build_context(workspace, destination):
     scripts = destination / ".github" / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
-    for name in ("agentic_worker.py", "check_agentic_sandbox.py", "check_agentic_readiness.py"):
+    for name in ("agentic_worker.py", "check_agentic_sandbox.py"):
         shutil.copyfile(workspace / ".github" / "scripts" / name, scripts / name)
     control = destination / "config" / "agentic"
     shutil.copytree(workspace / "config" / "agentic", control, dirs_exist_ok=True,
@@ -510,7 +512,7 @@ def validate_candidate_patch(workspace, control, output, baseline):
         subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=30)
 
 
-def validation_failure(failure):
+def validation_failure_report(failure):
     details = getattr(failure, "output", None) or ""
     if isinstance(details, bytes):
         details = details.decode(errors="replace")
@@ -520,21 +522,20 @@ def validation_failure(failure):
 
 def validate_checkout_canary(workspace, control, output):
     output.mkdir(parents=True, exist_ok=True)
-    revision = command(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
-                        "rev-parse", "HEAD"], cwd=workspace, env=GIT_ENV).strip()
+    prefix = ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
+    revision = command([*prefix, "rev-parse", "HEAD"], cwd=workspace, env=GIT_ENV).strip()
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("Canary requires a trusted full HEAD revision")
     try:
         with tempfile.TemporaryDirectory(prefix="checkout-canary-", dir=output) as directory:
             temporary = Path(directory)
             checkout, baseline = temporary / "checkout", temporary / "baseline"
-            prefix = ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
             command([*prefix, "clone", "--no-hardlinks", "--no-checkout", "--", str(workspace), str(checkout)], env=GIT_ENV)
             command([*prefix, "checkout", "--detach", revision], cwd=checkout, env=GIT_ENV)
             snapshot_validation_baseline(checkout, revision, baseline)
             validation = validate_candidate_patch(checkout, control, output, baseline)
     except (RuntimeError, subprocess.TimeoutExpired) as failure:
-        (output / "canary-validation.txt").write_text(validation_failure(failure))
+        (output / "canary-validation.txt").write_text(validation_failure_report(failure))
         raise
     (output / "canary-validation.txt").write_text(validation[-30000:])
     return validation
@@ -592,14 +593,14 @@ def run_candidate(task, workspace, control, output, auth, model):
                 validation = validate_candidate_patch(workspace, control, output, baseline)
             except (RuntimeError, subprocess.TimeoutExpired) as failure:
                 result["outcome"] = "blocked"
-                validation = validation_failure(failure)
+                validation = validation_failure_report(failure)
                 summary = validation.rsplit("VALIDATION_SUMMARY ", 1)
                 detail = summary[-1].split("\n", 1)[0][:1500] if len(summary) == 2 else ""
                 detail = detail or "frozen_baseline and candidate results unavailable; incomplete validation report."
                 notice = "\n\nIndependent checkout validation failed or timed out. The candidate was not published.\n" + detail
-                while len(notice) + sum(len(item) for item in result["pending_validation"]) > 50000:
+                while len(notice) + sum(len(item) for item in result["pending_validation"]) > MAX_RESULT_TEXT:
                     result["pending_validation"].pop()
-                limit = min(30000, 50000 - sum(len(item) for item in result["pending_validation"]))
+                limit = min(MAX_RESULT_BODY, MAX_RESULT_TEXT - sum(len(item) for item in result["pending_validation"]))
                 result["body"] = result["body"][:limit - len(notice)] + notice
             # Tests may modify files. Publish exactly the patch inspected before tests.
             write_json(output / "result.json", result)
@@ -631,7 +632,7 @@ def comment_once(task, body, *, number=None, purpose="result", key=None):
 
 
 def validation_evidence(result, validation):
-    body = "\n\nIndependent validation: immutable baseline and candidate `tests/unit` suites\n\n```text\n"
+    body = "\n\nIndependent validation: frozen and candidate `tests/unit` suites against submitted sources\n\n```text\n"
     excerpt = validation if len(validation) <= 12000 else validation[:6000] + "\n[Middle output omitted]\n" + validation[-6000:]
     body += excerpt.replace("```", "'''") + "\n```"
     body += "\n\nPending validation before merge:\n" + "\n".join(

@@ -76,6 +76,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
       - name: Check persistent login without displaying credentials or calling a model
+        if: ${{ !cancelled() }}
         env:
           AGENTIC_CODEX_HOME: ${{ vars.AGENTIC_CODEX_HOME || '/var/lib/neurodesktop-codex' }}
         run: python3 .github/scripts/check_agentic_readiness.py

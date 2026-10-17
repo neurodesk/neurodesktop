@@ -292,7 +292,7 @@ def test_mount_verification_can_recover(tmp_path, first_mount):
 
 
 @pytest.mark.parametrize("clock_advances", ((50, 15, 45), (50, 15, 50), (50, 30, 30)))
-def test_verification_deadline_reserves_kill_grace(tmp_path, clock_advances):
+def test_verification_deadline_reserves_kill_grace_and_clock_rounding(tmp_path, clock_advances):
     result, calls = run_health(
         tmp_path,
         "check_cvmfs_mount.sh",
@@ -305,12 +305,12 @@ def test_verification_deadline_reserves_kill_grace(tmp_path, clock_advances):
         for duration, command in re.findall(r"^limit (\d+) (ls|findmnt)$", calls, re.M)
     ]
     assert [command for _, command in limits[:3]] == ["ls", "findmnt", "ls"]
-    assert limits[2][0] <= min(45, 115 - sum(clock_advances[:2]))
+    assert limits[2][0] <= min(45, 114 - sum(clock_advances[:2]))
     if sum(clock_advances) == 110:
         assert result.returncode == 0, result.stdout + result.stderr
         assert len(limits) == 4
         assert limits[-1][1] == "findmnt"
-        assert 0 < limits[-1][0] <= 5
+        assert 0 < limits[-1][0] <= 4
     else:
         assert result.returncode == 1
         assert len(limits) == 3
@@ -324,7 +324,7 @@ def test_exhausted_deadline_does_not_start_another_read(tmp_path):
         "check_cvmfs_mount.sh",
         mounted=True,
         first_read="fail",
-        clock_advances=(115,),
+        clock_advances=(114,),
     )
     assert result.returncode == 1
     assert calls.count("read\n") == 1

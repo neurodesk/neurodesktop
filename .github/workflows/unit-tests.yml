@@ -20,7 +20,7 @@ on:
 
 jobs:
   unit-tests:
-    name: pytest tests/unit
+    name: Checkout unit tests
     runs-on: ubuntu-latest
 
     steps:
@@ -102,3 +102,16 @@ jobs:
           path: ${{ runner.temp }}/agentic-canary/canary-validation.txt
           if-no-files-found: ignore
           retention-days: 7
+
+  unit-tests-required:
+    name: pytest tests/unit
+    needs: [unit-tests, worker-validation]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require both checkout and offline worker validation
+        env:
+          CHECKOUT_RESULT: ${{ needs.unit-tests.result }}
+          WORKER_RESULT: ${{ needs.worker-validation.result }}
+        run: |
+          [[ "$CHECKOUT_RESULT" == success && "$WORKER_RESULT" == success ]]

@@ -90,6 +90,10 @@ Each suite has an 840-second deadline, an 8 MiB output limit, and an 8 KiB
 retained output tail. These limits leave time for both reports beneath the
 controller's 1,800-second validation deadline. A timeout or output overflow
 terminates that suite's process group and still fails validation.
+When a suite's leader exits, the validator kills remaining processes in its
+group and drains buffered output for at most one second. It retains the leader's
+exit status so a child holding the output pipe cannot turn a completed suite
+into a timeout.
 This separates the agent's own test claims from the checks that authorize
 publication.
 
@@ -137,10 +141,11 @@ and pinned DOM dependencies, including JupyterHub, NIfTI support, and ACL tools.
 It includes the C compiler, C and X11 development headers, Xvfb, and `xrandr`
 needed by the native helper tests. Locked ESLint dependencies are installed
 with lifecycle scripts disabled under `/opt/javascript-lint`. The trusted
-validator exposes that image-owned dependency tree at the checkout's expected
-`tools/javascript-lint/node_modules` path after patch reconstruction. It does
-not install packages selected by candidate manifests or follow redirected
-checkout directories.
+validator's `--prepare-workspace` command links that image-owned dependency tree
+at the checkout's expected `tools/javascript-lint/node_modules` path before
+Codex starts. After `git clean` and patch reconstruction, the offline validator
+recreates the ignored link for both test suites. Neither setup installs packages
+selected by candidate manifests or follows redirected checkout directories.
 The image also exposes Python 3.12 at `/usr/bin/python3` for launcher shebangs.
 `NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES` points both validation suites to the
 image-owned DOM packages. Dependency downloads happen during the image build;
@@ -150,10 +155,10 @@ The `canary` command validates a disposable unchanged clone through the same
 credential-free Docker path and frozen-suite runner used for candidates. It
 does not modify the caller's checkout or make a model request. Both the manual
 readiness workflow and the unit-test workflow build the staged worker and run
-this check. Running it on pull requests catches test prerequisite drift before
-new tests reach unattended repairs. The canary result applies to the tested
-source revision and worker image; a successful login-storage check alone does
-not establish test readiness.
+this check. The existing required `pytest tests/unit` context gates both the
+checkout unit job and the offline canary, so a failing canary blocks merge.
+The canary result applies to the tested source revision and worker image;
+a successful login-storage check alone does not establish test readiness.
 Both workflows run unconditional cleanup through the staged controller before
 uploading canary evidence, including after cancellation or failure.
 

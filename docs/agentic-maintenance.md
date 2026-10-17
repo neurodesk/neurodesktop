@@ -134,7 +134,8 @@ configured directory is absent, check the runner's `AGENTIC_CODEX_HOME` value
 and persistent-volume mounts. If that directory exists but lacks `auth.json`,
 the dedicated Codex login has not saved data there. The readiness check reports
 these cases without including credentials in its diagnostic or claiming that an
-account session is unauthenticated.
+account session is unauthenticated. The storage check runs even if the checkout
+canary fails, unless the workflow is cancelled.
 
 Set the repository variable `AGENTIC_ENABLED=true`, then manually dispatch
 the issue workflow for a small existing bug. Verify that
@@ -152,6 +153,9 @@ without credentials or network access. Run this from a committed checkout;
 the canary tests its `HEAD` revision and leaves the original checkout intact:
 
 ```bash
+agentic_control=$(mktemp -d)
+python3 .github/scripts/agentic_worker.py stage \
+  --workspace "$PWD" --directory "$agentic_control"
 python3 .github/scripts/agentic_worker.py canary \
   --workspace "$PWD" --control "$agentic_control/config/agentic" \
   --directory "$(mktemp -d)"
