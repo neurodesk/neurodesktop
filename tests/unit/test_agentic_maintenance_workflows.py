@@ -1,5 +1,6 @@
 """Protect the subscription workflow's event and credential boundaries."""
 
+import os
 import re
 import subprocess
 import sys
@@ -168,3 +169,50 @@ def test_readiness_and_unit_ci_exercise_the_offline_validator():
     unit_job = yaml.safe_load(source('unit-tests.yml'))['jobs']['worker-validation']
     assert 'secrets.' not in str(unit_job)
     assert 'AGENTIC_CODEX_HOME' not in str(unit_job)
+
+
+def test_required_unit_context_gates_both_parallel_suites():
+    import yaml
+
+    jobs = yaml.safe_load(source('unit-tests.yml'))['jobs']
+    assert jobs['unit-tests']['name'] == 'Checkout unit tests'
+    for name in ('unit-tests', 'worker-validation'):
+        assert not jobs[name].get('needs')
+    gates = [job for job in jobs.values() if job.get('name') == 'pytest tests/unit']
+    assert len(gates) == 1
+    gate = gates[0]
+    assert set(gate['needs']) == {'unit-tests', 'worker-validation'}
+    assert gate['if'] == 'always()'
+    step, = gate['steps']
+    assert step['env'] == {
+        'CHECKOUT_RESULT': '${{ needs.unit-tests.result }}',
+        'WORKER_RESULT': '${{ needs.worker-validation.result }}',
+    }
+    assert 'continue-on-error' not in gate
+    assert 'continue-on-error' not in step
+
+
+@pytest.mark.parametrize('checkout', ['success', 'failure', 'cancelled', 'skipped', ''])
+@pytest.mark.parametrize('worker', ['success', 'failure', 'cancelled', 'skipped', ''])
+def test_required_unit_gate_only_accepts_two_successes(checkout, worker):
+    import yaml
+
+    jobs = yaml.safe_load(source('unit-tests.yml'))['jobs']
+    gate = next(job for job in jobs.values() if job.get('name') == 'pytest tests/unit')
+    step, = gate['steps']
+
+    result = subprocess.run(
+        ['bash', '-e', '-o', 'pipefail', '-c', step['run']],
+        env={**os.environ, 'CHECKOUT_RESULT': checkout, 'WORKER_RESULT': worker},
+        capture_output=True, text=True, timeout=5,
+    )
+
+    assert (result.returncode == 0) is (checkout == worker == 'success'), result.stdout + result.stderr
+
+
+def test_auth_storage_readiness_runs_after_canary_failure_unless_cancelled():
+    import yaml
+
+    steps = yaml.safe_load(source('agentic-readiness.yml'))['jobs']['readiness']['steps']
+    auth = next(step for step in steps if 'check_agentic_readiness.py' in step.get('run', ''))
+    assert auth['if'] == '${{ !cancelled() }}'

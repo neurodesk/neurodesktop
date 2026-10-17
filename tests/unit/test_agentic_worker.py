@@ -538,6 +538,12 @@ def test_candidate_runs_independent_credential_free_validation(worker, candidate
     assert len(state["calls"]) == 2
     agent, validation = state["calls"]
     assert "chosen-model" in agent and 'forced_login_method="chatgpt"' in agent
+    codex_index = agent.index("codex")
+    assert agent[codex_index - 5:codex_index + 2] == [
+        "5350s", "sh", "-c",
+        'python /control/validate.py --prepare-workspace /workspace && exec "$@"',
+        "sh", "codex", "exec",
+    ]
     assert "--network=none" in validation
     assert str(auth) not in " ".join(validation)
     assert any("dst=/baseline,readonly" in arg for arg in validation)
@@ -941,8 +947,9 @@ def test_stage_cli_copies_trusted_controller_and_locked_lint_context(tmp_path):
         "--workspace", str(repo_path(".")), "--directory", str(destination),
     ], check=True, capture_output=True, text=True)
 
-    for script in ("agentic_worker.py", "check_agentic_sandbox.py", "check_agentic_readiness.py"):
+    for script in ("agentic_worker.py", "check_agentic_sandbox.py"):
         assert (destination / ".github" / "scripts" / script).read_bytes() == repo_path(f".github/scripts/{script}").read_bytes()
+    assert not (destination / ".github" / "scripts" / "check_agentic_readiness.py").exists()
     for manifest in ("package.json", "package-lock.json"):
         assert (destination / "config" / "agentic" / "javascript-lint" / manifest).read_bytes() == repo_path(f"tools/javascript-lint/{manifest}").read_bytes()
     assert not (destination / "config" / "agentic" / "javascript-lint" / "node_modules").exists()
@@ -1024,7 +1031,10 @@ def test_candidate_failure_keeps_both_suite_reports_in_result_and_publication_ev
     result = json.loads((output / "result.json").read_text())
     validation = (output / "validation.txt").read_text()
     assert result["outcome"] == "blocked"
-    assert "frozen_baseline" in result["body"] and "candidate" in result["body"]
+    summary = json.loads(result["body"].splitlines()[-1])
+    assert [(record["stage"], record["status"]) for record in summary] == [
+        ("frozen_baseline", "failed"), ("candidate", "passed"),
+    ]
     for text in (validation, worker.validation_evidence(result, validation)):
         assert "frozen_baseline" in text and "candidate" in text
         assert "early failure detail" in text and "later candidate detail" in text

@@ -1,7 +1,10 @@
 """Regression tests for the frozen agentic validation baseline."""
 
 import json
+import os
+from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -245,6 +248,54 @@ def test_validator_timeout_kills_descendants_and_keeps_partial_output(validator,
     assert not marker.exists()
 
 
+@pytest.mark.parametrize("redirect_output", [True, False], ids=["closed-pipe", "inherited-pipe"])
+@pytest.mark.parametrize("returncode,status", [(0, "passed"), (7, "failed")])
+def test_validator_cleans_up_children_after_leader_exit(validator, tmp_path, redirect_output, returncode, status):
+    redirection = ">/dev/null 2>&1" if redirect_output else ""
+    script = (
+        f"sleep 30 {redirection} & echo $! > child.pid; "
+        f"printf 'leader output\\n'; exit {returncode}"
+    )
+
+    try:
+        result = validator.run("candidate", ["sh", "-c", script], cwd=tmp_path, timeout=2)
+
+        assert result["status"] == status
+        assert result["returncode"] == returncode
+        assert result["elapsed_seconds"] < 1.5
+        assert result["output_tail"] == "leader output\n"
+        child = int((tmp_path / "child.pid").read_text())
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            try:
+                child_state = Path(f"/proc/{child}/stat").read_text().split()[2]
+            except FileNotFoundError:
+                break
+            if child_state == "Z":
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail("Stage descendant survived its leader")
+    finally:
+        if (tmp_path / "child.pid").exists():
+            try:
+                os.kill(int((tmp_path / "child.pid").read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_validator_retains_buffered_output_after_leader_exit(validator, tmp_path):
+    payload = b"x" * 200000 + b"final buffered output\n"
+    script = "import os; os.write(1, b'x' * 200000 + b'final buffered output\\n')"
+
+    result = validator.run("candidate", [sys.executable, "-c", script], cwd=tmp_path)
+
+    assert result["status"] == "passed"
+    assert result["returncode"] == 0
+    assert result["output_tail"] == payload[-validator.STAGE_TAIL_BYTES:].decode()
+    assert result["output_truncated"] is True
+
+
 @pytest.mark.parametrize("failure,status", [
     ("import time; time.sleep(5)", "timed_out"),
     ("import os; os.write(1, b'x' * 65536)", "output_limit"),
@@ -290,6 +341,16 @@ def lint_checkout(validator, tmp_path, monkeypatch):
     subprocess.run(["git", "init", str(workspace)], check=True, capture_output=True)
     monkeypatch.setattr(validator, "LINT_NODE_MODULES", baked)
     return workspace, lint / "node_modules", baked
+
+
+def test_prepare_workspace_cli_links_baked_dependencies(validator, lint_checkout):
+    workspace, target, baked = lint_checkout
+
+    assert validator.main(["--prepare-workspace", str(workspace)]) == 0
+
+    assert target.is_symlink()
+    assert target.resolve() == baked
+    assert (target / "eslint-marker").read_text() == "trusted locked install"
 
 
 def test_lint_setup_restores_ignored_baked_install_after_git_clean(validator, lint_checkout):

@@ -10,7 +10,8 @@ verification_deadline=$((verification_started + 120))
 
 verify_command() {
     local limit=$1
-    local remaining=$((verification_deadline - SECONDS - 5))
+    # Reserve five seconds for kill grace and one for SECONDS rounding.
+    local remaining=$((verification_deadline - SECONDS - 6))
     shift
     (( remaining > 0 )) || return 124
     (( limit <= remaining )) || limit=$remaining
