@@ -62,6 +62,11 @@ jobs:
           --workspace "$GITHUB_WORKSPACE"
           --control "$RUNNER_TEMP/agentic-control/config/agentic"
           --directory "$RUNNER_TEMP/agentic-canary"
+      - name: Stop canary container after completion or cancellation
+        if: always()
+        run: >-
+          python3 "$RUNNER_TEMP/agentic-control/.github/scripts/agentic_worker.py" cleanup
+          --directory "$RUNNER_TEMP/agentic-canary"
       - name: Save checkout validation evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

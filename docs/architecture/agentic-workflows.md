@@ -154,6 +154,8 @@ this check. Running it on pull requests catches test prerequisite drift before
 new tests reach unattended repairs. The canary result applies to the tested
 source revision and worker image; a successful login-storage check alone does
 not establish test readiness.
+Both workflows run unconditional cleanup through the staged controller before
+uploading canary evidence, including after cancellation or failure.
 
 `AGENTIC_CODEX_MODEL` defaults to `gpt-5.6-sol`.
 `AGENTIC_RUNNER` defaults to `neurodesk-syd-arcrunner-neurodesktop` and
