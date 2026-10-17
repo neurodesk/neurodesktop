@@ -1,6 +1,7 @@
 """Protect the subscription workflow's event and credential boundaries."""
 
 import re
+import shlex
 import subprocess
 import sys
 import textwrap
@@ -168,3 +169,33 @@ def test_readiness_and_unit_ci_exercise_the_offline_validator():
     unit_job = yaml.safe_load(source('unit-tests.yml'))['jobs']['worker-validation']
     assert 'secrets.' not in str(unit_job)
     assert 'AGENTIC_CODEX_HOME' not in str(unit_job)
+
+
+@pytest.mark.parametrize(('filename', 'job_name'), [
+    ('agentic-readiness.yml', 'readiness'),
+    ('unit-tests.yml', 'worker-validation'),
+])
+def test_canary_jobs_always_clean_up_before_uploading_evidence(filename, job_name):
+    import yaml
+
+    steps = yaml.safe_load(source(filename))['jobs'][job_name]['steps']
+    cleanup_steps = [
+        (index, step) for index, step in enumerate(steps)
+        if 'cleanup' in shlex.split(step.get('run', ''))
+    ]
+    assert len(cleanup_steps) == 1, f'{filename} must have one canary cleanup step'
+    cleanup_index, cleanup = cleanup_steps[0]
+    assert cleanup['if'] == 'always()'
+    assert shlex.split(cleanup['run']) == [
+        'python3', '$RUNNER_TEMP/agentic-control/.github/scripts/agentic_worker.py',
+        'cleanup', '--directory', '$RUNNER_TEMP/agentic-canary',
+    ]
+    canary_index = next(
+        index for index, step in enumerate(steps)
+        if 'canary' in shlex.split(step.get('run', ''))
+    )
+    upload_index = next(
+        index for index, step in enumerate(steps)
+        if step.get('uses', '').startswith('actions/upload-artifact@')
+    )
+    assert canary_index < cleanup_index < upload_index
