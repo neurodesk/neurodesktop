@@ -22,6 +22,19 @@ def validator():
     return load_source_module("agentic_validator_test", "/opt/validate.py", "config/agentic/validate.py")
 
 
+def assert_process_exited(pid):
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline:
+        try:
+            state = Path(f"/proc/{pid}/stat").read_text().split()[2]
+        except (FileNotFoundError, ProcessLookupError):
+            return
+        if state == "Z":
+            return
+        time.sleep(0.01)
+    pytest.fail(f"Stage descendant {pid} is still running")
+
+
 def write_baseline(root):
     tests = root / "tests"
     unit = tests / "unit"
@@ -233,19 +246,26 @@ def test_validator_output_limit_fails_closed_with_bounded_tail(validator, monkey
 
 
 def test_validator_timeout_kills_descendants_and_keeps_partial_output(validator, tmp_path):
-    marker = tmp_path / "descendant-finished"
-    child = f"import time; from pathlib import Path; time.sleep(0.4); Path({str(marker)!r}).touch()"
+    child_pid = tmp_path / "child.pid"
     script = (
-        "import subprocess, sys, time; print('before timeout', flush=True); "
-        f"subprocess.Popen([sys.executable, '-c', {child!r}]); time.sleep(5)"
+        "import subprocess, sys, time; from pathlib import Path; "
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+        f"Path({str(child_pid)!r}).write_text(str(child.pid)); "
+        "print('before timeout', flush=True); time.sleep(30)"
     )
 
-    result = validator.run("frozen_baseline", [sys.executable, "-c", script], cwd=tmp_path, timeout=0.1)
+    try:
+        result = validator.run("frozen_baseline", [sys.executable, "-c", script], cwd=tmp_path, timeout=5)
 
-    assert result["status"] == "timed_out"
-    assert "before timeout" in result["output_tail"]
-    time.sleep(0.5)
-    assert not marker.exists()
+        assert result["status"] == "timed_out"
+        assert "before timeout" in result["output_tail"]
+        assert_process_exited(int(child_pid.read_text()))
+    finally:
+        if child_pid.exists():
+            try:
+                os.kill(int(child_pid.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 @pytest.mark.parametrize("redirect_output", [True, False], ids=["closed-pipe", "inherited-pipe"])
@@ -264,18 +284,7 @@ def test_validator_cleans_up_children_after_leader_exit(validator, tmp_path, red
         assert result["returncode"] == returncode
         assert result["elapsed_seconds"] < 1.5
         assert result["output_tail"] == "leader output\n"
-        child = int((tmp_path / "child.pid").read_text())
-        deadline = time.monotonic() + 1
-        while time.monotonic() < deadline:
-            try:
-                child_state = Path(f"/proc/{child}/stat").read_text().split()[2]
-            except (FileNotFoundError, ProcessLookupError):
-                break
-            if child_state == "Z":
-                break
-            time.sleep(0.01)
-        else:
-            pytest.fail("Stage descendant survived its leader")
+        assert_process_exited(int((tmp_path / "child.pid").read_text()))
     finally:
         if (tmp_path / "child.pid").exists():
             try:
