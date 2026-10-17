@@ -269,7 +269,7 @@ def test_validator_cleans_up_children_after_leader_exit(validator, tmp_path, red
         while time.monotonic() < deadline:
             try:
                 child_state = Path(f"/proc/{child}/stat").read_text().split()[2]
-            except FileNotFoundError:
+            except (FileNotFoundError, ProcessLookupError):
                 break
             if child_state == "Z":
                 break
