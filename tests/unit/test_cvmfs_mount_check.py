@@ -64,10 +64,10 @@ done
 [[ "$*" == "$CVMFS_REPOSITORY_ROOT" ]] || exit 99
 echo read >> "$CALLS"
 if [[ ! -e "$CALLS.read" ]]; then
-  touch "$CALLS.read"
+  : > "$CALLS.read"
   case "$FIRST_READ" in
     fail) exit 2 ;;
-    timeout) exec /bin/sleep 30 ;;
+    timeout) exit 124 ;;
   esac
 fi
 if [[ "$HANG_PROBE" == ls ]]; then trap '' TERM; exec /bin/sleep 30; fi
@@ -79,7 +79,7 @@ table="$MOUNT_TABLE"
 if [[ ! -e "$CALLS.mount" && -e "$FIRST_MOUNT_TABLE" ]]; then
   table="$FIRST_MOUNT_TABLE"
 fi
-touch "$CALLS.mount"
+: > "$CALLS.mount"
 /usr/bin/findmnt --fstab --tab-file "$table" "$@" || exit $?
 echo verified >> "$CALLS"
 """,
@@ -100,7 +100,12 @@ case "$1" in
 esac
 printf 'limit %s %s\n' "$duration" "$1" >> "$CALLS"
 printf 'bounded %s\n' "$*" >> "$CALLS"
-exec /usr/bin/timeout --kill-after=0.1s 0.1s "$@"
+real_limit=5s
+case "$1" in
+  ls|findmnt) [[ "$HANG_PROBE" != "$1" ]] || real_limit=0.1s ;;
+  cvmfs_config|systemctl|journalctl|tail) [[ "$DIAGNOSTIC" != hang ]] || real_limit=0.1s ;;
+esac
+exec /usr/bin/timeout --kill-after=0.1s "$real_limit" "$@"
 """,
     }
     for name in ("cvmfs_config", "systemctl", "journalctl", "tail"):
@@ -150,7 +155,7 @@ timeout() {
         env=env,
         capture_output=True,
         text=True,
-        timeout=8,
+        timeout=30,
     )
     return result, calls.read_text() if calls.exists() else ""
 
@@ -254,6 +259,8 @@ def test_mount_probe_is_bounded(tmp_path, probe):
     )
     assert result.returncode == 1
     assert "::error title=CVMFS mount unavailable::" in result.stdout
+    status_field = "read_status" if probe == "ls" else "findmnt_status"
+    assert re.search(rf"{status_field}=(124|137)\b", result.stdout)
     assert "probe" in calls
 
 

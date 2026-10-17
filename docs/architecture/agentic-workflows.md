@@ -155,7 +155,7 @@ The `canary` command validates a disposable unchanged clone through the same
 credential-free Docker path and frozen-suite runner used for candidates. It
 does not modify the caller's checkout or make a model request. Both the manual
 readiness workflow and the unit-test workflow build the staged worker and run
-this check. The existing required `pytest tests/unit` context gates both the
+this check. The required `pytest tests/unit` context gates both the
 checkout unit job and the offline canary, so a failing canary blocks merge.
 The canary result applies to the tested source revision and worker image;
 a successful login-storage check alone does not establish test readiness.

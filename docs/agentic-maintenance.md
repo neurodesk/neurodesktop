@@ -134,8 +134,9 @@ configured directory is absent, check the runner's `AGENTIC_CODEX_HOME` value
 and persistent-volume mounts. If that directory exists but lacks `auth.json`,
 the dedicated Codex login has not saved data there. The readiness check reports
 these cases without including credentials in its diagnostic or claiming that an
-account session is unauthenticated. The storage check runs even if the checkout
-canary fails, unless the workflow is cancelled.
+account session is unauthenticated. The storage check requires a successful
+worker image build. It runs even if the checkout canary fails, unless the
+workflow is cancelled.
 
 Set the repository variable `AGENTIC_ENABLED=true`, then manually dispatch
 the issue workflow for a small existing bug. Verify that
@@ -154,12 +155,17 @@ the canary tests its `HEAD` revision and leaves the original checkout intact:
 
 ```bash
 agentic_control=$(mktemp -d)
+agentic_canary=$(mktemp -d)
 python3 .github/scripts/agentic_worker.py stage \
   --workspace "$PWD" --directory "$agentic_control"
+printf 'Canary evidence: %s\n' "$agentic_canary/canary-validation.txt"
 python3 .github/scripts/agentic_worker.py canary \
   --workspace "$PWD" --control "$agentic_control/config/agentic" \
-  --directory "$(mktemp -d)"
+  --directory "$agentic_canary"
 ```
+
+The canary retains validation evidence in `$agentic_canary/canary-validation.txt`,
+including when validation fails.
 
 This check and the sandbox probe make no model request. The production
 runner's persistent mounts, account access, and complete issue-to-PR canary

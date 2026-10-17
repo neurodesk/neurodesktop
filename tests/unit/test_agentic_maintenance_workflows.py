@@ -241,9 +241,12 @@ def test_required_unit_gate_only_accepts_two_successes(checkout, worker):
     assert (result.returncode == 0) is (checkout == worker == 'success'), result.stdout + result.stderr
 
 
-def test_auth_storage_readiness_runs_after_canary_failure_unless_cancelled():
+def test_auth_storage_readiness_requires_built_image_but_not_passing_canary():
     import yaml
 
     steps = yaml.safe_load(source('agentic-readiness.yml'))['jobs']['readiness']['steps']
     auth = next(step for step in steps if 'check_agentic_readiness.py' in step.get('run', ''))
-    assert auth['if'] == '${{ !cancelled() }}'
+    assert auth['if'] == "${{ !cancelled() && steps.build_worker.outcome == 'success' }}"
+    build = next(step for step in steps if step.get('id') == 'build_worker')
+    assert 'docker build --tag neurodesktop-agentic:' in build['run']
+    assert steps.index(build) < steps.index(auth)

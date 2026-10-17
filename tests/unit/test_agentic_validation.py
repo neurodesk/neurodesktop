@@ -307,26 +307,37 @@ def test_failed_bounded_baseline_still_runs_candidate(tmp_path, failure, status)
     (baseline / "tests" / "unit" / "test_subject.py").write_text(
         "def test_failure(capfd):\n    with capfd.disabled():\n        " + failure + "\n"
     )
-    (workspace / "tests" / "conftest.py").write_text("")
+    if status == "output_limit":
+        with (baseline / "tests" / "conftest.py").open("a") as conftest:
+            conftest.write("import time\ntime.sleep(3)\n")
+    (workspace / "tests" / "conftest.py").write_text("import time\ntime.sleep(3)\n")
     (workspace / "tests" / "pytest.ini").unlink()
+    timeouts = {"frozen_baseline": 2 if status == "timed_out" else 30, "candidate": 30}
     bootstrap = (
-        "import functools, runpy, sys; "
-        "module = runpy.run_path(sys.argv[1]); main = module['main']; "
-        "main.__globals__['MAX_STAGE_OUTPUT'] = 4096; "
-        "main.__globals__['run'] = functools.partial(module['run'], timeout=2); "
-        "raise SystemExit(main(sys.argv[2:]))"
+        "import runpy, sys\n"
+        "module = runpy.run_path(sys.argv[1])\n"
+        f"timeouts = {timeouts!r}\n"
+        "def bounded_run(stage, *args, **kwargs):\n"
+        "    return module['run'](stage, *args, timeout=timeouts[stage], **kwargs)\n"
+        "main = module['main']\n"
+        "main.__globals__['MAX_STAGE_OUTPUT'] = 4096\n"
+        "main.__globals__['run'] = bounded_run\n"
+        "raise SystemExit(main(sys.argv[2:]))\n"
     )
 
     result = subprocess.run([
         sys.executable, "-c", bootstrap, str(VALIDATOR),
         "--baseline", str(baseline), "--workspace", str(workspace),
-    ], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10)
+    ], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=75)
 
     assert result.returncode == 1, result.stdout
     records = json.loads(result.stdout.split("VALIDATION_SUMMARY ")[-1])
     assert [(record["stage"], record["status"]) for record in records] == [
         ("frozen_baseline", status), ("candidate", "passed"),
     ]
+    assert records[1]["elapsed_seconds"] >= 3
+    if status == "output_limit":
+        assert records[0]["elapsed_seconds"] >= 3
 
 
 @pytest.fixture

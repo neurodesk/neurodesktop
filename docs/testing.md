@@ -254,10 +254,10 @@ bypass. It also requires these check contexts from GitHub Actions
 | PR image acceptance | `Installed image (amd64)` |
 | PR image acceptance | `Installed image (arm64)` |
 
-The `pytest tests/unit` context keeps its existing name and now aggregates
+The required `pytest tests/unit` context aggregates
 `Checkout unit tests` and `Offline worker validation`, which run in parallel.
 It succeeds only when both jobs succeed. A failed, cancelled, skipped, or missing
-dependency result fails the aggregate. No ruleset change is needed.
+dependency result fails the aggregate.
 
 Branches need not be up to date with `main` before merging. A missing, pending,
 or cancelled required check blocks a normal merge. Every pull request to `main`
