@@ -38,16 +38,19 @@ jobs:
           TASK_KIND: ${{ inputs.kind }}
           TASK_SUBJECT: ${{ inputs.subject }}
         run: python3 .github/scripts/agentic_worker.py prepare --directory "$RUNNER_TEMP/task"
+      - name: Stage trusted controller and locked build inputs
+        if: steps.task.outputs.skip != 'true'
+        run: >-
+          python3 .github/scripts/agentic_worker.py stage
+          --workspace "$GITHUB_WORKSPACE"
+          --directory "$RUNNER_TEMP/agentic-control"
       - name: Save trusted task and controller
         if: steps.task.outputs.skip != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: agentic-control
           include-hidden-files: true
-          path: |
-            .github/scripts/agentic_worker.py
-            .github/scripts/check_agentic_sandbox.py
-            config/agentic/
+          path: ${{ runner.temp }}/agentic-control/
           retention-days: 7
       - name: Save trusted task identity
         if: steps.task.outputs.skip != 'true'

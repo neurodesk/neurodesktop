@@ -3,7 +3,7 @@ title: Agentic CI workflows
 description: Failure reporting, issue repair, scheduled maintenance, and subscription-authenticated Codex execution through conventional Actions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-11"
+last-reviewed: "2026-10-17"
 ---
 
 # Agentic CI workflows
@@ -81,6 +81,15 @@ tests and their configuration remain independent of candidate pytest controls.
 Captured output is limited to 8 MiB per stream;
 overflow and timeouts terminate the command. The
 validation record includes the patch hash and retains bounded failure logs.
+Both the frozen and candidate suites retain their own exit status, elapsed
+time, and bounded output. A failure in the first suite does not prevent the
+second suite from running or disappear behind its output. Missing tools,
+test failures, and interrupted validation remain failures; a failed unchanged
+checkout is not automatically classified as an environment problem.
+Each suite has an 840-second deadline, an 8 MiB output limit, and an 8 KiB
+retained output tail. These limits leave time for both reports beneath the
+controller's 1,800-second validation deadline. A timeout or output overflow
+terminates that suite's process group and still fails validation.
 This separates the agent's own test claims from the checks that authorize
 publication.
 
@@ -117,15 +126,34 @@ checks passed.
 
 Each worker run builds `neurodesktop-agentic:codex-0.153.4` from the trusted
 [`config/agentic/Dockerfile`](../../config/agentic/Dockerfile), using Docker's
-layer cache. `WORKER_UID` and `WORKER_GID` build arguments create the runner's
+layer cache. The controller's `stage` command assembles a narrow build context
+from that trusted checkout, including the JavaScript lint package manifest and
+lockfile. The preparation artifact carries these inputs separately from the
+candidate checkout. `WORKER_UID` and `WORKER_GID` build arguments create the runner's
 identity inside the image. The image pins Codex CLI `0.153.4`.
 
 The trusted image build also installs the unit-test workflow's Python, system,
 and pinned DOM dependencies, including JupyterHub, NIfTI support, and ACL tools.
+It includes the C compiler, C and X11 development headers, Xvfb, and `xrandr`
+needed by the native helper tests. Locked ESLint dependencies are installed
+with lifecycle scripts disabled under `/opt/javascript-lint`. The trusted
+validator exposes that image-owned dependency tree at the checkout's expected
+`tools/javascript-lint/node_modules` path after patch reconstruction. It does
+not install packages selected by candidate manifests or follow redirected
+checkout directories.
 The image also exposes Python 3.12 at `/usr/bin/python3` for launcher shebangs.
 `NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES` points both validation suites to the
 image-owned DOM packages. Dependency downloads happen during the image build;
 validation remains offline and credential-free.
+
+The `canary` command validates a disposable unchanged clone through the same
+credential-free Docker path and frozen-suite runner used for candidates. It
+does not modify the caller's checkout or make a model request. Both the manual
+readiness workflow and the unit-test workflow build the staged worker and run
+this check. Running it on pull requests catches test prerequisite drift before
+new tests reach unattended repairs. The canary result applies to the tested
+source revision and worker image; a successful login-storage check alone does
+not establish test readiness.
 
 `AGENTIC_CODEX_MODEL` defaults to `gpt-5.6-sol`.
 `AGENTIC_RUNNER` defaults to `neurodesk-syd-arcrunner-neurodesktop` and

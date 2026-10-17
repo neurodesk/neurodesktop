@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-16"
+last-reviewed: "2026-10-17"
 ---
 
 # Testing
@@ -85,6 +85,15 @@ pytest tests/unit
 
 Missing launcher test dependencies fail with setup guidance instead of skipping.
 The unit-test workflow installs these same pinned dependencies automatically.
+The suite also runs real ESLint checks. Install their locked dependencies with
+`npm ci --prefix tools/javascript-lint --ignore-scripts --no-audit --no-fund`.
+
+The unit-test workflow also builds the agentic worker and validates an unchanged
+checkout through its offline, credential-free Docker path. This checks the
+worker's actual native and JavaScript prerequisites as the unit suite changes.
+The [agentic setup guide](agentic-maintenance.md#verify-setup-with-one-issue)
+provides the local canary command. Frozen and candidate suite results are
+reported separately, and both must pass.
 
 Install those with the interpreter's own site packages rather than `pip install
 --user`. `tests/unit/test_agentic_validation.py` runs

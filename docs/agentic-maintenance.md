@@ -3,7 +3,7 @@ title: Agentic maintenance workflows
 description: Run subscription-authenticated Codex on the existing self-hosted runner and review its proposed fixes
 parent: index.md
 status: current
-last-reviewed: "2026-09-18"
+last-reviewed: "2026-10-17"
 ---
 
 # Agentic maintenance workflows
@@ -44,9 +44,10 @@ that launches the worker. Do not use a personal home directory containing
 unrelated credentials. The repository does not configure the runner's PVC or
 Kubernetes mounts.
 
-Each worker run builds `neurodesktop-agentic:codex-0.153.4` from the trusted
-[`config/agentic/Dockerfile`](../config/agentic/Dockerfile), reusing the runner's
-Docker cache. Its ASTRA and anywidget pins must match the viewer's exact
+Each worker run builds `neurodesktop-agentic:codex-0.153.4` from a staged trusted
+context containing [`config/agentic/Dockerfile`](../config/agentic/Dockerfile)
+and the JavaScript lint lockfile, reusing the runner's Docker cache.
+Its ASTRA and anywidget pins must match the viewer's exact
 requirements in `extensions/astra-viewer/pyproject.toml`; the validation unit
 tests guard this agreement. After changing these dependencies, rebuild the
 worker and run the full checkout suite in its credential-free validation
@@ -66,9 +67,12 @@ On the trusted runner, build the image and create the private directory as
 an administrator. Run these commands as the account that runs Actions jobs:
 
 ```bash
+agentic_control=$(mktemp -d)
+python3 .github/scripts/agentic_worker.py stage \
+  --workspace "$PWD" --directory "$agentic_control"
 docker build --tag neurodesktop-agentic:codex-0.153.4 \
   --build-arg WORKER_UID="$(id -u)" --build-arg WORKER_GID="$(id -g)" \
-  config/agentic
+  "$agentic_control/config/agentic"
 sudo install -d -m 700 -o "$(id -u)" -g "$(id -g)" /var/lib/neurodesktop-codex
 docker run --rm -it --user "$(id -u):$(id -g)" \
   --env CODEX_HOME=/codex \
@@ -120,7 +124,10 @@ that caveat. See the exact sources and implications in
 After configuring the runner and completing login, manually run **Agentic
 runner readiness**. It provisions the four agent labels, then checks the real Docker mounts, sandbox, private file
 permissions, and matching authentication storage in the runner and daemon.
-It does not call a model or prove the saved session is still valid.
+It also runs both checkout suites in a disposable unchanged clone using the
+actual offline validator. It does not call a model or prove the saved session
+is still valid. The unit-test workflow runs the same test-readiness canary on
+pull requests, without accessing subscription storage.
 
 Readiness distinguishes storage setup from account authentication. If the
 configured directory is absent, check the runner's `AGENTIC_CODEX_HOME` value
@@ -140,14 +147,14 @@ remain explicit in the PR. Confirm the resulting branch and PR before enabling
 unattended operation. A completed agent process without a published PR is not
 proof that publication works.
 
-Validate the rebuilt worker against the complete checkout suite without
-credentials or network access:
+Validate the rebuilt worker through the complete frozen and candidate suites
+without credentials or network access. Run this from a committed checkout;
+the canary tests its `HEAD` revision and leaves the original checkout intact:
 
 ```bash
-docker run --rm --network=none --cap-drop=ALL \
-  --security-opt=no-new-privileges --user "$(id -u):$(id -g)" \
-  --env HOME=/tmp --volume "$PWD:/workspace:ro" --workdir /workspace \
-  neurodesktop-agentic:codex-0.153.4 python -m pytest tests/unit -q
+python3 .github/scripts/agentic_worker.py canary \
+  --workspace "$PWD" --control "$agentic_control/config/agentic" \
+  --directory "$(mktemp -d)"
 ```
 
 This check and the sandbox probe make no model request. The production

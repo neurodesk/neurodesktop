@@ -15,4 +15,4 @@ extensions/neurodesk-launcher/tsconfig.tsbuildinfo
 .venv-quality/
 
 # Repository JavaScript lint toolchain
-tools/javascript-lint/node_modules/
+tools/javascript-lint/node_modules
