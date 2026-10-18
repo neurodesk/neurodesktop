@@ -88,6 +88,9 @@ The unit-test workflow installs these same pinned dependencies automatically.
 The offline worker's `config/agentic/Dockerfile` uses the same DOM package pins.
 Renovate updates all three locations together, and the dependency-contract tests
 compare the worker and this command against the workflow's current pins.
+Review JupyterLab/Lumino upgrades against the JupyterLab shipped in the image.
+Regression coverage for extraction, grouping, and missing or stale pins runs
+with `pytest tests/unit/test_renovate_dom_harness.py`.
 The suite also runs real ESLint checks. Install their locked dependencies with
 `npm ci --prefix tools/javascript-lint --ignore-scripts --no-audit --no-fund`.
 
