@@ -1140,7 +1140,9 @@ RUN retry git clone https://github.com/neurodesk/freebrowse.git /tmp/freebrowse 
     && npm run build:jupyter \
     && cd /tmp/freebrowse/jupyter \
     && YARN_ENABLE_IMMUTABLE_INSTALLS=0 retry /opt/conda/bin/jlpm install \
-    && /opt/conda/bin/jlpm build:prod \
+    && /opt/conda/bin/jlpm build:lib \
+    && /opt/conda/bin/jupyter-builder build \
+    --core-package-file=/opt/conda/share/jupyter/lab/static/package.json . \
     && /opt/conda/bin/pip install --no-deps . \
     && /opt/conda/bin/jupyter server extension enable jupyterlab_freebrowse --sys-prefix \
     && /opt/conda/bin/python -c "from pathlib import Path; import jupyterlab_freebrowse as f; assert (Path(f.__file__).parent / 'static/freebrowse/index.html').is_file()" \

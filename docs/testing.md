@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-17"
+last-reviewed: "2026-10-18"
 ---
 
 # Testing
@@ -76,15 +76,21 @@ real JupyterLab registry, document context, and Lumino widgets. Install them
 in a temporary directory and expose that directory when running the suite:
 
 ```bash
-npm install --prefix /tmp/neurodesk-launcher-tests --no-audit --no-fund jsdom@26.1.0 typescript@5.2.2 esbuild@0.28.2 \
-  @jupyterlab/docregistry@4.6.3 @jupyterlab/coreutils@6.6.3 \
-  @jupyterlab/services@7.6.3 @lumino/widgets@2.9.0
+npm install --prefix /tmp/neurodesk-launcher-tests --no-audit --no-fund jsdom@26.1.0 typescript@5.9.3 esbuild@0.28.2 \
+  @jupyterlab/docregistry@4.6.4 @jupyterlab/coreutils@6.6.4 \
+  @jupyterlab/services@7.6.4 @lumino/widgets@2.10.0
 export NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES=/tmp/neurodesk-launcher-tests/node_modules
 pytest tests/unit
 ```
 
 Missing launcher test dependencies fail with setup guidance instead of skipping.
 The unit-test workflow installs these same pinned dependencies automatically.
+The offline worker's `config/agentic/Dockerfile` uses the same DOM package pins.
+Renovate updates all three locations together, and the dependency-contract tests
+compare the worker and this command against the workflow's current pins.
+Review JupyterLab/Lumino upgrades against the JupyterLab shipped in the image.
+Regression coverage for extraction, grouping, and missing or stale pins runs
+with `pytest tests/unit/test_renovate_dom_harness.py`.
 The suite also runs real ESLint checks. Install their locked dependencies with
 `npm ci --prefix tools/javascript-lint --ignore-scripts --no-audit --no-fund`.
 
