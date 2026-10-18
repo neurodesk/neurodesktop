@@ -321,20 +321,7 @@
       "groupName": "workflow tools"
     },
     {
-      "description": "The unit tests' DOM harness should stay aligned with the JupyterLab shipped in the image.",
-      "matchFileNames": [
-        ".github/workflows/unit-tests.yml",
-        "docs/testing.md",
-        "config/agentic/Dockerfile",
-        "tests/unit/test_agentic_validation.py"
-      ],
-      "matchDatasources": [
-        "npm"
-      ],
-      "groupName": "unit test DOM harness",
-      "prBodyNotes": [
-        "> [!WARNING]\n> Keep `@jupyterlab/*` and `@lumino/*` aligned with the JupyterLab version in the image."
-      ],
+      "description": "Keep the checkout and offline worker DOM harness aligned with the JupyterLab shipped in the image.",
       "matchDepNames": [
         "jsdom",
         "typescript",
@@ -343,6 +330,18 @@
         "@jupyterlab/coreutils",
         "@jupyterlab/services",
         "@lumino/widgets"
+      ],
+      "matchFileNames": [
+        ".github/workflows/unit-tests.yml",
+        "config/agentic/Dockerfile",
+        "docs/testing.md"
+      ],
+      "matchDatasources": [
+        "npm"
+      ],
+      "groupName": "unit test DOM harness",
+      "prBodyNotes": [
+        "> [!WARNING]\n> Keep `@jupyterlab/*` and `@lumino/*` aligned with the JupyterLab version in the image."
       ]
     },
     {
@@ -1089,12 +1088,12 @@
       "datasourceTemplate": "pypi"
     },
     {
-      "description": "DOM harness npm install pins shared by checkout CI, the offline worker and local testing docs.",
+      "description": "npm packages for the unit tests' DOM harness in CI, the offline worker, and docs/testing.md.",
       "customType": "regex",
       "managerFilePatterns": [
         "/^\\.github/workflows/unit-tests\\.yml$/",
-        "/^docs/testing\\.md$/",
-        "/^config/agentic/Dockerfile$/"
+        "/^config/agentic/Dockerfile$/",
+        "/^docs/testing\\.md$/"
       ],
       "matchStrings": [
         "npm install --prefix (?:[^\\n\\\\]|\\\\[^\\n])*(?:\\\\\\n(?:[^\\n\\\\]|\\\\[^\\n])*)*",
@@ -1103,17 +1102,6 @@
       "depNameTemplate": "{{{depName}}}",
       "datasourceTemplate": "npm",
       "matchStringsStrategy": "recursive"
-    },
-    {
-      "description": "Exact DOM harness expectations in the offline worker parity test.",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "/^tests/unit/test_agentic_validation\\.py$/"
-      ],
-      "matchStrings": [
-        "\"(?<depName>(?:@[\\w.-]+/)?[\\w.-]+)@(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
-      ],
-      "datasourceTemplate": "npm"
     },
     {
       "description": "Codex CLI in the agentic worker image, its image tag in workflows/scripts, and the docs that name it.",

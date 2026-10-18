@@ -12,7 +12,6 @@ SURFACES = (
     ".github/workflows/unit-tests.yml",
     "docs/testing.md",
     "config/agentic/Dockerfile",
-    "tests/unit/test_agentic_validation.py",
 )
 PACKAGES = {
     "jsdom", "typescript", "esbuild", "@jupyterlab/docregistry",
