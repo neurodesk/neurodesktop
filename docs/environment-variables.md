@@ -406,7 +406,7 @@ reviewed; the Dockerfile itself is authoritative.
   defaults to `1.5.4`, `1.27.2`, `1.84.0`, and `0.58.0`. The crypto override
   also updates the separately vendored gocryptfs build.
 - `BASE_IMAGE_TAG`: tag of the upstream Jupyter Docker base image; defaults to
-  the multi-architecture `2026-10-12` release
+  the multi-architecture `2026-10-18` release
 - `NPM_VERSION`: npm release installed with the runtime Node.js distribution;
   defaults to `12.2.1`
 - `FREEBROWSE_REF`: exact FreeBrowse source commit used to build the default
