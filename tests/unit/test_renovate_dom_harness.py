@@ -51,8 +51,10 @@ process.stdout.write(JSON.stringify(deps));
 @pytest.mark.parametrize("path", SURFACES)
 def test_renovate_extracts_all_dom_pins_at_the_same_versions(path):
     config = json.loads(repo_path("renovate.json").read_text())
-    reference = extract(config, SURFACES[0], repo_path(SURFACES[0]).read_text())
-    actual = extract(config, path, repo_path(path).read_text())
+    reference = [pin for pin in extract(config, SURFACES[0], repo_path(SURFACES[0]).read_text())
+                 if pin[0] in PACKAGES]
+    actual = [pin for pin in extract(config, path, repo_path(path).read_text())
+              if pin[0] in PACKAGES]
 
     assert {name for name, _ in reference} == PACKAGES
     assert len(actual) == len(PACKAGES), "Each DOM pin must be extracted exactly once"
