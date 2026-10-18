@@ -87,6 +87,14 @@ endpoint and retain it as a fallback if its data checks succeed. With
 `CVMFS_HOST_RESET_AFTER`) remain in
 [`config/cvmfs/default.local`](../../config/cvmfs/default.local).
 
+File-bundle prefetching is enabled with `CVMFS_PREFETCH_FILEBUNDLES=yes` in
+`config/cvmfs/default.local`. CVMFS 2.14.1 reads this option at mount time.
+When a published module opens its bundle trigger, CVMFS prefetches the listed
+startup files asynchronously. Loading the module does not wait for those
+downloads. The feature remains experimental and requires a publisher-defined
+bundle; enabling the client alone does not select files to download. See the
+[CVMFS file-bundle documentation](https://cvmfs.readthedocs.io/en/2.14/cpt-file-bundles/).
+
 Rankings are cached in `~/.cache/neurodesktop/cvmfs-selection.env` for one day.
 At startup, the primary must complete both hash-verified samples and the
 latency requests within twice its recorded workload estimate. The first fallback

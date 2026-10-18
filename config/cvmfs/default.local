@@ -13,3 +13,7 @@ CVMFS_TIMEOUT_DIRECT=10
 CVMFS_MAX_RETRIES=2
 # Retry the (measurement-ranked) primary server after 30 minutes.
 CVMFS_HOST_RESET_AFTER=1800
+
+# Experimental startup bundles are published with the tool on CVMFS.
+# The client reads this once per mount; enabling it requires a fresh mount.
+CVMFS_PREFETCH_FILEBUNDLES=yes
