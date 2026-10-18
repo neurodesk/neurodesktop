@@ -165,7 +165,7 @@ def test_worker_pins_match_viewer_dependencies():
 
 
 @pytest.mark.parametrize("requirement", [
-    "jupyterhub==6.0.1", "requests", "ipykernel", "websocket-client", "nibabel", "numpy",
+    "jupyterhub", "requests", "ipykernel", "websocket-client", "nibabel", "numpy",
     "openssh-client", "acl", "jq", "gcc", "libx11-dev", "xvfb", "x11-xserver-utils",
 ])
 def test_worker_provisions_mandatory_ci_dependencies(requirement):
@@ -189,6 +189,24 @@ def test_worker_dom_pins_match_ci_and_docs(package):
         assert re.findall(pattern, repo_path(relative).read_text()) == versions, (
             f"{relative} must match the CI pin for {package}@{versions[0]}"
         )
+
+
+def test_jupyterhub_pin_and_renovate_sources_match_ci():
+    from fnmatch import fnmatch
+    from test_renovate_dom_harness import extract
+
+    pattern = r"jupyterhub==(\d+\.\d+\.\d+)(?![\w.+-])"
+    workflow = repo_path(".github/workflows/unit-tests.yml").read_text()
+    versions = re.findall(pattern, workflow)
+    assert len(versions) == 1, f"Expected one exact CI JupyterHub pin: {versions}"
+    config = json.loads(repo_path("renovate.json").read_text())
+    rule = next(r for r in config["packageRules"] if r.get("groupName") == "workflow tools")
+    assert "jupyterhub" in rule["matchDepNames"]
+    for relative in (".github/workflows/unit-tests.yml", "config/agentic/Dockerfile", "docs/testing.md"):
+        assert re.findall(pattern, repo_path(relative).read_text()) == versions, relative
+        pins = extract(config, relative, repo_path(relative).read_text(), datasource="pypi")
+        assert [version for name, version in pins if name == "jupyterhub"] == versions, relative
+        assert any(fnmatch(relative, p) for p in rule["matchFileNames"]), relative
 
 
 def test_worker_supports_system_python_shebangs():

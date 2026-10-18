@@ -1300,10 +1300,12 @@ NiiVue document routing, and special filenames
 under standalone and JupyterHub base paths. Real Jupyter HTTP tests verify
 viewer assets require authentication, GET/HEAD work, and traversal is rejected.
 The fixtures come from the `FREEBROWSE_REF` commit in the Dockerfile.
-JupyterHub 6.0.1 cookie-authentication tests exercise its real XSRF decision
+JupyterHub cookie-authentication tests exercise its real XSRF decision
 through HTTP for same-origin module/style requests, invalid and absent cookies,
 cross-site and missing metadata, mutations, and traversal. Only the Hub token
-lookup is replaced. CI installs `jupyterhub==6.0.1` for this regression.
+lookup is replaced. CI installs `jupyterhub==6.1.0` for this regression.
+Renovate groups this pin with the offline worker's JupyterHub pin, and a
+dependency-contract test checks parity with the documented version.
 The installed-image suite repeats those cases against the shipped handler in
 [`test_freebrowse_hub_image.py`](../tests/container/test_freebrowse_hub_image.py).
 

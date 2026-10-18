@@ -312,6 +312,7 @@
       "description": "Tools used only by CI workflows.",
       "matchFileNames": [
         ".github/workflows/**",
+        "config/agentic/Dockerfile",
         "docs/testing.md"
       ],
       "matchDepNames": [
