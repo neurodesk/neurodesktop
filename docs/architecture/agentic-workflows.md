@@ -128,13 +128,13 @@ checks passed.
 
 ## Subscription authentication and remaining trust
 
-Each worker run builds `neurodesktop-agentic:codex-0.153.4` from the trusted
+Each worker run builds `neurodesktop-agentic:codex-0.162.1` from the trusted
 [`config/agentic/Dockerfile`](../../config/agentic/Dockerfile), using Docker's
 layer cache. The controller's `stage` command assembles a narrow build context
 from that trusted checkout, including the JavaScript lint package manifest and
 lockfile. The preparation artifact carries these inputs separately from the
 candidate checkout. `WORKER_UID` and `WORKER_GID` build arguments create the runner's
-identity inside the image. The image pins Codex CLI `0.153.4`.
+identity inside the image. The image pins Codex CLI `0.162.1`.
 
 The trusted image build also installs the unit-test workflow's Python, system,
 and pinned DOM dependencies, including JupyterHub, NIfTI support, and ACL tools.
@@ -146,7 +146,9 @@ at the checkout's expected `tools/javascript-lint/node_modules` path before
 Codex starts. After `git clean` and patch reconstruction, the offline validator
 recreates the ignored link for both test suites. Neither setup installs packages
 selected by candidate manifests or follows redirected checkout directories.
-The image also exposes Python 3.12 at `/usr/bin/python3` for launcher shebangs.
+The worker uses Python 3.15 and also exposes it at `/usr/bin/python3` for launcher
+shebangs. Checkout CI uses Python 3.12; the offline canary validates the worker's
+interpreter separately.
 `NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES` points both validation suites to the
 image-owned DOM packages. Dependency downloads happen during the image build;
 validation remains offline and credential-free.

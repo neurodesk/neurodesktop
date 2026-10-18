@@ -172,6 +172,41 @@ def test_readiness_and_unit_ci_exercise_the_offline_validator():
     assert 'AGENTIC_CODEX_HOME' not in str(unit_job)
 
 
+def test_worker_image_tags_and_renovate_sources_match_installed_codex():
+    from fnmatch import fnmatch
+    import json
+    import yaml
+
+    dockerfile = repo_path('config/agentic/Dockerfile').read_text()
+    version = re.search(r'@openai/codex@(\d+\.\d+\.\d+)', dockerfile).group(1)
+    image = f'neurodesktop-agentic:codex-{version}'
+    controller = repo_path('.github/scripts/agentic_worker.py').read_text()
+    assert re.search(r'^IMAGE = "([^"]+)"$', controller, re.M).group(1) == image
+
+    config = json.loads(repo_path('renovate.json').read_text())
+    manager = next(
+        m for m in config['customManagers']
+        if m.get('depNameTemplate') == '@openai/codex'
+        and '/^config/agentic/Dockerfile$/' in m['managerFilePatterns']
+    )
+    rule = next(r for r in config['packageRules'] if r.get('groupName') == 'agentic worker image')
+    for filename, job_name in (
+        ('agentic-readiness.yml', 'readiness'),
+        ('agentic-worker.yml', 'candidate'),
+        ('unit-tests.yml', 'worker-validation'),
+    ):
+        job = yaml.safe_load(source(filename))['jobs'][job_name]
+        builds = [
+            shlex.split(step['run']) for step in job['steps']
+            if step.get('run', '').startswith('docker build ')
+        ]
+        assert len(builds) == 1, filename
+        assert builds[0][builds[0].index('--tag') + 1] == image, filename
+        path = f'.github/workflows/{filename}'
+        assert any(re.search(pattern[1:-1], path) for pattern in manager['managerFilePatterns'])
+        assert any(fnmatch(path, pattern) for pattern in rule['matchFileNames'])
+
+
 @pytest.mark.parametrize(('filename', 'job_name'), [
     ('agentic-readiness.yml', 'readiness'),
     ('unit-tests.yml', 'worker-validation'),
