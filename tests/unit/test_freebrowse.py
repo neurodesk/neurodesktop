@@ -341,6 +341,10 @@ def test_image_build_replaces_niivue_with_both_freebrowse_bundles():
     assert "https://github.com/neurodesk/freebrowse.git" in dockerfile
     assert "patch_freebrowse.py" not in dockerfile
     assert "npm run build:jupyter" in dockerfile
-    assert "jlpm build:prod" in dockerfile
+    start = dockerfile.index("    && cd /tmp/freebrowse/jupyter")
+    layer = dockerfile[start:].split("\n\n", 1)[0]
+    assert "jlpm build:lib" in layer
+    assert "jupyter-builder build \\\n    --core-package-file=/opt/conda/share/jupyter/lab/static/package.json ." in layer
+    assert "jlpm build:prod" not in layer
     assert "jupyter server extension enable jupyterlab_freebrowse --sys-prefix" in dockerfile
     assert "ipyniivue==${IPYNIIVUE_VERSION}" in dockerfile
