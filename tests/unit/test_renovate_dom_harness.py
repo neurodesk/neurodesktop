@@ -19,21 +19,22 @@ PACKAGES = {
 }
 
 
-def extract(config, path, content):
+def extract(config, path, content, datasource="npm"):
     # Execute the configured JavaScript regexes, including recursive matches.
     # This is a focused packaging check, not a replacement for Renovate validation.
     result = subprocess.run(
         ["node", "-e", r"""
-const { config, path, content } = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+const { config, path, content, datasource } = JSON.parse(require('fs').readFileSync(0, 'utf8'));
 const deps = [];
 for (const manager of config.customManagers) {
-  if (manager.datasourceTemplate !== 'npm' ||
+  if (manager.datasourceTemplate !== datasource ||
       !manager.managerFilePatterns.some(p => new RegExp(p.slice(1, -1)).test(path))) continue;
   let inputs = [content];
   for (const pattern of manager.matchStrings) {
     const matches = inputs.flatMap(input => [...input.matchAll(new RegExp(pattern, 'g'))]);
     for (const match of matches) {
-      const { depName, currentValue } = match.groups ?? {};
+      const { currentValue } = match.groups ?? {};
+      const depName = match.groups?.depName ?? manager.depNameTemplate;
       if (depName && currentValue) deps.push([depName, currentValue]);
     }
     if (manager.matchStringsStrategy === 'recursive') inputs = matches.map(m => m[0]);
@@ -41,7 +42,7 @@ for (const manager of config.customManagers) {
 }
 process.stdout.write(JSON.stringify(deps));
 """],
-        input=json.dumps({"config": config, "path": path, "content": content}),
+        input=json.dumps({"config": config, "path": path, "content": content, "datasource": datasource}),
         text=True, capture_output=True, check=True,
     )
     return json.loads(result.stdout)
