@@ -140,6 +140,14 @@ constraints do not constrain isolated build dependencies. Changes to these
 pins require fresh isolated wheel builds for both `jupyterlab-slurm` and
 `neurodesk-launcher`.
 
+The pinned FreeBrowse extension compiles its TypeScript and builds its federated
+bundle with `jupyter-builder` and the installed core metadata at
+`/opt/conda/share/jupyter/lab/static/package.json`. Its upstream production script
+omits that core path. With the current Jupyter builder, the legacy builder
+declaration otherwise triggers a lookup for unavailable 4.0 core metadata.
+Using the installed core keeps the bundle aligned with the image's JupyterLab
+and avoids that network lookup.
+
 ## Image Size Hygiene
 
 Layers are append-only: deleting or re-owning a file in a later layer only
