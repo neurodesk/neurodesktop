@@ -1,7 +1,7 @@
-FROM node:24.19.0-bookworm-slim AS node
-RUN npm install --global @openai/codex@0.153.4 && npm cache clean --force
+FROM node:24.22.0-bookworm-slim AS node
+RUN npm install --global @openai/codex@0.162.1 && npm cache clean --force
 
-FROM python:3.12.12-slim-bookworm
+FROM python:3.15.0-slim-bookworm
 ARG WORKER_UID=1000
 ARG WORKER_GID=1000
 RUN (getent group "$WORKER_GID" || groupadd --gid "$WORKER_GID" codex) \
@@ -16,8 +16,8 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && apt-get install -y --no-install-recommends bash git curl jq openssh-client acl ripgrep ca-certificates \
        gcc libc6-dev libx11-dev xvfb x11-xserver-utils \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir pytest==8.4.2 httpx==0.28.1 traitlets==5.14.3 \
-       PyYAML==6.0.2 jupyter-server==2.17.0 jupyter-server-proxy==4.5.0 \
+    && pip install --no-cache-dir pytest==8.4.2 httpx==0.28.1 traitlets==5.16.1 \
+       PyYAML==6.0.3 jupyter-server==2.21.1 jupyter-server-proxy==4.5.0 \
        astra-spec==0.0.14 astra-tools==0.2.18 anywidget==0.11.0 \
        jupyterhub==6.0.1 requests==2.34.2 ipykernel==7.4.0 websocket-client==1.9.2 \
        nibabel==5.4.2 numpy==2.5.4

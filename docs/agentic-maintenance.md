@@ -44,7 +44,7 @@ that launches the worker. Do not use a personal home directory containing
 unrelated credentials. The repository does not configure the runner's PVC or
 Kubernetes mounts.
 
-Each worker run builds `neurodesktop-agentic:codex-0.153.4` from a staged trusted
+Each worker run builds `neurodesktop-agentic:codex-0.162.1` from a staged trusted
 context containing [`config/agentic/Dockerfile`](../config/agentic/Dockerfile)
 and the JavaScript lint lockfile, reusing the runner's Docker cache.
 Its ASTRA and anywidget pins must match the viewer's exact
@@ -59,7 +59,7 @@ baseline contains only tests. The validator redirects that helper to the
 patched checkout. Merge baseline test-path fixes before retrying blocked
 repairs, so their frozen snapshots include the corrected tests.
 
-The image pins Codex CLI `0.153.4`. Verify Docker can build and
+The image pins Codex CLI `0.162.1`. Verify Docker can build and
 run that image on the selected runner. The first build needs outbound access
 to its package and base-image sources.
 
@@ -70,14 +70,14 @@ an administrator. Run these commands as the account that runs Actions jobs:
 agentic_control=$(mktemp -d)
 python3 .github/scripts/agentic_worker.py stage \
   --workspace "$PWD" --directory "$agentic_control"
-docker build --tag neurodesktop-agentic:codex-0.153.4 \
+docker build --tag neurodesktop-agentic:codex-0.162.1 \
   --build-arg WORKER_UID="$(id -u)" --build-arg WORKER_GID="$(id -g)" \
   "$agentic_control/config/agentic"
 sudo install -d -m 700 -o "$(id -u)" -g "$(id -g)" /var/lib/neurodesktop-codex
 docker run --rm -it --user "$(id -u):$(id -g)" \
   --env CODEX_HOME=/codex \
   --mount type=bind,src=/var/lib/neurodesktop-codex,dst=/codex \
-  neurodesktop-agentic:codex-0.153.4 \
+  neurodesktop-agentic:codex-0.162.1 \
   codex -c 'cli_auth_credentials_store="file"' login --device-auth
 ```
 

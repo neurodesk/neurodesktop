@@ -128,13 +128,13 @@ checks passed.
 
 ## Subscription authentication and remaining trust
 
-Each worker run builds `neurodesktop-agentic:codex-0.153.4` from the trusted
+Each worker run builds `neurodesktop-agentic:codex-0.162.1` from the trusted
 [`config/agentic/Dockerfile`](../../config/agentic/Dockerfile), using Docker's
 layer cache. The controller's `stage` command assembles a narrow build context
 from that trusted checkout, including the JavaScript lint package manifest and
 lockfile. The preparation artifact carries these inputs separately from the
 candidate checkout. `WORKER_UID` and `WORKER_GID` build arguments create the runner's
-identity inside the image. The image pins Codex CLI `0.153.4`.
+identity inside the image. The image pins Codex CLI `0.162.1`.
 
 The trusted image build also installs the unit-test workflow's Python, system,
 and pinned DOM dependencies, including JupyterHub, NIfTI support, and ACL tools.
