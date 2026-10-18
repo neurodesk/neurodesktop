@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-16"
+last-reviewed: "2026-10-17"
 ---
 
 # Testing
@@ -85,9 +85,18 @@ pytest tests/unit
 
 Missing launcher test dependencies fail with setup guidance instead of skipping.
 The unit-test workflow installs these same pinned dependencies automatically.
+The suite also runs real ESLint checks. Install their locked dependencies with
+`npm ci --prefix tools/javascript-lint --ignore-scripts --no-audit --no-fund`.
 
-Install those with the interpreter's own site packages rather than `pip install
---user`. `tests/unit/test_agentic_validation.py` runs
+The unit-test workflow also builds the agentic worker and validates an unchanged
+checkout through its offline, credential-free Docker path. This checks the
+worker's actual native and JavaScript prerequisites as the unit suite changes.
+The [agentic setup guide](agentic-maintenance.md#verify-setup-with-one-issue)
+provides the local canary command. Frozen and candidate suite results are
+reported separately, and both must pass.
+
+Install the Python test dependencies in the interpreter's own site packages
+rather than with `pip install --user`. `tests/unit/test_agentic_validation.py` runs
 `config/agentic/validate.py`, which starts the frozen baseline with `python -I`
 so a candidate patch cannot reach it through the environment. Isolated mode
 also drops user site packages, so a `--user` install of `pytest` or of its
@@ -244,6 +253,11 @@ bypass. It also requires these check contexts from GitHub Actions
 | Unit tests | `pytest tests/unit` |
 | PR image acceptance | `Installed image (amd64)` |
 | PR image acceptance | `Installed image (arm64)` |
+
+The required `pytest tests/unit` context aggregates
+`Checkout unit tests` and `Offline worker validation`, which run in parallel.
+It succeeds only when both jobs succeed. A failed, cancelled, skipped, or missing
+dependency result fails the aggregate.
 
 Branches need not be up to date with `main` before merging. A missing, pending,
 or cancelled required check blocks a normal merge. Every pull request to `main`

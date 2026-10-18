@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import signal
 import subprocess
 import tarfile
@@ -22,6 +23,8 @@ CATEGORIES = ("updates", "security", "dead-code", "test-coverage", "refactoring"
 IMAGE = "neurodesktop-agentic:codex-0.153.4"
 MAX_COMMAND_OUTPUT = 8 * 1024 * 1024
 MAX_PATCH = 2 * 1024 * 1024
+MAX_RESULT_BODY = 30000
+MAX_RESULT_TEXT = 50000
 MAX_REVIEW_COMMITS = 3
 REVIEW_COMMIT = "[agentic-review]"
 GIT_ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
@@ -241,14 +244,14 @@ def validate_result(result):
         raise ValueError("Invalid Codex outcome")
     if not all(isinstance(result[k], str) and result[k].strip() for k in ("title", "body")):
         raise ValueError("Codex title and body must be nonempty strings")
-    if len(result["title"]) > 160 or len(result["body"]) > 30000:
+    if len(result["title"]) > 160 or len(result["body"]) > MAX_RESULT_BODY:
         raise ValueError("Codex result exceeds publication limits")
     pending = result["pending_validation"]
     if not isinstance(pending, list) or len(pending) > 50 or not all(
         isinstance(item, str) and len(item) <= 1000 for item in pending
     ):
         raise ValueError("Invalid pending validation")
-    if len(result["body"]) + sum(len(item) for item in pending) > 50000:
+    if len(result["body"]) + sum(len(item) for item in pending) > MAX_RESULT_TEXT:
         raise ValueError("Codex result leaves insufficient room for GitHub validation evidence")
     return result
 
@@ -481,6 +484,20 @@ def snapshot_validation_baseline(workspace, base_sha, destination):
         raise ValueError("Base revision does not contain the unit-test baseline")
 
 
+def stage_worker_build_context(workspace, destination):
+    scripts = destination / ".github" / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    for name in ("agentic_worker.py", "check_agentic_sandbox.py"):
+        shutil.copyfile(workspace / ".github" / "scripts" / name, scripts / name)
+    control = destination / "config" / "agentic"
+    shutil.copytree(workspace / "config" / "agentic", control, dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    lint = control / "javascript-lint"
+    lint.mkdir(exist_ok=True)
+    for name in ("package.json", "package-lock.json"):
+        shutil.copyfile(workspace / "tools" / "javascript-lint" / name, lint / name)
+
+
 def validate_candidate_patch(workspace, control, output, baseline):
     name = f"neurodesktop-check-{uuid.uuid4().hex}"
     (output / "container-name").write_text(name)
@@ -493,6 +510,35 @@ def validate_candidate_patch(workspace, control, output, baseline):
         ], timeout=1800)
     finally:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=30)
+
+
+def validation_failure_report(failure):
+    details = getattr(failure, "output", None) or ""
+    if isinstance(details, bytes):
+        details = details.decode(errors="replace")
+    reason = "validator timed out; incomplete suite report" if isinstance(failure, subprocess.TimeoutExpired) else "validator failed"
+    return f"FAILED: frozen_baseline and candidate unit tests; {reason}\n" + details[-24000:]
+
+
+def validate_checkout_canary(workspace, control, output):
+    output.mkdir(parents=True, exist_ok=True)
+    prefix = ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
+    revision = command([*prefix, "rev-parse", "HEAD"], cwd=workspace, env=GIT_ENV).strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("Canary requires a trusted full HEAD revision")
+    try:
+        with tempfile.TemporaryDirectory(prefix="checkout-canary-", dir=output) as directory:
+            temporary = Path(directory)
+            checkout, baseline = temporary / "checkout", temporary / "baseline"
+            command([*prefix, "clone", "--no-hardlinks", "--no-checkout", "--", str(workspace), str(checkout)], env=GIT_ENV)
+            command([*prefix, "checkout", "--detach", revision], cwd=checkout, env=GIT_ENV)
+            snapshot_validation_baseline(checkout, revision, baseline)
+            validation = validate_candidate_patch(checkout, control, output, baseline)
+    except (RuntimeError, subprocess.TimeoutExpired) as failure:
+        (output / "canary-validation.txt").write_text(validation_failure_report(failure))
+        raise
+    (output / "canary-validation.txt").write_text(validation[-30000:])
+    return validation
 
 
 def run_candidate(task, workspace, control, output, auth, model):
@@ -513,6 +559,7 @@ def run_candidate(task, workspace, control, output, auth, model):
             name = f"neurodesktop-codex-{uuid.uuid4().hex}"
             (output / "container-name").write_text(name)
             args = docker_args(name, workspace, control, output, auth=auth) + subscription_guard() + [
+                "sh", "-c", 'python /control/validate.py --prepare-workspace /workspace && exec "$@"', "sh",
                 "codex", "exec", "--ignore-user-config", "--ignore-rules", "--ephemeral",
                 "--strict-config", "--model", model,
                 "-c", 'forced_login_method="chatgpt"',
@@ -546,11 +593,15 @@ def run_candidate(task, workspace, control, output, auth, model):
                 validation = validate_candidate_patch(workspace, control, output, baseline)
             except (RuntimeError, subprocess.TimeoutExpired) as failure:
                 result["outcome"] = "blocked"
-                result["body"] += "\n\nIndependent checkout validation failed or timed out. The candidate was not published."
-                details = getattr(failure, "output", None) or ""
-                if isinstance(details, bytes):
-                    details = details.decode(errors="replace")
-                validation = "FAILED: immutable baseline and candidate unit tests\n" + details[-24000:]
+                validation = validation_failure_report(failure)
+                summary = validation.rsplit("VALIDATION_SUMMARY ", 1)
+                detail = summary[-1].split("\n", 1)[0][:1500] if len(summary) == 2 else ""
+                detail = detail or "frozen_baseline and candidate results unavailable; incomplete validation report."
+                notice = "\n\nIndependent checkout validation failed or timed out. The candidate was not published.\n" + detail
+                while len(notice) + sum(len(item) for item in result["pending_validation"]) > MAX_RESULT_TEXT:
+                    result["pending_validation"].pop()
+                limit = min(MAX_RESULT_BODY, MAX_RESULT_TEXT - sum(len(item) for item in result["pending_validation"]))
+                result["body"] = result["body"][:limit - len(notice)] + notice
             # Tests may modify files. Publish exactly the patch inspected before tests.
             write_json(output / "result.json", result)
             proof = {"passed": result["outcome"] == "change", "patch_sha256": hashlib.sha256(patch).hexdigest()}
@@ -581,8 +632,9 @@ def comment_once(task, body, *, number=None, purpose="result", key=None):
 
 
 def validation_evidence(result, validation):
-    body = "\n\nIndependent validation: immutable baseline and candidate `tests/unit` suites\n\n```text\n"
-    body += validation[-6000:].replace("```", "'''") + "\n```"
+    body = "\n\nIndependent validation: frozen and candidate `tests/unit` suites against submitted sources\n\n```text\n"
+    excerpt = validation if len(validation) <= 12000 else validation[:6000] + "\n[Middle output omitted]\n" + validation[-6000:]
+    body += excerpt.replace("```", "'''") + "\n```"
     body += "\n\nPending validation before merge:\n" + "\n".join(
         f"- {line}" for line in (result["pending_validation"] or ["Review the diff and required CI results."])
     )
@@ -730,7 +782,7 @@ def fetch_revision(workspace, revision):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=("prepare", "run", "publish", "cleanup"))
+    parser.add_argument("phase", choices=("prepare", "run", "publish", "cleanup", "stage", "canary"))
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--workspace", type=Path, default=Path.cwd())
     parser.add_argument("--control", type=Path)
@@ -738,6 +790,12 @@ def main():
     output = args.directory.resolve()
     if args.phase == "cleanup":
         cleanup(output)
+    elif args.phase == "stage":
+        stage_worker_build_context(args.workspace.resolve(), output)
+    elif args.phase == "canary":
+        if args.control is None:
+            parser.error("canary requires --control")
+        print(validate_checkout_canary(args.workspace.resolve(), args.control.resolve(), output))
     elif args.phase == "prepare":
         prepare(os.environ["TASK_KIND"], os.environ["TASK_SUBJECT"], os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_RUN_ID"], output)
     else:

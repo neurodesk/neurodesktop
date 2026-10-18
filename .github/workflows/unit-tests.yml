@@ -20,7 +20,7 @@ on:
 
 jobs:
   unit-tests:
-    name: pytest tests/unit
+    name: Checkout unit tests
     runs-on: ubuntu-latest
 
     steps:
@@ -62,3 +62,56 @@ jobs:
           npm ci --prefix tools/javascript-lint --ignore-scripts --no-audit --no-fund
           npm install --prefix "$RUNNER_TEMP/launcher-dom" --no-audit --no-fund jsdom@26.1.0 typescript@5.2.2 esbuild@0.28.2 @jupyterlab/docregistry@4.6.3 @jupyterlab/coreutils@6.6.3 @jupyterlab/services@7.6.3 @lumino/widgets@2.9.0
           pytest tests/unit -v
+
+  worker-validation:
+    name: Offline worker validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout run revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Stage trusted controller and locked build inputs
+        run: >-
+          python3 .github/scripts/agentic_worker.py stage
+          --workspace "$GITHUB_WORKSPACE"
+          --directory "$RUNNER_TEMP/agentic-control"
+      - name: Build worker image
+        run: >-
+          docker build --tag neurodesktop-agentic:codex-0.153.4
+          --build-arg WORKER_UID="$(id -u)" --build-arg WORKER_GID="$(id -g)"
+          "$RUNNER_TEMP/agentic-control/config/agentic"
+      - name: Validate an unchanged checkout without credentials or network
+        run: >-
+          python3 .github/scripts/agentic_worker.py canary
+          --workspace "$GITHUB_WORKSPACE"
+          --control "$RUNNER_TEMP/agentic-control/config/agentic"
+          --directory "$RUNNER_TEMP/agentic-canary"
+      - name: Stop canary container after completion or cancellation
+        if: always()
+        run: >-
+          python3 "$RUNNER_TEMP/agentic-control/.github/scripts/agentic_worker.py" cleanup
+          --directory "$RUNNER_TEMP/agentic-canary"
+      - name: Save checkout validation evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: offline-worker-validation
+          path: ${{ runner.temp }}/agentic-canary/canary-validation.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+  unit-tests-required:
+    name: pytest tests/unit
+    needs: [unit-tests, worker-validation]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require both checkout and offline worker validation
+        env:
+          CHECKOUT_RESULT: ${{ needs.unit-tests.result }}
+          WORKER_RESULT: ${{ needs.worker-validation.result }}
+        run: |
+          [[ "$CHECKOUT_RESULT" == success && "$WORKER_RESULT" == success ]]

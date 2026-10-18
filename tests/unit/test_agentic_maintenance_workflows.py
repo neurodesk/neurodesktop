@@ -1,6 +1,8 @@
 """Protect the subscription workflow's event and credential boundaries."""
 
+import os
 import re
+import shlex
 import subprocess
 import sys
 import textwrap
@@ -140,3 +142,111 @@ def test_reporter_catalog_covers_each_top_level_test_deployment_and_agent_workfl
 def test_all_worker_checkouts_disable_persisted_credentials():
     workflow = source('agentic-worker.yml')
     assert workflow.count('persist-credentials: false') == workflow.count('uses: actions/checkout@')
+
+
+def test_worker_stages_trusted_build_inputs_before_upload():
+    workflow = source('agentic-worker.yml')
+    prepare = workflow.split('  candidate:\n', 1)[0]
+    assert 'agentic_worker.py stage' in prepare
+    assert prepare.index('agentic_worker.py stage') < prepare.index('name: Save trusted task and controller')
+    assert 'path: ${{ runner.temp }}/agentic-control/' in prepare
+
+
+def test_readiness_and_unit_ci_exercise_the_offline_validator():
+    import yaml
+
+    for filename, job_name in (('agentic-readiness.yml', 'readiness'), ('unit-tests.yml', 'worker-validation')):
+        job = yaml.safe_load(source(filename))['jobs'][job_name]
+        commands = '\n'.join(step.get('run', '') for step in job['steps'])
+        assert 'agentic_worker.py stage' in commands
+        assert 'agentic_worker.py canary' in commands
+        assert commands.index('agentic_worker.py stage') < commands.index('docker build')
+        assert commands.index('docker build') < commands.index('agentic_worker.py canary')
+        assert job['timeout-minutes'] >= 40
+        checkout = next(step for step in job['steps'] if step.get('uses', '').startswith('actions/checkout@'))
+        assert checkout['with']['ref'] == '${{ github.sha }}'
+        assert checkout['with']['persist-credentials'] is False
+
+    unit_job = yaml.safe_load(source('unit-tests.yml'))['jobs']['worker-validation']
+    assert 'secrets.' not in str(unit_job)
+    assert 'AGENTIC_CODEX_HOME' not in str(unit_job)
+
+
+@pytest.mark.parametrize(('filename', 'job_name'), [
+    ('agentic-readiness.yml', 'readiness'),
+    ('unit-tests.yml', 'worker-validation'),
+])
+def test_canary_jobs_always_clean_up_before_uploading_evidence(filename, job_name):
+    import yaml
+
+    steps = yaml.safe_load(source(filename))['jobs'][job_name]['steps']
+    cleanup_steps = [
+        (index, step) for index, step in enumerate(steps)
+        if 'cleanup' in shlex.split(step.get('run', ''))
+    ]
+    assert len(cleanup_steps) == 1, f'{filename} must have one canary cleanup step'
+    cleanup_index, cleanup = cleanup_steps[0]
+    assert cleanup['if'] == 'always()'
+    assert shlex.split(cleanup['run']) == [
+        'python3', '$RUNNER_TEMP/agentic-control/.github/scripts/agentic_worker.py',
+        'cleanup', '--directory', '$RUNNER_TEMP/agentic-canary',
+    ]
+    canary_index = next(
+        index for index, step in enumerate(steps)
+        if 'canary' in shlex.split(step.get('run', ''))
+    )
+    upload_index = next(
+        index for index, step in enumerate(steps)
+        if step.get('uses', '').startswith('actions/upload-artifact@')
+    )
+    assert canary_index < cleanup_index < upload_index
+
+
+def test_required_unit_context_gates_both_parallel_suites():
+    import yaml
+
+    jobs = yaml.safe_load(source('unit-tests.yml'))['jobs']
+    assert jobs['unit-tests']['name'] == 'Checkout unit tests'
+    for name in ('unit-tests', 'worker-validation'):
+        assert not jobs[name].get('needs')
+    gates = [job for job in jobs.values() if job.get('name') == 'pytest tests/unit']
+    assert len(gates) == 1
+    gate = gates[0]
+    assert set(gate['needs']) == {'unit-tests', 'worker-validation'}
+    assert gate['if'] == 'always()'
+    step, = gate['steps']
+    assert step['env'] == {
+        'CHECKOUT_RESULT': '${{ needs.unit-tests.result }}',
+        'WORKER_RESULT': '${{ needs.worker-validation.result }}',
+    }
+    assert 'continue-on-error' not in gate
+    assert 'continue-on-error' not in step
+
+
+@pytest.mark.parametrize('checkout', ['success', 'failure', 'cancelled', 'skipped', ''])
+@pytest.mark.parametrize('worker', ['success', 'failure', 'cancelled', 'skipped', ''])
+def test_required_unit_gate_only_accepts_two_successes(checkout, worker):
+    import yaml
+
+    jobs = yaml.safe_load(source('unit-tests.yml'))['jobs']
+    gate = next(job for job in jobs.values() if job.get('name') == 'pytest tests/unit')
+    step, = gate['steps']
+
+    result = subprocess.run(
+        ['bash', '-e', '-o', 'pipefail', '-c', step['run']],
+        env={**os.environ, 'CHECKOUT_RESULT': checkout, 'WORKER_RESULT': worker},
+        capture_output=True, text=True, timeout=5,
+    )
+
+    assert (result.returncode == 0) is (checkout == worker == 'success'), result.stdout + result.stderr
+
+
+def test_auth_storage_readiness_requires_built_image_but_not_passing_canary():
+    import yaml
+
+    steps = yaml.safe_load(source('agentic-readiness.yml'))['jobs']['readiness']['steps']
+    auth = next(step for step in steps if 'check_agentic_readiness.py' in step.get('run', ''))
+    assert auth['if'] == "${{ !cancelled() && steps.build_worker.outcome == 'success' }}"
+    build = next(step for step in steps if step.get('id') == 'build_worker')
+    assert 'docker build --tag neurodesktop-agentic:' in build['run']
+    assert steps.index(build) < steps.index(auth)

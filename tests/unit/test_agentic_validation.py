@@ -1,15 +1,38 @@
 """Regression tests for the frozen agentic validation baseline."""
 
+import json
+import os
+from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
+import time
 
 import pytest
 
-from testlib import repo_path
+from testlib import load_source_module, repo_path
 
 
 VALIDATOR = repo_path("config/agentic/validate.py")
+
+
+@pytest.fixture
+def validator():
+    return load_source_module("agentic_validator_test", "/opt/validate.py", "config/agentic/validate.py")
+
+
+def assert_process_exited(pid):
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline:
+        try:
+            state = Path(f"/proc/{pid}/stat").read_text().split()[2]
+        except (FileNotFoundError, ProcessLookupError):
+            return
+        if state == "Z":
+            return
+        time.sleep(0.01)
+    pytest.fail(f"Stage descendant {pid} is still running")
 
 
 def write_baseline(root):
@@ -142,7 +165,7 @@ def test_worker_pins_match_viewer_dependencies():
 
 @pytest.mark.parametrize("requirement", [
     "jupyterhub==6.0.1", "requests", "ipykernel", "websocket-client", "nibabel", "numpy",
-    "openssh-client", "acl", "jq",
+    "openssh-client", "acl", "jq", "gcc", "libx11-dev", "xvfb", "x11-xserver-utils",
     "jsdom@26.1.0", "typescript@5.2.2", "esbuild@0.28.2",
     "@jupyterlab/docregistry@4.6.3", "@jupyterlab/coreutils@6.6.3",
     "@jupyterlab/services@7.6.3", "@lumino/widgets@2.9.0",
@@ -183,3 +206,234 @@ def test_build_checks_run_from_a_tests_only_baseline(tmp_path, module):
     result = validate(baseline, workspace)
 
     assert result.returncode == 0, result.stdout
+
+
+def test_validation_keeps_early_failure_and_loud_candidate_evidence(tmp_path):
+    baseline, workspace = tmp_path / "baseline", tmp_path / "workspace"
+    write_baseline(baseline)
+    write_candidate(workspace, "bad\n")
+    (workspace / "tests" / "conftest.py").write_text(
+        "import os\nos.write(1, b'candidate noise' * 5000)\n"
+    )
+    (workspace / "tests" / "pytest.ini").write_text("[pytest]\naddopts = -s\n")
+
+    result = validate(baseline, workspace)
+
+    assert result.returncode == 1
+    assert len(result.stdout.encode()) < 24000
+    assert "test_base_behavior" in result.stdout
+    assert "AssertionError" in result.stdout
+    records = json.loads(result.stdout.split("VALIDATION_SUMMARY ")[-1])
+    assert [(record["stage"], record["status"], record["returncode"]) for record in records] == [
+        ("frozen_baseline", "failed", 1), ("candidate", "passed", 0),
+    ]
+    assert all(record["elapsed_seconds"] >= 0 for record in records)
+
+
+@pytest.mark.parametrize("script", [
+    "import os; os.write(1, b'x' * 65536)",
+    "import os, time; os.write(2, b'x' * 65536); time.sleep(5)",
+])
+def test_validator_output_limit_fails_closed_with_bounded_tail(validator, monkeypatch, tmp_path, script):
+    monkeypatch.setattr(validator, "MAX_STAGE_OUTPUT", 1024)
+
+    result = validator.run("candidate", [sys.executable, "-c", script], cwd=tmp_path)
+
+    assert result["status"] == "output_limit"
+    assert result["returncode"] is not None
+    assert result["output_truncated"] is True
+    assert len(result["output_tail"].encode()) <= validator.STAGE_TAIL_BYTES
+
+
+def test_validator_timeout_kills_descendants_and_keeps_partial_output(validator, tmp_path):
+    child_pid = tmp_path / "child.pid"
+    script = (
+        "import subprocess, sys, time; from pathlib import Path; "
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+        f"Path({str(child_pid)!r}).write_text(str(child.pid)); "
+        "print('before timeout', flush=True); time.sleep(30)"
+    )
+
+    try:
+        result = validator.run("frozen_baseline", [sys.executable, "-c", script], cwd=tmp_path, timeout=5)
+
+        assert result["status"] == "timed_out"
+        assert "before timeout" in result["output_tail"]
+        assert_process_exited(int(child_pid.read_text()))
+    finally:
+        if child_pid.exists():
+            try:
+                os.kill(int(child_pid.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+@pytest.mark.parametrize("redirect_output", [True, False], ids=["closed-pipe", "inherited-pipe"])
+@pytest.mark.parametrize("returncode,status", [(0, "passed"), (7, "failed")])
+def test_validator_cleans_up_children_after_leader_exit(validator, tmp_path, redirect_output, returncode, status):
+    redirection = ">/dev/null 2>&1" if redirect_output else ""
+    script = (
+        f"sleep 30 {redirection} & echo $! > child.pid; "
+        f"printf 'leader output\\n'; exit {returncode}"
+    )
+
+    try:
+        result = validator.run("candidate", ["sh", "-c", script], cwd=tmp_path, timeout=2)
+
+        assert result["status"] == status
+        assert result["returncode"] == returncode
+        assert result["elapsed_seconds"] < 1.5
+        assert result["output_tail"] == "leader output\n"
+        assert_process_exited(int((tmp_path / "child.pid").read_text()))
+    finally:
+        if (tmp_path / "child.pid").exists():
+            try:
+                os.kill(int((tmp_path / "child.pid").read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_validator_retains_buffered_output_after_leader_exit(validator, tmp_path):
+    payload = b"x" * 200000 + b"final buffered output\n"
+    script = "import os; os.write(1, b'x' * 200000 + b'final buffered output\\n')"
+
+    result = validator.run("candidate", [sys.executable, "-c", script], cwd=tmp_path)
+
+    assert result["status"] == "passed"
+    assert result["returncode"] == 0
+    assert result["output_tail"] == payload[-validator.STAGE_TAIL_BYTES:].decode()
+    assert result["output_truncated"] is True
+
+
+@pytest.mark.parametrize("failure,status", [
+    ("import time; time.sleep(5)", "timed_out"),
+    ("import os; os.write(1, b'x' * 65536)", "output_limit"),
+])
+def test_failed_bounded_baseline_still_runs_candidate(tmp_path, failure, status):
+    baseline, workspace = tmp_path / "baseline", tmp_path / "workspace"
+    write_baseline(baseline)
+    write_candidate(workspace, "good\n")
+    (baseline / "tests" / "unit" / "test_subject.py").write_text(
+        "def test_failure(capfd):\n    with capfd.disabled():\n        " + failure + "\n"
+    )
+    if status == "output_limit":
+        with (baseline / "tests" / "conftest.py").open("a") as conftest:
+            conftest.write("import time\ntime.sleep(3)\n")
+    (workspace / "tests" / "conftest.py").write_text("import time\ntime.sleep(3)\n")
+    (workspace / "tests" / "pytest.ini").unlink()
+    timeouts = {"frozen_baseline": 2 if status == "timed_out" else 30, "candidate": 30}
+    bootstrap = (
+        "import runpy, sys\n"
+        "module = runpy.run_path(sys.argv[1])\n"
+        f"timeouts = {timeouts!r}\n"
+        "def bounded_run(stage, *args, **kwargs):\n"
+        "    return module['run'](stage, *args, timeout=timeouts[stage], **kwargs)\n"
+        "main = module['main']\n"
+        "main.__globals__['MAX_STAGE_OUTPUT'] = 4096\n"
+        "main.__globals__['run'] = bounded_run\n"
+        "raise SystemExit(main(sys.argv[2:]))\n"
+    )
+
+    result = subprocess.run([
+        sys.executable, "-c", bootstrap, str(VALIDATOR),
+        "--baseline", str(baseline), "--workspace", str(workspace),
+    ], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=75)
+
+    assert result.returncode == 1, result.stdout
+    records = json.loads(result.stdout.split("VALIDATION_SUMMARY ")[-1])
+    assert [(record["stage"], record["status"]) for record in records] == [
+        ("frozen_baseline", status), ("candidate", "passed"),
+    ]
+    assert records[1]["elapsed_seconds"] >= 3
+    if status == "output_limit":
+        assert records[0]["elapsed_seconds"] >= 3
+
+
+@pytest.fixture
+def lint_checkout(validator, tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    lint = workspace / "tools" / "javascript-lint"
+    lint.mkdir(parents=True)
+    baked = tmp_path / "baked" / "node_modules"
+    baked.mkdir(parents=True)
+    (baked / "eslint-marker").write_text("trusted locked install")
+    (workspace / ".gitignore").write_text("tools/javascript-lint/node_modules\n")
+    subprocess.run(["git", "init", str(workspace)], check=True, capture_output=True)
+    monkeypatch.setattr(validator, "LINT_NODE_MODULES", baked)
+    return workspace, lint / "node_modules", baked
+
+
+def test_prepare_workspace_cli_links_baked_dependencies(validator, lint_checkout):
+    workspace, target, baked = lint_checkout
+
+    assert validator.main(["--prepare-workspace", str(workspace)]) == 0
+
+    assert target.is_symlink()
+    assert target.resolve() == baked
+    assert (target / "eslint-marker").read_text() == "trusted locked install"
+
+
+def test_lint_setup_restores_ignored_baked_install_after_git_clean(validator, lint_checkout):
+    workspace, target, baked = lint_checkout
+
+    validator.prepare_checkout_dependencies(workspace)
+    subprocess.run(["git", "-C", str(workspace), "add", ".gitignore"], check=True)
+    assert subprocess.check_output(["git", "-C", str(workspace), "ls-files", "--", "tools"]) == b""
+    subprocess.run(["git", "-C", str(workspace), "clean", "-fdx"], check=True, capture_output=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    validator.prepare_checkout_dependencies(workspace)
+    validator.prepare_checkout_dependencies(workspace)
+
+    assert target.is_symlink()
+    assert target.resolve() == baked
+    assert (target / "eslint-marker").read_text() == "trusted locked install"
+
+
+@pytest.mark.parametrize("redirect", ["tools", "tools/javascript-lint", "tools/javascript-lint/node_modules"])
+def test_lint_setup_rejects_candidate_path_redirection(validator, lint_checkout, tmp_path, redirect):
+    workspace, _, _ = lint_checkout
+    external = tmp_path / "outside"
+    external.mkdir()
+    path = workspace / redirect
+    if path.exists():
+        shutil.rmtree(path)
+    path.symlink_to(external)
+
+    with pytest.raises(ValueError, match="dependency path"):
+        validator.prepare_checkout_dependencies(workspace)
+
+    assert list(external.iterdir()) == []
+
+
+def test_lint_setup_rejects_existing_candidate_dependency_directory(validator, lint_checkout):
+    workspace, target, _ = lint_checkout
+    target.mkdir()
+
+    with pytest.raises(ValueError, match="dependency path"):
+        validator.prepare_checkout_dependencies(workspace)
+
+
+def test_lint_setup_rejects_dependency_path_without_ignore_rule(validator, lint_checkout):
+    workspace, target, _ = lint_checkout
+    (workspace / ".gitignore").write_text("")
+
+    with pytest.raises(ValueError, match="ignored"):
+        validator.prepare_checkout_dependencies(workspace)
+
+    assert not target.exists()
+
+
+def test_lint_setup_rejects_tracked_link_even_when_it_targets_baked_install(validator, lint_checkout):
+    workspace, target, baked = lint_checkout
+    target.symlink_to(baked)
+    subprocess.run(["git", "-C", str(workspace), "add", "--force", str(target)], check=True)
+
+    with pytest.raises(ValueError, match="untracked"):
+        validator.prepare_checkout_dependencies(workspace)
+
+
+def test_worker_installs_trusted_locked_eslint():
+    worker = repo_path("config/agentic/Dockerfile").read_text()
+    assert "COPY javascript-lint/package.json javascript-lint/package-lock.json /opt/javascript-lint/" in worker
+    assert "npm ci --prefix /opt/javascript-lint --ignore-scripts --no-audit --no-fund" in worker
+    assert "libc6-dev" in worker

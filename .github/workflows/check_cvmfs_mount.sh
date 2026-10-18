@@ -5,11 +5,41 @@ set -u
 repository_root="${CVMFS_REPOSITORY_ROOT:-/cvmfs/neurodesk.ardc.edu.au}"
 repository_name="${CVMFS_REPOSITORY_NAME:-neurodesk.ardc.edu.au}"
 
-# Access triggers autofs; an ordinary directory or autofs trigger is not a CVMFS mount.
-if timeout --kill-after=5s 45s ls "$repository_root" >/dev/null &&
-    timeout --kill-after=5s 10s findmnt --noheadings --mountpoint "$repository_root" --types fuse,fuse.cvmfs --source cvmfs2; then
-    exit 0
-fi
+verification_started=$SECONDS
+verification_deadline=$((verification_started + 120))
+
+verify_command() {
+    local limit=$1
+    # Reserve five seconds for kill grace and one for SECONDS rounding.
+    local remaining=$((verification_deadline - SECONDS - 6))
+    shift
+    (( remaining > 0 )) || return 124
+    (( limit <= remaining )) || limit=$remaining
+    timeout --kill-after=5s "${limit}s" "$@"
+}
+
+for attempt in 1 2; do
+    # Access triggers autofs; its trigger alone is not a mounted CVMFS repository.
+    verify_command 45 ls "$repository_root" >/dev/null
+    read_status=$?
+    findmnt_status=not_run
+    if (( read_status == 0 )); then
+        verify_command 10 findmnt --noheadings --mountpoint "$repository_root" --types fuse,fuse.cvmfs --source cvmfs2
+        findmnt_status=$?
+    fi
+    elapsed=$((SECONDS - verification_started))
+    remaining=$((verification_deadline - SECONDS))
+    echo "[INFO]: CVMFS attempt=$attempt read_status=$read_status findmnt_status=$findmnt_status elapsed=${elapsed}s remaining=${remaining}s"
+    if [[ "$read_status" == 0 && "$findmnt_status" == 0 ]]; then
+        if (( attempt > 1 )); then
+            echo "[INFO]: CVMFS mount recovered on attempt $attempt."
+        fi
+        exit 0
+    fi
+    if (( attempt == 1 )); then
+        echo "::warning title=CVMFS mount pending::First mount verification failed; retrying the same repository within the remaining verification budget."
+    fi
+done
 
 echo "::error title=CVMFS mount unavailable::Cannot read a mounted CVMFS repository at $repository_root; inventory comparison was not run."
 
