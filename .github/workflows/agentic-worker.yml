@@ -87,7 +87,7 @@ jobs:
           path: ${{ runner.temp }}/agentic-output
       - name: Build pinned execution image from trusted configuration
         run: >-
-          docker build --tag neurodesktop-agentic:codex-0.153.4
+          docker build --tag neurodesktop-agentic:codex-0.162.1
           --build-arg WORKER_UID="$(id -u)" --build-arg WORKER_GID="$(id -g)"
           "$RUNNER_TEMP/agentic-control/config/agentic"
       - name: Verify container mounts and Codex sandbox without credentials

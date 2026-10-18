@@ -20,7 +20,7 @@ import uuid
 
 
 CATEGORIES = ("updates", "security", "dead-code", "test-coverage", "refactoring")
-IMAGE = "neurodesktop-agentic:codex-0.153.4"
+IMAGE = "neurodesktop-agentic:codex-0.162.1"
 MAX_COMMAND_OUTPUT = 8 * 1024 * 1024
 MAX_PATCH = 2 * 1024 * 1024
 MAX_RESULT_BODY = 30000
