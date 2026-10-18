@@ -85,6 +85,11 @@ pytest tests/unit
 
 Missing launcher test dependencies fail with setup guidance instead of skipping.
 The unit-test workflow installs these same pinned dependencies automatically.
+Renovate groups these pins with `config/agentic/Dockerfile` and the exact
+expectations in `tests/unit/test_agentic_validation.py`. Keep all four surfaces
+in sync, and review JupyterLab/Lumino upgrades against the JupyterLab shipped
+in the image before accepting them. Regression coverage for extraction and
+grouping runs with `pytest tests/unit/test_renovate_dom_harness.py`.
 The suite also runs real ESLint checks. Install their locked dependencies with
 `npm ci --prefix tools/javascript-lint --ignore-scripts --no-audit --no-fund`.
 
