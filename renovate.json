@@ -321,9 +321,19 @@
       "groupName": "workflow tools"
     },
     {
-      "description": "The unit tests' DOM harness should stay aligned with the JupyterLab shipped in the image.",
+      "description": "Keep the checkout and offline worker DOM harness aligned with the JupyterLab shipped in the image.",
+      "matchDepNames": [
+        "jsdom",
+        "typescript",
+        "esbuild",
+        "@jupyterlab/docregistry",
+        "@jupyterlab/coreutils",
+        "@jupyterlab/services",
+        "@lumino/widgets"
+      ],
       "matchFileNames": [
         ".github/workflows/unit-tests.yml",
+        "config/agentic/Dockerfile",
         "docs/testing.md"
       ],
       "matchDatasources": [
@@ -1078,10 +1088,11 @@
       "datasourceTemplate": "pypi"
     },
     {
-      "description": "npm packages for the unit tests' DOM harness, mirrored in docs/testing.md.",
+      "description": "npm packages for the unit tests' DOM harness in CI, the offline worker, and docs/testing.md.",
       "customType": "regex",
       "managerFilePatterns": [
         "/^\\.github/workflows/unit-tests\\.yml$/",
+        "/^config/agentic/Dockerfile$/",
         "/^docs/testing\\.md$/"
       ],
       "matchStrings": [

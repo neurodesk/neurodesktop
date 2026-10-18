@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-17"
+last-reviewed: "2026-10-18"
 ---
 
 # Testing
@@ -85,6 +85,9 @@ pytest tests/unit
 
 Missing launcher test dependencies fail with setup guidance instead of skipping.
 The unit-test workflow installs these same pinned dependencies automatically.
+The offline worker's `config/agentic/Dockerfile` uses the same DOM package pins.
+Renovate updates all three locations together, and the dependency-contract tests
+compare the worker and this command against the workflow's current pins.
 The suite also runs real ESLint checks. Install their locked dependencies with
 `npm ci --prefix tools/javascript-lint --ignore-scripts --no-audit --no-fund`.
 
