@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -166,9 +167,6 @@ def test_worker_pins_match_viewer_dependencies():
 @pytest.mark.parametrize("requirement", [
     "jupyterhub==6.0.1", "requests", "ipykernel", "websocket-client", "nibabel", "numpy",
     "openssh-client", "acl", "jq", "gcc", "libx11-dev", "xvfb", "x11-xserver-utils",
-    "jsdom@26.1.0", "typescript@5.2.2", "esbuild@0.28.2",
-    "@jupyterlab/docregistry@4.6.3", "@jupyterlab/coreutils@6.6.3",
-    "@jupyterlab/services@7.6.3", "@lumino/widgets@2.9.0",
 ])
 def test_worker_provisions_mandatory_ci_dependencies(requirement):
     worker = repo_path("config/agentic/Dockerfile").read_text()
@@ -176,6 +174,21 @@ def test_worker_provisions_mandatory_ci_dependencies(requirement):
 
     assert requirement in workflow
     assert requirement in worker, f"Offline worker is missing CI dependency: {requirement}"
+
+
+@pytest.mark.parametrize("package", [
+    "jsdom", "typescript", "esbuild", "@jupyterlab/docregistry", "@jupyterlab/coreutils",
+    "@jupyterlab/services", "@lumino/widgets",
+])
+def test_worker_dom_pins_match_ci_and_docs(package):
+    pattern = rf"{re.escape(package)}@(\d+\.\d+\.\d+)(?![\w.+-])"
+    workflow = repo_path(".github/workflows/unit-tests.yml").read_text()
+    versions = re.findall(pattern, workflow)
+    assert len(versions) == 1, f"Expected one exact CI pin for {package}: {versions}"
+    for relative in ("config/agentic/Dockerfile", "docs/testing.md"):
+        assert re.findall(pattern, repo_path(relative).read_text()) == versions, (
+            f"{relative} must match the CI pin for {package}@{versions[0]}"
+        )
 
 
 def test_worker_supports_system_python_shebangs():

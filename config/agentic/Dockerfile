@@ -17,14 +17,14 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
        gcc libc6-dev libx11-dev xvfb x11-xserver-utils \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir pytest==8.4.2 httpx==0.28.1 traitlets==5.14.3 \
-       PyYAML==6.0.2 jupyter-server==2.17.0 jupyter-server-proxy==4.5.0 \
+       PyYAML==6.0.2 jupyter-server==2.17.0 jupyter-server-proxy==4.6.0 \
        astra-spec==0.0.14 astra-tools==0.2.18 anywidget==0.11.0 \
        jupyterhub==6.0.1 requests==2.34.2 ipykernel==7.4.0 websocket-client==1.9.2 \
        nibabel==5.4.2 numpy==2.5.4
 RUN npm install --prefix /opt/launcher-dom --no-audit --no-fund \
-       jsdom@26.1.0 typescript@5.2.2 esbuild@0.28.2 \
-       @jupyterlab/docregistry@4.6.3 @jupyterlab/coreutils@6.6.3 \
-       @jupyterlab/services@7.6.3 @lumino/widgets@2.9.0 \
+       jsdom@26.1.0 typescript@5.9.3 esbuild@0.28.2 \
+       @jupyterlab/docregistry@4.6.4 @jupyterlab/coreutils@6.6.4 \
+       @jupyterlab/services@7.6.4 @lumino/widgets@2.10.0 \
     && npm cache clean --force
 COPY javascript-lint/package.json javascript-lint/package-lock.json /opt/javascript-lint/
 RUN npm ci --prefix /opt/javascript-lint --ignore-scripts --no-audit --no-fund \
