@@ -55,7 +55,7 @@ pytest /opt/tests/         # inside the built image
 
 Running `tests/unit` needs GCC, X11 development headers, Xvfb, and `xrandr`
 for the Glass helpers,
-Python 3.12, Node.js 24, `pytest`, `httpx`,
+Python 3.15, Node.js 24, `pytest`, `httpx`,
 `traitlets`, `requests`, `ipykernel`, `websocket-client`, `nibabel`, `numpy`,
 Git, curl, `jq`, GNU `mkdir`, and `ssh-keygen` (`openssh-client`); see
 `.github/workflows/unit-tests.yml`. The terminal-creation
@@ -129,7 +129,7 @@ run there:
 
 The [code quality workflow](../.github/workflows/code-quality.yml) runs on every
 pull request and push to `main`, independently of unit tests and image acceptance.
-Run the same checks locally from a checkout with Python 3.12 and Node.js 24:
+Run the same checks locally from a checkout with Python 3.15 and Node.js 24:
 
 ```bash
 python3 -m venv .venv-quality
