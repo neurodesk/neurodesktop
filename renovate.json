@@ -217,6 +217,7 @@
       "matchFileNames": [
         "config/agentic/Dockerfile",
         ".github/workflows/agentic-*.yml",
+        ".github/workflows/unit-tests.yml",
         ".github/scripts/agentic_worker.py",
         "docs/agentic-maintenance.md",
         "docs/architecture/agentic-workflows.md"
@@ -1099,6 +1100,7 @@
         "/^config/agentic/Dockerfile$/",
         "/^\\.github/workflows/agentic-readiness\\.yml$/",
         "/^\\.github/workflows/agentic-worker\\.yml$/",
+        "/^\\.github/workflows/unit-tests\\.yml$/",
         "/^\\.github/scripts/agentic_worker\\.py$/",
         "/^docs/agentic-maintenance\\.md$/",
         "/^docs/architecture/agentic-workflows\\.md$/"

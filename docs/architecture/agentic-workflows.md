@@ -146,7 +146,9 @@ at the checkout's expected `tools/javascript-lint/node_modules` path before
 Codex starts. After `git clean` and patch reconstruction, the offline validator
 recreates the ignored link for both test suites. Neither setup installs packages
 selected by candidate manifests or follows redirected checkout directories.
-The image also exposes Python 3.12 at `/usr/bin/python3` for launcher shebangs.
+The worker uses Python 3.15 and also exposes it at `/usr/bin/python3` for launcher
+shebangs. Checkout CI uses Python 3.12; the offline canary validates the worker's
+interpreter separately.
 `NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES` points both validation suites to the
 image-owned DOM packages. Dependency downloads happen during the image build;
 validation remains offline and credential-free.

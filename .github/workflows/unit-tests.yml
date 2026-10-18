@@ -80,7 +80,7 @@ jobs:
           --directory "$RUNNER_TEMP/agentic-control"
       - name: Build worker image
         run: >-
-          docker build --tag neurodesktop-agentic:codex-0.153.4
+          docker build --tag neurodesktop-agentic:codex-0.162.1
           --build-arg WORKER_UID="$(id -u)" --build-arg WORKER_GID="$(id -g)"
           "$RUNNER_TEMP/agentic-control/config/agentic"
       - name: Validate an unchanged checkout without credentials or network
