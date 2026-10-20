@@ -104,7 +104,7 @@ PrintMotd no
 #ClientAliveCountMax 3
 #UseDNS no
 #PidFile /var/run/sshd.pid
-PidFile /tmp/sshd_2222.pid
+PidFile /home/jovyan/.ssh/sshd_2222.pid
 #MaxStartups 10:30:100
 #PermitTunnel no
 #ChrootDirectory none

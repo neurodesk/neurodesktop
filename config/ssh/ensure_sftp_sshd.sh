@@ -52,7 +52,10 @@ NEURODESKTOP_RUNTIME_DIR="${NEURODESKTOP_RUNTIME_DIR:-${HOME}/.neurodesk/runtime
 mkdir -p "${NEURODESKTOP_RUNTIME_DIR}" 2>/dev/null || true
 rm -f "${NEURODESKTOP_RUNTIME_DIR}/sftp_port" 2>/dev/null || true
 
-SFTP_SSH_PID_FILE="/tmp/sshd_${SFTP_SSH_PORT}_${UID:-$(id -u)}.pid"
+# Keep daemon state out of the shared temporary directory. On Apptainer/HPC
+# hosts another UID can create a predictable /tmp entry between our stale-PID
+# check and sshd opening PidFile. SSH_DIR is made mode 0700 before sshd starts.
+SFTP_SSH_PID_FILE="${SSH_DIR}/sshd_${SFTP_SSH_PORT}.pid"
 
 warn() {
     echo "[WARN] $1"
