@@ -461,6 +461,60 @@ def test_failure_evidence_uses_only_this_repository_and_bounded_logs(worker, mon
     assert not any("attacker" in str(call) for call in calls)
 
 
+def test_failure_evidence_discards_verbose_api_metadata(worker, monkeypatch):
+    monkeypatch.setattr(worker, "api", lambda _path: {
+        "id": 20,
+        "name": "Build neurodesktop-test",
+        "head_sha": "a" * 40,
+        "repository": {"description": "x" * 30000},
+        "actor": {"login": "builder"},
+    })
+    monkeypatch.setattr(worker, "pages", lambda _path, *, key: [{
+        "id": 123,
+        "name": "scan-image (amd64)",
+        "conclusion": "failure",
+        "steps": [{"name": "Container image scan", "conclusion": "failure"}],
+        "runner_group_name": "GitHub Actions",
+        "labels": ["ubuntu-22.04"],
+    }])
+    monkeypatch.setattr(worker, "command", lambda _args: "critical finding")
+
+    evidence = worker.failure_context(
+        "owner/repo", "https://github.com/owner/repo/actions/runs/20",
+    )
+
+    assert evidence[0]["run"] == {
+        "id": 20,
+        "name": "Build neurodesktop-test",
+        "head_sha": "a" * 40,
+    }
+    assert "runner_group_name" not in evidence[0]["jobs"][0]
+    assert "labels" not in evidence[0]["jobs"][0]
+
+
+def test_failure_evidence_budget_keeps_the_end_of_both_failed_job_logs(worker):
+    context = {
+        "failure_evidence": [{
+            "run": {"id": 20, "name": "Build neurodesktop-test"},
+            "jobs": [{"id": 1, "name": "scan-image", "conclusion": "failure"}],
+            "logs": [
+                {"job": "scan-image (amd64)", "tail": "a" * 20000 + "\nAMD64-CVE-END"},
+                {"job": "scan-image (arm64)", "tail": "b" * 20000 + "\nARM64-CVE-END"},
+            ],
+        }],
+    }
+
+    bounded = worker.bounded_context(context)
+    serialized = json.dumps(bounded)
+
+    assert "AMD64-CVE-END" in serialized
+    assert "ARM64-CVE-END" in serialized
+    assert "scan-image (amd64)" in serialized
+    assert "scan-image (arm64)" in serialized
+    assert "Earlier evidence truncated" in serialized
+    assert len(serialized) <= 40000
+
+
 def test_snapshot_validation_baseline_reads_the_requested_base_revision(worker, git_repo, tmp_path):
     tests = git_repo / "tests"
     (tests / "unit").mkdir(parents=True)
