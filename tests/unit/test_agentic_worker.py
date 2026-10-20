@@ -461,6 +461,50 @@ def test_failure_evidence_uses_only_this_repository_and_bounded_logs(worker, mon
     assert not any("attacker" in str(call) for call in calls)
 
 
+def test_bounded_failure_evidence_keeps_diagnostics_ahead_of_api_metadata(worker, monkeypatch):
+    run = {
+        "id": 20,
+        "name": "Build neurodesktop",
+        "head_sha": "a" * 40,
+        "html_url": "https://github.com/owner/repo/actions/runs/20",
+        "repository": {"irrelevant_api_metadata": "x" * 30000},
+    }
+    jobs = [
+        {
+            "id": 123,
+            "name": "scan-image (amd64)",
+            "conclusion": "failure",
+            "steps": [{"name": "Container image scan", "conclusion": "failure"}],
+            "runner": {"irrelevant_api_metadata": "y" * 30000},
+        }
+    ]
+    monkeypatch.setattr(worker, "api", lambda _path: run)
+    monkeypatch.setattr(worker, "pages", lambda _path, *, key: jobs)
+    monkeypatch.setattr(
+        worker,
+        "command",
+        lambda _args: "Trivy finding: CVE-2026-99999 in example-package\n",
+    )
+
+    context = worker.bounded_context(
+        {
+            "failure_evidence": worker.failure_context(
+                "owner/repo", "https://github.com/owner/repo/actions/runs/20"
+            )
+        }
+    )
+
+    evidence = context["failure_evidence"][0]
+    assert evidence["run"]["id"] == 20
+    assert evidence["run"]["head_sha"] == "a" * 40
+    assert "repository" not in evidence["run"]
+    assert evidence["jobs"][0]["steps"] == [
+        {"name": "Container image scan", "conclusion": "failure"}
+    ]
+    assert "runner" not in evidence["jobs"][0]
+    assert "CVE-2026-99999 in example-package" in evidence["logs"][0]["tail"]
+
+
 def test_snapshot_validation_baseline_reads_the_requested_base_revision(worker, git_repo, tmp_path):
     tests = git_repo / "tests"
     (tests / "unit").mkdir(parents=True)

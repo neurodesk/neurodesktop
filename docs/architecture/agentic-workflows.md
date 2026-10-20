@@ -3,7 +3,7 @@ title: Agentic CI workflows
 description: Failure reporting, issue repair, scheduled maintenance, and subscription-authenticated Codex execution through conventional Actions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-17"
+last-reviewed: "2026-10-20"
 ---
 
 # Agentic CI workflows
@@ -48,14 +48,17 @@ automatic follow-up commits. Human review owns readiness and merging.
 Hosted preparation collects the task context and a known repository revision.
 Preparation runs only when `AGENTIC_ENABLED=true`; the manual runner-readiness
 workflow checks deployment prerequisites before activation.
-Issue text, review comments, and failure logs remain data. The worker's trusted
-task markers must occupy the first line; quoted markers cannot suppress other
-issues. Context sections have explicit size budgets and truncation notices,
-so unrelated PR descriptions cannot exhaust the prompt. The worker's trusted
-control code is separate from the checkout the model can edit. Actions checkout
-steps always use the default branch. The controller fetches validated full
-candidate SHAs as Git objects and checks out the candidate only before isolated
-execution; it never executes candidate scripts in the hosted publisher.
+Issue text, review comments, and failure logs remain data. Failure evidence
+keeps only diagnostic run and job fields from the GitHub API so bulky repository,
+actor, and runner metadata cannot displace the bounded failed-job log tails.
+The worker's trusted task markers must occupy the first line; quoted markers
+cannot suppress other issues. Context sections have explicit size budgets and
+truncation notices, so unrelated PR descriptions cannot exhaust the prompt.
+The worker's trusted control code is separate from the checkout the model can
+edit. Actions checkout steps always use the default branch. The controller
+fetches validated full candidate SHAs as Git objects and checks out the
+candidate only before isolated execution; it never executes candidate scripts
+in the hosted publisher.
 
 The Codex job runs on the configured existing self-hosted runner. It invokes
 `codex exec` in a disposable Docker container using a persistent dedicated

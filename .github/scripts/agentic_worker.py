@@ -256,6 +256,11 @@ def validate_result(result):
     return result
 
 
+def selected_fields(record, names):
+    """Copy only diagnostic fields from a GitHub API object."""
+    return {name: record[name] for name in names if name in record}
+
+
 def failure_context(repo, body):
     evidence = []
     # Issue URLs are data. Only numeric run IDs from this repository are used.
@@ -265,6 +270,35 @@ def failure_context(repo, body):
         run = api(f"repos/{repo}/actions/runs/{run_id}")
         jobs = pages(f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100", key="jobs")
         failed = [j for j in jobs if j["conclusion"] in {"failure", "timed_out"}]
+        run_summary = selected_fields(
+            run,
+            (
+                "id", "name", "path", "display_title", "run_number", "event",
+                "status", "conclusion", "head_branch", "head_sha", "run_attempt",
+                "html_url", "created_at", "updated_at",
+            ),
+        )
+        failed_summaries = []
+        for job in failed:
+            summary = selected_fields(
+                job,
+                (
+                    "id", "name", "status", "conclusion", "html_url", "started_at",
+                    "completed_at",
+                ),
+            )
+            if "steps" in job:
+                summary["steps"] = [
+                    selected_fields(
+                        step,
+                        (
+                            "number", "name", "status", "conclusion", "started_at",
+                            "completed_at",
+                        ),
+                    )
+                    for step in job["steps"]
+                ]
+            failed_summaries.append(summary)
         logs = []
         for job in failed[:2]:
             try:
@@ -272,7 +306,7 @@ def failure_context(repo, body):
                 logs.append({"job": job["name"], "tail": log[-20000:]})
             except (RuntimeError, subprocess.TimeoutExpired):
                 logs.append({"job": job["name"], "error": "Log unavailable"})
-        evidence.append({"run": run, "jobs": failed, "logs": logs})
+        evidence.append({"run": run_summary, "jobs": failed_summaries, "logs": logs})
     return evidence
 
 
