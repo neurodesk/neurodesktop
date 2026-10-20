@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-18"
+last-reviewed: "2026-10-20"
 ---
 
 # Testing
@@ -453,6 +453,13 @@ fail validation. Only after every required job
 passes does `merge-manifests` promote the architecture, date, and `latest` tags
 and copy them to configured registries. Failed candidates remain available for
 diagnosis under their run tags; they do not replace release tags.
+
+`pytest tests/unit/test_trivy_policy.py` checks the packaging contract for the
+eight kernel CVE exceptions added after issue #1142. Each exception requires
+the exact assessed Ubuntu `linux-libc-dev` package version and an expiry no
+later than 2026-11-20. The image scans apply these rules through Trivy's shared
+ignore file. The [build reference](architecture/build.md#publication)
+records why the headers remain installed and how the exceptions are bounded.
 
 The preparation job chooses one UTC build timestamp for both architectures and
 publication, so date tags match the version baked into the image even across

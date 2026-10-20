@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-16"
+last-reviewed: "2026-10-20"
 ---
 
 # Build-Time Behaviors
@@ -22,6 +22,17 @@ The [image release workflows](../testing.md#image-release-validation) build
 candidates for a specific run and attempt, test and scan them, and then promote
 the same candidates to release tags. Native runtime checks cover both image
 architectures. A date tag never substitutes for building the run's source SHA.
+
+The shared [Trivy policy](../../.trivyignore.yaml) records individual scan
+exceptions. [Issue #1142](https://github.com/neurodesk/neurodesktop/issues/1142)
+identified eight kernel CVEs reported against Ubuntu 26.04's
+`linux-libc-dev` 7.0.0-38.38. That package contains UAPI headers without the
+affected kernel implementation. CVMFS requires it through `uuid-dev` and
+`libc6-dev`; removing the headers breaks that dependency chain. Containers use
+the host kernel, whose security updates remain the host administrator's responsibility.
+These eight exceptions match only the assessed Ubuntu package and version,
+on either architecture, and expire on 2026-11-20 for reassessment. Other
+package versions, kernel packages, and CVEs remain subject to the scan gate.
 
 ## Base image dependencies
 
