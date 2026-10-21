@@ -633,7 +633,8 @@ RUN retry conda install -c conda-forge nb_conda_kernels \
 # `env PATH=` restores the conda-first PATH that runuser resets (the
 # jupyterlab-slurm source build needs jlpm and node on PATH).
 ARG BUST_CACHE_PIP=5
-ARG UV_VERSION="0.13.1"
+ARG CERTIFI_VERSION="2026.10.19"
+ARG UV_VERSION="0.13.4"
 ARG JUPYTER_AI_VERSION="3.2.0"
 ARG JUPYTER_COLLABORATION_VERSION="4.4.2"
 ARG JUPYTER_COLLABORATION_REF="3bf11cb7b271b554998105a11e6c9b8c3e376615"
@@ -711,6 +712,10 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     astra-spec==${ASTRA_SPEC_VERSION} \
     astra-tools==${ASTRA_TOOLS_VERSION} \
     anywidget==${ANYWIDGET_VERSION} \
+    # certifi and uv each bundle CA roots. These releases remove the
+    # compromised emSign ECC Root CA - G3 trust path (GHSA-6q48-6c7w-9gw2
+    # and GHSA-hq85-5cpj-mr62).
+    certifi==${CERTIFI_VERSION} \
     uv==${UV_VERSION} \
     # Keep widget comms on the stable main-shell path while JupyterLab's
     # per-target comm subshell support remains experimental.
@@ -731,6 +736,8 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     "requests>=2.34.2" \
     "chardet<8" \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade "litellm>=1.105.1" \
+    && test "$(/opt/conda/bin/python -c 'import importlib.metadata as m; print(m.version("certifi"))')" = "${CERTIFI_VERSION}" \
+    && test "$(/opt/conda/bin/uv --version)" = "uv ${UV_VERSION}" \
     # Replace public API sample tokens before committing source or bytecode to a layer.
     && /opt/conda/bin/python /tmp/sanitize_ghapi_examples.py \
     && /opt/conda/bin/python /tmp/sanitize_anthropic_examples.py \

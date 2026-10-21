@@ -675,6 +675,18 @@
       "datasourceTemplate": "github-release-attachments"
     },
     {
+      "description": "certifi CA bundle release.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG CERTIFI_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "certifi",
+      "datasourceTemplate": "pypi"
+    },
+    {
       "description": "uv release (pip-installed) and the version the container test expects.",
       "customType": "regex",
       "managerFilePatterns": [

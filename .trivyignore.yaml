@@ -123,3 +123,41 @@ vulnerabilities:
       implementation. CVMFS requires it through uuid-dev and libc6-dev on
       Ubuntu 26.04. Containers use the host kernel, which needs separate
       security updates. This exception covers only the assessed header version.
+  # Both architectures in Build neurodesktop-test run 39641150130 reported
+  # these kernel-source findings against the same UAPI header package.
+  - id: CVE-2026-98571
+    purls:
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-38.38
+    expired_at: 2026-11-20
+    statement: >-
+      linux-libc-dev contains UAPI headers, without the affected kernel
+      implementation. CVMFS requires it through uuid-dev and libc6-dev on
+      Ubuntu 26.04. Containers use the host kernel, which needs separate
+      security updates. This exception covers only the assessed header version.
+  - id: CVE-2026-98621
+    purls:
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-38.38
+    expired_at: 2026-11-20
+    statement: >-
+      linux-libc-dev contains UAPI headers, without the affected kernel
+      implementation. CVMFS requires it through uuid-dev and libc6-dev on
+      Ubuntu 26.04. Containers use the host kernel, which needs separate
+      security updates. This exception covers only the assessed header version.
+  - id: CVE-2026-98725
+    purls:
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-38.38
+    expired_at: 2026-11-20
+    statement: >-
+      linux-libc-dev contains UAPI headers, without the affected kernel
+      implementation. CVMFS requires it through uuid-dev and libc6-dev on
+      Ubuntu 26.04. Containers use the host kernel, which needs separate
+      security updates. This exception covers only the assessed header version.
+  - id: CVE-2026-98805
+    purls:
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-38.38
+    expired_at: 2026-11-20
+    statement: >-
+      linux-libc-dev contains UAPI headers, without the affected kernel
+      implementation. CVMFS requires it through uuid-dev and libc6-dev on
+      Ubuntu 26.04. Containers use the host kernel, which needs separate
+      security updates. This exception covers only the assessed header version.
