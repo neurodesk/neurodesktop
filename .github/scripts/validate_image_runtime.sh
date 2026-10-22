@@ -33,10 +33,16 @@ esac
 hpc_home_dir=''
 hpc_passwd_file=''
 hpc_group_file=''
+container_started=false
 
 cleanup() {
   local image_test_status=$?
   trap - EXIT
+  if [ "$image_test_status" -ne 0 ] && [ "$container_started" = true ]; then
+    echo '::group::Image test container log tail' >&2
+    docker logs --tail 120 neurodesktop-test >&2 || true
+    echo '::endgroup::' >&2
+  fi
   if ! docker rm -f neurodesktop-test >/dev/null 2>&1; then
     echo '::warning::Could not remove the image test container.' >&2
     if [ "$image_test_status" -eq 0 ]; then image_test_status=1; fi
@@ -71,6 +77,7 @@ if [ "$mode" != hpc ]; then
     -e NEURODESKTOP_CVMFS_STARTUP_MODE=eager \
     -e NB_UID="$(id -u)" -e NB_GID="$(id -g)" \
     "$image_ref"
+  container_started=true
   echo "Waiting for container startup..."
   ready=0
   for i in $(seq 1 60); do
@@ -85,7 +92,6 @@ if [ "$mode" != hpc ]; then
   done
   if [ "$ready" -ne 1 ]; then
     echo "::error::Container did not reach /api/status in 120s."
-    docker logs --tail 120 neurodesktop-test || true
     exit 1
   fi
   if [ "$grant_sudo" = "packages" ]; then
@@ -144,12 +150,12 @@ EOF
     -e NEURODESKTOP_SLURM_ENABLE=0 \
     -e NEURODESKTOP_SLURM_STARTUP_MODE=eager \
     "$image_ref"
+  container_started=true
   echo "Waiting for container startup..."
   ready=0
   for i in $(seq 1 90); do
     if ! docker inspect -f '{{.State.Running}}' neurodesktop-test 2>/dev/null | grep -q true; then
       echo "::error::Container exited during startup (HPC mode)."
-      docker logs --tail 120 neurodesktop-test || true
       exit 1
     fi
     code=$(docker exec neurodesktop-test curl -so /dev/null -w '%{http_code}' \
@@ -163,7 +169,6 @@ EOF
   done
   if [ "$ready" -ne 1 ]; then
     echo "::error::Container did not reach /api/status in 180s (HPC mode)."
-    docker logs --tail 120 neurodesktop-test || true
     exit 1
   fi
   docker exec -e NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 \
