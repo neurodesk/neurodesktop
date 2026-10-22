@@ -106,6 +106,48 @@ def test_defaults_restore_treats_directory_prefix_as_literal(tmp_path):
     assert (home / "nested/settings.json").read_text() == '{"theme": "dark"}'
 
 
+def test_defaults_restore_preserves_user_managed_symlink_paths(tmp_path):
+    defaults = tmp_path / "defaults"
+    default_tool = defaults / ".config/tool"
+    default_tool.mkdir(parents=True)
+    for name in ("existing.json", "dangling.json"):
+        (default_tool / name).write_text(f"image {name}")
+        os.utime(default_tool / name, (200, 200))
+
+    home = tmp_path / "home"
+    home_tool = home / ".config/tool"
+    home_tool.mkdir(parents=True)
+    dotfiles = tmp_path / "dotfiles"
+    dotfiles.mkdir()
+    existing = dotfiles / "existing.json"
+    existing.write_text("user setting")
+    os.utime(existing, (100, 100))
+    (home_tool / "existing.json").symlink_to(existing)
+    dangling = dotfiles / "not-created.json"
+    (home_tool / "dangling.json").symlink_to(dangling)
+    linked_directory = dotfiles / "linked-tool"
+    linked_directory.mkdir()
+    (home / ".config/linked-tool").symlink_to(linked_directory, target_is_directory=True)
+    (defaults / ".config/linked-tool").mkdir()
+    (defaults / ".config/linked-tool/nested.json").write_text("image nested")
+
+    script = source("restore_home_defaults.sh").rsplit("\nrestore_defaults", 1)[0]
+    sync = """
+for relative in .config/tool/existing.json .config/tool/dangling.json \
+    .config/linked-tool/nested.json; do
+    sync_file_from_defaults "$DEFAULTS/$relative" "$HOME/$relative"
+done
+"""
+    shell(script + sync, home, DEFAULTS=str(defaults))
+
+    assert (home_tool / "existing.json").is_symlink()
+    assert existing.read_text() == "user setting"
+    assert (home_tool / "dangling.json").is_symlink()
+    assert not dangling.exists()
+    assert (home / ".config/linked-tool").is_symlink()
+    assert not (linked_directory / "nested.json").exists()
+
+
 def test_deferred_components_run_independently_and_done_waits_for_both(tmp_path):
     script = source("deferred_startup.sh")
     run = script[script.index('echo "[deferred] Starting deferred initialization..."'):]

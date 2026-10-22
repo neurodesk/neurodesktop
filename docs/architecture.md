@@ -4,7 +4,7 @@ description: Startup flow, services, directory layout, and the map of
   per-subsystem architecture pages
 parent: index.md
 status: current
-last-reviewed: "2026-10-16"
+last-reviewed: "2026-10-22"
 ---
 
 # Architecture
@@ -79,9 +79,11 @@ The startup sequence follows this order (per
    prepares the user's home before Jupyter starts. It validates workspace JSON
    in one Python process and quarantines invalid files. Default restoration
    preserves missing-file restoration, newer-default migration, and privileged
-   ownership repair without launching a process per destination path. SSH
-   default ACLs are applied once, and matplotlib cache permissions are set at
-   the cache root without traversing generated files.
+   ownership repair without launching a process per destination path. It leaves
+   user-managed symbolic-link destinations and linked parent directories
+   untouched rather than migrating image defaults through them. SSH default
+   ACLs are applied once, and matplotlib cache permissions are set at the cache
+   root without traversing generated files.
    Notebook Intelligence setup uses `--no-refresh` to write configuration
    without probing saved server addresses. Interactive OpenCode changes still
    refresh running Jupyter servers.

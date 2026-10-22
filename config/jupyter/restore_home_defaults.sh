@@ -37,6 +37,32 @@ copy_file_with_fallback() {
     return 1
 }
 
+# Preserve user-managed links instead of following them while migrating image
+# defaults. This checks the destination and every existing path below HOME;
+# HOME itself may legitimately be a symlink supplied by the runtime.
+destination_has_symlink_component() {
+    local candidate="$1"
+    local home_root="${HOME_DIR%/}"
+    local parent
+
+    if [ -z "$home_root" ]; then
+        home_root="/"
+    fi
+
+    while [ "${candidate%/}" != "$home_root" ]; do
+        if [ -L "$candidate" ]; then
+            return 0
+        fi
+        parent="${candidate%/*}"
+        if [ "$parent" = "$candidate" ]; then
+            break
+        fi
+        candidate="${parent:-/}"
+    done
+
+    return 1
+}
+
 # Ensure a destination file exists and is updated when defaults are newer.
 sync_file_from_defaults() {
     local src="$1"
@@ -45,6 +71,11 @@ sync_file_from_defaults() {
     local action
 
     dest_dir="${dest%/*}"
+
+    if destination_has_symlink_component "$dest"; then
+        log_info "Preserving user-managed symbolic link path: $dest"
+        return 0
+    fi
 
     # Create parent directory if needed
     if [ ! -d "$dest_dir" ]; then
