@@ -106,8 +106,8 @@ unavailable log. Run, job, and step metadata use allowlists. The shared
 metadata and notices. Each job contains separate diagnostic sections and a
 tail for every failed step. Step attribution uses exact CLI step prefixes or
 unique job-step time ranges. Lines without unique attribution, including
-overlapping boundary seconds, remain explicitly unattributed. Error text never
-determines a step name.
+overlapping boundary seconds or missing timestamps without a known CLI prefix,
+remain explicitly unattributed. Error text never determines a step name.
 Known successful-step output is omitted with a line count. Unavailable logs
 remain named on the job and each failed step.
 
@@ -177,7 +177,10 @@ failure.
 Workflow-incident proposals use `Tracks` links. The publisher rechecks the
 trusted incident binding, open state, eligibility labels, and owned PRs before
 publication. It neutralizes generated closing references in the title, body,
-and commit message, including review follow-ups. Diagnostic improvements do
+and commit message, including review follow-ups. Each closing keyword must
+directly precede a reference to that incident, with an optional colon.
+References to other issues or repositories retain their own closing keywords,
+including mixed lists in one sentence. Diagnostic improvements do
 not close the original incident. Reused proposals and review follow-ups also
 reconcile the saved PR title and body through PATCH, preserving task markers,
 episode bindings, and other content. The publisher reads current ownership and

@@ -329,8 +329,8 @@ def collect_job_log(repo, job):
         if step.get("conclusion") == "skipped":
             continue
         try:
-            start = datetime.fromisoformat(step["started_at"].replace("Z", "+00:00")).timestamp()
-            end = datetime.fromisoformat(step["completed_at"].replace("Z", "+00:00")).timestamp()
+            start = datetime.fromisoformat((step["started_at"] or "").replace("Z", "+00:00")).timestamp()
+            end = datetime.fromisoformat((step["completed_at"] or "").replace("Z", "+00:00")).timestamp()
             if end >= start:
                 # Actions step timestamps omit fractions; shared boundary seconds are ambiguous.
                 intervals.append((index, start, end + 1))
@@ -947,8 +947,8 @@ def complete_publication(task, pr, result, workspace, validation):
 def nonclosing_text(text, task):
     number = re.escape(task.get("incident_subject", task["subject"]))
     repo = re.escape(task["repo"])
-    reference = rf"(?:\#{number}\b|{repo}\#{number}\b|https://github\.com/{repo}/issues/{number}\b)"
-    closing = re.compile(rf"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b(?!\])(?=[^.!;]*{reference})", re.IGNORECASE)
+    reference = rf"(?:\#{number}|{repo}\#{number}|https://github\.com/{repo}/issues/{number})(?![\w/])"
+    closing = re.compile(rf"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b(?=(?:\s*:\s*|\s+){reference})", re.IGNORECASE)
     return closing.sub("Tracks", text)
 
 
