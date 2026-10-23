@@ -10,6 +10,7 @@ from testlib import repo_path
 
 SECURITY_FLOORS = {
     "CERTIFI_VERSION": Version("2026.10.19"),
+    "PIP_VERSION": Version("26.2.2"),
     "UV_VERSION": Version("0.13.4"),
 }
 
@@ -27,8 +28,11 @@ def test_dockerfile_installs_python_ca_consumers_at_fixed_versions():
         assert Version(match.group(1)) >= fixed_version
 
     assert dockerfile.count("certifi==${CERTIFI_VERSION}") == 1
+    assert dockerfile.count('pip install --upgrade "pip==${PIP_VERSION}"') == 1
     assert dockerfile.count("uv==${UV_VERSION}") == 1
+    assert 'm.version("pip")' in dockerfile
     assert 'm.version("certifi")' in dockerfile
+    assert dockerfile.count('= "${PIP_VERSION}"') == 1
     assert dockerfile.count('= "${CERTIFI_VERSION}"') == 1
 
 

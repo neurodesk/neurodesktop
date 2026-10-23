@@ -462,10 +462,11 @@ later than 2026-11-20. The image scans apply these rules through Trivy's shared
 ignore file. The [build reference](architecture/build.md#publication)
 records why the headers remain installed and how the exceptions are bounded.
 
-`pytest tests/unit/test_python_ca_security.py` protects the fixed `certifi` and
-`uv` version floors for their bundled CA stores. The installed-image suite's
-`test_python_ca_security.py` parses the shipped `certifi` bundle and rejects the
-two distrusted emSign G3 roots; the ASTRA agent-skills test continues to execute
+`pytest tests/unit/test_python_ca_security.py` protects the fixed `pip`,
+`certifi`, and `uv` version floors for their bundled CA stores. The
+installed-image suite's `test_python_ca_security.py` parses both the main
+`certifi` bundle and pip's vendored copy and rejects the two distrusted
+emSign G3 roots. The ASTRA agent-skills test continues to execute
 the image's pinned `uv` binary.
 The checkout tests execute the build's `uv` version check with release banners
 containing target or commit metadata. They require the exact pinned version

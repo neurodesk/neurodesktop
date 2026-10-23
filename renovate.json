@@ -675,6 +675,18 @@
       "datasourceTemplate": "github-release-attachments"
     },
     {
+      "description": "pip release with its vendored CA bundle.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG PIP_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "pip",
+      "datasourceTemplate": "pypi"
+    },
+    {
       "description": "certifi CA bundle release.",
       "customType": "regex",
       "managerFilePatterns": [

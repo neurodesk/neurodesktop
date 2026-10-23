@@ -346,14 +346,14 @@ reviewed; the Dockerfile itself is authoritative.
   to rebuild the JupyterLab 4.6 collaboration frontends;
   defaults to
   `4.5.11`
-- `CERTIFI_VERSION`, `UV_VERSION`, `ASTRA_TOOLS_VERSION`, `ASTRA_SPEC_VERSION`,
+- `PIP_VERSION`, `CERTIFI_VERSION`, `UV_VERSION`, `ASTRA_TOOLS_VERSION`, `ASTRA_SPEC_VERSION`,
   `ANYWIDGET_VERSION`, `LIGHTCONE_CLI_VERSION`, `LIGHTCONE_CLI_SHA256`: exact
-  `certifi`, `uv`,
+  `pip`, `certifi`, `uv`,
   ASTRA CLI/schema, viewer runtime, and isolated Lightcone CLI releases
-  installed in the image; defaults to `2026.10.19`, `0.13.4`, `0.2.18`,
+  installed in the image; defaults to `26.2.2`, `2026.10.19`, `0.13.4`, `0.2.18`,
   `0.0.14`, `0.11.0`, `0.5.0`, and the verified SHA-256 of that Lightcone
-  source archive. The `certifi` and `uv` pins exclude the compromised emSign
-  ECC Root CA - G3 trust path from their bundled CA stores
+  source archive. The `pip`, `certifi`, and `uv` pins exclude compromised
+  emSign G3 trust paths from their bundled CA stores
 - `SNAKEMAKE_VERSION`: user-facing Snakemake workflow release; defaults to
   `9.27.0` in an isolated tool environment. Its metadata requires
   `packaging<26`, so that environment holds `packaging` at `25.0`.

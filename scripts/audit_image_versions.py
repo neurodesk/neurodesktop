@@ -63,6 +63,7 @@ CATALOG = (
     ),
     CatalogEntry("arg:TOMCAT_VERSION", "apache:tomcat/tomcat-11", "apache-dist", "<12"),
     CatalogEntry("arg:TOMCAT_MIGRATION_VERSION", "github:apache/tomcat-jakartaee-migration", "github-tags"),
+    CatalogEntry("arg:PIP_VERSION", "pypi:pip", "pypi"),
     CatalogEntry(
         "arg:CERTIFI_VERSION",
         "pypi:certifi",

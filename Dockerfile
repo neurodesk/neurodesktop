@@ -633,6 +633,7 @@ RUN retry conda install -c conda-forge nb_conda_kernels \
 # `env PATH=` restores the conda-first PATH that runuser resets (the
 # jupyterlab-slurm source build needs jlpm and node on PATH).
 ARG BUST_CACHE_PIP=5
+ARG PIP_VERSION="26.2.2"
 ARG CERTIFI_VERSION="2026.10.19"
 ARG UV_VERSION="0.13.4"
 ARG JUPYTER_AI_VERSION="3.2.0"
@@ -660,6 +661,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     && test "$(jq -r '.devDependencies["@jupyter/builder"]' /tmp/jupyterlab-slurm/package.json)" = "^${JUPYTER_BUILDER_VERSION}" \
     && /opt/conda/bin/python /tmp/patch_jupyterlab_slurm.py /tmp/jupyterlab-slurm/jupyterlab_slurm/handlers.py \
     && chown -R ${NB_UID}:${NB_GID} /tmp/jupyterlab-slurm \
+    && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade "pip==${PIP_VERSION}" \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --build-constraint /tmp/build-constraints.txt --upgrade \
     datalad \
     nipype \
@@ -736,6 +738,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     "requests>=2.34.2" \
     "chardet<8" \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade "litellm>=1.105.1" \
+    && test "$(/opt/conda/bin/python -c 'import importlib.metadata as m; print(m.version("pip"))')" = "${PIP_VERSION}" \
     && test "$(/opt/conda/bin/python -c 'import importlib.metadata as m; print(m.version("certifi"))')" = "${CERTIFI_VERSION}" \
     && UV_RELEASE="$(/opt/conda/bin/uv --version)" && test "${UV_RELEASE%% (*}" = "uv ${UV_VERSION}" \
     # Replace public API sample tokens before committing source or bytecode to a layer.
