@@ -26,6 +26,7 @@ MAX_PATCH = 2 * 1024 * 1024
 MAX_RESULT_BODY = 30000
 MAX_RESULT_TEXT = 50000
 MAX_REVIEW_COMMITS = 3
+MAX_FAILURE_EVIDENCE = 40000
 REVIEW_COMMIT = "[agentic-review]"
 GIT_ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
 FAILURE_RUN_FIELDS = (
@@ -216,8 +217,7 @@ def bounded_context(context):
                 remaining = budget - len(json.dumps(result)) - 2
                 if remaining < 200:
                     break
-                item_limit = 20000 if path == "failure_evidence" else 8000
-                result.insert(0, trim(item, min(item_limit, remaining), path))
+                result.insert(0, trim(item, min(8000, remaining), path))
             return result
         if isinstance(value, dict):
             result = {}
@@ -238,8 +238,11 @@ def bounded_context(context):
             return result
         return value
 
-    result = {key: trim(value, 40000 if key != "open_pull_requests" else 10000, key)
-              for key, value in context.items()}
+    result = {
+        key: pack_failure_evidence(value) if key == "failure_evidence" else
+        trim(value, 40000 if key != "open_pull_requests" else 10000, key)
+        for key, value in context.items()
+    }
     if notices:
         result["truncation_notice"] = (
             "Evidence was shortened to fit the task: " + ", ".join(dict.fromkeys(notices))
@@ -275,28 +278,181 @@ def validate_result(result):
     return result
 
 
-def failure_context(repo, body):
+def fit_evidence_text(text, budget, *, keep_end=False):
+    if len(json.dumps(text)) <= budget:
+        return text
+    notice = "\n[Earlier evidence truncated]\n" if keep_end else "\n[Evidence truncated]"
+    low, high = 0, len(text)
+    while low < high:
+        middle = (low + high + 1) // 2
+        candidate = notice + text[-middle:] if keep_end else text[:middle] + notice
+        if len(json.dumps(candidate)) <= budget:
+            low = middle
+        else:
+            high = middle - 1
+    return notice + (text[-low:] if low else "") if keep_end else text[:low] + notice
+
+
+def compact_failure_fields(value, fields):
+    result = {key: value[key] for key in fields if key in value and key != "steps"}
+    for key, text in list(result.items()):
+        if isinstance(text, str) and len(json.dumps(text)) > 1000:
+            result[key] = fit_evidence_text(text, 1000)
+    if "steps" in fields and "steps" in value:
+        result["steps"] = [compact_failure_fields(step, ("name", "number", "conclusion"))
+                           for step in value["steps"] if step.get("conclusion") in {"failure", "timed_out", "cancelled"}]
+    return result
+
+
+def diagnostic_sections(log):
+    lines = log.splitlines()
+    selected = set()
+    for index, line in enumerate(lines):
+        if re.search(r"CVE-\d{4}-\d+|GHSA-[\w-]+|FAILED\s|(?:AssertionError|Exception|Error|ERROR|FATAL|error)[:\s]|\bE\s+(?:assert|[A-Z])", line):
+            selected.update(range(max(0, index - 2), min(len(lines), index + 3)))
+    return "\n".join(lines[index] for index in sorted(selected))
+
+
+def pack_failure_evidence(evidence):
+    if len(json.dumps(evidence)) <= MAX_FAILURE_EVIDENCE:
+        return evidence
+    packed = json.loads(json.dumps(evidence))
+    texts = []
+    for item in packed:
+        for log in item.get("logs", []):
+            for field in ("diagnostics", "tail"):
+                if field in log:
+                    texts.append((log, field, log[field]))
+                    log[field] = ""
+        item["packing_notice"] = "Logs share a 40000-character JSON budget; consult the linked exact attempts for complete evidence."
+    while len(json.dumps(packed)) + len(texts) * 128 > MAX_FAILURE_EVIDENCE - 32:
+        item = next((entry for entry in reversed(packed) if entry.get("jobs")), None)
+        if item is None:
+            raise ValueError("Failure evidence metadata exceeds the shared budget")
+        job = item["jobs"].pop()
+        item["omitted_jobs"] = item.get("omitted_jobs", 0) + 1
+        item["omitted_steps"] = item.get("omitted_steps", 0) + len(job.get("steps", []))
+        logs = item.get("logs", [])
+        removed = next((log for log in reversed(logs) if log.get("job_id") == job.get("id") or ("job_id" not in log and log.get("job") == job.get("name"))), None)
+        if removed is not None:
+            logs.remove(removed)
+            texts = [(log, field, text) for log, field, text in texts if log is not removed]
+    remaining = MAX_FAILURE_EVIDENCE - 32 - len(json.dumps(packed))
+    for index, (log, field, text) in enumerate(texts):
+        allowance = remaining // (len(texts) - index)
+        log[field] = fit_evidence_text(text, allowance + 2, keep_end=field == "tail")
+        remaining -= len(json.dumps(log[field])) - 2
+    return packed
+
+
+def incident_record(issue):
+    if issue.get("user", {}).get("login") != "github-actions[bot]":
+        return None
+    lines = (issue.get("body") or "").split("\n")
+    match = re.fullmatch(r"<!-- neurodesktop-workflow-failure: run=([1-9]\d*) -->", lines[0])
+    if not match:
+        return None
+    prefix = "<!-- neurodesktop-incident:v1 "
+    if len(lines) < 2 or not lines[1].startswith("<!-- neurodesktop-incident:"):
+        return {"legacyRunId": int(match[1])}
+    if not lines[1].startswith(prefix) or not lines[1].endswith(" -->"):
+        raise ValueError("Malformed workflow incident record")
+    try:
+        record = json.loads(lines[1][len(prefix):-4])
+        origin = record["origin"]
+        bundle = record["bundle"]
+        scope = bundle["scope"]
+        observations = record["observations"]
+        if (not re.fullmatch(r"[a-f0-9]{64}", record["key"])
+                or origin["runId"] != int(match[1]) or type(origin["attempt"]) is not int or origin["attempt"] < 1
+                or not re.fullmatch(r"[a-f0-9]{40}", bundle["sourceSHA"])
+                or type(scope["workflowId"]) is not int or scope["workflowId"] < 1
+                or not re.fullmatch(r"[\w.-]+/[\w.-]+", scope["headRepository"])
+                or not isinstance(scope["exactRef"], str) or not scope["exactRef"]
+                or not ((scope.get("branchScope") is True and "prNumbers" not in scope)
+                        or ("branchScope" not in scope and isinstance(scope.get("prNumbers"), list)
+                            and scope["prNumbers"] and all(type(number) is int and number > 0 for number in scope["prNumbers"])))
+                or not observations or not all(type(item["runId"]) is int and item["runId"] > 0
+                    and type(item["attempt"]) is int and item["attempt"] > 0
+                    and item["sha"] == bundle["sourceSHA"] for item in observations)
+                or not any(item["runId"] == origin["runId"] and item["attempt"] == origin["attempt"] for item in observations)
+                or not bundle["failures"]
+                or not all(isinstance(failure["check"]["jobName"], str)
+                           and isinstance(failure["check"]["failedStepNames"], list)
+                           and all(isinstance(step, str) for step in failure["check"]["failedStepNames"])
+                           and failure["conclusion"] in {"failure", "timed_out"}
+                           and isinstance(failure["diagnosis"], str) for failure in bundle["failures"])):
+            raise ValueError("Invalid record")
+    except (ValueError, TypeError, KeyError) as error:
+        raise ValueError("Malformed workflow incident record") from error
+    return record
+
+
+def incident_binding(record):
+    if record is None or "legacyRunId" in record:
+        return record
+    return {"key": record["key"], "origin": record["origin"]}
+
+
+def incident_pull(pr, task):
+    if not owned_pull(pr, task["repo"]) or pr.get("state") != "open" or not has_task_marker(pr, task):
+        return False
+    lines = (pr.get("body") or "").split("\n")
+    prefix = "<!-- neurodesktop-incident-binding:v1 "
+    if len(lines) > 1 and lines[1].startswith("<!-- neurodesktop-incident-binding:"):
+        try:
+            return lines[1].startswith(prefix) and lines[1].endswith(" -->") and json.loads(lines[1][len(prefix):-4]) == task["incident"]
+        except ValueError:
+            return False
+    return True  # Legacy first-line task markers already bind this canonical issue.
+
+
+def failure_context(repo, body, *, occurrences=None):
     evidence = []
-    # Issue URLs are data. Only numeric run IDs from this repository are used.
-    for run_id in list(dict.fromkeys(re.findall(
-        rf"https://github\.com/{re.escape(repo)}/actions/runs/(\d+)", body
-    )))[:2]:
-        run_response = api(f"repos/{repo}/actions/runs/{run_id}")
-        run = {key: run_response[key] for key in FAILURE_RUN_FIELDS if key in run_response}
-        jobs = pages(f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100", key="jobs")
-        failed = [
-            {key: job[key] for key in FAILURE_JOB_FIELDS if key in job}
-            for job in jobs if job["conclusion"] in {"failure", "timed_out"}
+    if occurrences is None:
+        occurrences = [
+            (int(run), int(attempt) if attempt else None)
+            for run, attempt in re.findall(
+                rf"https://github\.com/{re.escape(repo)}/actions/runs/(\d+)(?:/attempts/(\d+))?", body,
+            )
         ]
+    references = list(dict.fromkeys(occurrences))
+    selected = references if len(references) <= 2 else [references[0], references[-1]]
+    for run_id, attempt in selected:
+        path = f"repos/{repo}/actions/runs/{run_id}"
+        source = f"https://github.com/{repo}/actions/runs/{run_id}"
+        try:
+            run_response = api(path + (f"/attempts/{attempt}" if attempt else ""))
+            if attempt and (run_response.get("run_attempt") != attempt or str(run_response.get("id")) != str(run_id)):
+                raise ValueError("Exact attempt metadata unavailable")
+            attempt = attempt or run_response.get("run_attempt")
+            if attempt:
+                path += f"/attempts/{attempt}"
+                source += f"/attempts/{attempt}"
+            run = compact_failure_fields(run_response, FAILURE_RUN_FIELDS)
+            jobs = pages(path + "/jobs?per_page=100", key="jobs")
+        except (RuntimeError, ValueError, subprocess.TimeoutExpired):
+            evidence.append({"run": {"id": run_id, "run_attempt": attempt, "html_url": source},
+                             "error": "Run or job manifest unavailable"})
+            continue
+        failed = [compact_failure_fields(job, FAILURE_JOB_FIELDS) for job in jobs
+                  if job.get("conclusion") in {"failure", "timed_out"}]
         logs = []
-        for job in failed[:2]:
+        for job in failed:
+            log_record = {"job": job.get("name", "Unnamed job"), "job_id": job["id"]}
             try:
                 log = command(["gh", "run", "view", "--repo", repo, "--job", str(job["id"]), "--log"])
-                logs.append({"job": job["name"], "tail": log[-20000:]})
+                log_record.update(diagnostics=diagnostic_sections(log), tail=log[-20000:])
+                if len(log) > 20000:
+                    log_record["omitted_tail_characters"] = len(log) - 20000
             except (RuntimeError, subprocess.TimeoutExpired):
-                logs.append({"job": job["name"], "error": "Log unavailable"})
-        evidence.append({"run": run, "jobs": failed, "logs": logs})
-    return evidence
+                log_record["error"] = "Log unavailable"
+            logs.append(log_record)
+        evidence.append({"run": run, "jobs": failed, "logs": logs, "source": source})
+    if evidence and len(references) > len(selected):
+        evidence[0]["omitted_runs"] = len(references) - len(selected)
+        evidence[0]["sampling_notice"] = "Root and latest occurrences sampled; all occurrence links remain on the source issue."
+    return pack_failure_evidence(evidence)
 
 
 def prepare(kind, subject, repo, run_id, output):
@@ -322,21 +478,39 @@ def prepare(kind, subject, repo, run_id, output):
     owned = [pr for pr in pulls if owned_pull(pr, repo)]
     if kind == "issue":
         issue = api(f"repos/{repo}/issues/{subject}")
+        record = incident_record(issue)
+        if record:
+            task["incident"] = incident_binding(record)
         labels = {label["name"] for label in issue["labels"]}
         task["skip"] = issue["state"] != "open" or "pull_request" in issue or bool(
             labels & {"agentic-operations", "agentic-ignore"}
         ) or "<!-- neurodesktop-agentic-operations -->" in (issue.get("body") or "")
+        task["skip"] |= bool(record and record.get("recovery"))
         task["skip"] |= any(
-            has_task_marker(pr, task) or
-            pr["head"]["ref"].startswith(f"agentic/issue-{subject}-") for pr in owned
+            incident_pull(pr, task) if record else (has_task_marker(pr, task) or
+            pr["head"]["ref"].startswith(f"agentic/issue-{subject}-")) for pr in owned
         )
         task["branch"] = f"agentic/issue-{subject}-{run_id}"
         if not task["skip"]:
+            comments = pages(f"repos/{repo}/issues/{subject}/comments?per_page=100")
+            occurrences = None
+            if record and "observations" in record:
+                observations = sorted(record["observations"], key=lambda item: item.get("completedAt") or 0)
+                occurrences = [(item["runId"], item["attempt"]) for item in observations]
+            elif record:
+                occurrences = [(record["legacyRunId"], None)]
+                for comment in comments:
+                    match = re.fullmatch(r"<!-- neurodesktop-workflow-failure-attempt: run=([1-9]\d*) attempt=([1-9]\d*) -->",
+                                         (comment.get("body") or "").split("\n")[0])
+                    if comment.get("user", {}).get("login") == "github-actions[bot]" and match and int(match[1]) == record["legacyRunId"]:
+                        occurrences.append((int(match[1]), int(match[2])))
+                if len(occurrences) > 1:
+                    occurrences.pop(0)
             task["context"] = {
                 "issue": issue,
-                "comments": pages(f"repos/{repo}/issues/{subject}/comments?per_page=100"),
+                "comments": comments,
                 "open_pull_requests": [{"number": p["number"], "title": p["title"]} for p in pulls],
-                "failure_evidence": failure_context(repo, issue.get("body") or ""),
+                "failure_evidence": failure_context(repo, issue.get("body") or "", occurrences=occurrences),
             }
     elif kind == "maintenance":
         week = datetime.now(timezone.utc).strftime("%G-W%V")
@@ -360,6 +534,15 @@ def prepare(kind, subject, repo, run_id, output):
         ) >= MAX_REVIEW_COMMITS
         task["branch"] = pr["head"]["ref"]
         task["base_sha"] = pr["head"]["sha"]
+        issue_marker = re.fullmatch(r"<!-- neurodesktop-agentic:issue:([1-9]\d*) -->", (pr.get("body") or "").split("\n")[0])
+        if valid and issue_marker:
+            source_issue = api(f"repos/{repo}/issues/{issue_marker[1]}")
+            record = incident_record(source_issue)
+            if record:
+                task["incident"] = incident_binding(record)
+                task["incident_subject"] = issue_marker[1]
+                task["skip"] |= not incident_pull(pr, {**task, "kind": "issue", "subject": issue_marker[1]})
+                task["skip"] |= source_issue.get("state") != "open" or bool(record.get("recovery"))
         task["context"] = {
             "pull_request": pr,
             "reviews": pages(f"repos/{repo}/pulls/{subject}/reviews?per_page=100"),
@@ -674,7 +857,8 @@ def complete_publication(task, pr, result, workspace, validation):
                      "A maintainer must review those changes before running their checks.",
                      number=number, purpose="ci-review-required")
     if task["kind"] == "issue":
-        comment_once(task, f"Proposed fix: {pr['html_url']}\n\n{result['body']}")
+        proposal = "Proposed change" if task.get("incident") else "Proposed fix"
+        comment_once(task, f"{proposal}: {pr['html_url']}\n\n{result['body']}")
     elif task["kind"] == "review":
         revision = git("rev-parse", "HEAD", cwd=workspace)
         comment_once(task, f"Review revision: `{revision}`\n\n{result['body']}"
@@ -683,11 +867,42 @@ def complete_publication(task, pr, result, workspace, validation):
     return number
 
 
+def nonclosing_text(text, task):
+    number = re.escape(task.get("incident_subject", task["subject"]))
+    repo = re.escape(task["repo"])
+    reference = rf"(?:\#{number}\b|{repo}\#{number}\b|https://github\.com/{repo}/issues/{number}\b)"
+    closing = re.compile(rf"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b(?=[^.!;]*{reference})", re.IGNORECASE)
+    return closing.sub("Tracks", text)
+
+
+def nonclosing_result(result, task):
+    return {**result, "title": nonclosing_text(result["title"], task),
+            "body": nonclosing_text(result["body"], task),
+            "pending_validation": [nonclosing_text(item, task) for item in result["pending_validation"]]
+            + ["Verify the original failed workflow checks; a diagnostic improvement does not establish recovery."]}
+
+
+def check_publication_incident(task):
+    if task["kind"] != "issue" and not task.get("incident"):
+        return
+    number = task.get("incident_subject", task["subject"])
+    issue = api(f"repos/{task['repo']}/issues/{number}")
+    record = incident_record(issue)
+    if incident_binding(record) != task.get("incident"):
+        raise ValueError("Workflow incident binding changed; refusing stale publication")
+    if record and (issue.get("state") != "open" or record.get("recovery")
+                   or {label["name"] for label in issue.get("labels", [])} & {"agentic-ignore", "agentic-operations"}):
+        raise ValueError("Workflow incident changed or recovered; refusing stale publication")
+
+
 def publish(task, output, workspace):
     result = validate_result(json.loads((output / "result.json").read_text()))
     validation = (output / "validation.txt").read_text()
     repo = task["repo"]
     if result["outcome"] != "change":
+        check_publication_incident(task)
+        if task.get("incident"):
+            result = nonclosing_result(result, task)
         if task["kind"] in {"issue", "review"}:
             comment_once(task, f"{result['outcome']}: {result['body']}",
                          key=review_marker(task) if task["kind"] == "review" else None)
@@ -703,14 +918,19 @@ def publish(task, output, workspace):
     proof = json.loads(validation.splitlines()[0])
     if proof != {"passed": True, "patch_sha256": hashlib.sha256(patch.read_bytes()).hexdigest()}:
         raise ValueError("Validation does not match the candidate patch")
+    check_publication_incident(task)
+    if task.get("incident"):
+        result = nonclosing_result(result, task)
+        validation = nonclosing_text(validation, task)
     pulls = [pr for pr in pages(f"repos/{repo}/pulls?state=open&per_page=100") if owned_pull(pr, repo)]
     if task["kind"] != "review":
-        existing = next((pr for pr in pulls if pr["head"]["ref"] == task["branch"] or has_task_marker(pr, task)), None)
+        existing = next((pr for pr in pulls if (incident_pull(pr, task) if task.get("incident") else
+                         pr["head"]["ref"] == task["branch"] or has_task_marker(pr, task))), None)
         if existing:
             return complete_publication(task, existing, result, workspace, validation)
     else:
         pr = api(f"repos/{repo}/pulls/{task['subject']}")
-        if pr["state"] != "open":
+        if pr["state"] != "open" or not owned_pull(pr, repo):
             raise ValueError("PR changed during review; refusing stale publication")
     git("checkout", "-B", task["branch"], task["base_sha"], cwd=workspace)
     git("apply", "--index", str(patch.resolve()), cwd=workspace)
@@ -726,6 +946,7 @@ def publish(task, output, workspace):
     if workflow_changes and os.environ.get("AGENTIC_PUSH_TOKEN"):
         commit_args += ["-m", "[skip ci]"]
     git(*commit_args, cwd=workspace)
+    check_publication_incident(task)
     remote = git("ls-remote", "origin", f"refs/heads/{task['branch']}", cwd=workspace)
     if remote:
         git("fetch", "origin", task["branch"], cwd=workspace)
@@ -749,13 +970,17 @@ def publish(task, output, workspace):
             **pr, "number": int(task["subject"]),
             "head": {**pr["head"], "ref": task["branch"]},
         }, result, workspace, validation)
-    body = marker(task) + "\n" + result["body"]
+    body = marker(task) + "\n"
+    if task.get("incident"):
+        body += "<!-- neurodesktop-incident-binding:v1 " + json.dumps(task["incident"], separators=(",", ":")) + " -->\n"
+    body += result["body"]
     body += validation_evidence(result, validation)
     if task["kind"] == "issue":
-        body += f"\n\nFixes #{task['subject']}"
+        body += f"\n\n{'Tracks' if task.get('incident') else 'Fixes'} #{task['subject']}"
         title = f"[issue-fix] #{task['subject']}: {result['title']}"
     else:
         title = f"[maintenance] {task['subject']}: {result['title']}"
+    check_publication_incident(task)
     pr = api(f"repos/{repo}/pulls", {
         "title": title, "body": body, "head": task["branch"],
         "base": task["base_branch"], "draft": True,
