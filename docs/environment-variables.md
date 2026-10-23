@@ -177,9 +177,9 @@ for RDP initialization and VS Code isolation.
   daemon and Jupyter SSH proxy from starting. Defaults to unset, preserving
   SSH availability. Apply it before starting Jupyter and the desktop. The
   Sherlock launcher passes `--env NEURODESKTOP_DISABLE_SSH=true` to Apptainer.
-  The desktop and Jupyter uploads and downloads remain available, while
-  Guacamole file transfers and SSH through Jupyter are disabled. Host SSH
-  connections and the Sherlock tunnel are unaffected
+  Guacamole's VNC SFTP transfers and SSH through Jupyter are disabled.
+  RDP drive transfers, Jupyter uploads and downloads, host SSH connections,
+  and the Sherlock tunnel remain available
 - `NVIDIA_DRIVER_CAPABILITIES`: NVIDIA Container Toolkit's driver-library
   capabilities. The image defaults to `compute,utility,graphics,display` so
   an allocated GPU has OpenGL/EGL libraries as well as CUDA and diagnostics.

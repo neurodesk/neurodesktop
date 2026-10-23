@@ -6,6 +6,7 @@ import sys
 from types import ModuleType, SimpleNamespace
 
 import pytest
+from tornado.httpclient import AsyncHTTPClient
 
 from testlib import repo_path
 
@@ -39,13 +40,17 @@ def test_jupyter_filters_only_the_ssh_entrypoint_before_loading(
         monkeypatch.setenv("NEURODESKTOP_DISABLE_SSH", disable_ssh)
     config = SimpleNamespace(FileContentsManager=SimpleNamespace())
 
-    for _ in range(2):
-        runpy.run_path(
-            repo_path("config/jupyter/jupyter_server_config_extra.py"),
-            init_globals={"c": config},
-        )
-        discovered = proxy_config.entry_points(group="jupyter_serverproxy_servers")
-        expected = ["custom-desktop", "custom-webapp"]
-        if disable_ssh != "true":
-            expected.insert(0, "sshd")
-        assert [point.name for point in discovered] == expected
+    saved_configuration = AsyncHTTPClient._save_configuration()
+    try:
+        for _ in range(2):
+            runpy.run_path(
+                repo_path("config/jupyter/jupyter_server_config_extra.py"),
+                init_globals={"c": config},
+            )
+            discovered = proxy_config.entry_points(group="jupyter_serverproxy_servers")
+            expected = ["custom-desktop", "custom-webapp"]
+            if disable_ssh != "true":
+                expected.insert(0, "sshd")
+            assert [point.name for point in discovered] == expected
+    finally:
+        AsyncHTTPClient._restore_configuration(saved_configuration)

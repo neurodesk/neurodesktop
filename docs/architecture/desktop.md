@@ -116,7 +116,7 @@ HPC network interface.
 Set `NEURODESKTOP_DISABLE_SSH=true` before startup to disable that daemon and
 the separate `jupyter-sshd-proxy` endpoint. Guacamole startup removes stale SFTP
 port state and disables its SFTP connection before Tomcat loads the mapping,
-so the VNC desktop still connects without file transfers. The Jupyter server
+so the VNC desktop still connects without SFTP transfers. The Jupyter server
 configuration filters the installed `sshd` proxy entrypoint before it loads,
 preserving other proxy services. The Sherlock launcher sets this variable in
 its Apptainer invocation. Its tunnel uses the cluster's host SSH servers and

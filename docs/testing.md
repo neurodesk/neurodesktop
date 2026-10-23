@@ -734,9 +734,10 @@ timed-out launch shutting down while the next launch starts.
 Desktop smoke tests keep Guacamole, Tomcat, VNC, and credential state in
 temporary per-test homes by default. VNC tunnel cases cover fresh and legacy
 homes without the XDG config parent, an absolute override, and an ignored
-relative override. The SSH-disabled case starts with stale SFTP port state,
-requires the SFTP connection to be disabled without a new SSH daemon, and
-receives desktop frames through the authenticated VNC tunnel. The installed
+relative override. SSH-disabled cases start with stale SFTP port state,
+require the SFTP connection to be disabled without a new SSH daemon, and
+receive desktop frames through the authenticated VNC tunnel. The combined-backend
+case exercises the template that enables SFTP by default. The installed
 SSH proxy tests load the shipped Jupyter configuration and verify that the
 `sshd` route and its host-key generation disappear only when
 `NEURODESKTOP_DISABLE_SSH=true`.

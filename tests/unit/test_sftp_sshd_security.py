@@ -39,10 +39,10 @@ ENSURE_SFTP_SSHD = resolve_source(
     ],
     ids=["legacy", "loopback", "ipv4-wildcard", "ipv6-wildcard", "include", "missing", "disabled"],
 )
-def test_sftp_sshd_forces_loopback_for_restored_config(
+def test_sftp_sshd_obeys_startup_policy_for_restored_config(
     tmp_path, saved_listeners, effective_listeners, use_fallback, disable_ssh
 ):
-    """Saved addresses, including included directives, must not expose SFTP."""
+    """Restore loopback-only SFTP or skip it entirely when SSH is disabled."""
     home = tmp_path / "home"
     ssh_dir = home / ".ssh"
     hostkeys = ssh_dir / "hostkeys"
