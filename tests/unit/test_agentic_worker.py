@@ -1326,12 +1326,43 @@ def test_persisted_incident_pr_is_nonclosing_after_publication_retry(
     worker.git("push", "origin", f"HEAD:refs/heads/{task['branch']}", cwd=repo)
     if kind.startswith("review"):
         task.update(kind="review", subject="91", incident_subject="42")
-    body = (
+    references = [
+        ("Fixes #42", "Tracks #42"),
+        ("Closes: owner/repo#42", "Tracks: owner/repo#42"),
+        ("RESOLVED: https://github.com/OWNER/REPO/issues/42", "Tracks: https://github.com/OWNER/REPO/issues/42"),
+        ("Fixes other/repo#8, fixes #42", "Fixes other/repo#8, Tracks #42"),
+        ("Fixes #42, fixes other/repo#8", "Tracks #42, fixes other/repo#8"),
+        ("Closes other/repo#42, closes owner/repo#42", "Closes other/repo#42, Tracks owner/repo#42"),
+        ("Resolves owner/repo#42, resolves other/repo#42", "Tracks owner/repo#42, resolves other/repo#42"),
+        ("Fixes #8, FIXES: #42, fixes owner/repo#8", "Fixes #8, Tracks: #42, fixes owner/repo#8"),
+        ("FIXED: OWNER/REPO#42, resolves #8", "Tracks: OWNER/REPO#42, resolves #8"),
+        ("Closes https://github.com/other/repo/issues/8, fixes https://github.com/owner/repo/issues/42",
+         "Closes https://github.com/other/repo/issues/8, Tracks https://github.com/owner/repo/issues/42"),
+        ("Fixes https://github.com/owner/repo/issues/42, closes https://github.com/other/repo/issues/42",
+         "Tracks https://github.com/owner/repo/issues/42, closes https://github.com/other/repo/issues/42"),
+        ("Resolve #42, close owner/repo#42, fix https://github.com/owner/repo/issues/42",
+         "Tracks #42, Tracks owner/repo#42, Tracks https://github.com/owner/repo/issues/42"),
+        ("Closed #42, resolves #43", "Tracks #42, resolves #43"),
+    ]
+    unchanged = [
+        "Fixes #43", "Fixes other/repo#42", "Fixes suffixowner/repo#42",
+        "Fixes other/owner/repo#42", "Fixes owner/repo-suffix#42", "Fixes owner/repository#42",
+        "Fixes #420", "Fixes owner/repo#420", "Fixes #42suffix",
+        "Fixes https://github.com/suffixowner/repo/issues/42",
+        "Fixes https://github.com/other/owner/repo/issues/42",
+        "Fixes https://github.com/owner/repo-suffix/issues/42",
+        "Fixes https://github.com/owner/repo/issues/420",
+        "Fixes https://github.com/owner/repo/issues/42/comments",
+        "Fixes https://github.com.example/owner/repo/issues/42",
+        "Fixes the diagnostics described in #42",
+    ]
+    prefix = (
         "<!-- neurodesktop-agentic:issue:42 -->\n"
         "<!-- neurodesktop-incident-binding:v1 " + json.dumps(binding) + " -->\n"
-        "Original diagnosis and validation.\n\nFixes #42\nFixes #43"
+        "Original diagnosis and validation.\n\n"
     )
-    pr = pull(title="[issue-fix] #42: Fixes #42: retain diagnostics", body=body,
+    body = prefix + "\n".join([before for before, _ in references] + unchanged)
+    pr = pull(title="[issue-fix] #42: Fixes other/repo#42, fixes #42: retain diagnostics", body=body,
               html_url="https://github.com/owner/repo/pull/91")
     comments, patches = {}, []
     original_command = worker.command
@@ -1372,7 +1403,7 @@ def test_persisted_incident_pr_is_nonclosing_after_publication_retry(
 
     monkeypatch.setattr(worker, "command", command)
     worker.write_json(output / "result.json", valid_result(
-        outcome="no_change" if kind == "review_no_change" else "change", title="Closes #42: diagnostics",
+        outcome="no_change" if kind == "review_no_change" else "change", title="Closes other/repo#8, closes #42",
     ))
     if interruption:
         with pytest.raises(RuntimeError, match="Simulated"):
@@ -1381,12 +1412,13 @@ def test_persisted_incident_pr_is_nonclosing_after_publication_retry(
     assert worker.publish(task, output, repo) == expected
     first_head = worker.git("rev-parse", task["branch"], cwd=remote)
     assert worker.publish(task, output, repo) == expected
-    assert pr["body"] == body.replace("Fixes #42", "Tracks #42")
-    assert pr["title"] == "[issue-fix] #42: Tracks #42: retain diagnostics"
+    assert pr["body"] == prefix + "\n".join([after for _, after in references] + unchanged)
+    assert pr["title"] == "[issue-fix] #42: Fixes other/repo#42, Tracks #42: retain diagnostics"
     assert patches == [{"title": pr["title"], "body": pr["body"]}]
     assert worker.git("rev-parse", task["branch"], cwd=remote) == first_head
     assert worker.git("rev-list", "--count", f"{task['base_sha']}..{task['branch']}", cwd=remote) == ("1" if kind == "review" else "0")
-    assert "Closes #42" not in worker.git("log", "-1", "--format=%B", task["branch"], cwd=remote)
+    if kind == "review":
+        assert "Closes other/repo#8, Tracks #42" in worker.git("log", "-1", "--format=%B", task["branch"], cwd=remote)
 
 
 @pytest.mark.parametrize("first_unavailable", [False, True])
