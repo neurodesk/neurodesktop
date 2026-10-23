@@ -1721,6 +1721,7 @@ COPY --from=builder /opt/glass/bin/ /usr/local/bin/
 COPY --chmod=0755 config/glass/ /opt/neurodesktop/glass/
 RUN find /opt/neurodesktop/glass -type f -exec chmod 0644 {} + \
     && install -m 0644 /opt/neurodesktop/glass/neurodesktop-glass.service /etc/systemd/system/ \
+    && install -m 0644 /opt/neurodesktop/glass/neurodesktop-prepare.service /etc/systemd/system/ \
     && install -m 0644 /opt/neurodesktop/glass/neurodesktop-jupyter.service /etc/systemd/system/ \
     && install -m 0644 /opt/neurodesktop/glass/glass.target /etc/systemd/system/ \
     && install -m 0755 /opt/neurodesktop/glass/neurodesktop-start-jupyter /usr/local/bin/

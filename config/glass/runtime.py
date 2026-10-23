@@ -4,12 +4,13 @@ import os
 from pathlib import Path
 import pwd
 import subprocess
+import sys
 import time
 
 BASE = Path("/opt/neurodesktop")
 
 
-def session():
+def environment():
     if os.geteuid() != 0:
         raise PermissionError("Glass session preparation requires root")
     if os.environ.get("NEURODESKTOP_RUNTIME") != "glass":
@@ -27,6 +28,11 @@ def session():
            "NB_USER": "jovyan", "NB_UID": "1000", "NB_GID": "100",
            "XDG_RUNTIME_DIR": str(runtime), "DISPLAY": ":0",
            "XAUTHORITY": str(runtime / "neurodesktop/Xauthority")}
+    return env
+
+
+def prepare():
+    env = environment()
     # Reuse the current root/user hooks, including deferred Slurm, home defaults,
     # workspace quarantine and NBI configuration. No separate lite config tree.
     subprocess.run(["/bin/bash", "/usr/local/bin/before-notebook.d/before_notebook.sh"],
@@ -34,6 +40,12 @@ def session():
     user_command = ["/usr/bin/setpriv", "--reuid=1000", "--regid=100", "--init-groups"]
     subprocess.run(user_command + ["/usr/bin/python3", "-I", str(BASE / "glass/jupyter.py"),
                                   "prepare"], env=env, check=True)
+    # Preparation is a separate oneshot shared by Jupyter and the desktop.
+
+
+def session():
+    env = environment()
+    user_command = ["/usr/bin/setpriv", "--reuid=1000", "--regid=100", "--init-groups"]
     # Never remove another live display's socket/lock. systemd tears down all
     # children on restart; Xorg owns cleanup of its display files.
     xorg = subprocess.Popen(["/usr/lib/xorg/Xorg", ":0", "-config",
@@ -55,4 +67,4 @@ def session():
 
 
 if __name__ == "__main__":
-    session()
+    {"prepare": prepare, "session": session}[sys.argv[1] if len(sys.argv) > 1 else "session"]()

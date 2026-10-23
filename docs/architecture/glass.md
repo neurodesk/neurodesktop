@@ -82,7 +82,10 @@ X display socket in Glass mode, without requiring on-demand Jupyter to be runnin
 
 The root Glass session manages Xorg and the user LXDE session in one systemd
 control group. Stopping/restarting the service stops its child processes, including
-clipboard/resize helpers. Jupyter is separate and starts only on request.
+clipboard/resize helpers. Jupyter is separate and starts only on request. Both services require the shared
+`neurodesktop-prepare.service` oneshot, which runs the root/user hooks once per
+boot without creating an X display. Starting Jupyter first does not start LXDE;
+opening the desktop later reuses the same private token and Xauthority.
 
 ## Acceptance
 

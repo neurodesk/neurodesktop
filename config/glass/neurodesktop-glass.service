@@ -1,6 +1,7 @@
 [Unit]
 Description=Neurodesktop native Glass desktop (opt-in)
-After=ccx3-stage2.service dbus.service
+After=neurodesktop-prepare.service dbus.service
+Requires=neurodesktop-prepare.service
 Wants=dbus.service
 
 [Service]
