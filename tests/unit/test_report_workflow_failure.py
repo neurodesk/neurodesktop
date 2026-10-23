@@ -25,6 +25,11 @@ const bot = { login: 'github-actions[bot]' };
 const rest = {
   actions: {
     listJobsForWorkflowRunAttempt() {},
+    async getWorkflowRun(params) {
+      calls.push({ type: 'attempt', ...params });
+      const runs = [...attempts.values()].filter(run => run.id === params.run_id);
+      return { data: runs.sort((a, b) => b.run_attempt - a.run_attempt)[0] };
+    },
     async getWorkflowRunAttempt(params) {
       calls.push({ type: 'attempt', ...params });
       const run = attempts.get(`${params.run_id}/${params.attempt_number}`);
@@ -279,7 +284,7 @@ def test_failed_dispatch_remains_retryable_without_duplicate_evidence():
     assert len(calls_of(output, "dispatch")) == 2
     assert len(output["issues"]) == 1
     assert len(output["comments"]) == 2
-    assert [call["type"] for call in output["calls"] if call["type"] != "read"] == [
+    assert [call["type"] for call in output["calls"] if call["type"] in {"issue", "comment", "update", "dispatch"}] == [
         "issue", "comment", "dispatch", "dispatch", "comment",
     ]
 
@@ -310,7 +315,7 @@ def test_agent_failures_report_operational_issue_without_recursive_dispatch(name
 
 
 @pytest.mark.parametrize("override", [
-    {"status": "in_progress"}, {"conclusion": "success"},
+    {"status": "in_progress"},
     {"conclusion": "cancelled"}, {"name": "Report workflow failure"},
     {"name": "Unrecognized workflow"},
 ])
@@ -349,11 +354,11 @@ def test_untrusted_comment_on_authoritative_issue_cannot_suppress_dispatch():
     assert len(calls_of(output, "dispatch")) == 1
 
 
-def test_closed_authoritative_issue_is_reopened_and_reused():
+def test_manually_closed_legacy_issue_is_not_reopened_or_treated_as_recovery():
     output = run_reporter(issues=[marker_issue(state="closed")])
     assert len(output["issues"]) == 1
-    assert output["issues"][0]["state"] == "open"
-    assert calls_of(output, "dispatch")[0]["inputs"] == {"issue-number": "42"}
+    assert output["issues"][0]["state"] == "closed"
+    assert not calls_of(output, "dispatch")
 
 
 def test_disabled_repair_records_evidence_without_consuming_dispatch_marker():
@@ -381,7 +386,10 @@ def test_workflow_subscribes_to_script_catalog_and_uses_trusted_checkout():
     assert {line.strip()[2:] for line in subscription.splitlines() if line.strip()} == set(catalog)
     assert "ref: ${{ github.event.repository.default_branch }}" in workflow
     assert "persist-credentials: false" in workflow
-    assert "group: failure-report-${{ github.event.workflow_run.id }}" in workflow
+    assert "group: failure-report-${{ github.event.workflow_run.workflow_id }}" in workflow
+    assert "queue: max" in workflow
+    assert '["failure", "timed_out", "success"]' in workflow
+    assert "pull-requests: read" in workflow
     assert "head_sha" not in workflow
     assert "download-artifact" not in workflow
 
@@ -517,3 +525,40 @@ def test_only_owned_canonical_pr_suppresses_repair_after_recording_occurrence(sp
     assert len(output["issues"]) == 1
     assert any("run=1235 attempt=1" in c["body"] for c in output["comments"])
     assert len(calls_of(output, "dispatch")) == (0 if spoof is None else 2)
+
+
+def test_legacy_exact_run_is_adopted_only_with_matching_authoritative_attempt():
+    output = run_reporter(issues=[marker_issue()], runs=[incident_run(), incident_run(1235, 11)])
+    assert len(output["issues"]) == 1
+    assert output["issues"][0]["number"] == 42
+    assert "neurodesktop-incident:v1" in output["issues"][0]["body"]
+
+
+def test_successful_exact_attempt_retry_closes_failure():
+    output = run_reporter(runs=[incident_run(), incident_run(hour=11, run_attempt=2, conclusion="success")])
+    assert output["issues"][0]["state"] == "closed"
+
+
+def test_incomplete_history_can_be_reconsidered_on_failure_redelivery():
+    first = run_reporter(runs=[incident_run()], historyError=True)
+    green = incident_run(1235, 11, conclusion="success")
+    output = run_reporter(issues=first["issues"], comments=first["comments"], runs=[incident_run()], history=[green])
+    assert output["issues"][0]["state"] == "closed"
+    assert not calls_of(output, "dispatch")
+
+
+def test_missing_scope_never_groups_two_runs_or_authorizes_recovery():
+    output = run_reporter(runs=[
+        incident_run(workflow_id=None), incident_run(1235, 11, workflow_id=None),
+        incident_run(1236, 12, conclusion="success", workflow_id=None),
+    ])
+    assert [issue["state"] for issue in output["issues"]] == ["open", "open"]
+
+
+def test_quoted_or_user_episode_cannot_authorize_recovery():
+    first = run_reporter(runs=[incident_run()])
+    issue = first["issues"][0]
+    for altered in [{**issue, "body": "Quotation\n" + issue["body"]},
+                    {**issue, "user": {"login": "maintainer"}}]:
+        output = run_reporter(issues=[altered], runs=[incident_run(1235, 11, conclusion="success")])
+        assert output["issues"][0]["state"] == "open"
