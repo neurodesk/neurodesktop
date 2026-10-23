@@ -562,3 +562,32 @@ def test_quoted_or_user_episode_cannot_authorize_recovery():
                     {**issue, "user": {"login": "maintainer"}}]:
         output = run_reporter(issues=[altered], runs=[incident_run(1235, 11, conclusion="success")])
         assert output["issues"][0]["state"] == "open"
+
+
+def test_complete_trivy_diagnosis_ignores_successful_setup_and_candidate_tags():
+    # Complete finding tables from run 39641150130, job 119377873207.
+    diagnosis = repo_path("tests/fixtures/workflow-failures/trivy-arm64.log").read_text()
+    first = incident_run(39641150130)
+    first["jobs"] = first["jobs"][:1]
+    first["logs"] = {str(first["jobs"][0]["id"]): "Worker ID: first\nPull image sha256:111\n" + diagnosis}
+    later = incident_run(39820073728, 11)
+    later["jobs"] = later["jobs"][:1]
+    later["logs"] = {str(later["jobs"][0]["id"]): "Worker ID: second\nPull image sha256:222\n" + diagnosis.replace("39641150130", "39820073728")}
+    output = run_reporter(runs=[first, later])
+    assert len(output["issues"]) == 1
+
+
+@pytest.mark.parametrize("change", [
+    ("CVE-2026-98571", "CVE-2026-11111"), ("2026.10.19", "2026.10.20"),
+    ("0.13.1", "0.13.2"), ("Total: 4", "Total: 5"),
+    ("##[error]Process completed with exit code 1.", ""),
+])
+def test_trivy_diagnosis_changes_and_incomplete_reports_never_group(change):
+    diagnosis = repo_path("tests/fixtures/workflow-failures/trivy-arm64.log").read_text()
+    first = incident_run(39641150130)
+    first["jobs"] = first["jobs"][:1]
+    first["logs"] = {str(first["jobs"][0]["id"]): diagnosis}
+    later = incident_run(39820073728, 11)
+    later["jobs"] = later["jobs"][:1]
+    later["logs"] = {str(later["jobs"][0]["id"]): diagnosis.replace("39641150130", "39820073728").replace(*change)}
+    assert len(run_reporter(runs=[first, later])["issues"]) == 2
