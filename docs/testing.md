@@ -455,11 +455,22 @@ and copy them to configured registries. Failed candidates remain available for
 diagnosis under their run tags; they do not replace release tags.
 
 `pytest tests/unit/test_trivy_policy.py` checks the packaging contract for the
-eight kernel CVE exceptions added after issue #1142. Each exception requires
+twelve kernel CVE exceptions added after issues #1142 and #1152. Each
+exception requires
 the exact assessed Ubuntu `linux-libc-dev` package version and an expiry no
 later than 2026-11-20. The image scans apply these rules through Trivy's shared
 ignore file. The [build reference](architecture/build.md#publication)
 records why the headers remain installed and how the exceptions are bounded.
+
+`pytest tests/unit/test_python_ca_security.py` protects the fixed `pip`,
+`certifi`, and `uv` version floors for their bundled CA stores. The
+installed-image suite's `test_python_ca_security.py` parses both the main
+`certifi` bundle and pip's vendored copy and rejects the two distrusted
+emSign G3 roots. The ASTRA agent-skills test continues to execute
+the image's pinned `uv` binary.
+The checkout tests execute the build's `uv` version check with release banners
+containing target or commit metadata. They require the exact pinned version
+and reject a failing command even when it prints the expected release.
 
 The preparation job chooses one UTC build timestamp for both architectures and
 publication, so date tags match the version baked into the image even across
@@ -553,6 +564,7 @@ non-obvious tiers protect.
 | Jupyter isolated build dependencies | `pytest tests/unit/test_jupyter_build_constraints.py tests/unit/test_jupyterlab_slurm_build.py` | Fresh isolated wheel builds for Slurm and launcher |
 | Image packaging layers | `pytest tests/unit/test_image_packaging_layers.py tests/unit/test_myst_build_workaround.py` | `pytest /opt/tests/test_image_size_hygiene.py /opt/tests/test_additional_components.py` and image layer inventory |
 | PyJWT asymmetric/HMAC key confusion | `pytest tests/unit/test_pyjwt_security.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_pyjwt_security.py` |
+| Python bundled CA trust | `pytest tests/unit/test_python_ca_security.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_python_ca_security.py /opt/tests/test_astra_agent_skills_image.py` |
 | ghapi public credential examples | `pytest tests/unit/test_ghapi_examples.py tests/unit/test_image_packaging_layers.py` | `pytest /opt/tests/test_image_size_hygiene.py` and unchanged image secret scan |
 | Anthropic SDK public credential examples | `pytest tests/unit/test_anthropic_examples.py tests/unit/test_image_packaging_layers.py` | `pytest /opt/tests/test_anthropic_examples.py` and unchanged image secret scan |
 | CVMFS mirror selection | `pytest tests/unit/test_cvmfs_selection.py tests/unit/test_cvmfs_server_inventory.py` | Run the selector with temporary config/cache paths, then verify a mounted read; see [CVMFS](architecture/cvmfs.md) |
