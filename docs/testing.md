@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-18"
+last-reviewed: "2026-10-23"
 ---
 
 # Testing
@@ -454,6 +454,24 @@ passes does `merge-manifests` promote the architecture, date, and `latest` tags
 and copy them to configured registries. Failed candidates remain available for
 diagnosis under their run tags; they do not replace release tags.
 
+`pytest tests/unit/test_trivy_policy.py` checks the packaging contract for the
+twelve kernel CVE exceptions added after issues #1142 and #1152. Each
+exception requires
+the exact assessed Ubuntu `linux-libc-dev` package version and an expiry no
+later than 2026-11-20. The image scans apply these rules through Trivy's shared
+ignore file. The [build reference](architecture/build.md#publication)
+records why the headers remain installed and how the exceptions are bounded.
+
+`pytest tests/unit/test_python_ca_security.py` protects the fixed `pip`,
+`certifi`, and `uv` version floors for their bundled CA stores. The
+installed-image suite's `test_python_ca_security.py` parses both the main
+`certifi` bundle and pip's vendored copy and rejects the two distrusted
+emSign G3 roots. The ASTRA agent-skills test continues to execute
+the image's pinned `uv` binary.
+The checkout tests execute the build's `uv` version check with release banners
+containing target or commit metadata. They require the exact pinned version
+and reject a failing command even when it prints the expected release.
+
 The preparation job chooses one UTC build timestamp for both architectures and
 publication, so date tags match the version baked into the image even across
 midnight. All checkouts use the run's source SHA. Scheduled runs build that revision even
@@ -546,6 +564,7 @@ non-obvious tiers protect.
 | Jupyter isolated build dependencies | `pytest tests/unit/test_jupyter_build_constraints.py tests/unit/test_jupyterlab_slurm_build.py` | Fresh isolated wheel builds for Slurm and launcher |
 | Image packaging layers | `pytest tests/unit/test_image_packaging_layers.py tests/unit/test_myst_build_workaround.py` | `pytest /opt/tests/test_image_size_hygiene.py /opt/tests/test_additional_components.py` and image layer inventory |
 | PyJWT asymmetric/HMAC key confusion | `pytest tests/unit/test_pyjwt_security.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_pyjwt_security.py` |
+| Python bundled CA trust | `pytest tests/unit/test_python_ca_security.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_python_ca_security.py /opt/tests/test_astra_agent_skills_image.py` |
 | ghapi public credential examples | `pytest tests/unit/test_ghapi_examples.py tests/unit/test_image_packaging_layers.py` | `pytest /opt/tests/test_image_size_hygiene.py` and unchanged image secret scan |
 | Anthropic SDK public credential examples | `pytest tests/unit/test_anthropic_examples.py tests/unit/test_image_packaging_layers.py` | `pytest /opt/tests/test_anthropic_examples.py` and unchanged image secret scan |
 | CVMFS mirror selection | `pytest tests/unit/test_cvmfs_selection.py tests/unit/test_cvmfs_server_inventory.py` | Run the selector with temporary config/cache paths, then verify a mounted read; see [CVMFS](architecture/cvmfs.md) |
@@ -558,6 +577,8 @@ non-obvious tiers protect.
 | Apptainer NVIDIA auto-configuration | `pytest tests/unit/test_apptainer_nv.py` | — |
 | Access-URL banner (`print_access_url.sh`) | `pytest tests/unit/test_print_access_url.py` | — |
 | Sherlock launcher (`scripts/connectSherlock.sh`) | `pytest tests/unit/test_connect_sherlock.py` | — |
+| Neurocommand container-store layout | `pytest tests/unit/test_container_storage_link.py` | `pytest /opt/tests/test_neurocommand_storage_image.py` |
+| SSH startup opt-out | `pytest tests/unit/test_sftp_sshd_security.py tests/unit/test_ssh_proxy_policy.py tests/unit/test_connect_sherlock.py` | `pytest /opt/tests/test_ssh_proxy_policy.py /opt/tests/test_desktops.py -k 'ssh_proxy or ssh-disabled or vnc_backends_bind_localhost_only'` |
 | T3 Code server, web UI, lifecycle, and packaging | `pytest tests/unit/test_t3_code_server.py tests/unit/test_t3_startup_settings.py tests/unit/test_t3_code_web.py` | `pytest /opt/tests/test_t3_code_server_image.py /opt/tests/test_t3_code_web_image.py` |
 | Tailscale binary packaging | `pytest tests/unit/test_tailscale_packaging.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_tailscale_image.py` |
 | Guided T3/Tailscale setup | `pytest tests/unit/test_t3_neurodesk_setup.py tests/unit/test_t3_code_server.py` | `pytest /opt/tests/test_tailscale_image.py /opt/tests/test_t3_code_server_image.py` |
@@ -726,7 +747,14 @@ timed-out launch shutting down while the next launch starts.
 Desktop smoke tests keep Guacamole, Tomcat, VNC, and credential state in
 temporary per-test homes by default. VNC tunnel cases cover fresh and legacy
 homes without the XDG config parent, an absolute override, and an ignored
-relative override. They require saved settings to survive TigerVNC's migration
+relative override. SSH-disabled cases start with stale SFTP port state,
+require the SFTP connection to be disabled without a new SSH daemon, and
+receive desktop frames through the authenticated VNC tunnel. The combined-backend
+case exercises the template that enables SFTP by default. The installed
+SSH proxy tests load the shipped Jupyter configuration and verify that the
+`sshd` route and its host-key generation disappear only when
+`NEURODESKTOP_DISABLE_SSH=true`.
+The VNC tunnel cases require saved settings to survive TigerVNC's migration
 and actual desktop frames to arrive over the authenticated tunnel.
 Tests that need to start the global xrdp service are skipped unless
 `NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1` is set. The build scripts and
@@ -1277,7 +1305,12 @@ pytest tests/unit/test_startup_batching.py tests/unit/test_wait_for_jupyter.py t
 These tests cover workspace quarantine in a single Python invocation, default
 restoration and ownership repair, SSH permission inheritance, NBI boot setup
 without live refresh, custom Jupyter ports and base paths, and independent
-CVMFS and Slurm execution. Resource-limit detection is sourced from the
+CVMFS and Slurm execution. The restoration tests exercise `.bashrc_append`
+against existing and dangling links, checking target contents and metadata
+without permitting sudo, touch, or tee calls. They also cover ordinary files,
+repeat runs, a symlinked `HOME`, and the permission fallback.
+
+Resource-limit detection is sourced from the
 helper against temporary cgroup v2 and v1 trees, with Slurm allocation
 overrides and malformed or missing limit files. Host Slurm configuration is
 sourced from its helper against a temporary root with real Unix sockets,

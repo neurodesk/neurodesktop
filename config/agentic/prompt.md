@@ -25,6 +25,13 @@ If there is no justified change, return no_change with evidence. If you cannot
 finish a coherent fix, return blocked and explain the exact blocker. Do not
 return a plan in place of implementation when a fix is feasible.
 
+A task with a trusted incident binding describes failed workflow checks.
+Keep log collection and other diagnostic improvements distinct from a repair
+of those checks. Name the original checks that still need to pass in
+pending_validation. Do not claim recovery from a passing checkout suite or
+use issue-closing keywords for the workflow incident. The reporter verifies
+recovery from the original checks and closes the incident.
+
 For a review task, verify all current actionable feedback against the supplied
 PR head, fix only valid findings within the original PR's scope, and explain
 rejected findings. Do not make a competing PR or request another review yourself.

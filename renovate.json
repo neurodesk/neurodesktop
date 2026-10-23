@@ -675,6 +675,30 @@
       "datasourceTemplate": "github-release-attachments"
     },
     {
+      "description": "pip release with its vendored CA bundle.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG PIP_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "pip",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "certifi CA bundle release.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG CERTIFI_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "certifi",
+      "datasourceTemplate": "pypi"
+    },
+    {
       "description": "uv release (pip-installed) and the version the container test expects.",
       "customType": "regex",
       "managerFilePatterns": [

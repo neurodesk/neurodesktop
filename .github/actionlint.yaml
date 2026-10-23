@@ -9,3 +9,6 @@ paths:
     ignore:
       # GitHub Actions supports queued concurrency; older actionlint does not.
       - 'unexpected key "queue" for "concurrency" section'
+  .github/workflows/report-workflow-failure.yml:
+    ignore:
+      - 'unexpected key "queue" for "concurrency" section'
