@@ -325,9 +325,11 @@ def publisher_api(worker, monkeypatch):
     def api(path, payload=None):
         calls.append((path, payload))
         if path == "repos/owner/repo/pulls":
-            pr = {"number": 91, "html_url": "https://github.com/owner/repo/pull/91", "user": {"login": "github-actions[bot]"}, "head": {"ref": payload["head"], "repo": {"full_name": "owner/repo"}}, "body": payload["body"]}
+            pr = {"number": 91, "state": "open", "title": payload["title"], "html_url": "https://github.com/owner/repo/pull/91", "user": {"login": "github-actions[bot]"}, "head": {"ref": payload["head"], "repo": {"full_name": "owner/repo"}}, "body": payload["body"]}
             created.append(pr)
             return pr
+        if path == "repos/owner/repo/pulls/91":
+            return created[0]
         if path.endswith("/comments"):
             comments.setdefault(path, []).append({"user": {"login": "github-actions[bot]"}, "body": payload["body"]})
         return {}
@@ -421,9 +423,13 @@ def test_failure_evidence_reads_jobs_from_paginated_objects(worker, monkeypatch,
     monkeypatch.setattr(worker, "command", command)
     evidence = worker.failure_context("owner/repo", "https://github.com/owner/repo/actions/runs/20")
     assert evidence[0]["jobs"] == ([] if conclusion == "success" else jobs)
-    assert evidence[0]["logs"] == ([] if conclusion == "success" else [
-        {"job": "check", "job_id": 123, "diagnostics": "", "tail": "failed job evidence"},
-    ])
+    if conclusion == "success":
+        assert evidence[0]["logs"] == []
+    else:
+        record = evidence[0]["logs"][0]
+        assert record["job_id"] == 123
+        assert record["unattributed"]["tail"] == "failed job evidence"
+        assert record["steps"] == []
     assert len(calls) == (2 if conclusion == "success" else 3)
 
 
@@ -459,7 +465,7 @@ def test_failure_evidence_uses_only_this_repository_and_bounded_logs(worker, mon
     assert all(len(item["logs"]) == 4 for item in evidence)
     assert len(json.dumps(evidence)) <= 40000
     assert evidence[0]["omitted_runs"] == 1
-    assert all("Earlier evidence truncated" in log["tail"] for item in evidence for log in item["logs"])
+    assert all("Earlier evidence truncated" in log["unattributed"]["tail"] for item in evidence for log in item["logs"])
     assert not any("attacker" in str(call) for call in calls)
 
 
@@ -494,19 +500,14 @@ def test_failure_evidence_discards_verbose_api_metadata(worker, monkeypatch):
     assert "labels" not in evidence[0]["jobs"][0]
 
 
-def test_failure_evidence_budget_keeps_the_end_of_both_failed_job_logs(worker):
-    context = {
-        "failure_evidence": [{
-            "run": {"id": 20, "name": "Build neurodesktop-test"},
-            "jobs": [{"id": 1, "name": "scan-image", "conclusion": "failure"}],
-            "logs": [
-                {"job": "scan-image (amd64)", "tail": "a" * 20000 + "\nAMD64-CVE-END"},
-                {"job": "scan-image (arm64)", "tail": "b" * 20000 + "\nARM64-CVE-END"},
-            ],
-        }],
-    }
-
-    bounded = worker.bounded_context(context)
+def test_failure_evidence_budget_keeps_the_end_of_both_failed_job_logs(worker, monkeypatch):
+    monkeypatch.setattr(worker, "api", lambda path: {"id": 20, "name": "Build neurodesktop-test"})
+    monkeypatch.setattr(worker, "pages", lambda path, key: [
+        {"id": arch, "name": f"scan-image ({arch})", "conclusion": "failure"} for arch in ("amd64", "arm64")
+    ])
+    monkeypatch.setattr(worker, "command", lambda args: "a" * 30000 + "\n" + args[args.index("--job") + 1].upper() + "-CVE-END")
+    evidence = worker.failure_context("owner/repo", "https://github.com/owner/repo/actions/runs/20")
+    bounded = worker.bounded_context({"failure_evidence": evidence})
     serialized = json.dumps(bounded)
 
     assert "AMD64-CVE-END" in serialized
@@ -1249,10 +1250,11 @@ def test_publication_rechecks_workflow_incident_eligibility(worker, proposal, pu
     assert not publisher_api[1]
 
 
-def test_manifest_overflow_reports_exact_job_and_step_omissions(worker, monkeypatch):
+@pytest.mark.parametrize("unit", ["x", "😀"])
+def test_manifest_overflow_reports_exact_job_and_step_omissions(worker, monkeypatch, unit):
     monkeypatch.setattr(worker, "api", lambda path: {"id": 20, "run_attempt": 1})
     jobs = [{"id": index, "name": f"job-{index}", "conclusion": "failure",
-             "steps": [{"name": f"step-{step}-" + "x" * 150, "conclusion": "failure"} for step in range(20)]}
+             "steps": [{"name": f"step-{step}-" + unit * 40, "conclusion": "failure"} for step in range(20)]}
             for index in range(50)]
     monkeypatch.setattr(worker, "pages", lambda path, key: jobs)
     read = []
@@ -1266,10 +1268,11 @@ def test_manifest_overflow_reports_exact_job_and_step_omissions(worker, monkeypa
     assert len(read) == 50
     assert len(json.dumps(evidence)) <= 40000
     item = evidence[0]
+    assert item["jobs"]
     assert item["omitted_jobs"] == 50 - len(item["jobs"])
     assert item["omitted_steps"] == 20 * item["omitted_jobs"]
     assert item["source"].endswith("/runs/20/attempts/1")
-    assert all("concrete failure" in log["diagnostics"] for log in item["logs"])
+    assert all("concrete failure" in json.dumps(log["unattributed"]["diagnostics"]) for log in item["logs"])
 
 
 @pytest.mark.parametrize("spoof", ["user", "quoted", "wrong_binding", "branch_only"])
@@ -1309,8 +1312,11 @@ def test_incident_prepare_uses_trusted_occurrences_instead_of_pasted_urls(worker
     assert not any("/666" in path for path, _ in calls)
 
 
-@pytest.mark.parametrize("kind", ["issue", "review"])
-@pytest.mark.parametrize("interruption", [None, "patch_response", "labels"])
+@pytest.mark.parametrize("kind,interruption", [
+    (kind, interruption) for kind in ("issue", "review", "review_no_change")
+    for interruption in (None, "patch_response", "labels")
+    if (kind, interruption) != ("review_no_change", "labels")
+])
 def test_persisted_incident_pr_is_nonclosing_after_publication_retry(
     worker, proposal, monkeypatch, kind, interruption,
 ):
@@ -1318,14 +1324,14 @@ def test_persisted_incident_pr_is_nonclosing_after_publication_retry(
     issue, binding = workflow_incident()
     task["incident"] = binding
     worker.git("push", "origin", f"HEAD:refs/heads/{task['branch']}", cwd=repo)
-    if kind == "review":
+    if kind.startswith("review"):
         task.update(kind="review", subject="91", incident_subject="42")
     body = (
         "<!-- neurodesktop-agentic:issue:42 -->\n"
         "<!-- neurodesktop-incident-binding:v1 " + json.dumps(binding) + " -->\n"
         "Original diagnosis and validation.\n\nFixes #42\nFixes #43"
     )
-    pr = pull(title="Fixes #42: retain diagnostics", body=body,
+    pr = pull(title="[issue-fix] #42: Fixes #42: retain diagnostics", body=body,
               html_url="https://github.com/owner/repo/pull/91")
     comments, patches = {}, []
     original_command = worker.command
@@ -1365,15 +1371,18 @@ def test_persisted_incident_pr_is_nonclosing_after_publication_retry(
         raise AssertionError((path, method, payload))
 
     monkeypatch.setattr(worker, "command", command)
-    worker.write_json(output / "result.json", valid_result(title="Closes #42: diagnostics"))
+    worker.write_json(output / "result.json", valid_result(
+        outcome="no_change" if kind == "review_no_change" else "change", title="Closes #42: diagnostics",
+    ))
     if interruption:
         with pytest.raises(RuntimeError, match="Simulated"):
             worker.publish(task, output, repo)
-    assert worker.publish(task, output, repo) == 91
+    expected = None if kind == "review_no_change" else 91
+    assert worker.publish(task, output, repo) == expected
     first_head = worker.git("rev-parse", task["branch"], cwd=remote)
-    assert worker.publish(task, output, repo) == 91
+    assert worker.publish(task, output, repo) == expected
     assert pr["body"] == body.replace("Fixes #42", "Tracks #42")
-    assert pr["title"] == "Tracks #42: retain diagnostics"
+    assert pr["title"] == "[issue-fix] #42: Tracks #42: retain diagnostics"
     assert patches == [{"title": pr["title"], "body": pr["body"]}]
     assert worker.git("rev-parse", task["branch"], cwd=remote) == first_head
     assert worker.git("rev-list", "--count", f"{task['base_sha']}..{task['branch']}", cwd=remote) == ("1" if kind == "review" else "0")
@@ -1423,12 +1432,101 @@ def test_prepare_allocates_diagnostics_to_each_failed_step(worker, github, monke
         record = evidence[0]["logs"][job - 1]
         assert [step["name"] for step in record["steps"]] == ["Scan", "VNC"]
         scan, vnc = record["steps"]
-        assert "Error: long scan diagnostic" in scan["diagnostics"]
+        assert "Error: long scan diagnostic" in json.dumps(scan["diagnostics"])
         assert "SCAN-END" in scan["tail"]
-        assert f"UNIQUE-VNC-{job}" in vnc["diagnostics"]
+        assert f"UNIQUE-VNC-{job}" in json.dumps(vnc["diagnostics"])
         assert f"VNC-END-{job}" in vnc["tail"]
         assert "cleanup" not in vnc["tail"]
         assert record["omitted_nonfailure_lines"] == 10000
     if first_unavailable:
         assert all(step["error"] == "Log unavailable" for step in evidence[0]["logs"][0]["steps"])
+    assert worker.bounded_context({"failure_evidence": evidence})["failure_evidence"] == evidence
+
+
+@pytest.mark.parametrize("kind", ["issue", "review"])
+@pytest.mark.parametrize("changed", ["author", "fork", "closed", "marker", "binding", "incident", "ignore"])
+def test_persisted_incident_pr_rechecks_ownership_before_mutation(worker, proposal, monkeypatch, kind, changed):
+    task, output, repo, remote = proposal
+    issue, binding = workflow_incident()
+    task["incident"] = binding
+    if kind == "review":
+        task.update(kind="review", subject="91", incident_subject="42")
+        worker.git("push", "origin", f"HEAD:refs/heads/{task['branch']}", cwd=repo)
+    original = pull(body="<!-- neurodesktop-agentic:issue:42 -->\nFixes #42")
+    current = json.loads(json.dumps(original))
+    if changed == "author":
+        current["user"]["login"] = "maintainer"
+    elif changed == "fork":
+        current["head"]["repo"]["full_name"] = "other/repo"
+    elif changed == "closed":
+        current["state"] = "closed"
+    elif changed == "marker":
+        current["body"] = "<!-- neurodesktop-agentic:issue:43 -->\nFixes #42"
+    elif changed == "binding":
+        current["body"] = '<!-- neurodesktop-agentic:issue:42 -->\n<!-- neurodesktop-incident-binding:v1 {"key":"other"} -->\nFixes #42'
+    reads = 0
+    writes = []
+
+    def api(path, payload=None, **kwargs):
+        nonlocal reads
+        if payload is not None:
+            writes.append((path, payload))
+            raise AssertionError("An ineligible PR or incident must not be mutated")
+        if path == "repos/owner/repo/issues/42":
+            reads += 1
+            if reads > 1 and changed == "incident":
+                return {**issue, "state": "closed"}
+            if reads > 1 and changed == "ignore":
+                return {**issue, "labels": [{"name": "agentic-ignore"}]}
+            return issue
+        assert path == "repos/owner/repo/pulls/91"
+        return current
+
+    monkeypatch.setattr(worker, "api", api)
+    monkeypatch.setattr(worker, "pages", lambda path: [original] if "/pulls?" in path else [])
+    with pytest.raises(ValueError, match="stale"):
+        worker.publish(task, output, repo)
+    assert writes == []
+    branches = worker.git("for-each-ref", "--format=%(objectname)", f"refs/heads/{task['branch']}", cwd=remote)
+    assert branches == (task["base_sha"] if kind == "review" else "")
+
+
+def test_prepare_retains_distinct_failure_sections_within_timed_step(worker, github, monkeypatch, tmp_path):
+    responses, _ = github
+    responses["repos/owner/repo/issues/42"]["body"] = "https://github.com/owner/repo/actions/runs/20/attempts/2"
+    responses["repos/owner/repo/actions/runs/20/attempts/2"] = {"id": 20, "run_attempt": 2}
+    job = {"id": 1, "name": "runtime", "conclusion": "failure", "steps": [
+        {"name": "Test", "number": 1, "conclusion": "failure",
+         "started_at": "2026-10-20T10:00:00Z", "completed_at": "2026-10-20T10:10:00Z"},
+        {"name": "Cleanup", "number": 2, "conclusion": "success",
+         "started_at": "2026-10-20T10:10:00Z", "completed_at": "2026-10-20T10:11:00Z"},
+    ]}
+    original = worker.pages
+    monkeypatch.setattr(worker, "pages", lambda path, **kwargs: [job] if "/jobs?" in path else original(path))
+    prefix = "runtime\tUNKNOWN STEP\t2026-10-20T10:05:00.0000000Z "
+    log = (
+        prefix + "Error: FIRST-CAUSE\n"
+        + (prefix + "E AssertionError: noisy early diagnostic é\n") * 4000
+        + (prefix + "neutral output\n") * 10
+        + prefix + "ERROR Guacamole: Non-numeric character in element length\n"
+        + (prefix + "neutral output\n") * 10
+        + prefix + "FAILED test_guac_vnc_tunnel[relative-xdg]\n"
+        + "runtime\tUNKNOWN STEP\t2026-10-20T10:10:00.1000000Z Error: AMBIGUOUS-BOUNDARY\n"
+        + "runtime\tUNKNOWN STEP\t2026-10-20T10:10:02.0000000Z cleanup\n" * 10000
+        + "Error: Test mentioned in an untimed message\n"
+    )
+    monkeypatch.setattr(worker, "command", lambda args: log)
+    worker.prepare("issue", "42", "owner/repo", "100", tmp_path)
+    evidence = json.loads((tmp_path / "task.json").read_text())["context"]["failure_evidence"]
+    record = evidence[0]["logs"][0]
+    diagnostics = json.dumps(record["steps"][0]["diagnostics"])
+    assert "FIRST-CAUSE" in diagnostics
+    assert "Non-numeric character in element length" in diagnostics
+    assert "FAILED test_guac_vnc_tunnel[relative-xdg]" in diagnostics
+    assert "AMBIGUOUS-BOUNDARY" not in diagnostics
+    assert "untimed message" not in diagnostics
+    assert "AMBIGUOUS-BOUNDARY" in json.dumps(record["unattributed"])
+    assert "untimed message" in json.dumps(record["unattributed"])
+    assert record["omitted_nonfailure_lines"] == 10000
+    assert len(json.dumps(evidence)) <= 40000
     assert worker.bounded_context({"failure_evidence": evidence})["failure_evidence"] == evidence

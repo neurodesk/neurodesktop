@@ -3,7 +3,7 @@ title: Agentic CI workflows
 description: Failure reporting, issue repair, scheduled maintenance, and subscription-authenticated Codex execution through conventional Actions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-20"
+last-reviewed: "2026-10-23"
 ---
 
 # Agentic CI workflows
@@ -41,7 +41,10 @@ ownership. Each episode retains its origin and failure observations, with
 per-attempt comments linking every affected run. Existing run, attempt, and
 dispatch receipts remain valid. A particular legacy report can be adopted when
 its exact attempts reconstruct the same complete identity. Manually closed
-reports do not establish recovery and are not automatically reopened.
+reports do not establish recovery and are not automatically reopened. Exact
+run ownership, including legacy reports, takes precedence over a matching open
+failure signature. Delivery order cannot move a recorded attempt to a newer
+episode or invalidate its dispatch receipt or existing owned proposal.
 
 A successful completion closes an incident only when one exact attempt proves
 that every failed job and step passed. Scope must match, execution must start
@@ -100,9 +103,21 @@ Failure evidence samples the root and latest exact attempts, with an explicit
 omitted-run count. Every failed job is queried, including jobs after an
 unavailable log. Run, job, and step metadata use allowlists. The shared
 `failure_evidence` budget is 40,000 ASCII-escaped JSON characters, including
-metadata and notices. Job and failed-step identities receive space before
-long logs. Pytest assertions, failed-test summaries, Trivy finding rows, and
-substantive errors precede cleanup tails. If the manifest itself cannot fit,
+metadata and notices. Each job contains separate diagnostic sections and a
+tail for every failed step. Step attribution uses exact CLI step prefixes or
+unique job-step time ranges. Lines without unique attribution, including
+overlapping boundary seconds, remain explicitly unattributed. Error text never
+determines a step name.
+Known successful-step output is omitted with a line count. Unavailable logs
+remain named on the job and each failed step.
+
+Job and failed-step identities receive space before long logs. The packer
+shares the remaining budget across step slots, then across separate diagnostic
+sections within each slot. Large sections preserve their beginning and end,
+alongside each step's tail. Pytest assertions, failed-test summaries, Trivy
+finding rows, and substantive errors precede cleanup tails. Omitted diagnostic
+sections and shortened tails have explicit counts or notices. If the manifest
+itself cannot fit,
 the record names the exact omitted job and step counts and links the source
 attempt. Generic context trimming does not trim packed failure evidence again.
 
@@ -163,7 +178,12 @@ Workflow-incident proposals use `Tracks` links. The publisher rechecks the
 trusted incident binding, open state, eligibility labels, and owned PRs before
 publication. It neutralizes generated closing references in the title, body,
 and commit message, including review follow-ups. Diagnostic improvements do
-not close the original incident. Pending validation names the original checks;
+not close the original incident. Reused proposals and review follow-ups also
+reconcile the saved PR title and body through PATCH, preserving task markers,
+episode bindings, and other content. The publisher reads current ownership and
+incident eligibility before changing the saved text. Retries after an accepted
+PATCH read the saved result and do not repeat an already completed change.
+Pending validation names the original checks;
 only the reporter's verified recovery establishes success. Ordinary human
 issue proposals retain their `Fixes` footer.
 

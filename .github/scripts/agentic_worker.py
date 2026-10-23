@@ -159,10 +159,10 @@ def git(*args, cwd=None):
     ).rstrip("\n")
 
 
-def api(path, payload=None):
+def api(path, payload=None, *, method="POST"):
     args = ["gh", "api", path]
     if payload is not None:
-        args += ["--method", "POST", "--input", "-"]
+        args += ["--method", method, "--input", "-"]
     return json.loads(command(args, data=json.dumps(payload) if payload is not None else None))
 
 
@@ -197,19 +197,7 @@ def bounded_context(context):
             return value
         notices.append(path)
         if isinstance(value, str):
-            marker = "\n[Earlier evidence truncated]\n" if keep_end else "\n[Evidence truncated]"
-            lower, upper = 0, len(value)
-            while lower < upper:
-                middle = (lower + upper + 1) // 2
-                candidate = marker + value[-middle:] if keep_end else value[:middle] + marker
-                if len(json.dumps(candidate)) <= budget:
-                    lower = middle
-                else:
-                    upper = middle - 1
-            if keep_end:
-                retained = value[len(value) - lower:] if lower else ""
-                return marker + retained
-            return value[:lower] + marker
+            return fit_evidence_text(value, budget, keep_end=keep_end)
         if isinstance(value, list):
             result = []
             # Retain recent discussion; the issue itself is a separate section.
@@ -310,7 +298,100 @@ def diagnostic_sections(log):
     for index, line in enumerate(lines):
         if re.search(r"CVE-\d{4}-\d+|GHSA-[\w-]+|FAILED\s|(?:AssertionError|Exception|Error|ERROR|FATAL|error)[:\s]|\bE\s+(?:assert|[A-Z])", line):
             selected.update(range(max(0, index - 2), min(len(lines), index + 3)))
-    return "\n".join(lines[index] for index in sorted(selected))
+    sections = []
+    previous = -2
+    for index in sorted(selected):
+        if index != previous + 1:
+            sections.append([])
+        sections[-1].append(lines[index])
+        previous = index
+    return ["\n".join(section) for section in sections]
+
+
+def collect_job_log(repo, job):
+    steps = job.get("steps", [])
+    failed = {index: {**compact_failure_fields(step, ("name", "number", "conclusion")),
+                      "diagnostics": [], "tail": ""}
+              for index, step in enumerate(steps) if step.get("conclusion") in {"failure", "timed_out", "cancelled"}}
+    record = {"job": compact_failure_fields(job, ("name",)).get("name", "Unnamed job"),
+              "job_id": job["id"], "steps": list(failed.values())}
+    try:
+        log = command(["gh", "run", "view", "--repo", repo, "--job", str(job["id"]), "--log"])
+    except (RuntimeError, subprocess.TimeoutExpired):
+        record["error"] = "Log unavailable"
+        for step in failed.values():
+            step["error"] = "Log unavailable"
+        return record
+    names = {}
+    intervals = []
+    for index, step in enumerate(steps):
+        names.setdefault(step.get("name"), []).append(index)
+        if step.get("conclusion") == "skipped":
+            continue
+        try:
+            start = datetime.fromisoformat(step["started_at"].replace("Z", "+00:00")).timestamp()
+            end = datetime.fromisoformat(step["completed_at"].replace("Z", "+00:00")).timestamp()
+            if end >= start:
+                # Actions step timestamps omit fractions; shared boundary seconds are ambiguous.
+                intervals.append((index, start, end + 1))
+        except (KeyError, TypeError, ValueError):
+            continue
+    lines_by_step = {index: [] for index in failed}
+    unattributed = []
+    omitted = 0
+    for line in log.splitlines(keepends=True):
+        parts = line.split("\t", 2)
+        prefixed = len(parts) == 3 and parts[0] == job.get("name")
+        text = parts[2] if prefixed else line
+        matches = names.get(parts[1], []) if prefixed else []
+        timestamp = re.match(r"\ufeff?(\d{4}-\d\d-\d\dT[\d:.]+Z)\s?", text)
+        if not matches and timestamp and (not prefixed or parts[1] == "UNKNOWN STEP"):
+            try:
+                instant = datetime.fromisoformat(timestamp[1].replace("Z", "+00:00")).timestamp()
+                matches = [index for index, start, end in intervals if start <= instant < end]
+            except ValueError:
+                pass
+        if timestamp:
+            text = text[timestamp.end():]
+        if len(matches) != 1:
+            unattributed.append(text)
+        elif matches[0] in failed:
+            lines_by_step[matches[0]].append(text)
+        else:
+            omitted += 1
+    if omitted:
+        record["omitted_nonfailure_lines"] = omitted
+    slots = [(failed[index], lines) for index, lines in lines_by_step.items()]
+    if unattributed:
+        record["unattributed"] = {"notice": "Step ownership unavailable or ambiguous; no step inferred from error text."}
+        slots.append((record["unattributed"], unattributed))
+    for slot, lines in slots:
+        text = "".join(lines)
+        slot.update(diagnostics=diagnostic_sections(text), tail=text[-20000:])
+        if not lines:
+            slot["error"] = "No log lines could be attributed to this failed step"
+        if len(text) > 20000:
+            slot["omitted_tail_characters"] = len(text) - 20000
+    return record
+
+
+def fit_diagnostic_sections(sections, budget):
+    retained = list(sections)
+    while len(retained) > 1 and len(retained) * 128 > budget:
+        retained.pop(len(retained) // 2)
+    omitted = len(sections) - len(retained)
+    remaining = budget - len(json.dumps(["" for _ in retained]))
+    fitted = []
+    for index, text in enumerate(retained):
+        allowance = remaining // (len(retained) - index)
+        if len(json.dumps(text)) - 2 <= allowance:
+            fitted.append(text)
+        else:
+            start = fit_evidence_text(text, allowance // 2)
+            end = fit_evidence_text(text, allowance - len(json.dumps(start)), keep_end=True)
+            fitted.append(start + end)
+        remaining -= len(json.dumps(fitted[-1])) - 2
+    return fitted, omitted
 
 
 def pack_failure_evidence(evidence):
@@ -320,12 +401,12 @@ def pack_failure_evidence(evidence):
     texts = []
     for item in packed:
         for log in item.get("logs", []):
-            for field in ("diagnostics", "tail"):
-                if field in log:
-                    texts.append((log, field, log[field]))
-                    log[field] = ""
+            for slot in [*log.get("steps", []), *([log["unattributed"]] if "unattributed" in log else [])]:
+                if slot.get("diagnostics") or slot.get("tail"):
+                    texts.append((log, slot, slot["diagnostics"], slot["tail"]))
+                    slot.update(diagnostics=[], tail="", omitted_diagnostic_sections=0)
         item["packing_notice"] = "Logs share a 40000-character JSON budget; consult the linked exact attempts for complete evidence."
-    while len(json.dumps(packed)) + len(texts) * 128 > MAX_FAILURE_EVIDENCE - 32:
+    while len(json.dumps(packed)) + len(texts) * 256 > MAX_FAILURE_EVIDENCE - 32:
         item = next((entry for entry in reversed(packed) if entry.get("jobs")), None)
         if item is None:
             raise ValueError("Failure evidence metadata exceeds the shared budget")
@@ -336,12 +417,16 @@ def pack_failure_evidence(evidence):
         removed = next((log for log in reversed(logs) if log.get("job_id") == job.get("id") or ("job_id" not in log and log.get("job") == job.get("name"))), None)
         if removed is not None:
             logs.remove(removed)
-            texts = [(log, field, text) for log, field, text in texts if log is not removed]
+            texts = [entry for entry in texts if entry[0] is not removed]
     remaining = MAX_FAILURE_EVIDENCE - 32 - len(json.dumps(packed))
-    for index, (log, field, text) in enumerate(texts):
+    for index, (_, slot, diagnostics, tail) in enumerate(texts):
         allowance = remaining // (len(texts) - index)
-        log[field] = fit_evidence_text(text, allowance + 2, keep_end=field == "tail")
-        remaining -= len(json.dumps(log[field])) - 2
+        before = len(json.dumps(slot))
+        slot["tail"] = fit_evidence_text(tail, allowance // 3 + 2, keep_end=True)
+        slot["diagnostics"], slot["omitted_diagnostic_sections"] = fit_diagnostic_sections(
+            diagnostics, allowance - (len(json.dumps(slot["tail"])) - 2) - 16,
+        )
+        remaining -= len(json.dumps(slot)) - before
     return packed
 
 
@@ -435,20 +520,10 @@ def failure_context(repo, body, *, occurrences=None):
             evidence.append({"run": {"id": run_id, "run_attempt": attempt, "html_url": source},
                              "error": "Run or job manifest unavailable"})
             continue
-        failed = [compact_failure_fields(job, FAILURE_JOB_FIELDS) for job in jobs
-                  if job.get("conclusion") in {"failure", "timed_out"}]
-        logs = []
-        for job in failed:
-            log_record = {"job": job.get("name", "Unnamed job"), "job_id": job["id"]}
-            try:
-                log = command(["gh", "run", "view", "--repo", repo, "--job", str(job["id"]), "--log"])
-                log_record.update(diagnostics=diagnostic_sections(log), tail=log[-20000:])
-                if len(log) > 20000:
-                    log_record["omitted_tail_characters"] = len(log) - 20000
-            except (RuntimeError, subprocess.TimeoutExpired):
-                log_record["error"] = "Log unavailable"
-            logs.append(log_record)
-        evidence.append({"run": run, "jobs": failed, "logs": logs, "source": source})
+        failed = [job for job in jobs if job.get("conclusion") in {"failure", "timed_out"}]
+        logs = [collect_job_log(repo, job) for job in failed]
+        evidence.append({"run": run, "jobs": [compact_failure_fields(job, FAILURE_JOB_FIELDS) for job in failed],
+                         "logs": logs, "source": source})
     if evidence and len(references) > len(selected):
         evidence[0]["omitted_runs"] = len(references) - len(selected)
         evidence[0]["sampling_notice"] = "Root and latest occurrences sampled; all occurrence links remain on the source issue."
@@ -849,6 +924,8 @@ def validation_evidence(result, validation):
 
 def complete_publication(task, pr, result, workspace, validation):
     number = pr["number"]
+    if task.get("incident"):
+        reconcile_incident_pull(task, number, pr["head"]["ref"])
     api(f"repos/{task['repo']}/issues/{number}/labels", {"labels": ["agentic-workflow"]})
     published_task = {**task, "branch": pr["head"]["ref"]}
     if trigger_ci(published_task, workspace) is False:
@@ -871,7 +948,7 @@ def nonclosing_text(text, task):
     number = re.escape(task.get("incident_subject", task["subject"]))
     repo = re.escape(task["repo"])
     reference = rf"(?:\#{number}\b|{repo}\#{number}\b|https://github\.com/{repo}/issues/{number}\b)"
-    closing = re.compile(rf"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b(?=[^.!;]*{reference})", re.IGNORECASE)
+    closing = re.compile(rf"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b(?!\])(?=[^.!;]*{reference})", re.IGNORECASE)
     return closing.sub("Tracks", text)
 
 
@@ -895,6 +972,17 @@ def check_publication_incident(task):
         raise ValueError("Workflow incident changed or recovered; refusing stale publication")
 
 
+def reconcile_incident_pull(task, number, branch):
+    current = api(f"repos/{task['repo']}/pulls/{number}")
+    issue_task = {**task, "kind": "issue", "subject": task.get("incident_subject", task["subject"])}
+    if not incident_pull(current, issue_task) or current["head"]["ref"] != branch:
+        raise ValueError("PR changed during publication; refusing stale publication")
+    check_publication_incident(task)
+    updated = {field: nonclosing_text(current[field], task) for field in ("title", "body")}
+    if any(updated[field] != current[field] for field in updated):
+        api(f"repos/{task['repo']}/pulls/{number}", updated, method="PATCH")
+
+
 def publish(task, output, workspace):
     result = validate_result(json.loads((output / "result.json").read_text()))
     validation = (output / "validation.txt").read_text()
@@ -903,6 +991,8 @@ def publish(task, output, workspace):
         check_publication_incident(task)
         if task.get("incident"):
             result = nonclosing_result(result, task)
+            if task["kind"] == "review":
+                reconcile_incident_pull(task, task["subject"], task["branch"])
         if task["kind"] in {"issue", "review"}:
             comment_once(task, f"{result['outcome']}: {result['body']}",
                          key=review_marker(task) if task["kind"] == "review" else None)
@@ -930,7 +1020,10 @@ def publish(task, output, workspace):
             return complete_publication(task, existing, result, workspace, validation)
     else:
         pr = api(f"repos/{repo}/pulls/{task['subject']}")
-        if pr["state"] != "open" or not owned_pull(pr, repo):
+        issue_task = {**task, "kind": "issue", "subject": task.get("incident_subject", task["subject"])}
+        if pr["state"] != "open" or not owned_pull(pr, repo) or (
+            task.get("incident") and (not incident_pull(pr, issue_task) or pr["head"]["ref"] != task["branch"])
+        ):
             raise ValueError("PR changed during review; refusing stale publication")
     git("checkout", "-B", task["branch"], task["base_sha"], cwd=workspace)
     git("apply", "--index", str(patch.resolve()), cwd=workspace)

@@ -436,18 +436,20 @@ async function reportWorkflowFailure({ github, context, core, repairEnabled = tr
   const observation = observationOf(run, jobs);
   let selected = episodes.find(({episode}) => episode.observations.some((item) =>
     item.runId === run.id && item.attempt === run.run_attempt));
+  const legacyIssue = issues.filter((item) => !item.pull_request && ownsMarker(item, issueMarker) &&
+    !item.body.split("\n")[1]?.startsWith("<!-- neurodesktop-incident:"))
+    .sort((a, b) => a.number - b.number)[0];
   const related = selected ? selected.episode.observations : episodes
-    .filter(({episode, issue}) => episode.key === key && issue.state === "open")
+    .filter(({episode, issue}) => !legacyIssue && episode.key === key && issue.state === "open")
     .flatMap(({episode}) => episode.observations);
-  const history = selected?.episode.recovery || !bundle ? {runs: [], incomplete: false}
+  const history = selected?.episode.recovery || legacyIssue?.state === "closed" || !bundle ? {runs: [], incomplete: false}
     : await recentSuccesses(github, params, run, [...related, observation]);
-  if (!selected && bundle) {
+  if (!selected && !legacyIssue && bundle) {
     for (const entry of episodes.filter(({episode, issue}) => episode.key === key && issue.state === "open")) {
       if (!await recover(github, params, entry.issue, entry.episode, history.runs)) { selected = entry; break; }
     }
   }
-  let issue = selected?.issue || issues.filter((item) => !item.pull_request && ownsMarker(item, issueMarker) && !item.body.split("\n")[1]?.startsWith("<!-- neurodesktop-incident:"))
-    .sort((a, b) => a.number - b.number)[0];
+  let issue = selected?.issue || legacyIssue;
   let episode = selected?.episode;
   const newObservation = !episode?.observations.some((item) => item.runId === run.id && item.attempt === run.run_attempt);
   if (!issue && bundle) episode = {key, origin: {runId: run.id, attempt: run.run_attempt}, bundle, observations: [observation]};
