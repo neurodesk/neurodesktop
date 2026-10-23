@@ -1637,6 +1637,7 @@ apptainer run \
    --home "${NEURODESKTOP_HOME_DIR}:${NEURODESKTOP_CONTAINER_HOME}" \
    --pwd "${NEURODESKTOP_CONTAINER_WORKDIR}" \
    --env CVMFS_DISABLE=true \
+   --env NEURODESKTOP_DISABLE_SSH=true \
    --env TINI_SUBREAPER=1 \
    --env NB_UID="${NEURODESKTOP_UID}" \
    --env NB_GID="${NEURODESKTOP_GID}" \

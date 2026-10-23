@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-20"
+last-reviewed: "2026-10-23"
 ---
 
 # Testing
@@ -577,6 +577,7 @@ non-obvious tiers protect.
 | Apptainer NVIDIA auto-configuration | `pytest tests/unit/test_apptainer_nv.py` | — |
 | Access-URL banner (`print_access_url.sh`) | `pytest tests/unit/test_print_access_url.py` | — |
 | Sherlock launcher (`scripts/connectSherlock.sh`) | `pytest tests/unit/test_connect_sherlock.py` | — |
+| SSH startup opt-out | `pytest tests/unit/test_sftp_sshd_security.py tests/unit/test_ssh_proxy_policy.py tests/unit/test_connect_sherlock.py` | `pytest /opt/tests/test_ssh_proxy_policy.py /opt/tests/test_desktops.py -k 'ssh_proxy or ssh-disabled or vnc_backends_bind_localhost_only'` |
 | T3 Code server, web UI, lifecycle, and packaging | `pytest tests/unit/test_t3_code_server.py tests/unit/test_t3_startup_settings.py tests/unit/test_t3_code_web.py` | `pytest /opt/tests/test_t3_code_server_image.py /opt/tests/test_t3_code_web_image.py` |
 | Tailscale binary packaging | `pytest tests/unit/test_tailscale_packaging.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_tailscale_image.py` |
 | Guided T3/Tailscale setup | `pytest tests/unit/test_t3_neurodesk_setup.py tests/unit/test_t3_code_server.py` | `pytest /opt/tests/test_tailscale_image.py /opt/tests/test_t3_code_server_image.py` |
@@ -745,7 +746,14 @@ timed-out launch shutting down while the next launch starts.
 Desktop smoke tests keep Guacamole, Tomcat, VNC, and credential state in
 temporary per-test homes by default. VNC tunnel cases cover fresh and legacy
 homes without the XDG config parent, an absolute override, and an ignored
-relative override. They require saved settings to survive TigerVNC's migration
+relative override. SSH-disabled cases start with stale SFTP port state,
+require the SFTP connection to be disabled without a new SSH daemon, and
+receive desktop frames through the authenticated VNC tunnel. The combined-backend
+case exercises the template that enables SFTP by default. The installed
+SSH proxy tests load the shipped Jupyter configuration and verify that the
+`sshd` route and its host-key generation disappear only when
+`NEURODESKTOP_DISABLE_SSH=true`.
+The VNC tunnel cases require saved settings to survive TigerVNC's migration
 and actual desktop frames to arrive over the authenticated tunnel.
 Tests that need to start the global xrdp service are skipped unless
 `NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1` is set. The build scripts and

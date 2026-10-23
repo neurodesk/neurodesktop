@@ -4,7 +4,7 @@ description: LXDE desktop over VNC/RDP through Guacamole, clipboard sync,
   per-display Firefox profiles, and office file associations
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-16"
+last-reviewed: "2026-10-23"
 ---
 
 # Desktop Environment
@@ -112,6 +112,15 @@ from included files. A saved configuration that allows another address uses a
 minimal loopback-only fallback without replacing the saved file. This prevents
 persisted configurations from exposing the service on a container or shared
 HPC network interface.
+
+Set `NEURODESKTOP_DISABLE_SSH=true` before startup to disable that daemon and
+the separate `jupyter-sshd-proxy` endpoint. Guacamole startup removes stale SFTP
+port state and disables its SFTP connection before Tomcat loads the mapping,
+so the VNC desktop still connects without SFTP transfers. The Jupyter server
+configuration filters the installed `sshd` proxy entrypoint before it loads,
+preserving other proxy services. The Sherlock launcher sets this variable in
+its Apptainer invocation. Its tunnel uses the cluster's host SSH servers and
+does not require an SSH server inside the image.
 
 The Neurodesk menu's **Update** entry updates the notebook-owned
 `/neurocommand` checkout without sudo. Root startup repairs checkout ownership
