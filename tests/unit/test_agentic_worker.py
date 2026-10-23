@@ -1530,3 +1530,35 @@ def test_prepare_retains_distinct_failure_sections_within_timed_step(worker, git
     assert record["omitted_nonfailure_lines"] == 10000
     assert len(json.dumps(evidence)) <= 40000
     assert worker.bounded_context({"failure_evidence": evidence})["failure_evidence"] == evidence
+
+
+@pytest.mark.parametrize("started,completed", [
+    (None, "2026-10-20T10:10:00Z"), ("2026-10-20T10:00:00Z", None), (None, None),
+])
+@pytest.mark.parametrize("prefix", ["Test", "UNKNOWN STEP"])
+def test_prepare_preserves_logs_with_nullable_step_timing(worker, github, monkeypatch, tmp_path, started, completed, prefix):
+    responses, _ = github
+    responses["repos/owner/repo/issues/42"]["body"] = "https://github.com/owner/repo/actions/runs/20/attempts/2"
+    responses["repos/owner/repo/actions/runs/20/attempts/2"] = {"id": 20, "run_attempt": 2}
+    jobs = [{"id": index, "name": f"job-{index}", "conclusion": "failure", "steps": [{
+        "name": "Test", "number": 1, "conclusion": "failure", "started_at": started, "completed_at": completed,
+    }]} for index in (1, 2)]
+    original = worker.pages
+    monkeypatch.setattr(worker, "pages", lambda path, **kwargs: jobs if "/jobs?" in path else original(path))
+    requested = []
+
+    def command(args):
+        job = int(args[args.index("--job") + 1])
+        requested.append(job)
+        return f"job-{job}\t{prefix}\t2026-10-20T10:05:00.0000000Z Error: ORIGINAL-CAUSE-{job}\n"
+
+    monkeypatch.setattr(worker, "command", command)
+    worker.prepare("issue", "42", "owner/repo", "100", tmp_path)
+    evidence = json.loads((tmp_path / "task.json").read_text())["context"]["failure_evidence"]
+    assert requested == [1, 2]
+    for index, record in enumerate(evidence[0]["logs"], 1):
+        slot = record["steps"][0] if prefix == "Test" else record["unattributed"]
+        assert f"ORIGINAL-CAUSE-{index}" in json.dumps(slot["diagnostics"])
+        if prefix == "UNKNOWN STEP":
+            assert record["steps"][0]["diagnostics"] == []
+            assert "attributed" in record["steps"][0]["error"]
