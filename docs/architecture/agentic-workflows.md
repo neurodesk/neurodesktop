@@ -3,7 +3,7 @@ title: Agentic CI workflows
 description: Failure reporting, issue repair, scheduled maintenance, and subscription-authenticated Codex execution through conventional Actions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-17"
+last-reviewed: "2026-10-20"
 ---
 
 # Agentic CI workflows
@@ -56,6 +56,9 @@ control code is separate from the checkout the model can edit. Actions checkout
 steps always use the default branch. The controller fetches validated full
 candidate SHAs as Git objects and checks out the candidate only before isolated
 execution; it never executes candidate scripts in the hosted publisher.
+Workflow-failure evidence keeps only diagnostic run and job fields. Within its
+budget, recent failed-job log endings take precedence over verbose API metadata,
+so the actual terminal error is available to repair tasks.
 
 The Codex job runs on the configured existing self-hosted runner. It invokes
 `codex exec` in a disposable Docker container using a persistent dedicated

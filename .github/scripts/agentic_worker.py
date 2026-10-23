@@ -28,6 +28,14 @@ MAX_RESULT_TEXT = 50000
 MAX_REVIEW_COMMITS = 3
 REVIEW_COMMIT = "[agentic-review]"
 GIT_ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
+FAILURE_RUN_FIELDS = (
+    "id", "name", "path", "html_url", "run_attempt", "event", "status",
+    "conclusion", "head_branch", "head_sha", "created_at", "updated_at",
+)
+FAILURE_JOB_FIELDS = (
+    "id", "name", "html_url", "status", "conclusion", "started_at",
+    "completed_at", "steps",
+)
 
 
 class CommandFailure(RuntimeError):
@@ -183,20 +191,24 @@ def bounded_context(context):
     """Keep subject evidence ahead of metadata within an explicit prompt budget."""
     notices = []
 
-    def trim(value, budget, path):
+    def trim(value, budget, path, *, keep_end=False):
         if len(json.dumps(value)) <= budget:
             return value
         notices.append(path)
         if isinstance(value, str):
-            suffix = "\n[Evidence truncated]"
+            marker = "\n[Earlier evidence truncated]\n" if keep_end else "\n[Evidence truncated]"
             lower, upper = 0, len(value)
             while lower < upper:
                 middle = (lower + upper + 1) // 2
-                if len(json.dumps(value[:middle] + suffix)) <= budget:
+                candidate = marker + value[-middle:] if keep_end else value[:middle] + marker
+                if len(json.dumps(candidate)) <= budget:
                     lower = middle
                 else:
                     upper = middle - 1
-            return value[:lower] + suffix
+            if keep_end:
+                retained = value[len(value) - lower:] if lower else ""
+                return marker + retained
+            return value[:lower] + marker
         if isinstance(value, list):
             result = []
             # Retain recent discussion; the issue itself is a separate section.
@@ -204,18 +216,25 @@ def bounded_context(context):
                 remaining = budget - len(json.dumps(result)) - 2
                 if remaining < 200:
                     break
-                result.insert(0, trim(item, min(8000, remaining), path))
+                item_limit = 20000 if path == "failure_evidence" else 8000
+                result.insert(0, trim(item, min(item_limit, remaining), path))
             return result
         if isinstance(value, dict):
             result = {}
-            priority = ("number", "title", "body", "base", "head", "path", "line", "diff_hunk", "tail")
+            priority = (
+                "number", "title", "body", "base", "head", "path", "line",
+                "diff_hunk", "logs", "job", "tail", "jobs", "run",
+            )
             keys = [key for key in priority if key in value]
             keys += [key for key in value if key not in priority]
             for key in keys:
                 remaining = budget - len(json.dumps(result)) - len(json.dumps(key)) - 4
                 if remaining < 200:
                     break
-                result[key] = trim(value[key], min(20000, remaining), path)
+                result[key] = trim(
+                    value[key], min(20000, remaining), f"{path}.{key}",
+                    keep_end=key == "tail",
+                )
             return result
         return value
 
@@ -262,9 +281,13 @@ def failure_context(repo, body):
     for run_id in list(dict.fromkeys(re.findall(
         rf"https://github\.com/{re.escape(repo)}/actions/runs/(\d+)", body
     )))[:2]:
-        run = api(f"repos/{repo}/actions/runs/{run_id}")
+        run_response = api(f"repos/{repo}/actions/runs/{run_id}")
+        run = {key: run_response[key] for key in FAILURE_RUN_FIELDS if key in run_response}
         jobs = pages(f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100", key="jobs")
-        failed = [j for j in jobs if j["conclusion"] in {"failure", "timed_out"}]
+        failed = [
+            {key: job[key] for key in FAILURE_JOB_FIELDS if key in job}
+            for job in jobs if job["conclusion"] in {"failure", "timed_out"}
+        ]
         logs = []
         for job in failed[:2]:
             try:
