@@ -196,8 +196,9 @@ else
 fi
 
 # Create a symlink to the neurodesktop-storage directory if it doesn't exist yet:
-if [ ! -L "/neurocommand/local/containers" ]; then
-  ln -s "${NEURODESKTOP_LOCAL_CONTAINERS:-/neurodesktop-storage/containers}" "/neurocommand/local/containers"
+# Neurocommand also uses a real directory here for its bundled module files.
+if [ ! -e "/neurocommand/local/containers" ] && [ ! -L "/neurocommand/local/containers" ]; then
+  ln -sT "${NEURODESKTOP_LOCAL_CONTAINERS:-/neurodesktop-storage/containers}" "/neurocommand/local/containers"
 fi
 
 # ensure overlay directory exists

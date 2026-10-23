@@ -153,7 +153,10 @@ for RDP initialization and VS Code isolation.
   cgroup v2 or v1 limit files. Inside a Slurm job (`SLURM_JOB_ID` set), a
   valid `SLURM_MEM_PER_NODE`, or `SLURM_MEM_PER_CPU` times the CPU count, and
   `SLURM_CPUS_ON_NODE`, `SLURM_JOB_CPUS_PER_NODE` or `SLURM_CPUS_PER_TASK`
-  override them. A preset value is kept when no limit is detected
+  override them. A preset value is kept when no limit is detected.
+  The Sherlock interactive launcher forwards those Slurm memory and CPU
+  variables across its compute-node SSH connection so the indicator receives
+  the allocation limits. Slurm enforces the allocation independently
 
 ## Slurm
 
