@@ -3,7 +3,7 @@ title: Agentic CI workflows
 description: Failure reporting, issue repair, scheduled maintenance, and subscription-authenticated Codex execution through conventional Actions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-17"
+last-reviewed: "2026-10-23"
 ---
 
 # Agentic CI workflows
@@ -26,6 +26,49 @@ default branch. It still records feature-branch failures and related pull
 requests, but the issue worker must not edit the default branch for those
 failures. Agent operational failures are classified separately so they do not
 recursively launch agents to repair their own unavailable authentication or runner.
+
+The reporter groups unresolved failures only when the workflow ID, head
+repository, exact branch or PR scope, source SHA, and complete failure bundle
+match. Matrix job names and failed step names remain part of the identity.
+Complete Trivy finding tables and pytest failure sections supply diagnostic
+identity. Successful setup output, runner IDs, and run-specific image tags do
+not define a failure. Missing, oversized, incomplete, or unrecognized diagnostics
+remain specific to the run and attempt. A different SHA or failure bundle can
+create a separate incident even when a human later identifies a shared cause.
+
+Bot-authored first-line run markers and reserved versioned records establish
+ownership. Each episode retains its origin and failure observations, with
+per-attempt comments linking every affected run. Existing run, attempt, and
+dispatch receipts remain valid. A particular legacy report can be adopted when
+its exact attempts reconstruct the same complete identity. Manually closed
+reports do not establish recovery and are not automatically reopened. Exact
+run ownership, including legacy reports, takes precedence over a matching open
+failure signature. Delivery order cannot move a recorded attempt to a newer
+episode or invalidate its dispatch receipt or existing owned proposal.
+
+A successful completion closes an incident only when one exact attempt proves
+that every failed job and step passed. Scope must match, execution must start
+after every covered failure completed, and the revision must be identical or a
+verified descendant. Missing, skipped, cancelled, or ambiguous checks leave the
+incident open. The reporter saves recovery proof before closing, so a retry can
+finish an interrupted close. A later failure starts a new episode. Replayed
+historical attempts retain their original owner.
+
+For delayed delivery, the reporter queries one page of at most 100 completed
+runs for the same workflow and branch since the relevant failure. It also
+queries known run IDs because reruns retain their original creation dates.
+At most ten known runs and ten exact attempts are examined. Missing pages,
+metadata, or a reached bound leave an explicit incomplete-history notice and
+cannot prove recovery. Later completion events and redelivery can reconsider
+an open report. Reporter runs queue by workflow ID with cancellation disabled.
+
+An owned open PR suppresses repair only with a matching first-line canonical
+issue marker and, when present, the exact episode binding. User-authored PRs,
+foreign heads, quoted markers, and bindings to old episodes do not count.
+The reporter records each occurrence before checking PR coverage or dispatch
+receipts. Failed dispatch remains retryable. A crash after GitHub accepts a
+dispatch can repeat delivery; whole-issue worker concurrency and publication
+rechecks prevent duplicate proposals.
 
 The issue workflow delegates investigation, implementation, and validation to
 [`agentic-worker.yml`](../../.github/workflows/agentic-worker.yml). There is
@@ -56,6 +99,27 @@ control code is separate from the checkout the model can edit. Actions checkout
 steps always use the default branch. The controller fetches validated full
 candidate SHAs as Git objects and checks out the candidate only before isolated
 execution; it never executes candidate scripts in the hosted publisher.
+Failure evidence samples the root and latest exact attempts, with an explicit
+omitted-run count. Every failed job is queried, including jobs after an
+unavailable log. Run, job, and step metadata use allowlists. The shared
+`failure_evidence` budget is 40,000 ASCII-escaped JSON characters, including
+metadata and notices. Each job contains separate diagnostic sections and a
+tail for every failed step. Step attribution uses exact CLI step prefixes or
+unique job-step time ranges. Lines without unique attribution, including
+overlapping boundary seconds or missing timestamps without a known CLI prefix,
+remain explicitly unattributed. Error text never determines a step name.
+Known successful-step output is omitted with a line count. Unavailable logs
+remain named on the job and each failed step.
+
+Job and failed-step identities receive space before long logs. The packer
+shares the remaining budget across step slots, then across separate diagnostic
+sections within each slot. Large sections preserve their beginning and end,
+alongside each step's tail. Pytest assertions, failed-test summaries, Trivy
+finding rows, and substantive errors precede cleanup tails. Omitted diagnostic
+sections and shortened tails have explicit counts or notices. If the manifest
+itself cannot fit,
+the record names the exact omitted job and step counts and links the source
+attempt. Generic context trimming does not trim packed failure evidence again.
 
 The Codex job runs on the configured existing self-hosted runner. It invokes
 `codex exec` in a disposable Docker container using a persistent dedicated
@@ -109,6 +173,22 @@ preparation skips an issue with an existing owned open PR. That distinction
 matters when publication failed after creating the PR. An unconditional
 cleanup step removes the recorded execution container after cancellation or
 failure.
+
+Workflow-incident proposals use `Tracks` links. The publisher rechecks the
+trusted incident binding, open state, eligibility labels, and owned PRs before
+publication. It neutralizes generated closing references in the title, body,
+and commit message, including review follow-ups. Each closing keyword must
+directly precede a reference to that incident, with an optional colon.
+References to other issues or repositories retain their own closing keywords,
+including mixed lists in one sentence. Diagnostic improvements do
+not close the original incident. Reused proposals and review follow-ups also
+reconcile the saved PR title and body through PATCH, preserving task markers,
+episode bindings, and other content. The publisher reads current ownership and
+incident eligibility before changing the saved text. Retries after an accepted
+PATCH read the saved result and do not repeat an already completed change.
+Pending validation names the original checks;
+only the reporter's verified recovery establishes success. Ordinary human
+issue proposals retain their `Fixes` footer.
 
 The PR API retains `GITHUB_TOKEN` so generated PRs have the expected bot
 author. Optional `AGENTIC_PUSH_TOKEN` authenticates initial and review pushes,

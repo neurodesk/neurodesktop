@@ -459,13 +459,16 @@ fi
 # with CLIENT_UNAUTHORIZED (0x0301).
 NEURODESKTOP_SFTP_PORT=""
 if [ "${_start_vnc}" -eq 1 ]; then
-    if [ -x /opt/neurodesktop/ensure_sftp_sshd.sh ]; then
+    if [ "${NEURODESKTOP_DISABLE_SSH:-false}" = "true" ]; then
+        rm -f "${NEURODESKTOP_RUNTIME_DIR}/sftp_port" 2>/dev/null || true
+        echo "[INFO] NEURODESKTOP_DISABLE_SSH=true: skipping VNC SFTP side-channel."
+    elif [ -x /opt/neurodesktop/ensure_sftp_sshd.sh ]; then
         /opt/neurodesktop/ensure_sftp_sshd.sh || \
             echo "[WARN] Failed to initialize SSH/SFTP service for Guacamole."
     else
         echo "[WARN] /opt/neurodesktop/ensure_sftp_sshd.sh not found."
     fi
-    if [ -f "${NEURODESKTOP_RUNTIME_DIR}/sftp_port" ]; then
+    if [ "${NEURODESKTOP_DISABLE_SSH:-false}" != "true" ] && [ -f "${NEURODESKTOP_RUNTIME_DIR}/sftp_port" ]; then
         NEURODESKTOP_SFTP_PORT="$(cat "${NEURODESKTOP_RUNTIME_DIR}/sftp_port" 2>/dev/null || true)"
     fi
 
@@ -499,9 +502,11 @@ if [ "${_start_vnc}" -eq 1 ]; then
         # Disable SFTP entirely so Guacamole does not attempt the side-channel.
         # enable-sftp=false is the idiomatic way to turn off the feature in the
         # libguac-client-vnc connection params.
-        echo "[WARN] SFTP side-channel unavailable (port=${NEURODESKTOP_SFTP_PORT:-unset}," \
-             "nb_user=${_sftp_nb_user}, resolvable=$(id -u "${_sftp_nb_user}" 2>/dev/null || echo no)," \
-             "cur_uid=$(id -u)); disabling enable-sftp in mapping."
+        if [ "${NEURODESKTOP_DISABLE_SSH:-false}" != "true" ]; then
+            echo "[WARN] SFTP side-channel unavailable (port=${NEURODESKTOP_SFTP_PORT:-unset}," \
+                 "nb_user=${_sftp_nb_user}, resolvable=$(id -u "${_sftp_nb_user}" 2>/dev/null || echo no)," \
+                 "cur_uid=$(id -u)); disabling enable-sftp in mapping."
+        fi
         update_mapping_param "vnc" "enable-sftp" "false" || true
         if [ "${_start_rdp}" -eq 1 ]; then
             update_mapping_param "rdp" "enable-sftp" "false" || true

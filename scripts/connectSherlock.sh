@@ -1637,6 +1637,7 @@ apptainer run \
    --home "${NEURODESKTOP_HOME_DIR}:${NEURODESKTOP_CONTAINER_HOME}" \
    --pwd "${NEURODESKTOP_CONTAINER_WORKDIR}" \
    --env CVMFS_DISABLE=true \
+   --env NEURODESKTOP_DISABLE_SSH=true \
    --env TINI_SUBREAPER=1 \
    --env NB_UID="${NEURODESKTOP_UID}" \
    --env NB_GID="${NEURODESKTOP_GID}" \
@@ -1644,6 +1645,7 @@ apptainer run \
    --env NEURODESKTOP_LOCAL_CONTAINERS="${GROUP_HOME}/neurodesk/local/containers" \
    $GROUP_HOME/neurodesk/neurodesktop_latest.sif \
    start-notebook.py \
+      --ServerApp.ip=127.0.0.1 \
       --ServerApp.port="${NEURODESKTOP_NOTEBOOK_PORT}" \
       --ServerApp.port_retries=0 \
       --IdentityProvider.token="${NEURODESKTOP_TOKEN}" \
@@ -1735,11 +1737,23 @@ EOF
     # non-interactive, so neither SSH hop needs a remote TTY. Avoiding one also
     # prevents Sherlock's interactive login quota check from delaying or
     # printing a misleading "Killed" message during startup.
+    # Quote allocation values for the compute-node shell, including Slurm's
+    # CPU-count notation and configuration paths containing spaces.
     run_foreground_neurodesk_session "$CTRL_SOCKET" "$LOGIN_NODE" "$JOB_NAME" \
       ssh -S "$CTRL_SOCKET" -o ExitOnForwardFailure=yes -T -L "${TUNNEL_PORT}:localhost:${TUNNEL_PORT}" "$LOGIN_NODE" \
         "salloc --job-name=$JOB_NAME -p $PARTITION --nodes=1 --time=$WALLTIME --ntasks=1 --cpus-per-task=$CPUS --mem=$MEM $GPU_FLAG \
         bash -c 'echo \"Allocated: \${SLURM_NODELIST}\"; \
-                 ssh -o ExitOnForwardFailure=yes -T -L ${TUNNEL_PORT}:localhost:${NOTEBOOK_PORT} \${SLURM_NODELIST} \"SLURM_JOB_ID=\${SLURM_JOB_ID} SLURM_CONF=\${SLURM_CONF:-} SLURM_SACK_SOCKET=\${SLURM_SACK_SOCKET:-} MUNGE_SOCKET=\${MUNGE_SOCKET:-} NEURODESKTOP_ENABLE_GPU=${ENABLE_GPU_CONTAINER} NEURODESKTOP_NOTEBOOK_PORT=${NOTEBOOK_PORT} NEURODESKTOP_TOKEN=${TUNNEL_TOKEN} NEURODESKTOP_DISPLAY_URL=http://127.0.0.1:${TUNNEL_PORT} ~/.neurodesk_job.sh\"'"
+                 printf -v slurm_env \"%q \" \
+                   \"SLURM_JOB_ID=\${SLURM_JOB_ID}\" \
+                   \"SLURM_CONF=\${SLURM_CONF:-}\" \
+                   \"SLURM_SACK_SOCKET=\${SLURM_SACK_SOCKET:-}\" \
+                   \"MUNGE_SOCKET=\${MUNGE_SOCKET:-}\" \
+                   \"SLURM_MEM_PER_NODE=\${SLURM_MEM_PER_NODE:-}\" \
+                   \"SLURM_MEM_PER_CPU=\${SLURM_MEM_PER_CPU:-}\" \
+                   \"SLURM_CPUS_ON_NODE=\${SLURM_CPUS_ON_NODE:-}\" \
+                   \"SLURM_JOB_CPUS_PER_NODE=\${SLURM_JOB_CPUS_PER_NODE:-}\" \
+                   \"SLURM_CPUS_PER_TASK=\${SLURM_CPUS_PER_TASK:-}\"; \
+                 ssh -o ExitOnForwardFailure=yes -T -L ${TUNNEL_PORT}:localhost:${NOTEBOOK_PORT} \${SLURM_NODELIST} \"env \${slurm_env} NEURODESKTOP_ENABLE_GPU=${ENABLE_GPU_CONTAINER} NEURODESKTOP_NOTEBOOK_PORT=${NOTEBOOK_PORT} NEURODESKTOP_TOKEN=${TUNNEL_TOKEN} NEURODESKTOP_DISPLAY_URL=http://127.0.0.1:${TUNNEL_PORT} ~/.neurodesk_job.sh\"'"
 }
 
 # Check if the script is being executed directly

@@ -6,6 +6,8 @@ import os
 import shlex
 import subprocess
 
+import pytest
+
 from testlib import repo_path
 
 
@@ -19,6 +21,7 @@ def run_bash(command: str, *, env: dict[str, str] | None = None):
         capture_output=True,
         text=True,
         env=env,
+        timeout=30,
     )
 
 
@@ -28,6 +31,85 @@ def test_connect_sherlock_is_valid_bash():
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_sherlock_disables_container_ssh_in_the_apptainer_invocation(tmp_path):
+    setup = SCRIPT.read_text(encoding="utf-8").split(
+        "unset APPTAINERENV_HOME\n", 1
+    )[1].split("\nEOF", 1)[0]
+    arguments = tmp_path / "apptainer-arguments"
+    command = f"""
+apptainer() {{ printf '%s\\n' "$@" > {shlex.quote(str(arguments))}; }}
+GROUP_HOME={shlex.quote(str(tmp_path))}
+NEURODESKTOP_DISABLE_SSH=false
+{setup}
+"""
+
+    result = run_bash(command)
+
+    assert result.returncode == 0, result.stderr
+    argv = arguments.read_text(encoding="utf-8").splitlines()
+    assert argv[0] == "run"
+    assert "start-notebook.py" in argv
+    settings = [argv[index + 1] for index, argument in enumerate(argv) if argument == "--env"]
+    assert "NEURODESKTOP_DISABLE_SSH=true" in settings
+    assert "CVMFS_DISABLE=true" in settings
+    assert "--ServerApp.ip=127.0.0.1" in argv
+
+
+@pytest.mark.parametrize("allocation,expected_limits", [
+    ({"SLURM_MEM_PER_NODE": "8192", "SLURM_CPUS_ON_NODE": "1"}, ("8589934592", "1")),
+    ({"SLURM_MEM_PER_CPU": "4096", "SLURM_JOB_CPUS_PER_NODE": "2(x2)"}, ("8589934592", "2")),
+    ({"SLURM_MEM_PER_CPU": "2048", "SLURM_CPUS_PER_TASK": "3",
+      "SLURM_CONF": "/etc/slurm/config with 'quotes'.conf"}, ("6442450944", "3")),
+])
+def test_interactive_launch_preserves_slurm_limits_across_ssh(tmp_path, allocation, expected_limits):
+    cgroup = tmp_path / "cgroup"
+    cgroup.mkdir()
+    (cgroup / "memory.max").write_text("max\n")
+    (cgroup / "cpu.max").write_text("max 100000\n")
+    inherited = tmp_path / "inherited"
+    job = tmp_path / ".neurodesk_job.sh"
+    job.write_text(f'''#!/bin/bash
+source {shlex.quote(str(repo_path("config/jupyter/detect_resource_limits.sh")))}
+detect_resource_limits {shlex.quote(str(cgroup))}
+env -0 > {shlex.quote(str(inherited))}
+''')
+    job.chmod(0o700)
+    source = SCRIPT.read_text()
+    launch = source[source.rindex('    run_foreground_neurodesk_session "$CTRL_SOCKET"'):].split("\n}", 1)[0]
+    exports = "\n".join(f"export {key}={shlex.quote(value)}" for key, value in allocation.items())
+    command = f'''
+CTRL_SOCKET=probe LOGIN_NODE=login JOB_NAME=probe TUNNEL_PORT=32338 NOTEBOOK_PORT=32338
+PARTITION=dev WALLTIME=02:00:00 CPUS=1 MEM=8G GPU_FLAG= ENABLE_GPU_CONTAINER=0 TUNNEL_TOKEN=probe-token
+export PROBE_HOME={shlex.quote(str(tmp_path))}
+run_foreground_neurodesk_session() {{ shift 3; "$@"; }}
+ssh() {{
+    local remote="${{!#}}"
+    if [[ "$remote" == salloc* ]]; then
+        bash -c "$remote"
+    else
+        env -i HOME="$PROBE_HOME" PATH="$PATH" bash -c "$remote"
+    fi
+}}
+salloc() {{
+    while [[ "$1" != bash ]]; do shift; done
+    export SLURM_JOB_ID=12345 SLURM_NODELIST=compute-node
+    {exports}
+    "$@"
+}}
+export -f ssh salloc
+{launch}
+'''
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith("SLURM_") and key not in {"MEM_LIMIT", "CPU_LIMIT"}}
+
+    result = run_bash(command, env=env)
+
+    assert result.returncode == 0, result.stderr
+    values = dict(item.split("=", 1) for item in inherited.read_text().split("\0") if item)
+    assert (values.get("MEM_LIMIT"), values.get("CPU_LIMIT")) == expected_limits
+    assert {key: values.get(key) for key in allocation} == allocation
 
 
 def test_connect_sherlock_keeps_image_server_extensions_enabled():

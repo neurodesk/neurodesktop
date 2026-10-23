@@ -25,3 +25,19 @@ def test_context_string_uses_largest_prefix_that_fits_json_budget(unit):
         assert len(prefix) > 19000
     assert context["issue"]["number"] == 42
     assert "issue" in context["truncation_notice"]
+
+
+@pytest.mark.parametrize("unit", ["A", "é", "😀", '"\\\n'])
+@pytest.mark.parametrize("keep_end", [False, True])
+def test_context_and_evidence_trimming_keep_the_same_bounded_text(unit, keep_end):
+    worker = load_source_module(
+        "agentic_context_test", "/opt/agentic_worker.py", ".github/scripts/agentic_worker.py"
+    )
+    text = "BEGIN" + unit * 65000 + "END"
+    field = "tail" if keep_end else "body"
+    bounded = worker.bounded_context({"issue": {field: text}})
+    retained = bounded["issue"][field]
+    assert retained == worker.fit_evidence_text(text, 20000, keep_end=keep_end)
+    assert len(json.dumps(retained)) <= 20000
+    assert retained.endswith("END") if keep_end else retained.startswith("BEGIN")
+    assert f"issue.{field}" in bounded["truncation_notice"]
