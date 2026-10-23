@@ -973,7 +973,9 @@ RUN echo "Installing neurocommand ref ${NEUROCOMMAND_REF}" \
     && git branch --set-upstream-to=origin/main main \
     && bash build.sh --lxde --edit \
     && bash install.sh \
-    && ln -s /neurodesktop-storage/containers /neurocommand/local/containers
+    && if [ ! -e /neurocommand/local/containers ] && [ ! -L /neurocommand/local/containers ]; then \
+        ln -sT /neurodesktop-storage/containers /neurocommand/local/containers; \
+    fi
 
 # Install AI coding assistants. The Jupyter AI ACP adapters are installed in
 # their own runtime-only layer below so adapter updates do not rebuild

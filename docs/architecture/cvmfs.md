@@ -4,7 +4,7 @@ description: CVMFS server selection and mount configuration, and the
   neurocommand CLI/module system for neuroimaging tools
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-17"
+last-reviewed: "2026-10-23"
 ---
 
 # CVMFS and Neurocommand
@@ -217,6 +217,13 @@ Neurocommand is cloned from
 build. It provides the CLI and module system for neuroimaging tools, uses Lmod
 for module management, and stores containers in
 `/neurodesktop-storage/containers`.
+
+Neurocommand may keep bundled module files in a real
+`/neurocommand/local/containers` directory. Image build and startup preserve
+that directory and create the storage symlink only when the path is absent.
+Existing files and symlinks are also preserved. The launchers use
+`NEURODESKTOP_LOCAL_CONTAINERS` for the container store; Sherlock sets it to
+the shared group store bound into the image.
 
 The notebook user owns `/neurocommand`. The Neurodesk menu's **Update**
 entry runs `/usr/local/bin/neurodesk-update`, which invokes

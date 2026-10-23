@@ -121,6 +121,8 @@ configuration filters the installed `sshd` proxy entrypoint before it loads,
 preserving other proxy services. The Sherlock launcher sets this variable in
 its Apptainer invocation. Its tunnel uses the cluster's host SSH servers and
 does not require an SSH server inside the image.
+The Sherlock launcher also binds Jupyter to `127.0.0.1`; its SSH tunnel
+connects to that loopback listener on the compute node.
 
 The Neurodesk menu's **Update** entry updates the notebook-owned
 `/neurocommand` checkout without sudo. Root startup repairs checkout ownership
