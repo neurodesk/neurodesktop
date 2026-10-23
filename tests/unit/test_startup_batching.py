@@ -163,7 +163,7 @@ sudo() {
     command "$@"
 }
 handle_bashrc_append
-''', home, DEFAULTS=str(defaults), CALLS=str(calls))
+''', home, DEFAULTS=str(defaults), CALLS=str(calls), SHLVL='1')
 
 
 @pytest.mark.parametrize("content,mode", [
