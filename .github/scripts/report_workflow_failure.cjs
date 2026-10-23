@@ -97,10 +97,17 @@ function readEpisode(issue) {
       !episode.bundle?.scope || !/^[a-f0-9]{40}$/.test(episode.bundle.sourceSHA || "") ||
       !Array.isArray(episode.bundle.failures) || !episode.bundle.failures.length ||
       episode.key !== digest(canonical(episode.bundle)) || !Array.isArray(episode.observations)) return null;
+  const scope = episode.bundle.scope;
+  if (canonical(scopeOf({
+    workflow_id: scope.workflowId, head_repository: {full_name: scope.headRepository},
+    head_branch: scope.exactRef, head_sha: episode.bundle.sourceSHA,
+    event: scope.branchScope === true ? "push" : "pull_request",
+    pull_requests: Array.isArray(scope.prNumbers) ? scope.prNumbers.map((number) => ({number})) : [],
+  })) !== canonical(scope)) return null;
   if (episode.bundle.failures.some((failure) =>
     typeof failure.check?.jobName !== "string" || !Array.isArray(failure.check.failedStepNames) ||
     failure.check.failedStepNames.some((step) => typeof step !== "string") ||
-    !FAILED.has(failure.conclusion) || typeof failure.diagnosis !== "string")) return null;
+    !FAILED.has(failure.conclusion) || !/^(?:[a-f0-9]{64}|opaque:[1-9]\d*\/[1-9]\d*\/[1-9]\d*)$/.test(failure.diagnosis || ""))) return null;
   if (episode.recovery && (!Number.isSafeInteger(episode.recovery.runId) || episode.recovery.runId <= 0 ||
       !Number.isSafeInteger(episode.recovery.attempt) || episode.recovery.attempt <= 0 ||
       !/^[a-f0-9]{40}$/.test(episode.recovery.sha || "") ||
@@ -113,6 +120,7 @@ function readEpisode(issue) {
     !Number.isSafeInteger(observation.runId) || observation.runId <= 0 ||
     !Number.isSafeInteger(observation.attempt) || observation.attempt <= 0 ||
     observation.sha !== episode.bundle.sourceSHA)) return null;
+  if (!episode.observations.some((item) => item.runId === episode.origin.runId && item.attempt === episode.origin.attempt)) return null;
   return episode;
 }
 
@@ -126,6 +134,70 @@ function observationOf(run, jobs) {
   };
 }
 
+function meaningfulDiagnosis(text, run) {
+  const lines = text.split("\n");
+  const exit = lines.findLastIndex((line) => /^##\[error\]Process completed with exit code [1-9]\d*\.$/.test(line));
+  if (text.includes("Report Summary")) {
+    if (exit < 0) return null;
+    const sections = [];
+    for (let index = 0; index < exit; index++) {
+      const total = lines[index].match(/^Total: (\d+) \(/);
+      if (!total) continue;
+      if (!/^=+$/.test(lines[index - 1] || "") || !lines[index - 2]) return null;
+      const target = lines[index - 2].replace(
+        new RegExp(`:run-${run.id}-${run.run_attempt}-(amd64|arm64)(?= |$)`), ":candidate-$1",
+      );
+      const table = [];
+      let ended = false;
+      for (index++; index < exit; index++) {
+        if (lines[index].startsWith("└")) { ended = true; break; }
+        if (!lines[index].startsWith("│")) continue;
+        const cells = lines[index].split("│").slice(1, -1).map((cell) => cell.trim());
+        if (cells.length === 7) table.push(cells);
+      }
+      if (!ended || table[0]?.join("|") !== "Library|Vulnerability|Severity|Status|Installed Version|Fixed Version|Title") return null;
+      const rows = table.slice(1);
+      const count = rows.filter((cells) => /^(?:CVE-\d{4}-\d+|GHSA-[\w-]+)$/.test(cells[1]) || (cells[0] && cells[4])).length;
+      if (count !== Number(total[1])) return null;
+      sections.push({target, total: Number(total[1]), rows});
+    }
+    if (!sections.length) return null;
+    const errors = lines.filter((line) => line.startsWith("##[error]") && !line.includes("Process completed with exit code"));
+    return {trivy: sections, errors};
+  }
+  const pytest = text.match(/=+ (?:FAILURES|ERRORS) =+\n[\s\S]*?=+ short test summary info =+\n[\s\S]*?(?=^=+ .*\b(?:failed|errors?)\b.*=+$)/m);
+  if (pytest) return {pytest: pytest[0].trim()};
+  const nonempty = lines.filter((line) => line.trim());
+  if (nonempty.length && nonempty.every((line) =>
+    /^(?:CVE-\d{4}-\d+ |GHSA-[\w-]+ |FAILED .+ - .+|E +.+|(?:\w*Error|Exception|ERROR|FATAL): .+)/.test(line) &&
+    !/Process completed with exit code|process .*failed with exit code/i.test(line))) return {messages: nonempty};
+  return null;
+}
+
+function jobDiagnosis(log, job, run) {
+  if (Buffer.byteLength(log) > 1024 * 1024) return null;
+  const lines = log.replace(/\x1b\[[0-9;]*m/g, "").split("\n");
+  const steps = (job.steps || []).filter((step) => FAILED.has(step.conclusion));
+  const sections = steps.length ? steps : [null];
+  const diagnostics = [];
+  for (const step of sections) {
+    let selected = lines;
+    if (step?.started_at && step?.completed_at) {
+      const start = Date.parse(step.started_at), end = Date.parse(step.completed_at) + 1000;
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+      selected = lines.filter((line) => {
+        const timestamp = line.match(/^\d{4}-\d\d-\d\dT[\d:.]+Z/);
+        return timestamp && Date.parse(timestamp[0]) >= start && Date.parse(timestamp[0]) < end;
+      });
+    } else if (sections.length > 1) return null;
+    const text = selected.map((line) => line.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z\s?/, "")).join("\n").trim();
+    const diagnosis = meaningfulDiagnosis(text, run);
+    if (!diagnosis) return null;
+    diagnostics.push({step: step?.name || null, diagnosis});
+  }
+  return digest(canonical(diagnostics));
+}
+
 async function failureBundle(github, params, run, failedJobs) {
   const scope = scopeOf(run);
   if (!scope || !failedJobs.length) return null;
@@ -137,16 +209,8 @@ async function failureBundle(github, params, run, failedJobs) {
         ...params, job_id: job.id, request: { timeout: 10000 },
       });
       const log = typeof response.data === "string" ? response.data : Buffer.from(response.data).toString("utf8");
-      // Hash the complete log, not a prefix or a generic exit-code annotation.
-      if (Buffer.byteLength(log) <= 1024 * 1024) {
-        const normalized = log.replace(/\x1b\[[0-9;]*m/g, "")
-          .replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z\s*/gm, "").trim();
-        const substantive = normalized.replace(/^.*(?:Process completed with exit code|process .*failed with exit code).*$/gim, "");
-        if (/CVE-\d{4}-\d+|FAILED .+|(?:Error|Exception|ERROR|FATAL|error):? .+/m.test(substantive)) {
-          diagnosis = digest(normalized);
-        }
-      }
-    } catch { /* Unavailable diagnostics remain specific to this occurrence. */ }
+      diagnosis = jobDiagnosis(log, job, run) || diagnosis;
+    } catch {}
     failures.push({
       check: {jobName: String(job.name), failedStepNames: (job.steps || [])
         .filter((step) => FAILED.has(step.conclusion)).map((step) => step.name).sort()},
@@ -300,7 +364,12 @@ async function adoptLegacy(github, params, issue, run, bundle, observation, comm
   return episode;
 }
 
-function coveringPull(pr, issue, repository) {
+function coveringPull(pr, issue, repository, episode) {
+  if (pr.body?.split("\n")[1]?.startsWith("<!-- neurodesktop-incident-binding:")) {
+    const expected = episode ? {key: episode.key, origin: episode.origin}
+      : {legacyRunId: Number(issue.body.split("\n")[0].match(/run=(\d+)/)?.[1])};
+    if (canonical(readRecord(pr, "incident-binding")) !== canonical(expected)) return false;
+  }
   return pr.state === "open" && pr.user?.login === BOT &&
     pr.head?.repo?.full_name?.toLowerCase() === repository.toLowerCase() &&
     pr.body?.split("\n")[0] === `<!-- neurodesktop-agentic:issue:${issue.number} -->`;
@@ -365,7 +434,6 @@ async function reportWorkflowFailure({ github, context, core, repairEnabled = tr
   const bundle = await failureBundle(github, params, run, failedJobs);
   const key = bundle && digest(canonical(bundle));
   const observation = observationOf(run, jobs);
-  // Ownership precedes signature lookup, including closed historical episodes.
   let selected = episodes.find(({episode}) => episode.observations.some((item) =>
     item.runId === run.id && item.attempt === run.run_attempt));
   const related = selected ? selected.episode.observations : episodes
@@ -440,6 +508,8 @@ async function reportWorkflowFailure({ github, context, core, repairEnabled = tr
           : `Attempt ${run.run_attempt}: ${failedJobs.length} failed or timed-out jobs.`,
         `${runUrl}/attempts/${run.run_attempt}`, "",
         details || "No failed job details are available. Inspect the workflow-level failure in the run summary.",
+        ...(episode?.bundle.failures.some((failure) => failure.diagnosis.startsWith("opaque:"))
+          ? ["Complete diagnostic identity is unavailable for one or more jobs; these failures cannot be grouped across runs."] : []),
         ...(history.incomplete ? ["Recovery history is incomplete; this report remains open pending verified coverage."] : []),
       ].join("\n"),
     });
@@ -449,7 +519,7 @@ async function reportWorkflowFailure({ github, context, core, repairEnabled = tr
     return {issue: issue.number, dispatched: false, recovered: true};
   }
   const pulls = await github.paginate(github.rest.pulls.list, {...params, state: "open", per_page: 100});
-  if (pulls.some((pr) => coveringPull(pr, issue, repository))) return {issue: issue.number, dispatched: false};
+  if (pulls.some((pr) => coveringPull(pr, issue, repository, episode))) return {issue: issue.number, dispatched: false};
 
   if (operational || cancelledWithoutSteps || !repairEnabled || !trustedHead || !defaultBranchRun || comments.some((comment) => ownsMarker(comment, dispatchMarker))) {
     return { issue: issue.number, dispatched: false, operational };
