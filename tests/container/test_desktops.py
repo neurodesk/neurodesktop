@@ -1208,7 +1208,7 @@ def test_xrdp_tls_key_access():
     )
 
 
-@pytest.mark.parametrize("home_layout", ["fresh", "legacy", "xdg", "relative-xdg"])
+@pytest.mark.parametrize("home_layout", ["fresh", "legacy", "xdg", "relative-xdg", "ssh-disabled"])
 def test_guac_vnc_tunnel(home_layout, monkeypatch):
     """End-to-end VNC smoke test through Guacamole - auth + desktop render.
 
@@ -1218,6 +1218,20 @@ def test_guac_vnc_tunnel(home_layout, monkeypatch):
     Guacamole read the mapping before guacamole.sh finished stamping the
     dynamic port."""
     nb_user, home_dir, _, guacamole_home = _prepare_guacamole_runtime()
+    monkeypatch.setenv(
+        "NEURODESKTOP_DISABLE_SSH", "true" if home_layout == "ssh-disabled" else "false"
+    )
+    if home_layout == "ssh-disabled":
+        state = Path(home_dir) / ".neurodesk"
+        runtime = state / "runtime-vnc"
+        runtime.mkdir(parents=True)
+        stale_port = runtime / "sftp_port"
+        stale_port.write_text("2299\n")
+        if os.geteuid() == 0:
+            for path in (state, runtime, stale_port):
+                shutil.chown(path, user=nb_user)
+        before_sshd = subprocess.run(["pgrep", "-x", "sshd"], capture_output=True, text=True)
+        assert before_sshd.returncode in (0, 1), before_sshd.stderr
 
     config_home = Path(home_dir) / ".config"
     if home_layout == "xdg":
@@ -1267,6 +1281,12 @@ def test_guac_vnc_tunnel(home_layout, monkeypatch):
                     mapping_vnc_port = int(match.group(1))
             time.sleep(1)
         assert mapping_vnc_port, f"VNC port never stamped into user-mapping.xml at {mapping_path}"
+        if home_layout == "ssh-disabled":
+            assert '<param name="enable-sftp">false</param>' in mapping_text
+            assert not stale_port.exists()
+            after_sshd = subprocess.run(["pgrep", "-x", "sshd"], capture_output=True, text=True)
+            assert after_sshd.returncode in (0, 1), after_sshd.stderr
+            assert not set(after_sshd.stdout.split()) - set(before_sshd.stdout.split())
 
         _, ss_out = run_cmd("ss -lntp 2>/dev/null | grep -E 'Xtigervnc|Xvnc'")
         assert ss_out, (

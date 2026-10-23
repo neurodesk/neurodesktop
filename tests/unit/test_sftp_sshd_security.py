@@ -12,31 +12,35 @@ ENSURE_SFTP_SSHD = resolve_source(
 
 
 @pytest.mark.parametrize(
-    ("saved_listeners", "effective_listeners", "use_fallback"),
+    ("saved_listeners", "effective_listeners", "use_fallback", "disable_ssh"),
     [
-        ("", "listenaddress 127.0.0.1:2222\n", False),
-        ("ListenAddress 127.0.0.1\n", "listenaddress 127.0.0.1:2222\n", False),
+        ("", "listenaddress 127.0.0.1:2222\n", False, None),
+        ("ListenAddress 127.0.0.1\n", "listenaddress 127.0.0.1:2222\n", False, "false"),
         (
             "ListenAddress 0.0.0.0\n",
             "listenaddress 127.0.0.1:2222\nlistenaddress 0.0.0.0:2222\n",
             True,
+            None,
         ),
         (
             "ListenAddress ::\n",
             "listenaddress 127.0.0.1:2222\nlistenaddress [::]:2222\n",
             True,
+            None,
         ),
         (
             "Include sshd_config.d/*.conf\n",
             "listenaddress 127.0.0.1:2222\nlistenaddress 192.0.2.1:2222\n",
             True,
+            None,
         ),
-        ("", "", True),
+        ("", "", True, None),
+        ("", "listenaddress 127.0.0.1:2222\n", False, "true"),
     ],
-    ids=["legacy", "loopback", "ipv4-wildcard", "ipv6-wildcard", "include", "missing"],
+    ids=["legacy", "loopback", "ipv4-wildcard", "ipv6-wildcard", "include", "missing", "disabled"],
 )
 def test_sftp_sshd_forces_loopback_for_restored_config(
-    tmp_path, saved_listeners, effective_listeners, use_fallback
+    tmp_path, saved_listeners, effective_listeners, use_fallback, disable_ssh
 ):
     """Saved addresses, including included directives, must not expose SFTP."""
     home = tmp_path / "home"
@@ -53,6 +57,8 @@ def test_sftp_sshd_forces_loopback_for_restored_config(
     (ssh_dir / "sshd_config").write_text(saved_config)
 
     runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    (runtime / "sftp_port").write_text("2299\n")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     started = tmp_path / "sshd-started"
@@ -99,12 +105,21 @@ def test_sftp_sshd_forces_loopback_for_restored_config(
         "FAKE_SSHD_STARTED": str(started),
         "FAKE_SSHD_EFFECTIVE_CONFIG": effective_listeners,
     }
+    env.pop("NEURODESKTOP_DISABLE_SSH", None)
+    if disable_ssh is not None:
+        env["NEURODESKTOP_DISABLE_SSH"] = disable_ssh
 
     result = subprocess.run(
         ["bash", str(driver)], env=env, capture_output=True, text=True, timeout=10
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+    if disable_ssh == "true":
+        assert "NEURODESKTOP_DISABLE_SSH=true: skipping SSH/SFTP service." in result.stdout
+        assert not started.exists()
+        assert not arguments.exists()
+        assert not (runtime / "sftp_port").exists()
+        return
     assert (runtime / "sftp_port").read_text() == "2222\n"
     assert "ListenAddress=127.0.0.1\n" in arguments.read_text()
     selected_config = ssh_dir / ("sshd_config.fallback" if use_fallback else "sshd_config")

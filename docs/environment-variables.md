@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-10-16"
+last-reviewed: "2026-10-23"
 ---
 
 # Environment Variables
@@ -173,6 +173,13 @@ for RDP initialization and VS Code isolation.
 
 ## Desktop (VNC/RDP, Guacamole, Firefox)
 
+- `NEURODESKTOP_DISABLE_SSH`: set to `true` to prevent the Guacamole SFTP
+  daemon and Jupyter SSH proxy from starting. Defaults to unset, preserving
+  SSH availability. Apply it before starting Jupyter and the desktop. The
+  Sherlock launcher passes `--env NEURODESKTOP_DISABLE_SSH=true` to Apptainer.
+  The desktop and Jupyter uploads and downloads remain available, while
+  Guacamole file transfers and SSH through Jupyter are disabled. Host SSH
+  connections and the Sherlock tunnel are unaffected
 - `NVIDIA_DRIVER_CAPABILITIES`: NVIDIA Container Toolkit's driver-library
   capabilities. The image defaults to `compute,utility,graphics,display` so
   an allocated GPU has OpenGL/EGL libraries as well as CUDA and diagnostics.

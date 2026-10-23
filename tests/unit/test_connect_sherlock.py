@@ -30,6 +30,29 @@ def test_connect_sherlock_is_valid_bash():
     assert result.returncode == 0, result.stderr
 
 
+def test_sherlock_disables_container_ssh_in_the_apptainer_invocation(tmp_path):
+    setup = SCRIPT.read_text(encoding="utf-8").split(
+        "unset APPTAINERENV_HOME\n", 1
+    )[1].split("\nEOF", 1)[0]
+    arguments = tmp_path / "apptainer-arguments"
+    command = f"""
+apptainer() {{ printf '%s\\n' "$@" > {shlex.quote(str(arguments))}; }}
+GROUP_HOME={shlex.quote(str(tmp_path))}
+NEURODESKTOP_DISABLE_SSH=false
+{setup}
+"""
+
+    result = run_bash(command)
+
+    assert result.returncode == 0, result.stderr
+    argv = arguments.read_text(encoding="utf-8").splitlines()
+    assert argv[0] == "run"
+    assert "start-notebook.py" in argv
+    settings = [argv[index + 1] for index, argument in enumerate(argv) if argument == "--env"]
+    assert "NEURODESKTOP_DISABLE_SSH=true" in settings
+    assert "CVMFS_DISABLE=true" in settings
+
+
 def test_connect_sherlock_keeps_image_server_extensions_enabled():
     source = SCRIPT.read_text(encoding="utf-8")
 

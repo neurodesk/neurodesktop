@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Publish a port only after sshd binds it; stale ports can break VNC connections.
+NEURODESKTOP_RUNTIME_DIR="${NEURODESKTOP_RUNTIME_DIR:-${HOME}/.neurodesk/runtime}"
+mkdir -p "${NEURODESKTOP_RUNTIME_DIR}" 2>/dev/null || true
+rm -f "${NEURODESKTOP_RUNTIME_DIR}/sftp_port" 2>/dev/null || true
+if [ "${NEURODESKTOP_DISABLE_SSH:-false}" = "true" ]; then
+    echo "[INFO] NEURODESKTOP_DISABLE_SSH=true: skipping SSH/SFTP service."
+    exit 0
+fi
+
 SSH_DIR="${HOME}/.ssh"
 SSH_CONFIG="${SSH_DIR}/sshd_config"
 DEFAULT_SSH_CONFIG="/opt/jovyan_defaults/.ssh/sshd_config"
@@ -42,15 +51,6 @@ if [ -z "${SFTP_SSH_PORT:-}" ]; then
     SFTP_SSH_PORT="$(find_free_tcp_port_for_sftp 2222 20 || true)"
 fi
 export NEURODESKTOP_SFTP_PORT="${SFTP_SSH_PORT}"
-
-# Runtime dir where we will publish the chosen port IFF sshd actually binds it.
-# Do NOT publish eagerly: if the start fails later, guacamole.sh would otherwise
-# stamp a dead port into user-mapping.xml and Guacamole would abort the VNC
-# tunnel with CLIENT_UNAUTHORIZED (0x0301) at connect time when it tries to
-# initialise the SFTP side-channel.
-NEURODESKTOP_RUNTIME_DIR="${NEURODESKTOP_RUNTIME_DIR:-${HOME}/.neurodesk/runtime}"
-mkdir -p "${NEURODESKTOP_RUNTIME_DIR}" 2>/dev/null || true
-rm -f "${NEURODESKTOP_RUNTIME_DIR}/sftp_port" 2>/dev/null || true
 
 SFTP_SSH_PID_FILE="/tmp/sshd_${SFTP_SSH_PORT}_${UID:-$(id -u)}.pid"
 
