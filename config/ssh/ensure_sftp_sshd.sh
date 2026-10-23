@@ -52,7 +52,8 @@ if [ -z "${SFTP_SSH_PORT:-}" ]; then
 fi
 export NEURODESKTOP_SFTP_PORT="${SFTP_SSH_PORT}"
 
-SFTP_SSH_PID_FILE="/tmp/sshd_${SFTP_SSH_PORT}_${UID:-$(id -u)}.pid"
+# Keep daemon state in the user's private SSH directory on shared HPC hosts.
+SFTP_SSH_PID_FILE="${SSH_DIR}/sshd_${SFTP_SSH_PORT}.pid"
 
 warn() {
     echo "[WARN] $1"
@@ -192,14 +193,9 @@ start_sshd() {
         return 0
     fi
 
-    if [ -f "${SFTP_SSH_PID_FILE}" ]; then
-        local existing_pid
-        existing_pid="$(cat "${SFTP_SSH_PID_FILE}" 2>/dev/null || true)"
-        if [ -n "${existing_pid}" ] && kill -0 "${existing_pid}" 2>/dev/null; then
-            return 0
-        fi
-        rm -f "${SFTP_SSH_PID_FILE}"
-    fi
+    # A persisted PID can belong to another host or a previous container.
+    # The listener check above and sshd's bind determine local availability.
+    rm -f "${SFTP_SSH_PID_FILE}"
 
     if sudo -n true 2>/dev/null; then
         sshd_prefix=(sudo)

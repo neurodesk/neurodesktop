@@ -111,7 +111,11 @@ The SSH daemon used only for Guacamole's VNC SFTP side-channel listens on
 from included files. A saved configuration that allows another address uses a
 minimal loopback-only fallback without replacing the saved file. This prevents
 persisted configurations from exposing the service on a container or shared
-HPC network interface.
+HPC network interface. Its PID file also stays in the user's mode-0700 SSH
+directory, so another UID on a shared host cannot replace the daemon's state
+path between startup checks and the daemon opening it. Startup checks the local
+listener rather than trusting a saved PID, which can be reused after a container
+restart or belong to another host sharing the home directory.
 
 Set `NEURODESKTOP_DISABLE_SSH=true` before startup to disable that daemon and
 the separate `jupyter-sshd-proxy` endpoint. Guacamole startup removes stale SFTP

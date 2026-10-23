@@ -11,6 +11,7 @@ ENSURE_SFTP_SSHD = resolve_source(
 )
 
 
+@pytest.mark.parametrize("stale_pid", [False, True], ids=["fresh", "reused-pid"])
 @pytest.mark.parametrize(
     ("saved_listeners", "effective_listeners", "use_fallback", "disable_ssh"),
     [
@@ -40,7 +41,7 @@ ENSURE_SFTP_SSHD = resolve_source(
     ids=["legacy", "loopback", "ipv4-wildcard", "ipv6-wildcard", "include", "missing", "disabled"],
 )
 def test_sftp_sshd_obeys_startup_policy_for_restored_config(
-    tmp_path, saved_listeners, effective_listeners, use_fallback, disable_ssh
+    tmp_path, saved_listeners, effective_listeners, use_fallback, disable_ssh, stale_pid
 ):
     """Restore loopback-only SFTP or skip it entirely when SSH is disabled."""
     home = tmp_path / "home"
@@ -55,6 +56,8 @@ def test_sftp_sshd_obeys_startup_policy_for_restored_config(
         + saved_listeners
     )
     (ssh_dir / "sshd_config").write_text(saved_config)
+    if stale_pid:
+        (ssh_dir / "sshd_2222.pid").write_text(f"{os.getpid()}\n")
 
     runtime = tmp_path / "runtime"
     runtime.mkdir()
@@ -63,6 +66,10 @@ def test_sftp_sshd_obeys_startup_policy_for_restored_config(
     bin_dir.mkdir()
     started = tmp_path / "sshd-started"
     arguments = tmp_path / "sshd-arguments"
+    shared_tmp = tmp_path / "shared-tmp"
+    shared_tmp.mkdir()
+    attack_target = tmp_path / "other-user-file"
+    attack_target.write_text("private\n")
 
     fake_sshd = bin_dir / "sshd"
     fake_sshd.write_text(
@@ -74,6 +81,18 @@ def test_sftp_sshd_obeys_startup_policy_for_restored_config(
         "if [[ \" $* \" == *\" -t \"* ]]; then exit 0; fi\n"
         'printf "%s\\n" "$@" > "$FAKE_SSHD_ARGUMENTS"\n'
         'if [[ \" $* \" != *\" -o ListenAddress=127.0.0.1 \"* ]]; then exit 64; fi\n'
+        'previous=""\n'
+        'for argument in "$@"; do\n'
+        '  if [ "$previous" = "-o" ] && [[ "$argument" == PidFile=* ]]; then\n'
+        '    pid_file=${argument#PidFile=}\n'
+        '  fi\n'
+        '  previous=$argument\n'
+        'done\n'
+        'if [[ "$pid_file" == "$FAKE_SHARED_TMP"/* ]]; then\n'
+        '  rm -f "$pid_file"\n'
+        '  ln -s "$FAKE_ATTACK_TARGET" "$pid_file"\n'
+        'fi\n'
+        'printf "4242\\n" > "$pid_file"\n'
         'touch "$FAKE_SSHD_STARTED"\n'
     )
     fake_sshd.chmod(0o755)
@@ -92,6 +111,9 @@ def test_sftp_sshd_obeys_startup_policy_for_restored_config(
     # Redirect only the unavailable image-owned executable. The test still
     # executes the complete startup script and observes its published state.
     script = ENSURE_SFTP_SSHD.read_text().replace("/usr/sbin/sshd", str(fake_sshd))
+    # Isolate the simulated world-writable directory from the host while
+    # preserving the production path's ownership and race model.
+    script = script.replace("/tmp/sshd_", f"{shared_tmp}/sshd_")
     driver = tmp_path / "ensure_sftp_sshd.sh"
     driver.write_text(script)
     driver.chmod(0o755)
@@ -104,6 +126,8 @@ def test_sftp_sshd_obeys_startup_policy_for_restored_config(
         "FAKE_SSHD_ARGUMENTS": str(arguments),
         "FAKE_SSHD_STARTED": str(started),
         "FAKE_SSHD_EFFECTIVE_CONFIG": effective_listeners,
+        "FAKE_SHARED_TMP": str(shared_tmp),
+        "FAKE_ATTACK_TARGET": str(attack_target),
     }
     env.pop("NEURODESKTOP_DISABLE_SSH", None)
     if disable_ssh is not None:
@@ -121,6 +145,10 @@ def test_sftp_sshd_obeys_startup_policy_for_restored_config(
         assert not (runtime / "sftp_port").exists()
         return
     assert (runtime / "sftp_port").read_text() == "2222\n"
+    assert attack_target.read_text() == "private\n"
+    assert f"PidFile={ssh_dir / 'sshd_2222.pid'}\n" in arguments.read_text()
+    assert (ssh_dir / "sshd_2222.pid").read_text() == "4242\n"
+    assert ssh_dir.stat().st_mode & 0o777 == 0o700
     assert "ListenAddress=127.0.0.1\n" in arguments.read_text()
     selected_config = ssh_dir / ("sshd_config.fallback" if use_fallback else "sshd_config")
     assert f"-f\n{selected_config}\n" in arguments.read_text()
