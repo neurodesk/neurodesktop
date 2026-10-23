@@ -1,5 +1,3 @@
-"""Exercise the installed Python CA-bundle security boundary."""
-
 from importlib.metadata import version
 from pathlib import Path
 

@@ -467,6 +467,9 @@ records why the headers remain installed and how the exceptions are bounded.
 `test_python_ca_security.py` parses the shipped `certifi` bundle and rejects the
 two distrusted emSign G3 roots; the ASTRA agent-skills test continues to execute
 the image's pinned `uv` binary.
+The checkout tests execute the build's `uv` version check with release banners
+containing target or commit metadata. They require the exact pinned version
+and reject a failing command even when it prints the expected release.
 
 The preparation job chooses one UTC build timestamp for both architectures and
 publication, so date tags match the version baked into the image even across

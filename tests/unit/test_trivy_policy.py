@@ -7,8 +7,6 @@ import yaml
 from testlib import repo_path
 
 
-# Both architecture scans reported these findings across Build neurodesktop
-# run 39464164441 and Build neurodesktop-test run 39641150130.
 HEADER_FINDINGS = (
     "CVE-2026-89530",
     "CVE-2026-89652",

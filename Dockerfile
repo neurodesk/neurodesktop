@@ -737,7 +737,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     "chardet<8" \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade "litellm>=1.105.1" \
     && test "$(/opt/conda/bin/python -c 'import importlib.metadata as m; print(m.version("certifi"))')" = "${CERTIFI_VERSION}" \
-    && test "$(/opt/conda/bin/uv --version)" = "uv ${UV_VERSION}" \
+    && UV_RELEASE="$(/opt/conda/bin/uv --version)" && test "${UV_RELEASE%% (*}" = "uv ${UV_VERSION}" \
     # Replace public API sample tokens before committing source or bytecode to a layer.
     && /opt/conda/bin/python /tmp/sanitize_ghapi_examples.py \
     && /opt/conda/bin/python /tmp/sanitize_anthropic_examples.py \
