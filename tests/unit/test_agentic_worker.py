@@ -1136,3 +1136,105 @@ def test_blocked_notice_fits_a_result_at_the_combined_publication_limit(worker, 
     result = worker.validate_result(json.loads((output / "result.json").read_text()))
     assert result["outcome"] == "blocked"
     assert "frozen_baseline" in result["body"] and "candidate" in result["body"]
+
+
+@pytest.mark.parametrize("first_unavailable", [False, True])
+def test_prepare_preserves_third_failure_through_shared_unicode_budget(worker, github, monkeypatch, tmp_path, first_unavailable):
+    responses, _ = github
+    responses["repos/owner/repo/issues/42"]["body"] = "https://github.com/owner/repo/actions/runs/20/attempts/2"
+    responses["repos/owner/repo/actions/runs/20"] = {"id": 20, "run_attempt": 3}
+    responses["repos/owner/repo/actions/runs/20/attempts/2"] = {"id": 20, "run_attempt": 2}
+    jobs = [{
+        "id": index, "name": name, "conclusion": "failure",
+        "steps": [{"name": "Test" if index == 3 else "Scan", "conclusion": "failure", "extra": "x" * 80000}],
+        "metadata": "x" * 80000,
+    } for index, name in enumerate(["scan (amd64)", "scan (arm64)", "runtime (arm64)"], 1)]
+    original_pages = worker.pages
+    job_paths = []
+
+    def pages(path, *, key=None):
+        if "/jobs?" in path:
+            job_paths.append(path)
+            return jobs
+        return original_pages(path)
+
+    requested = []
+
+    def command(args):
+        job_id = int(args[args.index("--job") + 1])
+        requested.append(job_id)
+        if job_id == 1 and first_unavailable:
+            raise RuntimeError("log expired")
+        diagnostic = "CVE-2026-1234 libthing HIGH 1.0 1.1" if job_id < 3 else (
+            "FAILED tests/container/test_guacamole.py::test_guac_vnc_tunnel[relative-xdg]\n"
+            "E AssertionError: Guacamole protocol error"
+        )
+        return "😀 setup\n" * 20000 + diagnostic + "\n" + "cleanup é\n" * 10000
+
+    monkeypatch.setattr(worker, "pages", pages)
+    monkeypatch.setattr(worker, "command", command)
+    worker.prepare("issue", "42", "owner/repo", "100", tmp_path)
+    evidence = json.loads((tmp_path / "task.json").read_text())["context"]["failure_evidence"]
+    serialized = json.dumps(evidence)
+    assert requested == [1, 2, 3]
+    assert all("/attempts/2/" in path for path in job_paths)
+    assert len(serialized) <= 40000
+    assert "test_guac_vnc_tunnel[relative-xdg]" in serialized
+    assert "Guacamole protocol error" in serialized
+    assert "CVE-2026-1234" in serialized
+    assert all(name in serialized for name in ("scan (amd64)", "scan (arm64)", "runtime (arm64)"))
+    assert "extra" not in serialized and "metadata" not in serialized
+    assert worker.bounded_context({"failure_evidence": evidence})["failure_evidence"] == evidence
+    if first_unavailable:
+        assert "Log unavailable" in serialized
+
+
+def workflow_incident():
+    bundle = {
+        "scope": {"workflowId": 55, "headRepository": "owner/repo", "exactRef": "main", "branchScope": True},
+        "sourceSHA": "a" * 40,
+        "failures": [{"check": {"jobName": "runtime", "failedStepNames": ["Test"]},
+                      "conclusion": "failure", "diagnosis": "b" * 64}],
+    }
+    record = {
+        "key": hashlib.sha256(json.dumps(bundle, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+        "origin": {"runId": 20, "attempt": 2}, "bundle": bundle,
+    }
+    issue = {
+        "number": 42, "state": "open", "labels": [], "user": {"login": "github-actions[bot]"},
+        "body": "<!-- neurodesktop-workflow-failure: run=20 -->\n"
+                "<!-- neurodesktop-incident:v1 " + json.dumps(record, separators=(",", ":")) + " -->\n"
+                "Workflow failure https://github.com/owner/repo/actions/runs/20/attempts/2",
+    }
+    return issue, {"key": record["key"], "origin": record["origin"]}
+
+
+def test_workflow_incident_publication_cannot_close_it(worker, proposal, publisher_api, monkeypatch):
+    task, output, repo, remote = proposal
+    issue, binding = workflow_incident()
+    task["incident"] = binding
+    original = worker.api
+    monkeypatch.setattr(worker, "api", lambda path, payload=None: issue if path == "repos/owner/repo/issues/42" else original(path, payload))
+    worker.write_json(output / "result.json", valid_result(
+        title="Fixes #42: preserve logs",
+        body="Closes #42. Fixed owner/repo#42. Resolves https://github.com/owner/repo/issues/42.",
+        pending_validation=["Fixes #42 after image tests"],
+    ))
+    assert worker.publish(task, output, repo) == 91
+    request = next(payload for path, payload in publisher_api[0] if path == "repos/owner/repo/pulls")
+    published = request["body"] + request["title"] + worker.git("log", "-1", "--format=%B", task["branch"], cwd=remote)
+    assert "Tracks #42" in request["body"]
+    assert not any(word in published.lower() for word in ("fixes ", "fixed ", "closes ", "resolves "))
+    assert "original" in request["body"].lower()
+
+
+def test_publication_rechecks_workflow_incident_eligibility(worker, proposal, publisher_api, monkeypatch):
+    task, output, repo, _ = proposal
+    issue, binding = workflow_incident()
+    task["incident"] = binding
+    issue["state"] = "closed"
+    original = worker.api
+    monkeypatch.setattr(worker, "api", lambda path, payload=None: issue if path == "repos/owner/repo/issues/42" else original(path, payload))
+    with pytest.raises(ValueError, match="incident"):
+        worker.publish(task, output, repo)
+    assert not publisher_api[1]
