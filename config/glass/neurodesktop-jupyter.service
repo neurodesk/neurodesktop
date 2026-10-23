@@ -1,7 +1,7 @@
 [Unit]
 Description=Authenticated on-demand Neurodesktop JupyterLab
-After=neurodesktop-glass.service
-Requires=neurodesktop-glass.service
+After=neurodesktop-prepare.service
+Requires=neurodesktop-prepare.service
 
 [Service]
 Type=simple

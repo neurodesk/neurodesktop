@@ -1,0 +1,14 @@
+[Unit]
+Description=Prepare Neurodesktop user session without starting a display
+After=ccx3-stage2.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=NEURODESKTOP_RUNTIME=glass
+Environment=NEURODESKTOP_CVMFS_STARTUP_MODE=external
+Environment=CVMFS_DISABLE=true
+Environment=PATH=/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/python3 -I /opt/neurodesktop/glass/runtime.py prepare
+TimeoutStartSec=300
+KillMode=control-group
