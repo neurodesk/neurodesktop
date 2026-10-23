@@ -24,13 +24,14 @@ the same candidates to release tags. Native runtime checks cover both image
 architectures. A date tag never substitutes for building the run's source SHA.
 
 The shared [Trivy policy](../../.trivyignore.yaml) records individual scan
-exceptions. [Issue #1142](https://github.com/neurodesk/neurodesktop/issues/1142)
-identified eight kernel CVEs reported against Ubuntu 26.04's
+exceptions. [Issues #1142](https://github.com/neurodesk/neurodesktop/issues/1142)
+and [#1152](https://github.com/neurodesk/neurodesktop/issues/1152) identified
+twelve kernel CVEs reported against Ubuntu 26.04's
 `linux-libc-dev` 7.0.0-38.38. That package contains UAPI headers without the
 affected kernel implementation. CVMFS requires it through `uuid-dev` and
 `libc6-dev`; removing the headers breaks that dependency chain. Containers use
 the host kernel, whose security updates remain the host administrator's responsibility.
-These eight exceptions match only the assessed Ubuntu package and version,
+These twelve exceptions match only the assessed Ubuntu package and version,
 on either architecture, and expire on 2026-11-20 for reassessment. Other
 package versions, kernel packages, and CVEs remain subject to the scan gate.
 
@@ -96,6 +97,13 @@ standalone documentation strings and removes the affected modules' bytecode.
 It validates all six files before writing and fails if their example counts
 change or the literal appears in executable code. SDK request construction,
 user credentials, and scanner rules remain unchanged.
+
+The main Python environment pins `pip` 26.2.2, `certifi` 2026.10.19, and
+`uv` 0.13.4. Their fixed releases remove the compromised emSign G3 trust
+paths. Updating the main `certifi` distribution does not update pip's vendored
+copy, so pip is upgraded before installing the other Python packages.
+The installed-image test inspects both certifi bundles. The pins remain under
+the direct-version audit and Renovate tracking.
 
 The runtime stage is ordered by how often each layer's inputs change, because
 invalidating a layer re-runs every layer after it. Three bands, in order:

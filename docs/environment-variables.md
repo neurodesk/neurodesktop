@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-10-16"
+last-reviewed: "2026-10-23"
 ---
 
 # Environment Variables
@@ -153,7 +153,10 @@ for RDP initialization and VS Code isolation.
   cgroup v2 or v1 limit files. Inside a Slurm job (`SLURM_JOB_ID` set), a
   valid `SLURM_MEM_PER_NODE`, or `SLURM_MEM_PER_CPU` times the CPU count, and
   `SLURM_CPUS_ON_NODE`, `SLURM_JOB_CPUS_PER_NODE` or `SLURM_CPUS_PER_TASK`
-  override them. A preset value is kept when no limit is detected
+  override them. A preset value is kept when no limit is detected.
+  The Sherlock interactive launcher forwards those Slurm memory and CPU
+  variables across its compute-node SSH connection so the indicator receives
+  the allocation limits. Slurm enforces the allocation independently
 
 ## Slurm
 
@@ -173,6 +176,13 @@ for RDP initialization and VS Code isolation.
 
 ## Desktop (VNC/RDP, Guacamole, Firefox)
 
+- `NEURODESKTOP_DISABLE_SSH`: set to `true` to prevent the Guacamole SFTP
+  daemon and Jupyter SSH proxy from starting. Defaults to unset, preserving
+  SSH availability. Apply it before starting Jupyter and the desktop. The
+  Sherlock launcher passes `--env NEURODESKTOP_DISABLE_SSH=true` to Apptainer.
+  Guacamole's VNC SFTP transfers and SSH through Jupyter are disabled.
+  RDP drive transfers, Jupyter uploads and downloads, host SSH connections,
+  and the Sherlock tunnel remain available
 - `NVIDIA_DRIVER_CAPABILITIES`: NVIDIA Container Toolkit's driver-library
   capabilities. The image defaults to `compute,utility,graphics,display` so
   an allocated GPU has OpenGL/EGL libraries as well as CUDA and diagnostics.
@@ -346,11 +356,14 @@ reviewed; the Dockerfile itself is authoritative.
   to rebuild the JupyterLab 4.6 collaboration frontends;
   defaults to
   `4.5.11`
-- `UV_VERSION`, `ASTRA_TOOLS_VERSION`, `ASTRA_SPEC_VERSION`,
-  `ANYWIDGET_VERSION`, `LIGHTCONE_CLI_VERSION`, `LIGHTCONE_CLI_SHA256`: exact `uv`,
+- `PIP_VERSION`, `CERTIFI_VERSION`, `UV_VERSION`, `ASTRA_TOOLS_VERSION`, `ASTRA_SPEC_VERSION`,
+  `ANYWIDGET_VERSION`, `LIGHTCONE_CLI_VERSION`, `LIGHTCONE_CLI_SHA256`: exact
+  `pip`, `certifi`, `uv`,
   ASTRA CLI/schema, viewer runtime, and isolated Lightcone CLI releases
-  installed in the image; defaults to `0.13.1`, `0.2.18`, `0.0.14`, `0.11.0`,
-  `0.5.0`, and the verified SHA-256 of that Lightcone source archive
+  installed in the image; defaults to `26.2.2`, `2026.10.19`, `0.13.4`, `0.2.18`,
+  `0.0.14`, `0.11.0`, `0.5.0`, and the verified SHA-256 of that Lightcone
+  source archive. The `pip`, `certifi`, and `uv` pins exclude compromised
+  emSign G3 trust paths from their bundled CA stores
 - `SNAKEMAKE_VERSION`: user-facing Snakemake workflow release; defaults to
   `9.27.0` in an isolated tool environment. Its metadata requires
   `packaging<26`, so that environment holds `packaging` at `25.0`.

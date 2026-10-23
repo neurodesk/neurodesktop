@@ -7,7 +7,6 @@ import yaml
 from testlib import repo_path
 
 
-# Both scans in Build neurodesktop run 39464164441 reported these findings.
 HEADER_FINDINGS = (
     "CVE-2026-89530",
     "CVE-2026-89652",
@@ -17,6 +16,10 @@ HEADER_FINDINGS = (
     "CVE-2026-90162",
     "CVE-2026-93221",
     "CVE-2026-98365",
+    "CVE-2026-98571",
+    "CVE-2026-98621",
+    "CVE-2026-98725",
+    "CVE-2026-98805",
 )
 
 

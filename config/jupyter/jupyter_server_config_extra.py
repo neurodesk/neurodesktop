@@ -4,9 +4,24 @@
 # jupyter_notebook_config.py so it has exactly one registration site next to
 # its warning suppression below; the legacy notebook config would add further
 # re-applications through notebook_shim's per-extension-app loads.
+import os
 import sys
 
 from tornado.httpclient import AsyncHTTPClient
+
+
+if os.environ.get('NEURODESKTOP_DISABLE_SSH') == 'true':
+    from importlib.metadata import entry_points as _proxy_entry_points
+
+    import jupyter_server_proxy.config as _proxy_config
+
+    # Installed proxy entrypoints are added independently of ServerProxy.servers.
+    # Filter before loading sshd so it cannot register a route or seed host keys.
+    # Start from stdlib discovery to keep repeated config loads idempotent.
+    def _proxy_entry_points_without_ssh(**kwargs):
+        return [point for point in _proxy_entry_points(**kwargs) if point.name != 'sshd']
+
+    _proxy_config.entry_points = _proxy_entry_points_without_ssh
 
 
 # jupyter-server-proxy buffers ordinary HTTP responses through Tornado's

@@ -27,14 +27,16 @@ permissions:
   contents: read
   actions: write
   issues: write
+  pull-requests: read
 
 concurrency:
-  group: failure-report-${{ github.event.workflow_run.id }}
+  group: failure-report-${{ github.event.workflow_run.workflow_id }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   report:
-    if: contains(fromJSON('["failure", "timed_out"]'), github.event.workflow_run.conclusion)
+    if: contains(fromJSON('["failure", "timed_out", "success"]'), github.event.workflow_run.conclusion)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

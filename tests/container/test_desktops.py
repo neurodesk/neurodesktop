@@ -1115,8 +1115,9 @@ def test_guac_login_rejects_legacy_default_password():
 
 
 @pytest.mark.parametrize("sftp_config", ["default", "wildcard", "include"])
-def test_vnc_backends_bind_localhost_only(sftp_config):
+def test_vnc_backends_bind_localhost_only(sftp_config, monkeypatch):
     """VNC and its SFTP side-channel must be reachable only on loopback."""
+    monkeypatch.setenv("NEURODESKTOP_DISABLE_SSH", "false")
     nb_user, home_dir, _, guacamole_home = _prepare_guacamole_runtime()
     if sftp_config != "default":
         ssh_dir = Path(home_dir) / ".ssh"
@@ -1208,8 +1209,10 @@ def test_xrdp_tls_key_access():
     )
 
 
-@pytest.mark.parametrize("home_layout", ["fresh", "legacy", "xdg", "relative-xdg"])
-def test_guac_vnc_tunnel(home_layout, monkeypatch):
+@pytest.mark.parametrize(
+    "scenario", ["fresh", "legacy", "xdg", "relative-xdg", "ssh-disabled", "ssh-disabled-both"]
+)
+def test_guac_vnc_tunnel(scenario, monkeypatch):
     """End-to-end VNC smoke test through Guacamole - auth + desktop render.
 
     Authentication errors may follow the initial sync handshake.
@@ -1217,32 +1220,53 @@ def test_guac_vnc_tunnel(home_layout, monkeypatch):
     matches an Xvnc process that is listening, to catch cache-drift bugs where
     Guacamole read the mapping before guacamole.sh finished stamping the
     dynamic port."""
+    if scenario == "ssh-disabled-both" and not _global_desktop_service_tests_enabled():
+        pytest.skip(
+            "Combined-backend SSH policy test can start the global RDP service; "
+            "set NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1 in disposable test containers."
+        )
+    backend = "both" if scenario == "ssh-disabled-both" else "vnc"
+    ssh_disabled = scenario in ("ssh-disabled", "ssh-disabled-both")
     nb_user, home_dir, _, guacamole_home = _prepare_guacamole_runtime()
+    monkeypatch.setenv(
+        "NEURODESKTOP_DISABLE_SSH", "true" if ssh_disabled else "false"
+    )
+    if ssh_disabled:
+        state = Path(home_dir) / ".neurodesk"
+        runtime = state / f"runtime-{backend}"
+        runtime.mkdir(parents=True)
+        stale_port = runtime / "sftp_port"
+        stale_port.write_text("2299\n")
+        if os.geteuid() == 0:
+            for path in (state, runtime, stale_port):
+                shutil.chown(path, user=nb_user)
+        before_sshd = subprocess.run(["pgrep", "-x", "sshd"], capture_output=True, text=True)
+        assert before_sshd.returncode in (0, 1), before_sshd.stderr
 
     config_home = Path(home_dir) / ".config"
-    if home_layout == "xdg":
+    if scenario == "xdg":
         config_home = Path(home_dir) / "custom" / "config"
         monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
-    elif home_layout == "relative-xdg":
+    elif scenario == "relative-xdg":
         monkeypatch.setenv("XDG_CONFIG_HOME", "relative-config-is-ignored")
     else:
         monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     assert not config_home.exists()
     legacy = Path(home_dir) / ".vnc"
     saved_config = '$geometry = "1024x768";\n'
-    if home_layout == "fresh":
+    if scenario == "fresh":
         shutil.rmtree(legacy)
     else:
         (legacy / "tigervnc.conf").write_text(saved_config)
         saved_startup = (legacy / "xstartup").read_bytes()
 
-    process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home, backend="vnc")
+    process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home, backend=backend)
     tunnel = None
     try:
         _guacamole_ready(process.tomcat_port, home_dir=home_dir, process=process)
         assert legacy.resolve() == config_home / "tigervnc"
         assert legacy.stat().st_uid == pwd.getpwnam(nb_user).pw_uid
-        if home_layout != "fresh":
+        if scenario != "fresh":
             assert (legacy / "tigervnc.conf").read_text() == saved_config
             assert (legacy / "xstartup").read_bytes() == saved_startup
         _guacd_port = _read_runtime_port(home_dir, "guacd_port", default=4822)
@@ -1267,6 +1291,12 @@ def test_guac_vnc_tunnel(home_layout, monkeypatch):
                     mapping_vnc_port = int(match.group(1))
             time.sleep(1)
         assert mapping_vnc_port, f"VNC port never stamped into user-mapping.xml at {mapping_path}"
+        if ssh_disabled:
+            assert '<param name="enable-sftp">false</param>' in mapping_text
+            assert not stale_port.exists()
+            after_sshd = subprocess.run(["pgrep", "-x", "sshd"], capture_output=True, text=True)
+            assert after_sshd.returncode in (0, 1), after_sshd.stderr
+            assert not set(after_sshd.stdout.split()) - set(before_sshd.stdout.split())
 
         _, ss_out = run_cmd("ss -lntp 2>/dev/null | grep -E 'Xtigervnc|Xvnc'")
         assert ss_out, (
