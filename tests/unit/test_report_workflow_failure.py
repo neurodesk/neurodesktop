@@ -569,6 +569,30 @@ def test_incomplete_history_can_be_reconsidered_on_failure_redelivery():
     assert not calls_of(output, "dispatch")
 
 
+@pytest.mark.parametrize("newer_first", [True, False])
+@pytest.mark.parametrize("closed", [False, True])
+def test_legacy_attempt_owner_precedes_equivalent_newer_episode(newer_first, closed):
+    original = marker_issue(state="closed" if closed else "open")
+    receipts = [marker_comment("attempt"), marker_comment("dispatched")]
+    pr = {
+        "number": 500, "state": "open", "user": {"login": "github-actions[bot]"},
+        "head": {"repo": {"full_name": "NeuroDesk/neurodesktop"}},
+        "body": "<!-- neurodesktop-agentic:issue:42 -->\nExisting proposal",
+    }
+    older, newer = incident_run(), incident_run(1235, 11)
+    runs = [newer, older] if newer_first else [older, newer]
+    output = run_reporter(issues=[original], comments=receipts, pulls=[pr], runs=runs + [older])
+    assert output["results"][1 if newer_first else 0]["issue"] == 42
+    assert output["results"][-1]["issue"] == 42
+    assert output["results"][-1]["dispatched"] is False
+    for kind in ("attempt", "dispatched"):
+        marker = f"<!-- neurodesktop-workflow-failure-{kind}: run=1234 attempt=1 -->"
+        owners = [c["issue_number"] for c in output["comments"] if c["body"].splitlines()[0] == marker]
+        assert owners == [42]
+    assert not any(c["inputs"]["issue-number"] == "42" for c in calls_of(output, "dispatch"))
+    assert output["issues"][0]["state"] == ("closed" if closed else "open")
+
+
 def test_missing_scope_never_groups_two_runs_or_authorizes_recovery():
     output = run_reporter(runs=[
         incident_run(workflow_id=None), incident_run(1235, 11, workflow_id=None),

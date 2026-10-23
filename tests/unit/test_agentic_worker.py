@@ -1307,3 +1307,128 @@ def test_incident_prepare_uses_trusted_occurrences_instead_of_pasted_urls(worker
     assert task["incident"] == binding
     assert task["context"]["failure_evidence"][0]["source"].endswith("/runs/20/attempts/2")
     assert not any("/666" in path for path, _ in calls)
+
+
+@pytest.mark.parametrize("kind", ["issue", "review"])
+@pytest.mark.parametrize("interruption", [None, "patch_response", "labels"])
+def test_persisted_incident_pr_is_nonclosing_after_publication_retry(
+    worker, proposal, monkeypatch, kind, interruption,
+):
+    task, output, repo, remote = proposal
+    issue, binding = workflow_incident()
+    task["incident"] = binding
+    worker.git("push", "origin", f"HEAD:refs/heads/{task['branch']}", cwd=repo)
+    if kind == "review":
+        task.update(kind="review", subject="91", incident_subject="42")
+    body = (
+        "<!-- neurodesktop-agentic:issue:42 -->\n"
+        "<!-- neurodesktop-incident-binding:v1 " + json.dumps(binding) + " -->\n"
+        "Original diagnosis and validation.\n\nFixes #42\nFixes #43"
+    )
+    pr = pull(title="Fixes #42: retain diagnostics", body=body,
+              html_url="https://github.com/owner/repo/pull/91")
+    comments, patches = {}, []
+    original_command = worker.command
+    interrupted = False
+
+    def command(args, **kwargs):
+        nonlocal interrupted
+        if args[:2] != ["gh", "api"]:
+            return original_command(args, **kwargs)
+        path = args[2]
+        method = args[args.index("--method") + 1] if "--method" in args else "GET"
+        payload = json.loads(kwargs["data"]) if kwargs.get("data") else None
+        if path == "repos/owner/repo/issues/42":
+            return json.dumps(issue)
+        if "/pulls?" in path:
+            return json.dumps([[pr]])
+        if path == "repos/owner/repo/pulls/91":
+            if method == "PATCH":
+                patches.append(payload)
+                pr.update(payload)
+                if interruption == "patch_response" and not interrupted:
+                    interrupted = True
+                    raise RuntimeError("Simulated lost PATCH response")
+            else:
+                assert method == "GET"
+            return json.dumps(pr)
+        if "/comments?" in path:
+            return json.dumps([comments.get(path.split("?")[0], [])])
+        if path.endswith("/comments"):
+            comments.setdefault(path, []).append({"user": {"login": "github-actions[bot]"}, **payload})
+            return "{}"
+        if path.endswith("/labels"):
+            if interruption == "labels" and not interrupted:
+                interrupted = True
+                raise RuntimeError("Simulated label failure")
+            return "[]"
+        raise AssertionError((path, method, payload))
+
+    monkeypatch.setattr(worker, "command", command)
+    worker.write_json(output / "result.json", valid_result(title="Closes #42: diagnostics"))
+    if interruption:
+        with pytest.raises(RuntimeError, match="Simulated"):
+            worker.publish(task, output, repo)
+    assert worker.publish(task, output, repo) == 91
+    first_head = worker.git("rev-parse", task["branch"], cwd=remote)
+    assert worker.publish(task, output, repo) == 91
+    assert pr["body"] == body.replace("Fixes #42", "Tracks #42")
+    assert pr["title"] == "Tracks #42: retain diagnostics"
+    assert patches == [{"title": pr["title"], "body": pr["body"]}]
+    assert worker.git("rev-parse", task["branch"], cwd=remote) == first_head
+    assert worker.git("rev-list", "--count", f"{task['base_sha']}..{task['branch']}", cwd=remote) == ("1" if kind == "review" else "0")
+    assert "Closes #42" not in worker.git("log", "-1", "--format=%B", task["branch"], cwd=remote)
+
+
+@pytest.mark.parametrize("first_unavailable", [False, True])
+def test_prepare_allocates_diagnostics_to_each_failed_step(worker, github, monkeypatch, tmp_path, first_unavailable):
+    responses, _ = github
+    responses["repos/owner/repo/issues/42"]["body"] = "https://github.com/owner/repo/actions/runs/20/attempts/2"
+    responses["repos/owner/repo/actions/runs/20/attempts/2"] = {"id": 20, "run_attempt": 2}
+    jobs = [{
+        "id": job, "name": f"job-{job}", "conclusion": "failure",
+        "steps": [
+            {"number": 1, "name": "Scan", "conclusion": "failure"},
+            {"number": 2, "name": "VNC", "conclusion": "failure"},
+            {"number": 3, "name": "Cleanup", "conclusion": "success"},
+        ],
+    } for job in range(1, 5)]
+    original_pages = worker.pages
+    monkeypatch.setattr(worker, "pages", lambda path, **kwargs: jobs if "/jobs?" in path else original_pages(path))
+    requested = []
+
+    def command(args):
+        job = int(args[args.index("--job") + 1])
+        requested.append(job)
+        if job == 1 and first_unavailable:
+            raise RuntimeError("Log expired")
+        def line(step, text):
+            return f"job-{job}\t{step}\t2026-10-20T10:00:00.0000000Z {text}\n"
+        return (
+            line("Scan", "Error: long scan diagnostic 😀 é") * 10000
+            + line("Scan", "SCAN-END")
+            + line("VNC", f"Error: UNIQUE-VNC-{job} Guacamole protocol error")
+            + line("VNC", f"VNC-END-{job}")
+            + line("Cleanup", "cleanup é") * 10000
+        )
+
+    monkeypatch.setattr(worker, "command", command)
+    worker.prepare("issue", "42", "owner/repo", "100", tmp_path)
+    evidence = json.loads((tmp_path / "task.json").read_text())["context"]["failure_evidence"]
+    serialized = json.dumps(evidence)
+    assert requested == [1, 2, 3, 4]
+    assert len(serialized) <= 40000
+    for job in range(2 if first_unavailable else 1, 5):
+        assert f"UNIQUE-VNC-{job}" in serialized
+        record = evidence[0]["logs"][job - 1]
+        assert [step["name"] for step in record["steps"]] == ["Scan", "VNC"]
+        scan, vnc = record["steps"]
+        assert "Error: long scan diagnostic" in scan["diagnostics"]
+        assert "SCAN-END" in scan["tail"]
+        assert f"UNIQUE-VNC-{job}" in vnc["diagnostics"]
+        assert f"VNC-END-{job}" in vnc["tail"]
+        assert "cleanup" not in vnc["tail"]
+        assert record["omitted_nonfailure_lines"] == 10000
+    if first_unavailable:
+        assert all(step["error"] == "Log unavailable" for step in evidence[0]["logs"][0]["steps"])
+    assert worker.bounded_context({"failure_evidence": evidence})["failure_evidence"] == evidence
