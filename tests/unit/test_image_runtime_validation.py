@@ -283,6 +283,18 @@ def test_failure_status_survives_cleanup(validate, hpc, failure, expected):
         assert not pytest_calls(records)
 
 
+@pytest.mark.parametrize("hpc", [False, True])
+def test_test_failure_prints_container_logs_before_cleanup(validate, hpc):
+    result, records, _ = validate(hpc=hpc, TEST_STATUS=23)
+
+    assert result.returncode == 23
+    commands = [record["args"] for record in records]
+    logs = commands.index(["logs", "--tail", "120", "neurodesktop-test"])
+    cleanup = commands.index(["rm", "-f", "neurodesktop-test"], logs)
+    assert logs < cleanup
+    assert "test container startup log" in result.stderr
+
+
 def test_package_security_failure_prevents_suite(validate):
     result, records, _ = validate(grant_sudo="packages", SECURITY_STATUS=29)
 

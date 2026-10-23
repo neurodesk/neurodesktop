@@ -440,6 +440,9 @@ widget suite remains available on displayless runners.
 
 The validator installs cleanup before startup, rejects a readiness timeout or
 malformed HTTP status, and propagates application and graphics test failures.
+Before removing a started container after a failed validation stage, it
+prints the last 120 container log lines so startup and service diagnostics
+survive cleanup.
 CVMFS-backed application validation currently applies to amd64; arm64 still
 runs the portable installed-image suite.
 
