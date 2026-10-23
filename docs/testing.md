@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-20"
+last-reviewed: "2026-10-23"
 ---
 
 # Testing
@@ -1284,7 +1284,12 @@ pytest tests/unit/test_startup_batching.py tests/unit/test_wait_for_jupyter.py t
 These tests cover workspace quarantine in a single Python invocation, default
 restoration and ownership repair, SSH permission inheritance, NBI boot setup
 without live refresh, custom Jupyter ports and base paths, and independent
-CVMFS and Slurm execution. Resource-limit detection is sourced from the
+CVMFS and Slurm execution. The restoration tests exercise `.bashrc_append`
+against existing and dangling links, checking target contents and metadata
+without permitting sudo, touch, or tee calls. They also cover ordinary files,
+repeat runs, a symlinked `HOME`, and the permission fallback.
+
+Resource-limit detection is sourced from the
 helper against temporary cgroup v2 and v1 trees, with Slurm allocation
 overrides and malformed or missing limit files. Host Slurm configuration is
 sourced from its helper against a temporary root with real Unix sockets,

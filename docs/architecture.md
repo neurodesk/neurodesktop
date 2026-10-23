@@ -4,7 +4,7 @@ description: Startup flow, services, directory layout, and the map of
   per-subsystem architecture pages
 parent: index.md
 status: current
-last-reviewed: "2026-10-22"
+last-reviewed: "2026-10-23"
 ---
 
 # Architecture
@@ -81,9 +81,14 @@ The startup sequence follows this order (per
    preserves missing-file restoration, newer-default migration, and privileged
    ownership repair without launching a process per destination path. It leaves
    user-managed symbolic-link destinations and linked parent directories
-   untouched rather than migrating image defaults through them. SSH default
-   ACLs are applied once, and matplotlib cache permissions are set at the cache
-   root without traversing generated files.
+   untouched rather than migrating image defaults through them. The special
+   `.bashrc_append` handler also skips existing and dangling `.bashrc` links
+   before reading, creating, or appending to their targets, including through
+   sudo. A symlinked `HOME` remains supported. Ordinary `.bashrc` files retain
+   marker-based idempotency and the permission fallback. This policy applies
+   to `restore_home_defaults.sh`; the earlier `before_notebook.sh` hook writes
+   `.bashrc` separately. SSH default ACLs are applied once, and matplotlib cache
+   permissions are set at the cache root without traversing generated files.
    Notebook Intelligence setup uses `--no-refresh` to write configuration
    without probing saved server addresses. Interactive OpenCode changes still
    refresh running Jupyter servers.

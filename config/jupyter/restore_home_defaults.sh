@@ -37,8 +37,6 @@ copy_file_with_fallback() {
     return 1
 }
 
-# Preserve user-managed links instead of following them while migrating image
-# defaults. This checks the destination and every existing path below HOME;
 # HOME itself may legitimately be a symlink supplied by the runtime.
 destination_has_symlink_component() {
     local candidate="$1"
@@ -116,6 +114,11 @@ handle_bashrc_append() {
     local append_file="${DEFAULTS_DIR}/.bashrc_append"
     local bashrc="${HOME_DIR}/.bashrc"
     local marker="# Neurodesk bashrc additions"
+
+    if destination_has_symlink_component "$bashrc"; then
+        log_info "Preserving user-managed symbolic link path: $bashrc"
+        return 0
+    fi
 
     if [ ! -f "$append_file" ]; then
         return 0
