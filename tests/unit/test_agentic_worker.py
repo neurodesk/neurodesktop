@@ -422,7 +422,7 @@ def test_failure_evidence_reads_jobs_from_paginated_objects(worker, monkeypatch,
     evidence = worker.failure_context("owner/repo", "https://github.com/owner/repo/actions/runs/20")
     assert evidence[0]["jobs"] == ([] if conclusion == "success" else jobs)
     assert evidence[0]["logs"] == ([] if conclusion == "success" else [
-        {"job": "check", "tail": "failed job evidence"},
+        {"job": "check", "job_id": 123, "diagnostics": "", "tail": "failed job evidence"},
     ])
     assert len(calls) == (2 if conclusion == "success" else 3)
 
@@ -455,9 +455,11 @@ def test_failure_evidence_uses_only_this_repository_and_bounded_logs(worker, mon
         "https://github.com/owner/repo/actions/runs/40",
     ])
     evidence = worker.failure_context("owner/repo", body)
-    assert [item["run"]["id"] for item in evidence] == ["20", "30"]
-    assert all(len(item["logs"]) == 2 for item in evidence)
-    assert all(len(log["tail"]) == 20000 for item in evidence for log in item["logs"])
+    assert [item["run"]["id"] for item in evidence] == ["20", "40"]
+    assert all(len(item["logs"]) == 4 for item in evidence)
+    assert len(json.dumps(evidence)) <= 40000
+    assert evidence[0]["omitted_runs"] == 1
+    assert all("Earlier evidence truncated" in log["tail"] for item in evidence for log in item["logs"])
     assert not any("attacker" in str(call) for call in calls)
 
 
@@ -699,7 +701,7 @@ def test_review_retries_after_push_without_another_commit(worker, proposal, publ
     _, _, original_api = publisher_api
     def api(path, payload=None):
         if path == "repos/owner/repo/pulls/42":
-            return {"state": "open", "head": {"sha": worker.git("rev-parse", task["branch"], cwd=remote)}}
+            return pull(head={**pull()["head"], "sha": worker.git("rev-parse", task["branch"], cwd=remote)})
         if path == "repos/owner/repo/issues/42/comments" and state["fail_comment"]:
             raise RuntimeError("Comment service unavailable")
         return original_api(path, payload)
@@ -768,7 +770,7 @@ def test_ci_push_replay_does_not_duplicate_empty_commit(worker, proposal, publis
     state = {"fail": True}
     def api(path, payload=None):
         if path == "repos/owner/repo/pulls/42":
-            return {"state": "open", "head": {"sha": worker.git("rev-parse", task["branch"], cwd=remote)}}
+            return pull(head={**pull()["head"], "sha": worker.git("rev-parse", task["branch"], cwd=remote)})
         if path.endswith("/comments") and state["fail"]:
             state["fail"] = False
             raise RuntimeError("Comment unavailable after CI push")
@@ -894,7 +896,7 @@ def test_review_comment_contains_current_revision_and_validation(worker, proposa
     calls, _, original_api = publisher_api
     def api(path, payload=None):
         if path == 'repos/owner/repo/pulls/42':
-            return {'state': 'open', 'head': {'sha': worker.git('rev-parse', task['branch'], cwd=remote)}}
+            return pull(head={**pull()['head'], 'sha': worker.git('rev-parse', task['branch'], cwd=remote)})
         return original_api(path, payload)
     monkeypatch.setattr(worker, 'api', api)
     worker.write_json(output / 'result.json', valid_result(pending_validation=['New subsystem image check']))
@@ -1165,7 +1167,8 @@ def test_prepare_preserves_third_failure_through_shared_unicode_budget(worker, g
         requested.append(job_id)
         if job_id == 1 and first_unavailable:
             raise RuntimeError("log expired")
-        diagnostic = "CVE-2026-1234 libthing HIGH 1.0 1.1" if job_id < 3 else (
+        diagnostic = ("CVE-2026-1234 libthing HIGH 1.0 1.1" if job_id == 1
+                      else "GHSA-abcd-efgh-ijkl certifi HIGH 1.0 1.1") if job_id < 3 else (
             "FAILED tests/container/test_guacamole.py::test_guac_vnc_tunnel[relative-xdg]\n"
             "E AssertionError: Guacamole protocol error"
         )
@@ -1181,7 +1184,9 @@ def test_prepare_preserves_third_failure_through_shared_unicode_budget(worker, g
     assert len(serialized) <= 40000
     assert "test_guac_vnc_tunnel[relative-xdg]" in serialized
     assert "Guacamole protocol error" in serialized
-    assert "CVE-2026-1234" in serialized
+    assert "GHSA-abcd-efgh-ijkl" in serialized
+    if not first_unavailable:
+        assert "CVE-2026-1234" in serialized
     assert all(name in serialized for name in ("scan (amd64)", "scan (arm64)", "runtime (arm64)"))
     assert "extra" not in serialized and "metadata" not in serialized
     assert worker.bounded_context({"failure_evidence": evidence})["failure_evidence"] == evidence
@@ -1199,6 +1204,8 @@ def workflow_incident():
     record = {
         "key": hashlib.sha256(json.dumps(bundle, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
         "origin": {"runId": 20, "attempt": 2}, "bundle": bundle,
+        "observations": [{"runId": 20, "attempt": 2, "sha": "a" * 40,
+                          "startedAt": 1792500000000, "completedAt": 1792500600000}],
     }
     issue = {
         "number": 42, "state": "open", "labels": [], "user": {"login": "github-actions[bot]"},
@@ -1220,6 +1227,8 @@ def test_workflow_incident_publication_cannot_close_it(worker, proposal, publish
         body="Closes #42. Fixed owner/repo#42. Resolves https://github.com/owner/repo/issues/42.",
         pending_validation=["Fixes #42 after image tests"],
     ))
+    with (output / "validation.txt").open("a") as stream:
+        stream.write("Closes #42\n")
     assert worker.publish(task, output, repo) == 91
     request = next(payload for path, payload in publisher_api[0] if path == "repos/owner/repo/pulls")
     published = request["body"] + request["title"] + worker.git("log", "-1", "--format=%B", task["branch"], cwd=remote)
@@ -1238,3 +1247,63 @@ def test_publication_rechecks_workflow_incident_eligibility(worker, proposal, pu
     with pytest.raises(ValueError, match="incident"):
         worker.publish(task, output, repo)
     assert not publisher_api[1]
+
+
+def test_manifest_overflow_reports_exact_job_and_step_omissions(worker, monkeypatch):
+    monkeypatch.setattr(worker, "api", lambda path: {"id": 20, "run_attempt": 1})
+    jobs = [{"id": index, "name": f"job-{index}", "conclusion": "failure",
+             "steps": [{"name": f"step-{step}-" + "x" * 150, "conclusion": "failure"} for step in range(20)]}
+            for index in range(50)]
+    monkeypatch.setattr(worker, "pages", lambda path, key: jobs)
+    read = []
+
+    def command(args):
+        read.append(args[args.index("--job") + 1])
+        return "E AssertionError: concrete failure\n" + "cleanup\n" * 5000
+
+    monkeypatch.setattr(worker, "command", command)
+    evidence = worker.failure_context("owner/repo", "https://github.com/owner/repo/actions/runs/20")
+    assert len(read) == 50
+    assert len(json.dumps(evidence)) <= 40000
+    item = evidence[0]
+    assert item["omitted_jobs"] == 50 - len(item["jobs"])
+    assert item["omitted_steps"] == 20 * item["omitted_jobs"]
+    assert item["source"].endswith("/runs/20/attempts/1")
+    assert all("concrete failure" in log["diagnostics"] for log in item["logs"])
+
+
+@pytest.mark.parametrize("spoof", ["user", "quoted", "wrong_binding", "branch_only"])
+def test_incident_prepare_cannot_be_suppressed_by_spoofed_pr(worker, github, monkeypatch, tmp_path, spoof):
+    responses, _ = github
+    issue, binding = workflow_incident()
+    responses["repos/owner/repo/issues/42"] = issue
+    responses["repos/owner/repo/actions/runs/20/attempts/2"] = {"id": 20, "run_attempt": 2}
+    candidate = pull(body="<!-- neurodesktop-agentic:issue:42 -->")
+    if spoof == "user":
+        candidate["user"] = {"login": "maintainer"}
+    elif spoof == "quoted":
+        candidate["body"] = "Quote\n" + candidate["body"]
+    elif spoof == "wrong_binding":
+        candidate["body"] += '\n<!-- neurodesktop-incident-binding:v1 {"key":"other"} -->'
+    else:
+        candidate["body"] = "No task marker"
+    responses["repos/owner/repo/pulls?state=open&per_page=100"] = [candidate]
+    original = worker.pages
+    monkeypatch.setattr(worker, "pages", lambda path, **kwargs: [] if "/jobs?" in path else original(path))
+    task = worker.prepare("issue", "42", "owner/repo", "100", tmp_path)
+    assert not task["skip"]
+    assert task["incident"] == binding
+
+
+def test_incident_prepare_uses_trusted_occurrences_instead_of_pasted_urls(worker, github, monkeypatch, tmp_path):
+    responses, calls = github
+    issue, binding = workflow_incident()
+    issue["body"] += "\nhttps://github.com/owner/repo/actions/runs/666/attempts/7"
+    responses["repos/owner/repo/issues/42"] = issue
+    responses["repos/owner/repo/actions/runs/20/attempts/2"] = {"id": 20, "run_attempt": 2}
+    original = worker.pages
+    monkeypatch.setattr(worker, "pages", lambda path, **kwargs: [] if "/jobs?" in path else original(path))
+    task = worker.prepare("issue", "42", "owner/repo", "100", tmp_path)
+    assert task["incident"] == binding
+    assert task["context"]["failure_evidence"][0]["source"].endswith("/runs/20/attempts/2")
+    assert not any("/666" in path for path, _ in calls)

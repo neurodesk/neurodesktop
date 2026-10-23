@@ -527,6 +527,28 @@ def test_only_owned_canonical_pr_suppresses_repair_after_recording_occurrence(sp
     assert len(calls_of(output, "dispatch")) == (0 if spoof is None else 2)
 
 
+@pytest.mark.parametrize("binding", ["current", "stale", "malformed", "version"])
+def test_explicit_pr_binding_must_match_current_episode(binding):
+    first = run_reporter(runs=[incident_run()], repairEnabled=False)
+    episode = json.loads(first["issues"][0]["body"].splitlines()[1].removeprefix("<!-- neurodesktop-incident:v1 ").removesuffix(" -->"))
+    value = {"key": episode["key"], "origin": episode["origin"]}
+    if binding == "stale":
+        value["origin"] = {"runId": 999, "attempt": 1}
+    record = json.dumps(value) if binding != "malformed" else "{invalid"
+    version = "v2" if binding == "version" else "v1"
+    pr = {
+        "number": 500, "state": "open", "user": {"login": "github-actions[bot]"},
+        "head": {"repo": {"full_name": "NeuroDesk/neurodesktop"}},
+        "body": "<!-- neurodesktop-agentic:issue:100 -->\n"
+                f"<!-- neurodesktop-incident-binding:{version} {record} -->",
+    }
+    output = run_reporter(issues=first["issues"], comments=first["comments"],
+                          runs=[incident_run(1235, 11)], pulls=[pr])
+    assert len(output["issues"]) == 1
+    assert any("run=1235 attempt=1" in c["body"] for c in output["comments"])
+    assert len(calls_of(output, "dispatch")) == (0 if binding == "current" else 1)
+
+
 def test_legacy_exact_run_is_adopted_only_with_matching_authoritative_attempt():
     output = run_reporter(issues=[marker_issue()], runs=[incident_run(), incident_run(1235, 11)])
     assert len(output["issues"]) == 1
@@ -565,7 +587,6 @@ def test_quoted_or_user_episode_cannot_authorize_recovery():
 
 
 def test_complete_trivy_diagnosis_ignores_successful_setup_and_candidate_tags():
-    # Complete finding tables from run 39641150130, job 119377873207.
     diagnosis = repo_path("tests/fixtures/workflow-failures/trivy-arm64.log").read_text()
     first = incident_run(39641150130)
     first["jobs"] = first["jobs"][:1]
@@ -591,3 +612,22 @@ def test_trivy_diagnosis_changes_and_incomplete_reports_never_group(change):
     later["jobs"] = later["jobs"][:1]
     later["logs"] = {str(later["jobs"][0]["id"]): diagnosis.replace("39641150130", "39820073728").replace(*change)}
     assert len(run_reporter(runs=[first, later])["issues"]) == 2
+
+
+@pytest.mark.parametrize("same_error", [True, False])
+def test_pytest_failure_sections_keep_assertions_and_ignore_setup(same_error):
+    section = (
+        "================ FAILURES ================\n"
+        "________________ test_guac ________________\n"
+        "E AssertionError: Guacamole protocol error\n"
+        "================ short test summary info ================\n"
+        "FAILED test_guac - AssertionError: Guacamole protocol error\n"
+        "================ 1 failed in 1.00s ================\n"
+    )
+    first, later = incident_run(), incident_run(1235, 11)
+    first["logs"]["12342"] = "Worker ID: one\n" + section
+    later["logs"]["12352"] = "Worker ID: two\n" + section.replace("1.00s", "2.00s")
+    if not same_error:
+        later["logs"]["12352"] = later["logs"]["12352"].replace("Guacamole protocol error", "Connection refused")
+    output = run_reporter(runs=[first, later])
+    assert len(output["issues"]) == (1 if same_error else 2)
