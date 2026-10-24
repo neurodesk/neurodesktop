@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-20"
+last-reviewed: "2026-10-24"
 ---
 
 # Build-Time Behaviors
@@ -126,6 +126,13 @@ on every sibling file, so an unrelated edit (for example a unit test, when
 all of `tests/` was mounted) would needlessly rebuild everything downstream.
 When adding a layer, mount individual files and place the layer at the
 band matching its most volatile input.
+
+The TinyTeX layer refreshes `tlmgr` before requesting supplemental packages
+from the live TeX repository. The daily TinyTeX bundle and repository are
+published independently, and the repository can require a newer manager before
+it will process package installs. Both manager refresh and package installation
+use the image's retry wrapper; the installed-image PDF export test exercises the
+resulting toolchain.
 
 The runtime stage starts from the pinned multi-architecture
 `jupyter/base-notebook` date tag and runs an apt `dist-upgrade` against fresh
