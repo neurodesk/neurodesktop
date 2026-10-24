@@ -644,6 +644,7 @@ ARG ASTRA_TOOLS_VERSION="0.2.18"
 ARG ANYWIDGET_VERSION="0.11.0"
 ARG IPYNIIVUE_VERSION="2.4.4"
 ARG SNAKEMAKE_VERSION="9.27.0"
+ARG BROTLI_VERSION="1.2.1"
 ARG PYJWT_VERSION="2.15.1"
 ARG JUPYTER_BUILDER_VERSION
 ARG JUPYTERLAB_SLURM_REF="8dccb39808f8a1b77712a9a5773a7d2601a56683"
@@ -731,6 +732,10 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     xnat \
     pytest \
     bash_kernel \
+    # Brotli 1.2.1 rejects the malformed block-switch state that can make
+    # 1.2.0 write outside the decoder state (CVE-2026-111497). Keep this
+    # base-image dependency on the fixed release.
+    Brotli==${BROTLI_VERSION} \
     # PyJWT 2.14.0 rejects loader-compatible, non-canonical public-key PEMs
     # before an HS256 verifier can reuse the public key as its HMAC secret
     # (CVE-2026-102268). Keep this transitive dependency on the fixed release.
@@ -740,6 +745,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade "litellm>=1.105.1" \
     && test "$(/opt/conda/bin/python -c 'import importlib.metadata as m; print(m.version("pip"))')" = "${PIP_VERSION}" \
     && test "$(/opt/conda/bin/python -c 'import importlib.metadata as m; print(m.version("certifi"))')" = "${CERTIFI_VERSION}" \
+    && test "$(/opt/conda/bin/python -c 'import importlib.metadata as m; print(m.version("Brotli"))')" = "${BROTLI_VERSION}" \
     && UV_RELEASE="$(/opt/conda/bin/uv --version)" && test "${UV_RELEASE%% (*}" = "uv ${UV_VERSION}" \
     # Replace public API sample tokens before committing source or bytecode to a layer.
     && /opt/conda/bin/python /tmp/sanitize_ghapi_examples.py \

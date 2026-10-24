@@ -821,6 +821,18 @@
       "datasourceTemplate": "pypi"
     },
     {
+      "description": "Brotli decoder security floor pinned exactly.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG BROTLI_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?"
+      ],
+      "depNameTemplate": "brotli",
+      "datasourceTemplate": "pypi"
+    },
+    {
       "description": "PyJWT security floor pinned exactly.",
       "customType": "regex",
       "managerFilePatterns": [

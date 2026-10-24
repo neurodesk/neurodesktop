@@ -102,8 +102,12 @@ The main Python environment pins `pip` 26.2.2, `certifi` 2026.10.19, and
 `uv` 0.13.4. Their fixed releases remove the compromised emSign G3 trust
 paths. Updating the main `certifi` distribution does not update pip's vendored
 copy, so pip is upgraded before installing the other Python packages.
-The installed-image test inspects both certifi bundles. The pins remain under
-the direct-version audit and Renovate tracking.
+The installed-image test inspects both certifi bundles. The environment also
+pins Brotli 1.2.1 so malformed compressed input cannot reach the decoder
+out-of-bounds write in 1.2.0 (CVE-2026-111497). The build reads these
+security-sensitive packages back from installed metadata, and the image test
+exercises Brotli compression and decompression. The pins remain under the
+direct-version audit and Renovate tracking.
 
 The runtime stage is ordered by how often each layer's inputs change, because
 invalidating a layer re-runs every layer after it. Three bands, in order:
