@@ -3,8 +3,8 @@
 # Pin to a specific jupyter/base-notebook date for reproducibility.
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
 ARG BASE_IMAGE_TAG=2026-10-18
-ARG APPTAINER_VERSION=1.5.4
-ARG APPTAINER_GO_VERSION=1.27.2
+ARG APPTAINER_VERSION=1.5.5
+ARG APPTAINER_GO_VERSION=1.27.3
 ARG APPTAINER_GRPC_VERSION=1.84.0
 ARG APPTAINER_CRYPTO_VERSION=0.58.0
 ARG CVMFS_VERSION=2.14.1+ubuntu26.04
