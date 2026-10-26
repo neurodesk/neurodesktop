@@ -645,6 +645,7 @@ ARG ANYWIDGET_VERSION="0.11.0"
 ARG IPYNIIVUE_VERSION="2.4.4"
 ARG SNAKEMAKE_VERSION="9.27.0"
 ARG PYJWT_VERSION="2.15.1"
+ARG BROTLI_VERSION="1.2.1"
 ARG JUPYTER_BUILDER_VERSION
 ARG JUPYTERLAB_SLURM_REF="8dccb39808f8a1b77712a9a5773a7d2601a56683"
 USER root
@@ -735,11 +736,15 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     # before an HS256 verifier can reuse the public key as its HMAC secret
     # (CVE-2026-102268). Keep this transitive dependency on the fixed release.
     PyJWT==${PYJWT_VERSION} \
+    # The base image's Conda Brotli 1.2.0 decoder has an out-of-bounds write
+    # (GHSA-9v8h-qqgm-4m35). Replace it with the fixed release.
+    brotli==${BROTLI_VERSION} \
     "requests>=2.34.2" \
     "chardet<8" \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade "litellm>=1.105.1" \
     && test "$(/opt/conda/bin/python -c 'import importlib.metadata as m; print(m.version("pip"))')" = "${PIP_VERSION}" \
     && test "$(/opt/conda/bin/python -c 'import importlib.metadata as m; print(m.version("certifi"))')" = "${CERTIFI_VERSION}" \
+    && test "$(/opt/conda/bin/python -c 'import importlib.metadata as m; print(m.version("brotli"))')" = "${BROTLI_VERSION}" \
     && UV_RELEASE="$(/opt/conda/bin/uv --version)" && test "${UV_RELEASE%% (*}" = "uv ${UV_VERSION}" \
     # Replace public API sample tokens before committing source or bytecode to a layer.
     && /opt/conda/bin/python /tmp/sanitize_ghapi_examples.py \

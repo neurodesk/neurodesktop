@@ -373,6 +373,9 @@ reviewed; the Dockerfile itself is authoritative.
   environment; defaults to `2.15.1`. It retains the rejection of non-canonical
   public-key PEM encodings introduced in `2.14.0`, preventing their reuse as
   HMAC secrets (CVE-2026-102268)
+- `BROTLI_VERSION`: exact Brotli Python release that replaces the base image's
+  Conda build in the main Python environment; defaults to `1.2.1`, which fixes
+  the decoder out-of-bounds write in `1.2.0` (GHSA-9v8h-qqgm-4m35)
 - `AGENT_SKILLS_REF`: exact commit of
   `LightconeResearch/agent-skills` used for the Codex and Claude reproduction
   plugin and OpenCode's copied skills and hook adapter;
