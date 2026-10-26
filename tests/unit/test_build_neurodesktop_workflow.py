@@ -126,6 +126,30 @@ def test_production_build_checkouts_stay_on_the_run_sha():
     assert "ref: ${{ github.ref }}" not in workflow
 
 
+def test_production_arch_build_retries_the_same_candidate_after_failure():
+    workflow = yaml.safe_load(WORKFLOW.read_text())
+    steps = workflow["jobs"]["build-image"]["steps"]
+    builds = [
+        step
+        for step in steps
+        if step.get("uses", "").startswith("docker/build-push-action@")
+    ]
+
+    assert len(builds) == 2
+    first, retry = builds
+    assert first["id"] == "build"
+    assert first["continue-on-error"] is True
+    assert retry["if"] == "${{ steps.build.outcome == 'failure' }}"
+    assert retry["uses"] == first["uses"]
+    assert retry["with"] == first["with"]
+
+    wait = steps[steps.index(first) + 1]
+    assert wait["name"] == "Wait before retrying arch image build"
+    assert wait["if"] == retry["if"]
+    assert wait["run"] == "sleep 30"
+    assert steps.index(wait) + 1 == steps.index(retry)
+
+
 def test_image_tests_use_cvmfs_action_without_stale_apt_package_lists():
     for workflow_path in IMAGE_TEST_WORKFLOWS:
         workflow = workflow_path.read_text()
