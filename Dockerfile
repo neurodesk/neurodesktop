@@ -848,8 +848,8 @@ RUN --mount=type=bind,source=config/agents/patch_nbi.py,target=/tmp/patch_nbi.py
 # MyST 2.7.0 uses pnpm. Its published metadata requests @jupyter/ydoc 3.x,
 # while JupyterLab 4.6 provides 4.x, so compile against an exact current YDoc
 # and retain that exact version in both the manifest and lockfile.
-ARG MYST_PNPM_VERSION="11.28.6"
-ARG MYST_YDOC_VERSION="4.1.1"
+ARG MYST_PNPM_VERSION="11.28.8"
+ARG MYST_YDOC_VERSION="4.2.0"
 RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
     && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
     && MYST_PACKAGE_DIR="$(/opt/conda/bin/python -c 'import jupyterlab_myst, os; print(os.path.dirname(jupyterlab_myst.__file__))')" \
