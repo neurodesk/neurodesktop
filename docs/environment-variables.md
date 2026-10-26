@@ -286,7 +286,8 @@ Connect procedures.
 - `BASH_ENV`: agent launchers set this to
   `/opt/neurodesktop/agent_bash_env.sh` for noninteractive Bash tool shells.
   `NEURODESKTOP_PREVIOUS_BASH_ENV` retains the caller's initializer, which runs
-  before Neurodesk's module setup. Retained Slurm scripts source the shared
+  before Neurodesk's module setup. An unreadable initializer, such as a host
+  path that Apptainer passes into the container, is skipped. Retained Slurm scripts source the shared
   initializer explicitly, including when job environment export is disabled.
 - `CODEX_PATH`, `CLAUDE_CODE_EXECUTABLE`: executable paths used by the Jupyter
   AI ACP adapters. They default to quiet selectors under `/opt/neurodesktop/`.
