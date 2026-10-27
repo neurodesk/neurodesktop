@@ -1,6 +1,6 @@
 """Guard the direct Brotli security pin used by the runtime image.
 
-The installed package and decoder are exercised by the matching container test.
+The installed release is checked by the matching container test.
 """
 
 import re
@@ -23,6 +23,5 @@ def test_dockerfile_installs_brotli_at_the_security_fixed_version():
 
     assert match is not None
     assert Version(match.group(1)) >= MINIMUM_FIXED_VERSION
-    assert dockerfile.count("Brotli==${BROTLI_VERSION}") == 1
-    assert 'm.version("Brotli")' in dockerfile
-    assert dockerfile.count('= "${BROTLI_VERSION}"') == 1
+    assert dockerfile.count("brotli==${BROTLI_VERSION}") == 1
+    assert dockerfile.count('m.version("brotli"))\')" = "${BROTLI_VERSION}"') == 1

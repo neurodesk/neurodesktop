@@ -286,7 +286,8 @@ Connect procedures.
 - `BASH_ENV`: agent launchers set this to
   `/opt/neurodesktop/agent_bash_env.sh` for noninteractive Bash tool shells.
   `NEURODESKTOP_PREVIOUS_BASH_ENV` retains the caller's initializer, which runs
-  before Neurodesk's module setup. Retained Slurm scripts source the shared
+  before Neurodesk's module setup. An unreadable initializer, such as a host
+  path that Apptainer passes into the container, is skipped. Retained Slurm scripts source the shared
   initializer explicitly, including when job environment export is disabled.
 - `CODEX_PATH`, `CLAUDE_CODE_EXECUTABLE`: executable paths used by the Jupyter
   AI ACP adapters. They default to quiet selectors under `/opt/neurodesktop/`.
@@ -356,15 +357,14 @@ reviewed; the Dockerfile itself is authoritative.
   to rebuild the JupyterLab 4.6 collaboration frontends;
   defaults to
   `4.5.11`
-- `PIP_VERSION`, `CERTIFI_VERSION`, `UV_VERSION`, `BROTLI_VERSION`,
-  `ASTRA_TOOLS_VERSION`, `ASTRA_SPEC_VERSION`, `ANYWIDGET_VERSION`,
-  `LIGHTCONE_CLI_VERSION`, `LIGHTCONE_CLI_SHA256`: exact `pip`, `certifi`, `uv`,
-  Brotli, ASTRA CLI/schema, viewer runtime, and isolated Lightcone CLI releases
-  installed in the image; defaults to `26.2.2`, `2026.10.19`, `0.13.4`, `1.2.1`,
-  `0.2.18`, `0.0.14`, `0.11.0`, `0.5.0`, and the verified SHA-256 of that
-  Lightcone source archive. The `pip`, `certifi`, and `uv` pins exclude
-  compromised emSign G3 trust paths from their bundled CA stores. The Brotli
-  pin fixes the decoder out-of-bounds write in CVE-2026-111497
+- `PIP_VERSION`, `CERTIFI_VERSION`, `UV_VERSION`, `ASTRA_TOOLS_VERSION`, `ASTRA_SPEC_VERSION`,
+  `ANYWIDGET_VERSION`, `LIGHTCONE_CLI_VERSION`, `LIGHTCONE_CLI_SHA256`: exact
+  `pip`, `certifi`, `uv`,
+  ASTRA CLI/schema, viewer runtime, and isolated Lightcone CLI releases
+  installed in the image; defaults to `26.2.2`, `2026.10.19`, `0.13.4`, `0.2.18`,
+  `0.0.14`, `0.11.0`, `0.5.0`, and the verified SHA-256 of that Lightcone
+  source archive. The `pip`, `certifi`, and `uv` pins exclude compromised
+  emSign G3 trust paths from their bundled CA stores
 - `SNAKEMAKE_VERSION`: user-facing Snakemake workflow release; defaults to
   `9.27.0` in an isolated tool environment. Its metadata requires
   `packaging<26`, so that environment holds `packaging` at `25.0`.
@@ -373,6 +373,9 @@ reviewed; the Dockerfile itself is authoritative.
   environment; defaults to `2.15.1`. It retains the rejection of non-canonical
   public-key PEM encodings introduced in `2.14.0`, preventing their reuse as
   HMAC secrets (CVE-2026-102268)
+- `BROTLI_VERSION`: exact Brotli Python release that replaces the base image's
+  Conda build in the main Python environment; defaults to `1.2.1`, which fixes
+  the decoder out-of-bounds write in `1.2.0` (GHSA-9v8h-qqgm-4m35)
 - `AGENT_SKILLS_REF`: exact commit of
   `LightconeResearch/agent-skills` used for the Codex and Claude reproduction
   plugin and OpenCode's copied skills and hook adapter;

@@ -83,8 +83,8 @@ CATALOG = (
     CatalogEntry("arg:ANYWIDGET_VERSION", "pypi:anywidget", "pypi"),
     CatalogEntry("arg:IPYNIIVUE_VERSION", "pypi:ipyniivue", "pypi"),
     CatalogEntry("arg:SNAKEMAKE_VERSION", "pypi:snakemake", "pypi"),
-    CatalogEntry("arg:BROTLI_VERSION", "pypi:Brotli", "pypi"),
     CatalogEntry("arg:PYJWT_VERSION", "pypi:PyJWT", "pypi"),
+    CatalogEntry("arg:BROTLI_VERSION", "pypi:brotli", "pypi"),
     CatalogEntry("arg:NBI_JUPYTERLAB_BUILDER_VERSION", "npm:@jupyterlab/builder", "npm"),
     CatalogEntry(
         "arg:MYST_PNPM_VERSION",

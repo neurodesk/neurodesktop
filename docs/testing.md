@@ -472,10 +472,10 @@ installed-image suite's `test_python_ca_security.py` parses both the main
 emSign G3 roots. The ASTRA agent-skills test continues to execute
 the image's pinned `uv` binary.
 
-`pytest tests/unit/test_python_brotli_security.py` protects the direct fixed
-Brotli version and its build-time metadata check. The installed-image test
-requires the fixed package version and exercises compression and decompression
-through the shipped extension module.
+`pytest tests/unit/test_brotli_security.py` protects the direct fixed Brotli
+version and its build-time metadata check. The installed-image tests require
+one fixed package release and exercise compression and decompression through
+the shipped extension module.
 
 The checkout tests execute the build's `uv` version check with release banners
 containing target or commit metadata. They require the exact pinned version
@@ -572,8 +572,8 @@ non-obvious tiers protect.
 | --- | --- | --- |
 | Jupyter isolated build dependencies | `pytest tests/unit/test_jupyter_build_constraints.py tests/unit/test_jupyterlab_slurm_build.py` | Fresh isolated wheel builds for Slurm and launcher |
 | Image packaging layers | `pytest tests/unit/test_image_packaging_layers.py tests/unit/test_myst_build_workaround.py` | `pytest /opt/tests/test_image_size_hygiene.py /opt/tests/test_additional_components.py` and image layer inventory |
-| Python Brotli decoder security | `pytest tests/unit/test_python_brotli_security.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_python_brotli_security.py` and the unchanged critical vulnerability scan |
 | PyJWT asymmetric/HMAC key confusion | `pytest tests/unit/test_pyjwt_security.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_pyjwt_security.py` |
+| Brotli decoder out-of-bounds write | `pytest tests/unit/test_brotli_security.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_brotli_security.py` |
 | Python bundled CA trust | `pytest tests/unit/test_python_ca_security.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_python_ca_security.py /opt/tests/test_astra_agent_skills_image.py` |
 | ghapi public credential examples | `pytest tests/unit/test_ghapi_examples.py tests/unit/test_image_packaging_layers.py` | `pytest /opt/tests/test_image_size_hygiene.py` and unchanged image secret scan |
 | Anthropic SDK public credential examples | `pytest tests/unit/test_anthropic_examples.py tests/unit/test_image_packaging_layers.py` | `pytest /opt/tests/test_anthropic_examples.py` and unchanged image secret scan |
