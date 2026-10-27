@@ -191,6 +191,8 @@ fi
 
 # Per-backend CATALINA_BASE. server.xml gets the Tomcat port stamped in directly -
 # property-substitution via -Dport.http=... has proven unreliable across builds.
+# The configurator also forces the connector onto loopback and refuses unexpected
+# connector layouts rather than exposing Guacamole on a shared host network.
 mkdir -p \
     "${CATALINA_BASE_PER_USER}/conf" \
     "${CATALINA_BASE_PER_USER}/logs" \
@@ -202,15 +204,11 @@ mkdir -p \
 cp -rfT /usr/local/tomcat/conf "${CATALINA_BASE_PER_USER}/conf" 2>/dev/null || \
     cp -rf /usr/local/tomcat/conf/. "${CATALINA_BASE_PER_USER}/conf/" 2>/dev/null || true
 
-sed -i -E \
-    "s|<Connector port=\"[^\"]+\" protocol=\"HTTP/1\.1\"|<Connector port=\"${NEURODESKTOP_TOMCAT_PORT}\" protocol=\"HTTP/1.1\"|" \
-    "${CATALINA_BASE_PER_USER}/conf/server.xml"
-
-# Disable the Tomcat shutdown port (default 8005): shared Apptainer netns
-# collisions, and residual JVMs in rapid test teardown/startup, both break it.
-sed -i -E \
-    "s|<Server port=\"[0-9]+\"|<Server port=\"-1\"|" \
-    "${CATALINA_BASE_PER_USER}/conf/server.xml"
+if ! /usr/bin/python3 -I /opt/neurodesktop/configure_tomcat.py \
+    "${CATALINA_BASE_PER_USER}/conf/server.xml" "${NEURODESKTOP_TOMCAT_PORT}"; then
+    echo "[ERROR] Refusing to start Guacamole with an unsafe Tomcat connector." >&2
+    exit 1
+fi
 
 if [ ! -e "${CATALINA_BASE_PER_USER}/webapps/ROOT" ]; then
     ln -sfn /usr/local/tomcat/webapps/ROOT "${CATALINA_BASE_PER_USER}/webapps/ROOT"

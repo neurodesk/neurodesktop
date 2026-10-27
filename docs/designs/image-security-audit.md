@@ -3,7 +3,7 @@ title: Image security audit
 description: Source audit of image credentials, service isolation, privileges, and release controls
 parent: index.md
 status: assessed
-last-reviewed: "2026-09-20"
+last-reviewed: "2026-10-27"
 ---
 
 # Image security audit
@@ -14,7 +14,8 @@ T3 authentication code, credential persistence, and production publication workf
 See [Architecture](../architecture.md), [runtime variables](../environment-variables.md),
 and [testing](../testing.md) for the current operational contracts.
 
-Follow-up changes address findings 1, 2, 4, and the default sudo policy in 5.
+Follow-up changes address findings 1, 2, 4, the default sudo policy in 5, and
+the Tomcat listener portion of finding 6.
 See [desktop security](../architecture/desktop.md#credentials-and-service-access)
 and [startup privileges](../environment-variables.md#startup-privileges) for the
 implemented behavior. The findings below retain the original audit snapshot.

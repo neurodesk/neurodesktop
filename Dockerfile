@@ -350,6 +350,10 @@ RUN retry bash -o pipefail -c 'wget -q \
     && mkdir /usr/local/tomcat/webapps \
     && sed -i -E '/<Connector port="8080" protocol="HTTP\/1\.1"/ {/maxHttpRequestHeaderSize=/! s|$| maxHttpRequestHeaderSize="65536"|;}' /usr/local/tomcat/conf/server.xml \
     && grep -q 'maxHttpRequestHeaderSize="65536"' /usr/local/tomcat/conf/server.xml \
+    # Tomcat otherwise listens on every local address. Guacamole is reached
+    # through authenticated Jupyter Server Proxy and needs no host-facing port.
+    && sed -i -E '/<Connector port="8080" protocol="HTTP\/1\.1"/ {/address=/! s|$| address="127.0.0.1"|;}' /usr/local/tomcat/conf/server.xml \
+    && grep -q 'address="127.0.0.1"' /usr/local/tomcat/conf/server.xml \
     # Make the Connector port settable per-user via CATALINA_OPTS=-Dport.http=NNNN.
     # Needed under Apptainer where multiple users share the host netns and cannot
     # all bind 8080. catalina.properties supplies 8080 as the fallback so running
@@ -1233,6 +1237,7 @@ RUN --mount=type=bind,source=config/jupyter/kernel_wrapper.sh,target=/tmp/kernel
 # Create Guacamole configurations (user-mapping.xml gets filled in the startup.sh script)
 RUN --mount=type=bind,source=config/guacamole,target=/tmp/guacamole,ro \
     mkdir -p /etc/guacamole \
+    && install -m 0755 /tmp/guacamole/configure_tomcat.py /opt/neurodesktop/configure_tomcat.py \
     && echo -e "user-mapping: /etc/guacamole/user-mapping.xml\nguacd-hostname: 127.0.0.1" > /etc/guacamole/guacamole.properties \
     && echo -e "[server]\nbind_host = 127.0.0.1\nbind_port = 4822" > /etc/guacamole/guacd.conf \
     && install -m 0644 -o ${NB_UID} -g ${NB_GID} /tmp/guacamole/user-mapping-vnc.xml /etc/guacamole/user-mapping-vnc.xml \

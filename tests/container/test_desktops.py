@@ -67,6 +67,18 @@ def _wait_for_tcp_port(port, timeout_seconds=30, host="127.0.0.1"):
     raise AssertionError(f"TCP port {port} did not open on {host}: {last_error}")
 
 
+def _tcp_listener_addresses(port):
+    result = subprocess.run(
+        ["ss", "-H", "-lnt"], capture_output=True, text=True, check=True
+    )
+    addresses = []
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) >= 4 and fields[3].rsplit(":", 1)[-1] == str(port):
+            addresses.append(fields[3])
+    return addresses
+
+
 def _read_runtime_port(home_dir, name, default):
     """Read a port guacamole.sh published to $HOME/.neurodesk/runtime/<name>."""
     state_root = os.path.join(home_dir, ".neurodesk")
@@ -1068,6 +1080,7 @@ def test_guac_api_connections():
     tomcat_port = process.tomcat_port
     try:
         _guacamole_ready(tomcat_port, home_dir=home_dir, process=process)
+        assert _tcp_listener_addresses(tomcat_port) == [f"127.0.0.1:{tomcat_port}"]
         _guacd_port = _read_runtime_port(home_dir, "guacd_port", default=4822)
         _wait_for_tcp_port(_guacd_port)
 
