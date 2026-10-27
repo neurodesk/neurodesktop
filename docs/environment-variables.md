@@ -416,7 +416,7 @@ reviewed; the Dockerfile itself is authoritative.
   `3bf11cb7b271b554998105a11e6c9b8c3e376615`
 - `MYST_PNPM_VERSION`, `MYST_YDOC_VERSION`: pnpm and Jupyter
   YDoc releases used for the MyST/RISE compatibility rebuild; defaults to
-  `11.28.6` and `4.1.1`
+  `11.28.8` and `4.2.0`
 - `APPTAINER_VERSION`, `APPTAINER_GO_VERSION`, `APPTAINER_GRPC_VERSION`,
   `APPTAINER_CRYPTO_VERSION`: Apptainer source release and the Go
   toolchain/grpc/crypto module versions used in its dedicated build stage;

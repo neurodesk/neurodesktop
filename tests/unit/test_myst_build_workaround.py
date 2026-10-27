@@ -31,7 +31,7 @@ def dockerfile() -> str:
 def test_myst_build_uses_pinned_release_and_frozen_lockfile(dockerfile: str) -> None:
     """MyST 2.7.0 ships pnpm-lock.yaml, so reproduce it with pinned pnpm."""
     assert "jupyterlab_myst==2.7.0" in DOCKERFILE.read_text()
-    assert 'ARG MYST_PNPM_VERSION="11.28.6"' in dockerfile
+    assert 'ARG MYST_PNPM_VERSION="11.28.8"' in dockerfile
     assert "pnpm@${MYST_PNPM_VERSION} install --frozen-lockfile" in dockerfile
     assert "npm install" not in dockerfile
     assert "npx --yes" not in dockerfile
@@ -46,7 +46,7 @@ def test_myst_build_install_runs_before_labextension_build(dockerfile: str) -> N
 
 def test_myst_build_updates_ydoc_for_jupyterlab_46(dockerfile: str) -> None:
     """MyST 2.7's ydoc 3 dependency must be rebuilt for JupyterLab's ydoc 4."""
-    assert 'ARG MYST_YDOC_VERSION="4.1.1"' in dockerfile
+    assert 'ARG MYST_YDOC_VERSION="4.2.0"' in dockerfile
     assert 'pnpm@${MYST_PNPM_VERSION} add --save-exact "@jupyter/ydoc@${MYST_YDOC_VERSION}"' in dockerfile
     assert 'dependencies.@jupyter/ydoc=^4.0.0' not in dockerfile
 
