@@ -124,6 +124,30 @@ def test_setup_preserves_existing_initializer_and_survives_repeated_setup(image,
     assert result.stdout == "yes yes\n"
 
 
+def test_missing_host_initializer_does_not_block_tool_shells(image, tmp_path):
+    # Apptainer passes a host BASH_ENV whose path is not mounted in the container.
+    paths, _ = image
+    setup = paths["/opt/neurodesktop/agent_shell_setup.sh"]
+    result = run(
+        f'. {setup}\n'
+        "bash -c 'module load test/1; printf \"%s\\n\" \"$MODULE_LOADED\"'",
+        tmp_path, BASH_ENV="/share/software/user/open/lmod/lmod/init/bash",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "yes\n"
+    assert not result.stderr
+
+
+def test_failing_existing_initializer_stops_the_tool_shell(image, tmp_path):
+    paths, _ = image
+    previous = tmp_path / "previous.sh"
+    previous.write_text('return 5\n')
+    setup = paths["/opt/neurodesktop/agent_shell_setup.sh"]
+    result = run(f'. {setup}\nbash -c "echo unsafe"', tmp_path, BASH_ENV=str(previous))
+    assert result.returncode == 5
+    assert not result.stdout
+
+
 def test_strict_script_stops_on_initialization_failure(image, tmp_path):
     paths, _ = image
     paths["/etc/profile.d/lmod.sh"].write_text('return 7\n')
