@@ -515,7 +515,8 @@ RUN HOME=/root /bin/bash -lc 'set -euo pipefail; \
     tlmgr_path="$(echo /opt/TinyTeX/bin/*/tlmgr)"; \
     "${tlmgr_path}" option sys_bin /usr/local/bin >/dev/null; \
     "${tlmgr_path}" path add >/dev/null; \
-    "${tlmgr_path}" install \
+    retry "${tlmgr_path}" update --self; \
+    retry "${tlmgr_path}" install \
     tcolorbox \
     parskip \
     caption \
