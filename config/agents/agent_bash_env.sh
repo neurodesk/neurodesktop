@@ -6,7 +6,9 @@ neurodesk_initialize_tool_shell() {
     case "$-" in *u*) restore_nounset=1 ;; esac
     set +u
 
-    if [ -n "${NEURODESKTOP_PREVIOUS_BASH_ENV:-}" ] &&
+    # Like Bash, skip a missing initializer, such as a host path Apptainer
+    # passed into the container.
+    if [ -r "${NEURODESKTOP_PREVIOUS_BASH_ENV:-}" ] &&
        [ "${NEURODESKTOP_PREVIOUS_BASH_ENV}" != "${BASH_SOURCE[0]}" ] &&
        [ "${_NEURODESKTOP_PREVIOUS_BASH_ENV_PID:-}" != "$BASHPID" ]; then
         _NEURODESKTOP_PREVIOUS_BASH_ENV_PID=$BASHPID
