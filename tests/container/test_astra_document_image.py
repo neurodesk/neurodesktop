@@ -20,26 +20,36 @@ def wait_for(bidi, context, expression):
 
 
 def click(bidi, context, expression):
-    point = json.loads(
-        evaluate(
-            bidi,
-            context,
-            """JSON.stringify((() => {
-        const node = """
-            + expression
-            + """;
-        node.scrollIntoView({block:'center'});
-        const r = node.getBoundingClientRect();
-        return {x:Math.round(r.left+Math.min(r.width/2,20)),y:Math.round(r.top+r.height/2)};
-    })())""",
-        )
-    )
-    assert evaluate(
-        bidi,
-        context,
-        f"Boolean(({expression}).contains(document.elementFromPoint({point['x']},{point['y']})))",
-    ), point
-    actions = [{"type": "pointerMove", "duration": 0, "origin": "viewport", **point}]
+    target = bidi.request("script.evaluate", {
+        "expression": """(async () => {
+            const deadline = performance.now() + 20000;
+            let previous = null;
+            let stableFrames = 0;
+            while (performance.now() < deadline) {
+                await new Promise(requestAnimationFrame);
+                const node = """ + expression + """;
+                if (!node?.checkVisibility()) {
+                    previous = null;
+                    stableFrames = 0;
+                    continue;
+                }
+                node.scrollIntoView({block: 'center', behavior: 'instant'});
+                const rect = node.getBoundingClientRect();
+                const geometry = JSON.stringify([rect.x, rect.y, rect.width, rect.height]);
+                const hit = document.elementFromPoint(
+                    rect.x + rect.width / 2, rect.y + rect.height / 2);
+                stableFrames = geometry === previous && node.contains(hit)
+                    ? stableFrames + 1 : 0;
+                if (stableFrames >= 2) return node;
+                previous = geometry;
+            }
+            throw new Error('ASTRA click target did not become stable and unobscured');
+        })()""",
+        "target": {"context": context}, "awaitPromise": True,
+    })
+    assert target["type"] == "success", target.get("exceptionDetails", {}).get("text", target)
+    origin = {"type": "element", "element": {"sharedId": target["result"]["sharedId"]}}
+    actions = [{"type": "pointerMove", "duration": 0, "origin": origin, "x": 0, "y": 0}]
     actions += [
         {"type": "pointerDown", "button": 0},
         {"type": "pointerUp", "button": 0},

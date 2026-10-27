@@ -477,6 +477,12 @@ installed-image suite's `test_python_ca_security.py` parses both the main
 `certifi` bundle and pip's vendored copy and rejects the two distrusted
 emSign G3 roots. The ASTRA agent-skills test continues to execute
 the image's pinned `uv` binary.
+
+`pytest tests/unit/test_brotli_security.py` protects the direct fixed Brotli
+version and its build-time metadata check. The installed-image tests require
+one fixed package release and exercise compression and decompression through
+the shipped extension module.
+
 The checkout tests execute the build's `uv` version check with release banners
 containing target or commit metadata. They require the exact pinned version
 and reject a failing command even when it prints the expected release.
@@ -1008,6 +1014,14 @@ universe, Evidence mode, and SVG nodes together in one DOM evaluation. A save
 can deliver a delayed document notification after the manual refresh completes,
 so the viewer can briefly show its loading state again. The test polls for the
 complete result within its existing deadline and sends the Refresh click once.
+
+ASTRA browser clicks wait for the target to be stable and unobscured, then use
+its native BiDi element reference. A layout change between discovery and input
+therefore keeps the click on the intended element. The installed Firefox
+regressions in `test_astra_browser_click_image.py` move the target immediately
+before input, briefly cover it before clicking, and require a persistently
+covered target to fail without clicking. The readiness wait expires before
+the BiDi transport timeout.
 
 ### Nightly JupyterHub probe
 
