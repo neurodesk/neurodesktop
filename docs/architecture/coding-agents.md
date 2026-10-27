@@ -223,7 +223,9 @@ The terminal and ACP launchers for Codex and Claude, the OpenCode wrapper,
 and all T3 provider launchers export
 `BASH_ENV=/opt/neurodesktop/agent_bash_env.sh` through a shared shell setup.
 An existing `BASH_ENV` is retained in `NEURODESKTOP_PREVIOUS_BASH_ENV` and
-sourced before Neurodesk initialization. Launchers do not emit setup banners
+sourced before Neurodesk initialization. As in Bash, an unreadable initializer
+is skipped; host clusters such as Sherlock export a `BASH_ENV` path that is not
+mounted in the container. Launchers do not emit setup banners
 into agent protocol streams.
 For login tool shells, `/etc/profile.d/zz-neurodesk-agent.sh` restores the
 shared `BASH_ENV` after Lmod's system profile. It applies only to descendants
