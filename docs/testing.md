@@ -457,6 +457,12 @@ passes does `merge-manifests` promote the architecture, date, and `latest` tags
 and copy them to configured registries. Failed candidates remain available for
 diagnosis under their run tags; they do not replace release tags.
 
+The production workflow retries a failed architecture build once after 30
+seconds. Both attempts use the same source SHA, build arguments, cache, and
+run-specific candidate tag, so a transient upstream registry failure can recover
+without changing the artifact that later test and scan jobs consume. A failed
+second attempt still fails the build job and prevents promotion.
+
 `pytest tests/unit/test_trivy_policy.py` checks the packaging contract for the
 twelve kernel CVE exceptions added after issues #1142 and #1152. Each
 exception requires
