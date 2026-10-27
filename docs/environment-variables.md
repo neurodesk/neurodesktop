@@ -420,7 +420,7 @@ reviewed; the Dockerfile itself is authoritative.
 - `APPTAINER_VERSION`, `APPTAINER_GO_VERSION`, `APPTAINER_GRPC_VERSION`,
   `APPTAINER_CRYPTO_VERSION`: Apptainer source release and the Go
   toolchain/grpc/crypto module versions used in its dedicated build stage;
-  defaults to `1.5.4`, `1.27.2`, `1.84.0`, and `0.58.0`. The crypto override
+  defaults to `1.5.5`, `1.27.3`, `1.84.0`, and `0.58.0`. The crypto override
   also updates the separately vendored gocryptfs build.
 - `BASE_IMAGE_TAG`: tag of the upstream Jupyter Docker base image; defaults to
   the multi-architecture `2026-10-18` release
