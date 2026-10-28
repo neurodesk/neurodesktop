@@ -27,11 +27,12 @@ The shared [Trivy policy](../../.trivyignore.yaml) records individual scan
 exceptions. [Issues #1142](https://github.com/neurodesk/neurodesktop/issues/1142)
 and [#1152](https://github.com/neurodesk/neurodesktop/issues/1152) identified
 twelve kernel CVEs reported against Ubuntu 26.04's
-`linux-libc-dev` 7.0.0-38.38. That package contains UAPI headers without the
+`linux-libc-dev` 7.0.0-38.38; Ubuntu's 7.0.0-42.42 update still reports the
+same twelve with no fixed version. That package contains UAPI headers without the
 affected kernel implementation. CVMFS requires it through `uuid-dev` and
 `libc6-dev`; removing the headers breaks that dependency chain. Containers use
 the host kernel, whose security updates remain the host administrator's responsibility.
-These twelve exceptions match only the assessed Ubuntu package and version,
+These twelve exceptions match only the assessed Ubuntu package and versions,
 on either architecture, and expire on 2026-11-20 for reassessment. Other
 package versions, kernel packages, and CVEs remain subject to the scan gate.
 

@@ -30,7 +30,10 @@ def test_kernel_exceptions_apply_only_to_the_assessed_ubuntu_headers():
     by_id = {finding["id"]: finding for finding in findings}
     for cve in HEADER_FINDINGS:
         finding = by_id[cve]
-        assert finding["purls"] == ["pkg:deb/ubuntu/linux-libc-dev@7.0.0-38.38"]
+        assert finding["purls"] == [
+            "pkg:deb/ubuntu/linux-libc-dev@7.0.0-38.38",
+            "pkg:deb/ubuntu/linux-libc-dev@7.0.0-42.42",
+        ]
         assert isinstance(finding["expired_at"], date)
         assert finding["expired_at"] <= date(2026, 11, 20)
         assert "host kernel" in finding["statement"]
