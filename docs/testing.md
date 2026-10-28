@@ -1016,13 +1016,14 @@ can deliver a delayed document notification after the manual refresh completes,
 so the viewer can briefly show its loading state again. The test polls for the
 complete result within its existing deadline and sends the Refresh click once.
 
-ASTRA browser clicks wait for the target to be stable and unobscured, then use
-its native BiDi element reference. A layout change between discovery and input
-therefore keeps the click on the intended element. The installed Firefox
+ASTRA browser clicks wait for the target to be stable and for at least one
+interior point to be unobscured, then use its native BiDi element reference and
+the exposed point's relative offset. A layout change between discovery and
+input therefore keeps the click on the intended element. The installed Firefox
 regressions in `test_astra_browser_click_image.py` move the target immediately
-before input, briefly cover it before clicking, and require a persistently
-covered target to fail without clicking. The readiness wait expires before
-the BiDi transport timeout.
+before input, partially or briefly cover it before clicking, and require a
+persistently covered target to fail without clicking. The readiness wait
+expires before the BiDi transport timeout.
 
 ### Nightly JupyterHub probe
 

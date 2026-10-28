@@ -102,6 +102,24 @@ def test_astra_click_waits_for_a_cover_to_disappear(browser):
     assert evaluate(session, context, "window.clicked.join(',')") == "target"
 
 
+def test_astra_click_uses_an_exposed_part_of_a_partially_covered_target(browser):
+    session, context = browser
+    evaluate(session, context, """(() => {
+        const cover = document.createElement('div');
+        cover.id = 'partial-cover';
+        Object.assign(cover.style, {
+            position: 'fixed', left: '110px', top: '55px', width: '40px',
+            height: '50px', zIndex: '10', background: 'white'
+        });
+        document.body.append(cover);
+        return true;
+    })()""")
+
+    click(session, context, "document.querySelector('#target')")
+
+    assert evaluate(session, context, "window.clicked.join(',')") == "target"
+
+
 def test_astra_click_rejects_a_persistently_covered_target(browser):
     session, context = browser
     evaluate(session, context, """(() => {
