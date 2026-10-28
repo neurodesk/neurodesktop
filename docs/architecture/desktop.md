@@ -4,7 +4,7 @@ description: LXDE desktop over VNC/RDP through Guacamole, clipboard sync,
   per-display Firefox profiles, and office file associations
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-23"
+last-reviewed: "2026-10-27"
 ---
 
 # Desktop Environment
@@ -99,6 +99,13 @@ still start when their launcher opens. Local Slurm and CVMFS retain their root
 startup worker. Guacamole web and VNC credentials remain separate per-user
 secrets. See [startup privileges](../environment-variables.md#startup-privileges)
 for the package-only sudo policy.
+
+Guacamole's Tomcat HTTP connector also listens only on `127.0.0.1`. Each
+launcher configures its per-user port and loopback address together, disables
+Tomcat's shutdown TCP port, and stops before launch if the copied `server.xml`
+does not contain exactly one active HTTP/1.1 connector. Browser access therefore
+continues through Jupyter's authenticated proxy without exposing the Guacamole
+login surface to container peers or users sharing an HPC network namespace.
 
 The packaged xrdp daemon runs as `xrdp`. The image sets sesman's
 `SessionSockdirGroup=xrdp` so that daemon can reach the notebook user's Xorg

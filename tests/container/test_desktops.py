@@ -1,6 +1,7 @@
 import subprocess
 import sys
 import inspect
+import ipaddress
 import os
 import grp
 import pwd
@@ -65,6 +66,33 @@ def _wait_for_tcp_port(port, timeout_seconds=30, host="127.0.0.1"):
             sock.close()
 
     raise AssertionError(f"TCP port {port} did not open on {host}: {last_error}")
+
+
+def _tcp_listener_hosts(port):
+    """Return listening hosts for port, folding IPv4-mapped IPv6 to IPv4.
+
+    Java binds 127.0.0.1 on a dual-stack socket, which ss reports as
+    [::ffff:127.0.0.1]; wildcard binds stay distinguishable (*, [::]).
+    """
+    result = subprocess.run(
+        ["ss", "-H", "-lnt"], capture_output=True, text=True, check=True
+    )
+    hosts = []
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) < 4:
+            continue
+        host, _, listen_port = fields[3].rpartition(":")
+        if listen_port != str(port):
+            continue
+        host = host.strip("[]").split("%", 1)[0]
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            hosts.append(host)
+            continue
+        hosts.append(str(getattr(address, "ipv4_mapped", None) or address))
+    return hosts
 
 
 def _read_runtime_port(home_dir, name, default):
@@ -1068,6 +1096,7 @@ def test_guac_api_connections():
     tomcat_port = process.tomcat_port
     try:
         _guacamole_ready(tomcat_port, home_dir=home_dir, process=process)
+        assert _tcp_listener_hosts(tomcat_port) == ["127.0.0.1"]
         _guacd_port = _read_runtime_port(home_dir, "guacd_port", default=4822)
         _wait_for_tcp_port(_guacd_port)
 
