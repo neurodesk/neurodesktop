@@ -6,7 +6,11 @@ repository_root="${CVMFS_REPOSITORY_ROOT:-/cvmfs/neurodesk.ardc.edu.au}"
 repository_name="${CVMFS_REPOSITORY_NAME:-neurodesk.ardc.edu.au}"
 
 verification_started=$SECONDS
-verification_deadline=$((verification_started + 120))
+verification_deadline=$((verification_started + 180))
+# autofs caches a failed mount for 60 seconds (--negative-timeout), so an
+# immediate second read would only replay the first failure.
+negative_cache_wait=61
+minimum_retry_read=10
 
 verify_command() {
     local limit=$1
@@ -37,7 +41,16 @@ for attempt in 1 2; do
         exit 0
     fi
     if (( attempt == 1 )); then
-        echo "::warning title=CVMFS mount pending::First mount verification failed; retrying the same repository within the remaining verification budget."
+        if (( read_status != 0 )); then
+            if (( remaining - negative_cache_wait - 6 < minimum_retry_read )); then
+                echo "[INFO]: Not enough verification budget remains to retry after the autofs negative cache expires."
+                break
+            fi
+            echo "::warning title=CVMFS mount pending::First repository read failed; retrying the same repository after the ${negative_cache_wait}-second autofs negative cache expires."
+            sleep "$negative_cache_wait"
+        else
+            echo "::warning title=CVMFS mount pending::First mount verification failed; retrying the same repository within the remaining verification budget."
+        fi
     fi
 done
 

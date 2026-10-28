@@ -135,11 +135,16 @@ mount with source `cvmfs2` using `findmnt`. An unavailable mount produces one
 mount-failure annotation and stops before inventory download, replica propagation
 waits, or the FSL file copy.
 The checker permits at most two read-and-mount checks within a shared
-120-second verification budget. Each command's timeout is limited by the
+180-second verification budget. Each command's timeout is limited by the
 remaining budget, reserving five seconds for kill grace and one second for
 Bash's whole-second clock rounding. A failed first check records command exit
-status and elapsed time before the second attempt. A recovered check is visible
-in the log. Both attempts use the same configured
+status and elapsed time before the second attempt. When the first repository
+read fails, the checker waits 61 seconds before the second read, because autofs
+[caches failed mounts for 60 seconds](https://man7.org/linux/man-pages/man8/automount.8.html)
+and an immediate read only replays the cached failure. It skips the second
+read when the budget cannot fit that wait plus a 10-second read. A mount-type
+failure after a successful read retries immediately. A recovered check is
+visible in the log. Both attempts use the same configured
 mirror and repository; the checker does not restart autofs or change servers.
 Failure diagnostics include effective client configuration, the repository probe
 and status, autofs status and journal, and client logs. Each diagnostic has a
