@@ -38,3 +38,17 @@ print(json.dumps(sorted(
     )
 
     assert "_version" not in json.loads(result.stdout)
+
+
+def test_launcher_source_has_one_package_manager_contract():
+    """The image and checkout builds must share npm's locked dependency tree."""
+    pyproject = tomllib.loads(
+        (LAUNCHER / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    build = pyproject["tool"]["hatch"]["build"]["hooks"]["jupyter-builder"]
+
+    assert build["build-kwargs"]["npm"] == ["npm"]
+    assert build["editable-build-kwargs"]["npm"] == ["npm"]
+    assert (LAUNCHER / "package-lock.json").is_file()
+    assert not (LAUNCHER / "yarn.lock").exists()
+    assert not (LAUNCHER / ".yarnrc.yml").exists()
