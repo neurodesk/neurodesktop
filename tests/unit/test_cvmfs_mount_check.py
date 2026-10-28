@@ -355,8 +355,12 @@ def test_mount_recovery_has_no_privileged_effects(tmp_path):
     assert "systemctl restart" not in calls
 
 
-@pytest.mark.parametrize(("first_read_seconds", "retries"), ((45, True), (104, False)))
-def test_negative_cache_wait_fits_verification_budget(tmp_path, first_read_seconds, retries):
+@pytest.mark.parametrize(
+    ("first_read_seconds", "retry_limit"), ((45, 45), (103, 10), (104, None))
+)
+def test_negative_cache_wait_fits_verification_budget(
+    tmp_path, first_read_seconds, retry_limit
+):
     result, calls = run_health(
         tmp_path,
         "check_cvmfs_mount.sh",
@@ -364,11 +368,12 @@ def test_negative_cache_wait_fits_verification_budget(tmp_path, first_read_secon
         first_read="timeout",
         clock_advances=(first_read_seconds,),
     )
-    if retries:
-        assert result.returncode == 0, result.stdout + result.stderr
+    if retry_limit:
         assert calls.count("sleep 61\n") == 1
         limits = re.findall(r"^limit (\d+) ls$", calls, re.M)
-        assert limits == ["45", "45"]
+        # Bash's whole-second clock may tick once between steps.
+        assert limits[0] == "45"
+        assert int(limits[1]) in (retry_limit - 1, retry_limit)
     else:
         assert result.returncode == 1
         assert "sleep" not in calls

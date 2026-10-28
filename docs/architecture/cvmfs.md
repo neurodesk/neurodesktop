@@ -141,7 +141,9 @@ Bash's whole-second clock rounding. A failed first check records command exit
 status and elapsed time before the second attempt. When the first repository
 read fails, the checker waits 61 seconds before the second read, because autofs
 [caches failed mounts for 60 seconds](https://man7.org/linux/man-pages/man8/automount.8.html)
-and an immediate read only replays the cached failure. It skips the second
+and an immediate read only replays the cached failure. After a timed-out
+read the wait is best effort: killing `ls` does not stop the autofs mount
+attempt, which can fail later and start its cache then. It skips the second
 read when the budget cannot fit that wait plus a 10-second read. A mount-type
 failure after a successful read retries immediately. A recovered check is
 visible in the log. Both attempts use the same configured
