@@ -133,6 +133,10 @@ timeout() {
   clock_step=$((clock_step + 1))
   return "$status"
 }
+sleep() {
+  command sleep "$@"
+  SECONDS=$((SECONDS + $1))
+}
 """
     )
     env = dict(
@@ -278,9 +282,9 @@ def test_initial_read_failure_recovers_before_inventory(tmp_path, script, first_
     assert re.search(rf"attempt=1 read_status={status} .*elapsed=\d+s", result.stdout)
     assert re.search(r"attempt=2 read_status=0 findmnt_status=0 .*elapsed=\d+s", result.stdout)
     assert calls.count("read\n") == 2
+    assert calls.index("sleep 61\n") < calls.rindex("read\n")
     assert calls.index("verified\n") < calls.index("inventory\n")
     assert "copy\n" in calls
-    assert "sleep" not in calls
     assert "refresh" not in calls
     assert "cvmfs_config probe" not in calls
 
@@ -295,10 +299,11 @@ def test_mount_verification_can_recover(tmp_path, first_mount):
     assert "::warning" in result.stdout
     assert re.search(r"attempt=1 read_status=0 findmnt_status=1 .*elapsed=\d+s", result.stdout)
     assert calls.count("read\n") == 2
+    assert "sleep" not in calls
     assert calls.index("verified\n") < calls.index("inventory\n")
 
 
-@pytest.mark.parametrize("clock_advances", ((50, 15, 45), (50, 15, 50), (50, 30, 30)))
+@pytest.mark.parametrize("clock_advances", ((50, 15, 105), (50, 15, 110), (50, 30, 90)))
 def test_verification_deadline_reserves_kill_grace_and_clock_rounding(tmp_path, clock_advances):
     result, calls = run_health(
         tmp_path,
@@ -312,8 +317,8 @@ def test_verification_deadline_reserves_kill_grace_and_clock_rounding(tmp_path, 
         for duration, command in re.findall(r"^limit (\d+) (ls|findmnt)$", calls, re.M)
     ]
     assert [command for _, command in limits[:3]] == ["ls", "findmnt", "ls"]
-    assert limits[2][0] <= min(45, 114 - sum(clock_advances[:2]))
-    if sum(clock_advances) == 110:
+    assert limits[2][0] <= min(45, 174 - sum(clock_advances[:2]))
+    if sum(clock_advances) == 170:
         assert result.returncode == 0, result.stdout + result.stderr
         assert len(limits) == 4
         assert limits[-1][1] == "findmnt"
@@ -331,10 +336,11 @@ def test_exhausted_deadline_does_not_start_another_read(tmp_path):
         "check_cvmfs_mount.sh",
         mounted=True,
         first_read="fail",
-        clock_advances=(114,),
+        clock_advances=(174,),
     )
     assert result.returncode == 1
     assert calls.count("read\n") == 1
+    assert "sleep" not in calls
     assert "bounded findmnt" not in calls
     assert result.stdout.count("::error title=CVMFS mount unavailable::") == 1
     assert "cvmfs_config probe" in calls
@@ -346,5 +352,30 @@ def test_mount_recovery_has_no_privileged_effects(tmp_path):
     )
     assert result.returncode == 0
     assert "sudo " not in calls
-    assert "sleep " not in calls
     assert "systemctl restart" not in calls
+
+
+@pytest.mark.parametrize(
+    ("first_read_seconds", "retry_limit"), ((45, 45), (103, 10), (104, None))
+)
+def test_negative_cache_wait_fits_verification_budget(
+    tmp_path, first_read_seconds, retry_limit
+):
+    result, calls = run_health(
+        tmp_path,
+        "check_cvmfs_mount.sh",
+        mounted=True,
+        first_read="timeout",
+        clock_advances=(first_read_seconds,),
+    )
+    if retry_limit:
+        assert calls.count("sleep 61\n") == 1
+        limits = re.findall(r"^limit (\d+) ls$", calls, re.M)
+        # Bash's whole-second clock may tick once between steps.
+        assert limits[0] == "45"
+        assert int(limits[1]) in (retry_limit - 1, retry_limit)
+    else:
+        assert result.returncode == 1
+        assert "sleep" not in calls
+        assert calls.count("read\n") == 1
+        assert result.stdout.count("::error title=CVMFS mount unavailable::") == 1
