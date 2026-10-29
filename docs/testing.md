@@ -471,6 +471,13 @@ later than 2026-11-20. The image scans apply these rules through Trivy's shared
 ignore file. The [build reference](architecture/build.md#publication)
 records why the headers remain installed and how the exceptions are bounded.
 
+`pytest tests/unit/test_conda_rattler_security.py` protects the temporary
+removal of the vulnerable optional Rattler solver without adding a Trivy
+exception. The installed-image `test_conda_rattler_security_image.py` confirms
+that both Rattler packages and their native module are absent, `libmamba` is
+selected, the vulnerable `py-rattler` line is disallowed, and a dry-run solve
+against a generated local channel succeeds without network access.
+
 `pytest tests/unit/test_python_ca_security.py` protects the fixed `pip`,
 `certifi`, and `uv` version floors for their bundled CA stores. The
 installed-image suite's `test_python_ca_security.py` parses both the main
