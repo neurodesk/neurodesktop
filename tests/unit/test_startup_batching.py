@@ -1,5 +1,6 @@
 """Exercise startup work against temporary homes without the image."""
 
+import json
 import os
 import shlex
 import subprocess
@@ -25,6 +26,54 @@ def shell(script, home, **env):
 def sanitizer():
     script = source("jupyterlab_startup.sh")
     return script[script.index("sanitize_jupyterlab_workspaces() {"):script.index("ensure_jupyterlab_page_config() {")]
+
+
+def kernel_spec_wrapper():
+    script = source("jupyterlab_startup.sh")
+    start = script.index("python3 - <<'PY' 2>/dev/null || true")
+    end = script.index("\nPY\n\nsanitize_jupyterlab_workspaces()", start) + len(
+        "\nPY"
+    )
+    return script[start:end]
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [b"\xff", b"[" * 2_000],
+    ids=["undecodable", "excessively-nested"],
+)
+def test_kernel_spec_batch_isolates_malformed_files_and_wraps_once(tmp_path, malformed):
+    home = tmp_path / "home"
+    broken = home / ".local/share/jupyter/kernels/broken/kernel.json"
+    broken.parent.mkdir(parents=True)
+    broken.write_bytes(malformed)
+    data_dir = tmp_path / "jupyter data"
+    valid = data_dir / "kernels/custom/kernel.json"
+    valid.parent.mkdir(parents=True)
+    valid.write_text(
+        '{"argv": ["python", "-m", "ipykernel_launcher", "-f", '
+        '"{connection_file}"], "display_name": "Custom"}'
+    )
+
+    for _ in range(2):
+        shell(
+            kernel_spec_wrapper(),
+            home,
+            JUPYTER_DATA_DIR=str(data_dir),
+        )
+
+    assert broken.read_bytes() == malformed
+    assert json.loads(valid.read_text()) == {
+        "argv": [
+            "/opt/neurodesktop/kernel_wrapper.sh",
+            "python",
+            "-m",
+            "ipykernel_launcher",
+            "-f",
+            "{connection_file}",
+        ],
+        "display_name": "Custom",
+    }
 
 
 def test_workspace_batch_preserves_valid_files_and_quarantines_invalid(tmp_path):
