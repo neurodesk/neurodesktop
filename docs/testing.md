@@ -83,6 +83,10 @@ export NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES=/tmp/neurodesk-launcher-tests/nod
 pytest tests/unit
 ```
 
+The ASTRA document DOM driver supplies a no-op `ResizeObserver` for JupyterLab's
+toolbar. These tests cover document actions and lifecycle without layout, which
+jsdom does not calculate.
+
 Missing launcher test dependencies fail with setup guidance instead of skipping.
 The unit-test workflow installs these same pinned dependencies automatically.
 The offline worker's `config/agentic/Dockerfile` uses the same DOM package pins.

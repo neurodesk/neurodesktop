@@ -50,6 +50,12 @@ dom.window.matchMedia = () => ({
   addListener() {},
   removeListener() {},
 });
+// jsdom has no layout engine; these document tests do not resize toolbars.
+dom.window.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(
   dom.window,
 );
@@ -63,6 +69,7 @@ for (const key of [
   "ShadowRoot",
   "customElements",
   "MutationObserver",
+  "ResizeObserver",
 ])
   globalThis[key] = dom.window[key];
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "astra-document-"));
