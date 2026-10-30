@@ -39,8 +39,8 @@ def kernel_spec_wrapper():
 
 @pytest.mark.parametrize(
     "malformed",
-    [b"\xff", b"[" * 2_000],
-    ids=["undecodable", "excessively-nested"],
+    [b"\xff", b"[" * 2_000, b"null", b"[]", b"42", b'"kernel"', b"true"],
+    ids=["undecodable", "excessively-nested", "null", "list", "number", "string", "boolean"],
 )
 def test_kernel_spec_batch_isolates_malformed_files_and_wraps_once(tmp_path, malformed):
     home = tmp_path / "home"

@@ -76,6 +76,8 @@ for root in candidate_roots:
             spec = json.loads(spec_file.read_text())
         except (ValueError, OSError, RecursionError):
             continue
+        if not isinstance(spec, dict):
+            continue
         argv = spec.get("argv")
         if not isinstance(argv, list) or not argv or argv[0] == WRAPPER:
             continue
