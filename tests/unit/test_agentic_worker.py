@@ -393,6 +393,31 @@ def test_publish_refuses_stale_review(worker, proposal, publisher_api, monkeypat
         worker.publish(task, output, repo)
 
 
+@pytest.mark.parametrize("kind", ["review", "issue"])
+def test_branch_moved_during_run_skips_review_but_refuses_issue(worker, proposal, publisher_api, monkeypatch, tmp_path, kind):
+    task, output, repo, remote = proposal
+    task["kind"] = kind
+    worker.git("checkout", "-b", task["branch"], cwd=repo)
+    (repo / "file.txt").write_text("Human changes\n")
+    worker.git("commit", "-am", "Human revision", cwd=repo)
+    worker.git("push", "origin", task["branch"], cwd=repo)
+    worker.git("checkout", "main", cwd=repo)
+    human = worker.git("rev-parse", task["branch"], cwd=remote)
+    calls, _, original_api = publisher_api
+    monkeypatch.setattr(worker, "api", lambda path, payload=None: (
+        pull(number=42) if path == "repos/owner/repo/pulls/42" else original_api(path, payload)))
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    if kind == "review":
+        assert worker.publish(task, output, repo) is None
+        assert f"superseded: PR branch moved past `{task['base_sha']}`" in summary.read_text()
+    else:
+        with pytest.raises(ValueError, match="Branch changed during publication"):
+            worker.publish(task, output, repo)
+    assert worker.git("rev-parse", task["branch"], cwd=remote) == human
+    assert not [path for path, _ in calls if path.endswith("/comments") or path.endswith("/pulls")]
+
+
 @pytest.mark.parametrize("auth_data", [
     {"auth_mode": "apikey", "OPENAI_API_KEY": "key"},
     {"auth_mode": "chatgpt", "tokens": {}},

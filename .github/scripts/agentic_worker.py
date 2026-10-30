@@ -983,6 +983,12 @@ def reconcile_incident_pull(task, number, branch):
         api(f"repos/{task['repo']}/pulls/{number}", updated, method="PATCH")
 
 
+def step_summary(text):
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as stream:
+            stream.write(text + "\n")
+
+
 def publish(task, output, workspace):
     result = validate_result(json.loads((output / "result.json").read_text()))
     validation = (output / "validation.txt").read_text()
@@ -996,9 +1002,7 @@ def publish(task, output, workspace):
         if task["kind"] in {"issue", "review"}:
             comment_once(task, f"{result['outcome']}: {result['body']}",
                          key=review_marker(task) if task["kind"] == "review" else None)
-        if os.environ.get("GITHUB_STEP_SUMMARY"):
-            with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as stream:
-                stream.write(f"{result['outcome']}: {result['body']}\n")
+        step_summary(f"{result['outcome']}: {result['body']}")
         return None
     patch = output / "change.patch"
     if not patch.is_file() or not 0 < patch.stat().st_size <= MAX_PATCH:
@@ -1048,6 +1052,11 @@ def publish(task, output, workspace):
             push_branch(task["branch"], workspace)
         elif git("rev-parse", "FETCH_HEAD^{tree}", cwd=workspace) == git("rev-parse", "HEAD^{tree}", cwd=workspace):
             git("reset", "--hard", "FETCH_HEAD", cwd=workspace)
+        elif task["kind"] == "review":
+            # A newer push supersedes this review; CodeRabbit's summary of
+            # that push starts a review of the current head.
+            step_summary(f"superseded: PR branch moved past `{task['base_sha']}` during review")
+            return None
         else:
             raise ValueError("Branch changed during publication; refusing stale publication")
     else:

@@ -168,6 +168,8 @@ publisher owns GitHub write credentials. Patches are bounded and cannot add
 credential paths, Git metadata, symlinks, or submodules. Proposed workflow
 changes do not replace the current run's separately prepared controller.
 The publisher rejects a stale target rather than overwriting a newer change.
+A review whose PR branch moved during the run ends without pushing or
+commenting; CodeRabbit's summary of the newer push starts its review.
 Rerunning a failed publisher reconciles the same task branch and PR. Rerunning
 preparation skips an issue with an existing owned open PR. That distinction
 matters when publication failed after creating the PR. An unconditional
