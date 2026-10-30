@@ -935,7 +935,7 @@ def test_static_fallback_lists_distinct_hosts_in_sync_with_the_image_default():
     urls = fallback.split('"')[1].split(";")
     assert urls == _configured_server_urls(static)
     hosts = [urlparse(url).hostname for url in urls]
-    assert "cvmfs-toronto.neurodesk.org" in hosts
+    assert hosts.count("cvmfs-toronto.neurodesk.org") == 1
     assert len(hosts) == len(set(hosts))
     # Geo-DNS aliases resolve to whichever host DNS picks, which can be
     # another entry in this list; failover would then retry the same server.
