@@ -45,6 +45,7 @@ yields invalid text. The parity tests pin this divergence explicitly.
 from __future__ import annotations
 
 import hashlib
+from typing import NamedTuple
 
 try:
     from pycrdt import Map, Text
@@ -53,6 +54,18 @@ except ImportError:  # pragma: no cover - the unit tier substitutes fakes
 
 CONTROL_CHARS = "\b\r\n"
 REWIND_CHARS = ("\b", "\r")
+
+
+class StreamState(NamedTuple):
+    """Compact per-cell state retained between stream messages.
+
+    Named fields keep the cursor bookkeeping readable while the tuple base
+    preserves compatibility with state returned by earlier installed copies.
+    """
+
+    text_length: int
+    cursor: int
+    running_hash: object
 
 
 def _hasher(text: str = ""):
@@ -106,13 +119,16 @@ def write_stream_output(outputs, content: dict, state=None):
     """Coalesce one stream message into *outputs* and return the new state.
 
     *outputs* is the cell's CRDT output array. *state* is the previous
-    ``(text_length, cursor, running_hash)`` for this cell, or ``None`` when
-    nothing is known — ``None`` means the cursor is at the end of whatever
-    the text currently is. A contiguous same-name stream run updates the
-    last output's ``Text`` in place; anything else starts a new ``Map``
+    :class:`StreamState` for this cell, or ``None`` when nothing is known —
+    ``None`` means the cursor is at the end of whatever the text currently
+    is. Plain ``(text_length, cursor, running_hash)`` tuples from an older
+    installed copy remain accepted. A contiguous same-name stream run updates
+    the last output's ``Text`` in place; anything else starts a new ``Map``
     entry, so interleaved stdout/stderr stay separate outputs exactly as
     nbformat records them.
     """
+    if state is not None:
+        state = StreamState(*state)
     name = content["name"]
     new_text = content["text"]
     last = outputs[-1] if len(outputs) else None
@@ -123,7 +139,7 @@ def write_stream_output(outputs, content: dict, state=None):
         and isinstance(last.get("text"), Text)
     ):
         ytext = last["text"]
-        at_end = state is None or state[0] == state[1]
+        at_end = state is None or state.text_length == state.cursor
         if at_end and not any(char in new_text for char in REWIND_CHARS):
             # With the cursor at the end of the text, printable runs and
             # newlines are pure appends (the '\n' rule appends at the end of
@@ -136,20 +152,24 @@ def write_stream_output(outputs, content: dict, state=None):
             ytext += new_text
             if state is None:
                 return None
-            state[2].update(new_text.encode("utf-8"))
+            state.running_hash.update(new_text.encode("utf-8"))
             grown = len(new_text)
-            return state[0] + grown, state[1] + grown, state[2]
+            return StreamState(
+                state.text_length + grown,
+                state.cursor + grown,
+                state.running_hash,
+            )
 
         current = str(ytext)
         valid = (
             state is not None
-            and state[0] == len(current)
-            and state[2].digest() == _hasher(current).digest()
+            and state.text_length == len(current)
+            and state.running_hash.digest() == _hasher(current).digest()
         )
         # The running hash proves the text is exactly what this writer
         # produced; anything else (another writer, a replayed room) restarts
         # conservatively at the end instead of overwriting foreign content.
-        cursor = state[1] if valid else len(current)
+        cursor = state.cursor if valid else len(current)
         updated, cursor = process_stream_text(cursor, new_text, current)
         prefix = 0
         while (
@@ -164,7 +184,7 @@ def write_stream_output(outputs, content: dict, state=None):
             del ytext[byte_prefix:]
         if prefix < len(updated):
             ytext.insert(byte_prefix, updated[prefix:])
-        return len(updated), cursor, _hasher(updated)
+        return StreamState(len(updated), cursor, _hasher(updated))
 
     updated, cursor = process_stream_text(0, new_text)
     outputs.append(Map({
@@ -172,4 +192,4 @@ def write_stream_output(outputs, content: dict, state=None):
         "text": Text(updated),
         "name": name,
     }))
-    return len(updated), cursor, _hasher(updated)
+    return StreamState(len(updated), cursor, _hasher(updated))
