@@ -305,6 +305,46 @@ def test_login_path_codex_wrapper_keeps_t3_app_server_stdout_clean(tmp_path):
     assert not (home / ".codex").exists()
 
 
+def test_t3_codex_provider_starts_from_a_read_only_directory(tmp_path):
+    """T3 0.1.5 probes Codex from the server's working directory."""
+    import subprocess
+
+    guidance = tmp_path / "AGENTS.md"
+    guidance.write_text("image guidance\n")
+    quiet = tmp_path / "quiet-codex"
+    quiet.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "print(json.dumps({'argv': sys.argv[1:]}))\n"
+    )
+    quiet.chmod(0o755)
+    wrapper = tmp_path / "codex"
+    wrapper.write_text(
+        repo_path("config/agents/t3-provider-bin/codex").read_text()
+        .replace("/opt/neurodesktop/agent_shell_setup.sh", str(tmp_path / "absent.sh"))
+        .replace("/opt/AGENTS.md", str(guidance))
+        .replace("/usr/bin/codex", str(quiet))
+    )
+    wrapper.chmod(0o755)
+    read_only = tmp_path / "read-only"
+    read_only.mkdir()
+    read_only.chmod(0o555)
+    if os.access(read_only, os.W_OK):
+        pytest.skip("directory permissions are not enforced for this user")
+    try:
+        result = subprocess.run(
+            [str(wrapper), "app-server"], cwd=read_only,
+            capture_output=True, text=True, timeout=10,
+        )
+    finally:
+        read_only.chmod(0o755)
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"argv": ["app-server"]}
+    assert result.stderr == ""
+    assert not (read_only / "AGENTS.md").exists()
+
+
 def _run_opencode_launcher(tmp_path, bashrc, environment):
     import subprocess
 
