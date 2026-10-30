@@ -72,7 +72,10 @@ as those entries change its position.
 The launcher DOM regressions, including T3 iframe file-link capture, reloads,
 disposal, and the T3 Connect panel, also require jsdom and TypeScript.
 ASTRA document tests additionally load the
-real JupyterLab registry, document context, and Lumino widgets. Install them
+real JupyterLab registry, document context, and Lumino widgets. The document
+harness supplies an inert `ResizeObserver` adapter because jsdom does not
+compute layout. These cases cover document lifecycle rather than toolbar
+resizing. Install the dependencies
 in a temporary directory and expose that directory when running the suite:
 
 ```bash
