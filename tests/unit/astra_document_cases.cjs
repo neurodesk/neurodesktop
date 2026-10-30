@@ -50,8 +50,9 @@ dom.window.matchMedia = () => ({
   addListener() {},
   removeListener() {},
 });
-// jsdom has no layout engine; these document tests do not resize toolbars.
-dom.window.ResizeObserver = class {
+// jsdom has no layout engine. These document lifecycle cases do not resize
+// toolbars, but JupyterLab's ReactiveToolbar requires the observer API.
+globalThis.ResizeObserver = dom.window.ResizeObserver = class {
   observe() {}
   unobserve() {}
   disconnect() {}
@@ -69,7 +70,6 @@ for (const key of [
   "ShadowRoot",
   "customElements",
   "MutationObserver",
-  "ResizeObserver",
 ])
   globalThis[key] = dom.window[key];
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "astra-document-"));

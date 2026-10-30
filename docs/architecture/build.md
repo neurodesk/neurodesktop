@@ -146,6 +146,15 @@ layer upgrades every direct requested distribution while retaining explicit
 compatibility holds. Resolver-selected dependencies inherit the new base and
 fresh direct solves; the build does not run an unbounded post-solve pip or
 conda upgrade that could replace the base image's tested Jupyter environment.
+The image explicitly uses Conda's supported `libmamba` solver. The pinned base
+currently also supplies the opt-in `conda-rattler-solver` 0.2.0 and
+`py-rattler` 0.26.0, whose native extension embeds the vulnerable Rust `zip`
+8.6.0 crate (CVE-2026-115905). The released solver cannot use the fixed
+`py-rattler` 0.28.0 line, so the build removes both unused Rattler packages and
+disallows only `py-rattler <0.28.0`; it then starts Conda to verify that
+`libmamba` remains selected. Remove this mitigation only after the base
+image carries a released compatible solver and an installed-image scan confirms
+that its `zip` crate is 9.0.5 or newer.
 Snakemake 9.27.0 has an isolated tool environment because its `packaging<26`
 requirement conflicts with the base image's Conda requirement of
 `packaging>=26.3`. Its private environment uses `packaging` 25.0 and exposes the

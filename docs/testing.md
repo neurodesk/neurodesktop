@@ -72,7 +72,10 @@ as those entries change its position.
 The launcher DOM regressions, including T3 iframe file-link capture, reloads,
 disposal, and the T3 Connect panel, also require jsdom and TypeScript.
 ASTRA document tests additionally load the
-real JupyterLab registry, document context, and Lumino widgets. Install them
+real JupyterLab registry, document context, and Lumino widgets. The document
+harness supplies an inert `ResizeObserver` adapter because jsdom does not
+compute layout. These cases cover document lifecycle rather than toolbar
+resizing. Install the dependencies
 in a temporary directory and expose that directory when running the suite:
 
 ```bash
@@ -82,10 +85,6 @@ npm install --prefix /tmp/neurodesk-launcher-tests --no-audit --no-fund jsdom@26
 export NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES=/tmp/neurodesk-launcher-tests/node_modules
 pytest tests/unit
 ```
-
-The ASTRA document DOM driver supplies a no-op `ResizeObserver` for JupyterLab's
-toolbar. These tests cover document actions and lifecycle without layout, which
-jsdom does not calculate.
 
 Missing launcher test dependencies fail with setup guidance instead of skipping.
 The unit-test workflow installs these same pinned dependencies automatically.
@@ -474,6 +473,16 @@ the exact assessed Ubuntu `linux-libc-dev` package version and an expiry no
 later than 2026-11-20. The image scans apply these rules through Trivy's shared
 ignore file. The [build reference](architecture/build.md#publication)
 records why the headers remain installed and how the exceptions are bounded.
+
+`pytest tests/unit/test_conda_rattler_security.py` protects the temporary
+removal of the vulnerable optional Rattler solver without adding a Trivy
+exception. The installed-image `test_conda_rattler_security_image.py` confirms
+that both Rattler packages and their native module are absent, `libmamba` is
+selected, the vulnerable `py-rattler` line is disallowed, and an installation
+from a generated local channel succeeds without network access. Harmless fixture
+packages named `py-rattler` test rejection of 0.27.0 and acceptance of 0.28.0,
+checking enforcement
+of the vulnerable-version restriction without blocking the fixed line.
 
 `pytest tests/unit/test_python_ca_security.py` protects the fixed `pip`,
 `certifi`, and `uv` version floors for their bundled CA stores. The

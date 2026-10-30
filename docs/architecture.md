@@ -91,7 +91,10 @@ The startup sequence follows this order (per
    permissions are set at the cache root without traversing generated files.
    Notebook Intelligence setup uses `--no-refresh` to write configuration
    without probing saved server addresses. Interactive OpenCode changes still
-   refresh running Jupyter servers.
+   refresh running Jupyter servers. Valid user-installed kernelspecs are also
+   wrapped once so newly launched kernels refresh the Neurodesk environment;
+   malformed kernelspecs are skipped independently instead of stopping the
+   remaining batch.
    OpenCode database maintenance is
    deliberately excluded from this startup path; the manual recovery tool is
    described under
