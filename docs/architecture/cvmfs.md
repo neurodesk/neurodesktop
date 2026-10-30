@@ -57,6 +57,12 @@ divided by their body-transfer time. Both exclude DNS, TCP, and TLS setup,
 because the CVMFS client reuses connections. The weights are fixed and apply
 equally to every region; the measured network path decides the order.
 
+The candidate pool includes the Toronto Stratum 1 at
+`http://cvmfs-toronto.neurodesk.org`. Clients in Toronto select it when its
+measured workload estimate is lowest. It also appears in the image's static
+GeoAPI fallback and the daily CVMFS health-check matrix. Adding it to the pool
+invalidates cached rankings from earlier images at the next startup.
+
 Each request has a unique query string to avoid reusing a CDN edge response.
 This does not flush origin caches. CDN endpoints are therefore scored on their
 cold path. The client's local CVMFS cache already serves the user's own repeat

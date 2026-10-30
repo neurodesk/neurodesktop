@@ -624,6 +624,35 @@ def test_health_workflow_checks_exactly_the_mirrors_users_can_select(tmp_path):
     assert {f"http://{server}" for server in monitored} == _default_pool(tmp_path)
 
 
+def test_default_pool_selects_toronto_when_its_network_path_is_faster(
+    tmp_path, fast_server, second_server, transfer_times, monkeypatch,
+):
+    toronto = "http://cvmfs-toronto.neurodesk.org"
+    jetstream = "http://cvmfs-jetstream.neurodesk.org"
+    hosts = sorted(_default_pool(tmp_path))
+    assert toronto in hosts
+    transfer_times({fast_server: (0.01, 0.18, 0.005),
+                    second_server: (0.01, 0.02, 0.15)})
+    selector = _selector("cvmfs_toronto_selection")
+    fetch = selector.Benchmark.fetch
+    routes = {toronto: (fast_server, "192.0.2.1"),
+              jetstream: (second_server, "192.0.2.2")}
+
+    def local_fetch(self, base, path, **kwargs):
+        if base not in routes:
+            return None
+        target, address = routes[base]
+        result = fetch(self, target, path, **kwargs)
+        if result:
+            result["ip"] = address
+        return result
+
+    monkeypatch.setattr(selector.Benchmark, "fetch", local_fetch)
+    monkeypatch.setattr(selector, "is_canonical", lambda base, timeout: True)
+    selected = selector.select(selector.Benchmark(), hosts)
+    assert selected["bases"] == [toronto, jetstream]
+
+
 def test_faster_cached_challenger_triggers_ranking(tmp_path, mock_repo, transfer_times):
     first, first_base = _start_server(mock_repo, _QuietHandler)
     second, second_base = _start_server(mock_repo, _QuietHandler)
@@ -906,6 +935,7 @@ def test_static_fallback_lists_distinct_hosts_in_sync_with_the_image_default():
     urls = fallback.split('"')[1].split(";")
     assert urls == _configured_server_urls(static)
     hosts = [urlparse(url).hostname for url in urls]
+    assert hosts.count("cvmfs-toronto.neurodesk.org") == 1
     assert len(hosts) == len(set(hosts))
     # Geo-DNS aliases resolve to whichever host DNS picks, which can be
     # another entry in this list; failover would then retry the same server.

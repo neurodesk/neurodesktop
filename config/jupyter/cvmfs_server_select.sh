@@ -14,6 +14,7 @@ http://cvmfs-melbourne.neurodesk.org
 http://cvmfs-sydney.neurodesk.org
 http://cvmfs-perth.neurodesk.org
 http://cvmfs-jetstream.neurodesk.org
+http://cvmfs-toronto.neurodesk.org
 http://cvmfs-frankfurt.neurodesk.org
 http://cvmfs01.nikhef.nl:8000
 http://cvmfs-s1bnl.opensciencegrid.org:8000
@@ -42,7 +43,7 @@ HOST_POOL="${NEURODESKTOP_CVMFS_HOST_POOL:-${DEFAULT_HOST_POOL}}"
 # beside it would make failover retry the same machine. List a host whose
 # GeoAPI answers first (Jetstream's returned HTTP 500 when this was written).
 # Keep in sync with config/cvmfs/neurodesk.ardc.edu.au.conf.
-FALLBACK_SERVER_URL="http://cvmfs-frankfurt.neurodesk.org/cvmfs/@fqrn@;http://cvmfs-sydney.neurodesk.org/cvmfs/@fqrn@;http://cvmfs-jetstream.neurodesk.org/cvmfs/@fqrn@;http://s1brisbane-cvmfs.openhtc.io/cvmfs/@fqrn@;http://s1nikhef-cvmfs.openhtc.io/cvmfs/@fqrn@"
+FALLBACK_SERVER_URL="http://cvmfs-frankfurt.neurodesk.org/cvmfs/@fqrn@;http://cvmfs-sydney.neurodesk.org/cvmfs/@fqrn@;http://cvmfs-jetstream.neurodesk.org/cvmfs/@fqrn@;http://cvmfs-toronto.neurodesk.org/cvmfs/@fqrn@;http://s1brisbane-cvmfs.openhtc.io/cvmfs/@fqrn@;http://s1nikhef-cvmfs.openhtc.io/cvmfs/@fqrn@"
 
 log() { echo "[cvmfs-select] $*"; }
 
