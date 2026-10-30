@@ -50,6 +50,13 @@ dom.window.matchMedia = () => ({
   addListener() {},
   removeListener() {},
 });
+// jsdom has no layout engine. These document lifecycle cases do not resize
+// toolbars, but JupyterLab's ReactiveToolbar requires the observer API.
+globalThis.ResizeObserver = dom.window.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(
   dom.window,
 );

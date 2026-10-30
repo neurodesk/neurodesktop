@@ -618,8 +618,19 @@ RUN --mount=type=bind,source=config/firefox/syspref.js,target=/tmp/syspref.js,ro
 
 USER ${NB_USER}
 
-# Install conda packages
-RUN retry conda install -c conda-forge nb_conda_kernels \
+# Install conda packages. conda-rattler-solver 0.2.0 pulls py-rattler 0.26.0,
+# whose native extension contains the vulnerable Rust zip 8.6.0 crate
+# (CVE-2026-115905). The released solver cannot use the fixed py-rattler 0.28
+# yet, so retain conda's supported libmamba solver and remove the unused
+# opt-in Rattler plugin. The system constraint prevents a later solve from
+# silently restoring a vulnerable py-rattler while allowing the fixed line.
+RUN retry conda install --solver=libmamba -c conda-forge nb_conda_kernels \
+    && conda config --system --set solver libmamba \
+    && conda remove --yes --force-remove conda-rattler-solver py-rattler \
+    && conda config --system --append disallowed_packages 'py-rattler <0.28.0' \
+    && /opt/conda/bin/python -c 'import importlib.util; assert importlib.util.find_spec("rattler") is None' \
+    && test "$(conda config --show solver)" = 'solver: libmamba' \
+    && conda info --json >/dev/null \
     && conda clean --all -f -y \
     && conda config --system --prepend envs_dirs '~/conda-environments' \
     && rm -rf /home/${NB_USER}/.cache
