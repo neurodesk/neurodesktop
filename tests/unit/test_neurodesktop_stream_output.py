@@ -145,6 +145,27 @@ def test_backspace_fragments_are_applied_to_the_shared_text():
     assert str(outputs[0]["text"]) == "aXY\n"
 
 
+def test_stream_state_names_fields_and_accepts_a_plain_tuple():
+    """Keep the helper compatible with callers that retain opaque tuples."""
+    module = load_module_with_fakes()
+    outputs = []
+
+    state = module.write_stream_output(
+        outputs, {"name": "stdout", "text": "abcdef"}
+    )
+    assert isinstance(state, tuple)
+    assert (state.text_length, state.cursor) == (6, 6)
+
+    # Earlier installed copies returned an unnamed tuple. Keep accepting that
+    # representation while returning the owned domain model from this copy.
+    state = module.write_stream_output(
+        outputs, {"name": "stdout", "text": "\rX"}, tuple(state)
+    )
+    assert isinstance(state, module.StreamState)
+    assert (state.text_length, state.cursor) == (6, 1)
+    assert str(outputs[0]["text"]) == "Xbcdef"
+
+
 def test_interleaved_stream_names_stay_separate_outputs():
     module = load_module_with_fakes()
     outputs = []

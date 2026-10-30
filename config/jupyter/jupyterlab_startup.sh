@@ -74,7 +74,9 @@ for root in candidate_roots:
     for spec_file in root.glob("*/kernel.json"):
         try:
             spec = json.loads(spec_file.read_text())
-        except (json.JSONDecodeError, OSError):
+        except (ValueError, OSError, RecursionError):
+            continue
+        if not isinstance(spec, dict):
             continue
         argv = spec.get("argv")
         if not isinstance(argv, list) or not argv or argv[0] == WRAPPER:

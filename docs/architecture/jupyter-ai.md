@@ -252,8 +252,9 @@ are a port of JupyterLab's `Private.processText`/`addText`
 the package as `outputs/_neurodesktop_stream.py` and splices only thin
 delegating methods, so the algorithm stays reviewable and is pinned by parity
 vectors in `tests/unit/test_neurodesktop_stream_output.py`. Between messages
-the processor retains only a per-cell `(length, cursor, running hash)` —
-never the accumulated text — and appends blindly while the cursor sits at
+the processor retains only a per-cell `StreamState` named tuple
+`(text_length, cursor, running_hash)` — never the accumulated text — and
+appends blindly while the cursor sits at
 the end and the fragment contains no `\r` or `\b`, so ordinary
 newline-terminated output of any size is neither held in memory for the life
 of the room nor rebuilt on every fragment. Rewinding fragments materialize
