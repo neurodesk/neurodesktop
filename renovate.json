@@ -302,7 +302,7 @@
       "groupName": "javascript lint tools"
     },
     {
-      "description": "T3 Code server manifest, Dockerfile ARG and tests move together.",
+      "description": "T3 Code server Dockerfile ARG and tests move together.",
       "matchDepNames": [
         "t3"
       ],
@@ -351,6 +351,7 @@
       "matchDepNames": [
         "tailscale/tailscale",
         "cloudflare/cloudflared",
+        "t3",
         "lightcone-cli",
         "cvmfs-release",
         "JuliaBinaryWrappers/strace_jll.jl"
@@ -1017,17 +1018,18 @@
       "datasourceTemplate": "npm"
     },
     {
-      "description": "T3 Code server: Dockerfile ARG plus the unit and container tests that read it back (config/agents/t3-code/package.json is handled by the npm manager).",
+      "description": "T3 Code server release archive: Dockerfile ARG plus the unit and container tests that read it back (both T3_CODE_*_SHA256 ARGs need a manual refresh).",
       "customType": "regex",
       "managerFilePatterns": [
         "/^Dockerfile$/",
         "/^tests/unit/test_t3_code_server\\.py$/",
-        "/^tests/container/test_t3_code_server_image\\.py$/"
+        "/^tests/container/test_t3_code_server_image\\.py$/",
+        "/^tests/container/test_t3_ollama\\.py$/"
       ],
       "matchStrings": [
         "ARG T3_CODE_VERSION=\\\\?\"?(?<currentValue>\\d[^\"\\\\\\s]*)\\\\?\"?",
-        "package\\[\"dependencies\"\\]\\[\"t3\"\\] == \"(?<currentValue>[^\"]+)\"",
-        "== \"t3 v(?<currentValue>[^\"]+)\""
+        "== \"t3 v(?<currentValue>[^\"]+)\"",
+        "\\[\"serverVersion\"\\] == \"(?<currentValue>[^\"]+)\""
       ],
       "depNameTemplate": "t3",
       "datasourceTemplate": "npm"

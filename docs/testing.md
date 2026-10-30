@@ -80,8 +80,8 @@ in a temporary directory and expose that directory when running the suite:
 
 ```bash
 npm install --prefix /tmp/neurodesk-launcher-tests --no-audit --no-fund jsdom@26.1.0 typescript@5.9.3 esbuild@0.28.2 \
-  @jupyterlab/docregistry@4.6.4 @jupyterlab/coreutils@6.6.4 \
-  @jupyterlab/services@7.6.4 @lumino/widgets@2.10.0
+  @jupyterlab/docregistry@4.6.5 @jupyterlab/coreutils@6.6.5 \
+  @jupyterlab/services@7.6.5 @lumino/widgets@2.10.0
 export NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES=/tmp/neurodesk-launcher-tests/node_modules
 pytest tests/unit
 ```

@@ -248,7 +248,7 @@ T3 starts automatically with Jupyter as the notebook user.
 - `NEURODESKTOP_T3_CODE_EXECUTABLE`,
   `NEURODESKTOP_T3_CODE_PROVIDER_BIN`: installed server and quiet provider
   directory overrides. These are intended for image tests and development.
-  The defaults are `/opt/t3-code/node_modules/.bin/t3` and
+  The defaults are `/opt/t3-code/t3` and
   `/opt/neurodesktop/t3-provider-bin`.
 
 See [T3 Code remote access](architecture/t3-code.md) for the Docker and T3
@@ -401,10 +401,10 @@ reviewed; the Dockerfile itself is authoritative.
 - `T3_CLOUDFLARED_VERSION`: the relay client release bundled for guided T3 Connect
   linking; defaults to `2026.10.1` and uses T3's supported executable override. Update
   both architecture SHA-256 values in `Dockerfile` whenever this version changes.
-- `T3_CODE_VERSION`: the headless T3 Code server release installed from the
-  checked manifest; defaults to `0.1.0`. The release ships one self-contained
-  executable per platform, so the layer installs no lockfile and compiles
-  nothing
+- `T3_CODE_VERSION`: the headless T3 Code server release installed from its
+  GitHub release archive; defaults to `0.1.5`. Update `T3_CODE_AMD64_SHA256`
+  and `T3_CODE_ARM64_SHA256` together with the version, using the release's
+  `SHA256SUMS`. Each archive is self-contained, so the layer compiles nothing
 - `TAILSCALE_VERSION`: static Tailscale CLI and daemon release; defaults to
   `1.104.1`. Update `TAILSCALE_AMD64_SHA256` and `TAILSCALE_ARM64_SHA256`
   together with the version, using the official archive checksums. Installation

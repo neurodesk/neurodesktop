@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from pathlib import Path
+import re
 import stat
 import sys
 from types import SimpleNamespace
@@ -224,9 +226,6 @@ def test_spawn_failure_parks_sidecar_without_escaping_into_jupyter(tmp_path):
 
 def test_extension_package_and_image_install_contract():
     dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
-    package = json.loads(
-        repo_path("config/agents/t3-code/package.json").read_text(encoding="utf-8")
-    )
     server_extension = (
         PACKAGE_ROOT / "neurodesk_t3_code/serverext.py"
     ).read_text(encoding="utf-8")
@@ -234,21 +233,28 @@ def test_extension_package_and_image_install_contract():
         PACKAGE_ROOT
         / "jupyter-config/jupyter_server_config.d/neurodesk_t3_code.json"
     ).read_text(encoding="utf-8")
-
-    assert 'ARG T3_CODE_VERSION="0.1.0"' in dockerfile
-    assert package["dependencies"]["t3"] == "0.1.0"
-    # The self-contained build bundles its dependencies, so nothing is
-    # compiled, no install script runs, and one platform build is installed.
-    assert "npm install --omit=dev --ignore-scripts" in dockerfile
-    assert "--no-package-lock" in dockerfile
-    assert "build-essential" not in dockerfile.split("ARG T3_CODE_VERSION")[1].split(
+    layer = dockerfile.split('ARG T3_CODE_VERSION="')[1].split(
         "# Expose the installed agent families"
     )[0]
-    assert "ls -d /opt/t3-code/node_modules/@t3code/* | wc -l" in dockerfile
-    assert "/client/index.html" in dockerfile
-    assert "node-pty/prebuilds/linux-$(node -p process.arch)/pty.node" in dockerfile
-    assert "apt-install-retry libatomic1" in dockerfile
-    assert "/opt/t3-code/node_modules/.bin/t3" in dockerfile
+
+    assert 'ARG T3_CODE_VERSION="0.1.5"' in dockerfile
+    # The npm `t3` package only downloads this archive per user at first run,
+    # so the image installs the checksum-pinned release archive itself.
+    assert re.search(r'ARG T3_CODE_AMD64_SHA256="[0-9a-f]{64}"', dockerfile)
+    assert re.search(r'ARG T3_CODE_ARM64_SHA256="[0-9a-f]{64}"', dockerfile)
+    assert (
+        "https://github.com/pingdotgg/t3code/releases/download/v${T3_CODE_VERSION}/${t3_archive}"
+        in layer
+    )
+    assert "sha256sum -c -" in layer
+    assert "npm install" not in layer
+    assert "build-essential" not in layer
+    assert "/opt/t3-code/client/index.html" in layer
+    assert 'node-pty/prebuilds/linux-${t3_arch}/pty.node' in layer
+    assert 'if ldd /opt/t3-code/t3 | grep "not found"; then exit 1; fi' in layer
+    assert "ln -s /opt/t3-code/t3 /usr/local/bin/t3" in layer
+    assert _supervisor_module().DEFAULT_EXECUTABLE == Path("/opt/t3-code/t3")
+    assert not repo_path("config/agents/t3-code").exists()
     assert "extensions/t3-code-server" in dockerfile
     assert '"neurodesk_t3_code": true' in config
     assert "async def _start_jupyter_server_extension(self, _serverapp" in server_extension

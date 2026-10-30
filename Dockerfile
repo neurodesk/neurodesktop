@@ -680,6 +680,9 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     && chown -R ${NB_UID}:${NB_GID} /tmp/jupyterlab-slurm \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --upgrade "pip==${PIP_VERSION}" \
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --build-constraint /tmp/build-constraints.txt --upgrade \
+    # Pin JupyterLab itself instead of inheriting the base image's release, so
+    # upgrades are explicit and Renovate tracks them.
+    jupyterlab==4.6.5 \
     datalad \
     nipype \
     niwrap \
@@ -1051,16 +1054,14 @@ RUN set -eu; \
     test "$(tailscaled --version | head -n 1)" = "${TAILSCALE_VERSION}"; \
     rm -rf /tmp/tailscale.tgz "/tmp/${tailscale_archive}"
 
-# Install the headless T3 Code server from its pinned, self-contained build.
-# The release publishes one executable per platform, with its web client and
-# prebuilt native modules bundled beside it, so this layer needs no compiler
-# and runs no install script. A checked-in lockfile cannot serve that shape:
-# npm records only the bundled tree of the platform it ran on, then refuses
-# `npm ci` everywhere and silently drops the optional platform package on the
-# other architecture. The exact pins determine the tree instead — this
-# manifest pins `t3`, `t3` pins each `@t3code/t3-<platform>` build, and each
-# build carries its dependencies inside its own tarball. The executable links
-# against libatomic, which the checks below prove is present.
+# Install the headless T3 Code server from its pinned, self-contained release
+# build. Since 0.1.1 the `t3` npm package is only a launcher that downloads this
+# same archive into each user's ~/.t3 on first run; install the archive itself
+# so the image works offline and every user runs the verified build. Each
+# archive bundles its web client, its native modules (including the node-pty
+# prebuild) and libatomic, so this layer compiles nothing and runs no install
+# script. Running the executable directly also keeps T3's npm self-update flow
+# away from the image-owned server.
 # Use a patched relay client through T3's executable override. Verify downloads before
 # installing; keeping it on PATH avoids per-user downloads and install prompts.
 ARG T3_CLOUDFLARED_VERSION="2026.10.1"
@@ -1078,34 +1079,37 @@ RUN set -eu; \
     cloudflared --version; \
     rm /tmp/t3-cloudflared
 
-ARG T3_CODE_VERSION="0.1.0"
-RUN --mount=type=bind,source=config/agents/t3-code/package.json,target=/tmp/t3-code/package.json,ro \
-    --mount=type=bind,source=config/agents/t3-provider-bin,target=/tmp/t3-provider-bin,ro \
+ARG T3_CODE_VERSION="0.1.5"
+ARG T3_CODE_AMD64_SHA256="21d50dcc9c634221b11b58d6a94350d2c6ee36905737b054b11fa4eba295a98b"
+ARG T3_CODE_ARM64_SHA256="389362e2a349ea62b38d9bc708f4fca2381936cccb2d326b5fc5d074b072aef1"
+RUN --mount=type=bind,source=config/agents/t3-provider-bin,target=/tmp/t3-provider-bin,ro \
     set -eux; \
     node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 24 || (major === 24 && minor < 10)) process.exit(1)'; \
-    test "$(node -p 'require("/tmp/t3-code/package.json").dependencies.t3')" = "${T3_CODE_VERSION}"; \
-    apt-get update; \
-    apt-install-retry libatomic1; \
+    case "$(dpkg --print-architecture)" in \
+        amd64) t3_arch=x64; t3_sha256="${T3_CODE_AMD64_SHA256}" ;; \
+        arm64) t3_arch=arm64; t3_sha256="${T3_CODE_ARM64_SHA256}" ;; \
+        *) echo "Unsupported T3 Code architecture" >&2; exit 1 ;; \
+    esac; \
+    t3_archive="t3-${T3_CODE_VERSION}-linux-${t3_arch}.tar.gz"; \
+    curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 600 \
+        "https://github.com/pingdotgg/t3code/releases/download/v${T3_CODE_VERSION}/${t3_archive}" \
+        -o /tmp/t3-code.tar.gz; \
+    printf '%s  %s\n' "${t3_sha256}" /tmp/t3-code.tar.gz | sha256sum -c -; \
     install -d -m 0755 /opt/t3-code /opt/neurodesktop/t3-provider-bin; \
-    install -m 0644 /tmp/t3-code/package.json /opt/t3-code/; \
-    cd /opt/t3-code; \
-    npm_config_cache=/tmp/npm-t3-cache npm install --omit=dev --ignore-scripts \
-        --no-package-lock --no-audit --no-fund; \
-    test "$(ls -d /opt/t3-code/node_modules/@t3code/* | wc -l)" -eq 1; \
-    t3_platform="$(ls -d /opt/t3-code/node_modules/@t3code/*)"; \
-    test "$(node -p "require(\"${t3_platform}/package.json\").version")" = "${T3_CODE_VERSION}"; \
-    test -x "${t3_platform}/t3"; \
-    test -f "${t3_platform}/client/index.html"; \
-    test -f "${t3_platform}/node_modules/node-pty/prebuilds/linux-$(node -p process.arch)/pty.node"; \
-    find /opt/t3-code -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete; \
-    test "$(/opt/t3-code/node_modules/.bin/t3 --version)" = "t3 v${T3_CODE_VERSION}"; \
+    tar -xzf /tmp/t3-code.tar.gz -C /opt/t3-code --strip-components=1 --no-same-owner; \
+    rm /tmp/t3-code.tar.gz; \
+    test -x /opt/t3-code/t3; \
+    test -f /opt/t3-code/client/index.html; \
+    test -f "/opt/t3-code/node_modules/node-pty/prebuilds/linux-${t3_arch}/pty.node"; \
+    if ldd /opt/t3-code/t3 | grep "not found"; then exit 1; fi; \
+    find /opt/t3-code -type f -name "*.map" -delete; \
+    test "$(/opt/t3-code/t3 --version)" = "t3 v${T3_CODE_VERSION}"; \
     install -m 0755 /tmp/t3-provider-bin/codex /tmp/t3-provider-bin/claude \
         /tmp/t3-provider-bin/opencode /tmp/t3-provider-bin/hostnamectl /opt/neurodesktop/t3-provider-bin/; \
-    ln -s /opt/t3-code/node_modules/.bin/t3 /usr/local/bin/t3; \
+    ln -s /opt/t3-code/t3 /usr/local/bin/t3; \
     chown -R root:users /opt/t3-code /opt/neurodesktop/t3-provider-bin; \
     chmod -R a+rX /opt/t3-code /opt/neurodesktop/t3-provider-bin; \
-    apt-get clean; \
-    rm -rf /var/lib/apt/lists/* /tmp/npm-t3-cache /root/.npm /home/${NB_USER}/.npm
+    rm -rf /root/.t3
 
 # Expose the installed agent families as Jupyter AI ACP personas. These
 # adapters are runtime-only and deliberately live after the expensive

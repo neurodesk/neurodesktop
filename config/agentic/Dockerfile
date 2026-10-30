@@ -23,8 +23,8 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
        nibabel==5.4.2 numpy==2.5.4
 RUN npm install --prefix /opt/launcher-dom --no-audit --no-fund \
        jsdom@26.1.0 typescript@5.9.3 esbuild@0.28.2 \
-       @jupyterlab/docregistry@4.6.4 @jupyterlab/coreutils@6.6.4 \
-       @jupyterlab/services@7.6.4 @lumino/widgets@2.10.0 \
+       @jupyterlab/docregistry@4.6.5 @jupyterlab/coreutils@6.6.5 \
+       @jupyterlab/services@7.6.5 @lumino/widgets@2.10.0 \
     && npm cache clean --force
 COPY javascript-lint/package.json javascript-lint/package-lock.json /opt/javascript-lint/
 RUN npm ci --prefix /opt/javascript-lint --ignore-scripts --no-audit --no-fund \

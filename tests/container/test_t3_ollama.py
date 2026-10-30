@@ -20,7 +20,7 @@ import websocket
 from testlib import resolve_source
 
 
-T3 = os.environ.get("NEURODESKTOP_TEST_T3_BIN", "/opt/t3-code/node_modules/.bin/t3")
+T3 = os.environ.get("NEURODESKTOP_TEST_T3_BIN", "/opt/t3-code/t3")
 LAUNCHER = os.environ.get(
     "NEURODESKTOP_TEST_OPENCODE_LAUNCHER", "/opt/neurodesktop/t3-provider-bin/opencode"
 )
@@ -189,7 +189,7 @@ def running_t3(home, ollama_host, *, inline=None):
                 time.sleep(0.1)
         else:
             pytest.fail("T3 did not answer its environment endpoint")
-        assert descriptor["serverVersion"] == "0.1.0"
+        assert descriptor["serverVersion"] == "0.1.5"
         credential = subprocess.check_output(
             [
                 T3,

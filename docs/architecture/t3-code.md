@@ -393,25 +393,23 @@ than using T3's systemd service installer or self-update flow.
 
 ## Build and architecture limits
 
-T3 0.1.0 publishes one self-contained executable per platform, with its web
-client, its `node-pty` prebuild and its other native modules bundled beside it.
-The PTY binding lives under `node_modules/node-pty/prebuilds/linux-x64/pty.node`
-on amd64 and `node_modules/node-pty/prebuilds/linux-arm64/pty.node` on arm64.
-The Dockerfile installs the manifest under `config/agents/t3-code` into
-`/opt/t3-code`, so the layer compiles nothing, runs no install script, and
-keeps exactly one `@t3code/t3-linux-<arch>` build. The executable links
-against `libatomic1`, which the layer installs; its build-time version check
-fails if that library is missing.
+T3 publishes one self-contained archive per platform on its GitHub release,
+with the executable, its web client, its `node-pty` prebuild, its other native
+modules and `libatomic` bundled together. The PTY binding lives under
+`node_modules/node-pty/prebuilds/linux-x64/pty.node` on amd64 and
+`node_modules/node-pty/prebuilds/linux-arm64/pty.node` on arm64. The
+Dockerfile downloads the archive for `T3_CODE_VERSION`, verifies it against
+the pinned `T3_CODE_AMD64_SHA256` or `T3_CODE_ARM64_SHA256`, and extracts it
+into `/opt/t3-code`. The layer compiles nothing, runs no install script, and
+fails if the executable has an unresolved shared library.
 
-This packaging replaces the earlier locked npm tree. `npm ci` cannot install
-it: npm records only the bundled tree of the platform that generated the
-lockfile, then refuses the install everywhere else and silently drops the
-optional platform package on the other architecture. The exact pins carry the
-same guarantee instead — the manifest pins `t3`, `t3` pins each
-`@t3code/t3-<platform>` build, and each build carries its dependencies inside
-its own tarball.
+Since 0.1.1 the `t3` npm package is only a launcher. It downloads the same
+archive into the caller's `~/.t3/runtime` on first run, which would make each
+user fetch about 370 MB and bypass the image's checksum. The image therefore
+runs `/opt/t3-code/t3` directly. A version bump must refresh both SHA256
+values from the release's `SHA256SUMS`.
 
 Both amd64 and arm64 images must pass the installed server and PTY checks.
-0.1.0 ships a resource monitor for both Linux architectures, so arm64 no
+The release ships a resource monitor for both Linux architectures, so arm64 no
 longer omits resource telemetry; server, terminal, pairing, and provider
 behavior must still pass.

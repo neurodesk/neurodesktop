@@ -112,6 +112,13 @@ CATALOG = (
         ">=1.0a0,<1.0rc0",
         "The image intentionally follows Pydra's 1.0 prerelease line.",
     ),
+    CatalogEntry(
+        "requirement:pypi:jupyterlab",
+        "pypi:jupyterlab",
+        "pypi",
+        "<4.7",
+        "The rebuilt MyST and collaboration frontends and the DOM harness target JupyterLab 4.6.",
+    ),
     CatalogEntry("requirement:pypi:jupyter-server-proxy", "pypi:jupyter-server-proxy", "pypi"),
     CatalogEntry("requirement:pypi:notebook-intelligence", "pypi:notebook-intelligence", "pypi"),
     CatalogEntry(
