@@ -478,8 +478,11 @@ records why the headers remain installed and how the exceptions are bounded.
 removal of the vulnerable optional Rattler solver without adding a Trivy
 exception. The installed-image `test_conda_rattler_security_image.py` confirms
 that both Rattler packages and their native module are absent, `libmamba` is
-selected, the vulnerable `py-rattler` line is disallowed, and a dry-run solve
-against a generated local channel succeeds without network access.
+selected, the vulnerable `py-rattler` line is disallowed, and an installation
+from a generated local channel succeeds without network access. Harmless fixture
+packages named `py-rattler` test rejection of 0.27.0 and acceptance of 0.28.0,
+checking enforcement
+of the vulnerable-version restriction without blocking the fixed line.
 
 `pytest tests/unit/test_python_ca_security.py` protects the fixed `pip`,
 `certifi`, and `uv` version floors for their bundled CA stores. The
