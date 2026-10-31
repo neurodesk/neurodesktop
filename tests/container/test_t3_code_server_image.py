@@ -30,7 +30,7 @@ def test_t3_code_runtime_and_native_terminal_support_are_installed():
     assert shutil.which("codex")
     assert shutil.which("claude")
     assert shutil.which("opencode")
-    assert "2026.10.1" in subprocess.check_output(["cloudflared", "--version"], text=True)
+    assert "2026.10.7" in subprocess.check_output(["cloudflared", "--version"], text=True)
 
     # The executable, its web client and its PTY binding ship together; the
     # server loads all three from this directory.

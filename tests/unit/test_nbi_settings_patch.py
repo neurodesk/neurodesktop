@@ -29,7 +29,7 @@ def load_patcher_module():
     )
 
 
-# Verbatim excerpts matching the notebook_intelligence 6.2.0 published
+# Verbatim excerpts matching the notebook_intelligence 6.3.0 published
 # labextension bundle:
 # the NBI API class holding fetchCapabilities, and the settings command whose
 # execute callback shows a panel built from the stale client-side cache.
@@ -40,7 +40,7 @@ BUNDLE_FIXTURE = (
     'n=new a.MainAreaWidget({content:t});return n.id="nbi-settings",n};'
     "let U=O();"
     "e.commands.addCommand(pe.openConfigurationDialog,"
-    '{label:"Notebook Intelligence Settings",'
+    '{label:x.__("Notebook Intelligence Settings"),'
     'execute:t=>{const n="string"==typeof(null==t?void 0:t.tab)?t.tab:void 0;'
     "U.isDisposed&&(U=O()),n&&U.content.selectTab(n),"
     'U.isAttached||e.shell.add(U,"main"),'
@@ -118,6 +118,7 @@ const O = () => ({
 });
 let U = {isDisposed: false, dispose() {disposed = true;}};
 const pe = {openConfigurationDialog: "settings"};
+const x = {__: (label) => label};
 const e = {
     commands: {addCommand(id, options) {execute = options.execute;}},
     shell: {add(panel) {shown = panel;}, activateById() {}}
@@ -128,6 +129,14 @@ const e = {
     program += "disposed, model: shown.content.model, tab: shown.content.tab ?? null})));"
     result = subprocess.run(["node", "-e", program], capture_output=True, text=True, check=True)
     assert json.loads(result.stdout) == {"disposed": True, "model": "fresh", "tab": selected_tab}
+
+
+def test_settings_patch_keeps_the_translated_command_label():
+    patcher = load_patcher_module()
+
+    patched, _ = patcher.patch_settings_bundle_text(BUNDLE_FIXTURE)
+
+    assert '{label:x.__("Notebook Intelligence Settings"),execute:async t=>' in patched
 
 
 def test_settings_patch_leaves_unrelated_text_alone():
@@ -301,7 +310,7 @@ def test_main_without_args_patches_both_targets(tmp_path, monkeypatch):
 def test_dockerfile_patches_the_compatible_published_nbi_frontend():
     dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
 
-    assert "notebook_intelligence==6.2.0" in dockerfile
+    assert "notebook_intelligence==6.3.0" in dockerfile
     assert '"mcp>=1.30.0,<2"' in dockerfile
     assert 'ARG NBI_JUPYTERLAB_BUILDER_VERSION="4.5.11"' in dockerfile
     assert "/tmp/nbi-yarn.lock" not in dockerfile

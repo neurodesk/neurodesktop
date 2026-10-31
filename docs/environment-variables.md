@@ -343,10 +343,11 @@ reviewed; the Dockerfile itself is authoritative.
 
 - `OPENCODE_VERSION`: the OpenCode release installed into
   the image; defaults to the validated pin in the Dockerfile (currently
-  `1.19.3`). Override to bump the pin, or set it to an empty value to
+  `1.19.5`). OpenCode 2 is held: it changes the plugin SDK the image's
+  OpenCode plugins target and needs its own migration. Override to bump the pin, or set it to an empty value to
   install the latest release
 - `CLAUDE_CODE_VERSION`: exact Claude Code native release installed as the
-  image fallback; defaults to `2.1.302`. The direct-version audit compares the
+  image fallback; defaults to `2.1.316`. The direct-version audit compares the
   pin with the official `@anthropic-ai/claude-code` release stream
 - `CVMFS_VERSION`: exact Ubuntu CVMFS client package version;
   defaults to `2.14.1+ubuntu26.04`
@@ -361,12 +362,12 @@ reviewed; the Dockerfile itself is authoritative.
   `ANYWIDGET_VERSION`, `LIGHTCONE_CLI_VERSION`, `LIGHTCONE_CLI_SHA256`: exact
   `pip`, `certifi`, `uv`,
   ASTRA CLI/schema, viewer runtime, and isolated Lightcone CLI releases
-  installed in the image; defaults to `26.2.2`, `2026.10.19`, `0.13.4`, `0.2.18`,
+  installed in the image; defaults to `26.2.2`, `2026.10.23`, `0.13.6`, `0.2.18`,
   `0.0.14`, `0.11.0`, `0.5.0`, and the verified SHA-256 of that Lightcone
   source archive. The `pip`, `certifi`, and `uv` pins exclude compromised
   emSign G3 trust paths from their bundled CA stores
 - `SNAKEMAKE_VERSION`: user-facing Snakemake workflow release; defaults to
-  `9.27.0` in an isolated tool environment. Its metadata requires
+  `9.27.1` in an isolated tool environment. Its metadata requires
   `packaging<26`, so that environment holds `packaging` at `25.0`.
   The main Python environment retains Conda's compatible `packaging` release
 - `PYJWT_VERSION`: exact PyJWT release installed into the main Python
@@ -387,26 +388,26 @@ reviewed; the Dockerfile itself is authoritative.
   Collaboration pinned alongside it
 - `CODEX_ACP_VERSION`, `CLAUDE_AGENT_ACP_VERSION`: pinned
   ACP adapters that expose the Codex and Claude personas in Jupyter AI;
-  defaults to `2.2.2` and `0.92.0`. They install without their vendored agent
+  defaults to `2.5.0` and `0.99.1`. They install without their vendored agent
   binaries and drive the selected user or image CLIs through `CODEX_PATH` and
   `CLAUDE_CODE_EXECUTABLE` (runtime variables exported by
   `environment_variables.sh`)
 - `CODEX_CLI_VERSION`: the `@openai/codex` CLI release
-  installed globally; defaults to `0.163.0`. Upgrades must pass the real T3 and
+  installed globally; defaults to `0.166.0`. Upgrades must pass the real T3 and
   ACP initialization probes. This release exceeds the pinned ACP adapter's
-  declared `^0.160.1` dependency range. The image deliberately uses its
+  declared `^0.165.0` dependency range. The image deliberately uses its
   global CLI after removing the adapter's bundled executable; installed-image
   ACP and T3 initialization probes must validate this exception.
   A user can install a newer release with `codex update`
 - `T3_CLOUDFLARED_VERSION`: the relay client release bundled for guided T3 Connect
-  linking; defaults to `2026.10.1` and uses T3's supported executable override. Update
+  linking; defaults to `2026.10.7` and uses T3's supported executable override. Update
   both architecture SHA-256 values in `Dockerfile` whenever this version changes.
 - `T3_CODE_VERSION`: the headless T3 Code server release installed from its
   GitHub release archive; defaults to `0.1.5`. Update `T3_CODE_AMD64_SHA256`
   and `T3_CODE_ARM64_SHA256` together with the version, using the release's
   `SHA256SUMS`. Each archive is self-contained, so the layer compiles nothing
 - `TAILSCALE_VERSION`: static Tailscale CLI and daemon release; defaults to
-  `1.104.1`. Update `TAILSCALE_AMD64_SHA256` and `TAILSCALE_ARM64_SHA256`
+  `1.104.4`. Update `TAILSCALE_AMD64_SHA256` and `TAILSCALE_ARM64_SHA256`
   together with the version, using the official archive checksums. Installation
   does not start or authenticate the daemon; see
   [manual userspace setup](architecture/t3-code.md#connect-through-tailscale-inside-the-container).
@@ -416,14 +417,14 @@ reviewed; the Dockerfile itself is authoritative.
   `3bf11cb7b271b554998105a11e6c9b8c3e376615`
 - `MYST_PNPM_VERSION`, `MYST_YDOC_VERSION`: pnpm and Jupyter
   YDoc releases used for the MyST/RISE compatibility rebuild; defaults to
-  `11.28.8` and `4.2.0`
+  `11.28.10` and `4.2.0`
 - `APPTAINER_VERSION`, `APPTAINER_GO_VERSION`, `APPTAINER_GRPC_VERSION`,
   `APPTAINER_CRYPTO_VERSION`: Apptainer source release and the Go
   toolchain/grpc/crypto module versions used in its dedicated build stage;
-  defaults to `1.5.5`, `1.27.3`, `1.84.0`, and `0.58.0`. The crypto override
+  defaults to `1.5.5`, `1.27.3`, `1.85.0`, and `0.58.0`. The crypto override
   also updates the separately vendored gocryptfs build.
 - `BASE_IMAGE_TAG`: tag of the upstream Jupyter Docker base image; defaults to
-  the multi-architecture `2026-10-18` release
+  the multi-architecture `2026-10-28` release
 - `NPM_VERSION`: npm release installed with the runtime Node.js distribution;
   defaults to `12.2.1`
 - `FREEBROWSE_REF`: exact FreeBrowse source commit used to build the default
@@ -440,7 +441,7 @@ reviewed; the Dockerfile itself is authoritative.
   VirtualGL release and architecture-specific Debian package checksums.
   The version defaults to `3.1.5`; update its verified checksums together with
   the version. GPU rendering remains an explicit application launch choice.
-- `CODE_SERVER_VERSION`: code-server release; defaults to `4.141.0`
+- `CODE_SERVER_VERSION`: code-server release; defaults to `4.144.0`
 - `SHELL_QUOTE_VERSION`: shell-quote release for VS Code's nested package;
   defaults to `1.12.0`
 - `PROXY_ADDR_VERSION`: proxy-addr release for code-server's npm dependency

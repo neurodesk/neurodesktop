@@ -52,7 +52,7 @@ DEFAULT_OLLAMA_PROVIDER_GLOB = (
     "llm_providers/ollama_llm_provider.py"
 )
 
-# The context-window lookup as shipped in notebook_intelligence 6.2.0's
+# The context-window lookup as shipped in notebook_intelligence 6.3.0's
 # update_chat_model_list(); model_family comes from the `ollama list`
 # response and is empty for safetensors/mlx imports.
 OLLAMA_ANCHOR = (
@@ -72,9 +72,10 @@ OLLAMA_REPLACEMENT = (
     '                            raise KeyError(f"{model_family}.context_length")\n'
 )
 
-# The command registration as emitted by the current minifier:
+# The command registration as emitted by the current minifier. 6.3.0 wraps
+# the label in its translator (label:x.__("...")); keep that call intact.
 COMMAND_PATTERN = re.compile(
-    r'label:"Notebook Intelligence Settings",'
+    r'label:(?P<label>(?:\w+\.__\()?"Notebook Intelligence Settings"\)?),'
     r"execute:(?P<arg>\w+)=>\{"
     r'const (?P<tab>\w+)="string"==typeof\(null==(?P=arg)\?void 0:(?P=arg)\.tab\)'
     r'\?(?P=arg)\.tab:void 0;'
@@ -117,7 +118,7 @@ def patch_settings_bundle_text(text):
     api = api_match.group("api")
 
     replacement = (
-        'label:"Notebook Intelligence Settings",'
+        f"label:{command_match.group('label')},"
         f"execute:async {arg}=>{{/*{SETTINGS_MARKER}*/"
         f'const {tab}="string"==typeof(null=={arg}?void 0:{arg}.tab)?{arg}.tab:void 0;'
         f"{widget}.isDisposed||{widget}.dispose();"

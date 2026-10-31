@@ -99,8 +99,8 @@ It validates all six files before writing and fails if their example counts
 change or the literal appears in executable code. SDK request construction,
 user credentials, and scanner rules remain unchanged.
 
-The main Python environment pins `pip` 26.2.2, `certifi` 2026.10.19, and
-`uv` 0.13.4. Their fixed releases remove the compromised emSign G3 trust
+The main Python environment pins `pip` 26.2.2, `certifi` 2026.10.23, and
+`uv` 0.13.6. Their fixed releases remove the compromised emSign G3 trust
 paths. Updating the main `certifi` distribution does not update pip's vendored
 copy, so pip is upgraded before installing the other Python packages.
 The installed-image test inspects both certifi bundles. The environment also
@@ -155,7 +155,7 @@ disallows only `py-rattler <0.28.0`; it then starts Conda to verify that
 `libmamba` remains selected. Remove this mitigation only after the base
 image carries a released compatible solver and an installed-image scan confirms
 that its `zip` crate is 9.0.5 or newer.
-Snakemake 9.27.0 has an isolated tool environment because its `packaging<26`
+Snakemake 9.27.1 has an isolated tool environment because its `packaging<26`
 requirement conflicts with the base image's Conda requirement of
 `packaging>=26.3`. Its private environment uses `packaging` 25.0 and exposes the
 normal `snakemake` command through `/usr/local/bin`. The main environment
@@ -173,7 +173,7 @@ declared builder range against the image's builder pin before producing the
 wheel; the previous package-rename workaround is no longer needed.
 
 Both Jupyter source builds use [build constraints](../../config/jupyter/build-constraints.txt)
-for the isolated Python build environment. The toolchain pins Hatchling 1.32.4
+for the isolated Python build environment. The toolchain pins Hatchling 1.33.0
 and hatch-jupyter-builder 0.10.0. The launcher also declares that pair in its
 own build metadata. Use pip's `--build-constraint`, not `-c`: ordinary runtime
 constraints do not constrain isolated build dependencies. Changes to these
@@ -269,10 +269,10 @@ build when a `notebook_intelligence` upgrade changes it, so the workarounds
 cannot silently regress; re-verify and update (or drop) them when bumping
 the pin.
 
-Notebook Intelligence 6.2.0's published frontend accepts the image's JupyterLab
+Notebook Intelligence 6.3.0's published frontend accepts the image's JupyterLab
 4.6 launcher. The image uses that bundle directly and checks that a
-`remoteEntry` exists before applying the patches. The settings patch preserves
-the optional tab selection after refreshing capabilities. The Ollama patch
+`remoteEntry` exists before applying the patches. The settings patch accepts the translated command label introduced in
+6.3.0 and preserves the optional tab selection after refreshing capabilities. The Ollama patch
 matches the lookup's exact nesting inside the provider's bounded client.
 The obsolete 5.3.1 source rebuild and its Yarn lockfile are removed.
 

@@ -45,7 +45,7 @@ configuration. The optional Jupyter AI magic and Jupyternaut extras are not
 installed because their LiteLLM/prerelease constraints conflict with the
 validated Neurodesktop stack.
 
-Notebook Intelligence 6.2.0 imports the MCP Python SDK's v1
+Notebook Intelligence 6.3.0 imports the MCP Python SDK's v1
 ``mcp.server.fastmcp`` module and declares ``mcp<2``. Neurodesktop retains
 ``mcp>=1.30.0,<2`` until Notebook Intelligence migrates to MCP 2. The
 container test imports the v1 API and Notebook Intelligence itself; the exit
@@ -374,7 +374,7 @@ tests and drop only marker-presence assertions; update the AGENTS.md bullet
 and this page. When a patcher has no seams left, delete the script, its
 Dockerfile `RUN` layer, and its unit-test file.
 
-`jupyter-ai-acp-client` 0.3.3 logs every streamed message chunk at INFO — two
+`jupyter-ai-acp-client` 0.3.4 logs every streamed message chunk at INFO — two
 lines per chunk, where a chunk is often a few characters — plus one line per
 tool-call start and per once-a-second progress tick, so a single persona reply
 floods the Jupyter server log with thousands of lines. A second anchored

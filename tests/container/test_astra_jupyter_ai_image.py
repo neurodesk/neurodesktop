@@ -16,7 +16,7 @@ from testlib import load_source_module, run_cmd
 
 def test_jupyter_ai_acp_stack_registers_neurodesktop_agent_personas():
     assert importlib.metadata.version("jupyter_ai") == "3.2.0"
-    assert importlib.metadata.version("jupyter-ai-acp-client") == "0.3.3"
+    assert importlib.metadata.version("jupyter-ai-acp-client") == "0.3.4"
 
     from jupyter_ai_acp_client.acp_personas.claude import ClaudeAcpPersona
     from jupyter_ai_acp_client.acp_personas.codex import CodexAcpPersona
@@ -185,7 +185,7 @@ def test_jupyter_ai_server_and_frontend_extensions_are_compatible():
     from packaging.version import Version
 
     assert Version(importlib.metadata.version("mcp")) < Version("2")
-    assert importlib.metadata.version("notebook-intelligence") == "6.2.0"
+    assert importlib.metadata.version("notebook-intelligence") == "6.3.0"
     from mcp.server.fastmcp import FastMCP
 
     import notebook_intelligence

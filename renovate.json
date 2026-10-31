@@ -97,7 +97,7 @@
       "enabled": false
     },
     {
-      "description": "Not dependencies: the local viewer package and Notebook Intelligence, held at 5.3.1 because 5.4.0 conflicts with the ACP client (scripts/audit_image_versions.py).",
+      "description": "Not dependencies: the local viewer package and Notebook Intelligence, whose build-time bundle patch is re-verified by hand on each bump (config/agents/patch_nbi.py).",
       "matchDepNames": [
         "neurodesk-astra-view",
         "notebook-intelligence"
@@ -138,6 +138,20 @@
         "jupyter-server-mcp"
       ],
       "allowedVersions": "<0.4.0"
+    },
+    {
+      "description": "Hold: Jupyter AI 3.2 requires jupyter-ai-persona-manager>=0.2.0,<0.3.0.",
+      "matchDepNames": [
+        "jupyter-ai-persona-manager"
+      ],
+      "allowedVersions": "<0.3.0"
+    },
+    {
+      "description": "Hold: OpenCode 2 changes the plugin SDK that the image's OpenCode plugins target.",
+      "matchDepNames": [
+        "anomalyco/opencode"
+      ],
+      "allowedVersions": "<2"
     },
     {
       "description": "Hold: Jupyter AI 3.2 requires jupyterlab-commands-toolkit>=0.2.0,<0.3.0.",
