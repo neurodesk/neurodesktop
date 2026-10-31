@@ -1,11 +1,11 @@
-# syntax=docker/dockerfile:1.27
+# syntax=docker/dockerfile:1.28
 
 # Pin to a specific jupyter/base-notebook date for reproducibility.
 # https://quay.io/repository/jupyter/base-notebook?tab=tags
-ARG BASE_IMAGE_TAG=2026-10-18
+ARG BASE_IMAGE_TAG=2026-10-28
 ARG APPTAINER_VERSION=1.5.5
 ARG APPTAINER_GO_VERSION=1.27.3
-ARG APPTAINER_GRPC_VERSION=1.84.0
+ARG APPTAINER_GRPC_VERSION=1.85.0
 ARG APPTAINER_CRYPTO_VERSION=0.58.0
 ARG CVMFS_VERSION=2.14.1+ubuntu26.04
 ARG CVMFS_RELEASE_VERSION=4.9
@@ -118,7 +118,7 @@ USER root
 
 ARG BUILD_ONLY_APT_PACKAGES="build-essential libcairo2-dev libjpeg-turbo8-dev libpng-dev libtool-bin freerdp3-dev libvncserver-dev libssl-dev libwebp-dev libssh2-1-dev libpango1.0-dev"
 ARG GUACAMOLE_VERSION="1.6.0"
-ARG CODE_SERVER_VERSION="4.141.0"
+ARG CODE_SERVER_VERSION="4.144.0"
 ARG SHELL_QUOTE_VERSION="1.12.0"
 ARG PROXY_ADDR_VERSION="2.0.8"
 
@@ -624,10 +624,15 @@ USER ${NB_USER}
 # yet, so retain conda's supported libmamba solver and remove the unused
 # opt-in Rattler plugin. The system constraint prevents a later solve from
 # silently restoring a vulnerable py-rattler while allowing the fixed line.
+# libmamba 2.10.0 aborts with std::bad_alloc on every file:// channel, so keep
+# the 2.9.0 line and block exactly 2.10.0 until a fixed release replaces it.
 RUN retry conda install --solver=libmamba -c conda-forge nb_conda_kernels \
+    'libmamba=2.9.0' 'libmambapy=2.9.0' 'mamba=2.9.0' \
     && conda config --system --set solver libmamba \
     && conda remove --yes --force-remove conda-rattler-solver py-rattler \
     && conda config --system --append disallowed_packages 'py-rattler <0.28.0' \
+    && conda config --system --append disallowed_packages 'libmamba ==2.10.0' \
+    && conda config --system --append disallowed_packages 'libmambapy ==2.10.0' \
     && /opt/conda/bin/python -c 'import importlib.util; assert importlib.util.find_spec("rattler") is None' \
     && test "$(conda config --show solver)" = 'solver: libmamba' \
     && conda info --json >/dev/null \
@@ -648,10 +653,10 @@ RUN retry conda install --solver=libmamba -c conda-forge nb_conda_kernels \
 # ${NB_USER} via runuser so /opt/conda stays user-owned exactly as before;
 # `env PATH=` restores the conda-first PATH that runuser resets (the
 # jupyterlab-slurm source build needs jlpm and node on PATH).
-ARG BUST_CACHE_PIP=5
+ARG BUST_CACHE_PIP=6
 ARG PIP_VERSION="26.2.2"
-ARG CERTIFI_VERSION="2026.10.19"
-ARG UV_VERSION="0.13.4"
+ARG CERTIFI_VERSION="2026.10.23"
+ARG UV_VERSION="0.13.6"
 ARG JUPYTER_AI_VERSION="3.2.0"
 ARG JUPYTER_COLLABORATION_VERSION="4.4.2"
 ARG JUPYTER_COLLABORATION_REF="3bf11cb7b271b554998105a11e6c9b8c3e376615"
@@ -659,7 +664,7 @@ ARG ASTRA_SPEC_VERSION="0.0.14"
 ARG ASTRA_TOOLS_VERSION="0.2.18"
 ARG ANYWIDGET_VERSION="0.11.0"
 ARG IPYNIIVUE_VERSION="2.4.4"
-ARG SNAKEMAKE_VERSION="9.27.0"
+ARG SNAKEMAKE_VERSION="9.27.1"
 ARG PYJWT_VERSION="2.15.1"
 ARG BROTLI_VERSION="1.2.1"
 ARG JUPYTER_BUILDER_VERSION
@@ -688,7 +693,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     niwrap \
     nbdev \
     nf-core \
-    pydra==1.0a11 \
+    pydra==1.0a12 \
     nipoppy \
     matplotlib \
     datalad-container \
@@ -699,7 +704,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     jupyter-server-proxy==4.6.0 \
     jupyterlmod \
     jupyterlab-git \
-    notebook_intelligence==6.2.0 \
+    notebook_intelligence==6.3.0 \
     # Notebook Intelligence imports mcp.server.fastmcp, which MCP 2
     # removed. Keep the v1 API until Notebook Intelligence migrates.
     "mcp>=1.30.0,<2" \
@@ -707,16 +712,16 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     # because their independent pre-1.0 releases otherwise drift underneath
     # the stable jupyter_ai metapackage.
     jupyter_ai==${JUPYTER_AI_VERSION} \
-    jupyter-ai-acp-client==0.3.3 \
+    jupyter-ai-acp-client==0.3.4 \
     jupyter-ai-chat-commands==0.0.4 \
-    jupyter-ai-persona-manager==0.2.2 \
+    jupyter-ai-persona-manager==0.2.3 \
     jupyter-ai-router==0.1.1 \
     jupyter-ai-tools==0.7.0 \
     # 0.3.2 still ships the issue #271 bug; the anchored build-time patch
     # below verifies its seams against every bump and fails loudly on a fix.
     jupyter-server-documents==0.3.3 \
     jupyter-server-mcp==0.3.0 \
-    jupyterlab-chat==0.25.2 \
+    jupyterlab-chat==0.25.3 \
     jupyterlab-commands-toolkit==0.2.0 \
     jupyterlab-notebook-awareness==0.2.0 \
     # Stay on the JupyterLab 4 collaboration line. Its published frontends
@@ -872,7 +877,7 @@ RUN --mount=type=bind,source=config/agents/patch_nbi.py,target=/tmp/patch_nbi.py
 # MyST 2.7.0 uses pnpm. Its published metadata requests @jupyter/ydoc 3.x,
 # while JupyterLab 4.6 provides 4.x, so compile against an exact current YDoc
 # and retain that exact version in both the manifest and lockfile.
-ARG MYST_PNPM_VERSION="11.28.8"
+ARG MYST_PNPM_VERSION="11.28.10"
 ARG MYST_YDOC_VERSION="4.2.0"
 RUN MYST_VERSION="$(/opt/conda/bin/pip show jupyterlab_myst | awk '/^Version:/ {print $2}')" \
     && RISE_VERSION="$(/opt/conda/bin/pip show jupyterlab_rise | awk '/^Version:/ {print $2}')" \
@@ -1006,8 +1011,8 @@ RUN echo "Installing neurocommand ref ${NEUROCOMMAND_REF}" \
 # frontend assets. The adapter is installed without its bundled binary and
 # drives this install via CODEX_PATH. Validate CLI upgrades with the actual T3
 # and ACP initialization probes, especially outside the adapter dependency range.
-ARG CODEX_CLI_VERSION="0.163.0"
-ARG CLAUDE_CODE_VERSION="2.1.302"
+ARG CODEX_CLI_VERSION="0.166.0"
+ARG CLAUDE_CODE_VERSION="2.1.316"
 RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_CLI_VERSION}" \
     && find "$(npm root -g)/@openai" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
     && rm -rf /root/.npm /tmp/npm-root-cache /home/${NB_USER}/.npm \
@@ -1026,16 +1031,16 @@ RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_C
 # the release so the terminal wrapper and the default config are tested as a
 # set; override at build time to bump it, or set it to an empty value to
 # install the latest release.
-ARG OPENCODE_VERSION="1.19.3"
+ARG OPENCODE_VERSION="1.19.5"
 RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash -s -- ${OPENCODE_VERSION:+--version "${OPENCODE_VERSION}"}' \
     && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
     && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
 
 # Install only the static Tailscale CLI and daemon; starting and authenticating
 # the userspace daemon is an explicit user action. Do not install systemd units.
-ARG TAILSCALE_VERSION="1.104.1"
-ARG TAILSCALE_AMD64_SHA256="108d1d96ecf410d305571e173516f27038f870919a9b89c914a167c6d33a4528"
-ARG TAILSCALE_ARM64_SHA256="f60294374967f3dfd8cf57bbbd474d6cfce32d123e3a8ddeab82a87940daa806"
+ARG TAILSCALE_VERSION="1.104.4"
+ARG TAILSCALE_AMD64_SHA256="624ea093d47d62cf56f17b8332d74b8decda4a1faa610ebc60a1de334b2b3dc9"
+ARG TAILSCALE_ARM64_SHA256="a1c249ce6bdebef62e1ae3b997595555bce2ae4709bf95a718e9ca7a129dad7e"
 RUN set -eu; \
     tailscale_arch="$(dpkg --print-architecture)"; \
     case "${tailscale_arch}" in \
@@ -1064,11 +1069,11 @@ RUN set -eu; \
 # away from the image-owned server.
 # Use a patched relay client through T3's executable override. Verify downloads before
 # installing; keeping it on PATH avoids per-user downloads and install prompts.
-ARG T3_CLOUDFLARED_VERSION="2026.10.1"
+ARG T3_CLOUDFLARED_VERSION="2026.10.7"
 RUN set -eu; \
     case "$(dpkg --print-architecture)" in \
-      amd64) relay_arch=amd64; relay_sha=3bfc539f45d2620c71debb7a86be0efa737ed5ccbad9eb85c787116900e5c586 ;; \
-      arm64) relay_arch=arm64; relay_sha=2c65dfabf616c40efc7545d107d7a57ad5e21377e2964b7e88af19a238074a46 ;; \
+      amd64) relay_arch=amd64; relay_sha=1f99fb518b83dec2ba8d870a7cc991d82a77e6196295a3d2754ba17ab9f91872 ;; \
+      arm64) relay_arch=arm64; relay_sha=3df43aedc9ff291d1735b5cb576cb97e0b157488796db2e32b28aecabb445775 ;; \
       *) exit 1 ;; \
     esac; \
     curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 300 \
@@ -1124,8 +1129,8 @@ RUN --mount=type=bind,source=config/agents/t3-provider-bin,target=/tmp/t3-provid
 # CODEX_CLI_VERSION rather than its bundled dependency. The
 # size assertion fails the build if a future adapter release relocates its
 # vendored binary and reintroduces the duplicate.
-ARG CODEX_ACP_VERSION="2.2.2"
-ARG CLAUDE_AGENT_ACP_VERSION="0.92.0"
+ARG CODEX_ACP_VERSION="2.5.0"
+ARG CLAUDE_AGENT_ACP_VERSION="0.99.1"
 RUN npm_config_cache=/tmp/npm-acp-cache retry npm install -g \
     "@agentclientprotocol/codex-acp@${CODEX_ACP_VERSION}" \
     "@agentclientprotocol/claude-agent-acp@${CLAUDE_AGENT_ACP_VERSION}" \

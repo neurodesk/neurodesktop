@@ -164,7 +164,7 @@ user's global plugin directory even when `OPENCODE_CONFIG` or
 `OPENCODE_CONFIG_DIR` selects additional config. It activates only when the quiet
 launcher supplies an observation.
 
-OpenCode 1.19.3 [resolves configuration before initializing plugins](https://github.com/anomalyco/opencode/blob/v1.19.3/packages/opencode/src/project/bootstrap.ts)
+OpenCode 1.19.5 [resolves configuration before initializing plugins](https://github.com/anomalyco/opencode/blob/v1.19.5/packages/opencode/src/project/bootstrap.ts)
 for each directory and awaits each plugin's `config` hook before other services. The hook
 passes that directory's Ollama settings and selected models to the shared
 helper through stdin. The helper returns only missing model metadata and the

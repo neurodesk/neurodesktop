@@ -141,3 +141,15 @@ def test_vulnerable_py_rattler_versions_are_disallowed():
     config = _run([CONDA, "config", "--show", "disallowed_packages"]).stdout
 
     assert "py-rattler <0.28.0" in config
+
+
+def test_libmamba_stays_off_the_release_that_breaks_local_channels():
+    packages = json.loads(_run([CONDA, "list", "--json", "^libmamba(py)?$"]).stdout)
+    config = _run([CONDA, "config", "--show", "disallowed_packages"]).stdout
+
+    assert {package["name"]: package["version"] for package in packages} == {
+        "libmamba": "2.9.0",
+        "libmambapy": "2.9.0",
+    }
+    assert "libmamba ==2.10.0" in config
+    assert "libmambapy ==2.10.0" in config
