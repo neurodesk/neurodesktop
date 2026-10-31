@@ -624,10 +624,15 @@ USER ${NB_USER}
 # yet, so retain conda's supported libmamba solver and remove the unused
 # opt-in Rattler plugin. The system constraint prevents a later solve from
 # silently restoring a vulnerable py-rattler while allowing the fixed line.
+# libmamba 2.10.0 aborts with std::bad_alloc on every file:// channel, so keep
+# the 2.9.0 line and block exactly 2.10.0 until a fixed release replaces it.
 RUN retry conda install --solver=libmamba -c conda-forge nb_conda_kernels \
+    'libmamba=2.9.0' 'libmambapy=2.9.0' 'mamba=2.9.0' \
     && conda config --system --set solver libmamba \
     && conda remove --yes --force-remove conda-rattler-solver py-rattler \
     && conda config --system --append disallowed_packages 'py-rattler <0.28.0' \
+    && conda config --system --append disallowed_packages 'libmamba ==2.10.0' \
+    && conda config --system --append disallowed_packages 'libmambapy ==2.10.0' \
     && /opt/conda/bin/python -c 'import importlib.util; assert importlib.util.find_spec("rattler") is None' \
     && test "$(conda config --show solver)" = 'solver: libmamba' \
     && conda info --json >/dev/null \

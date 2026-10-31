@@ -155,6 +155,14 @@ disallows only `py-rattler <0.28.0`; it then starts Conda to verify that
 `libmamba` remains selected. Remove this mitigation only after the base
 image carries a released compatible solver and an installed-image scan confirms
 that its `zip` crate is 9.0.5 or newer.
+The `2026-10-28` base ships libmamba 2.10.0, which aborts with
+`std::bad_alloc` when it reads any `file://` channel, including an empty one.
+Conda's `conda-forge` solves still work. The conda layer installs the 2.9.0
+`libmamba`, `libmambapy` and `mamba` builds and disallows exactly
+`libmamba ==2.10.0` and `libmambapy ==2.10.0`, so a later update cannot restore
+the broken release but can install a fixed one. Drop the pins once a
+base image ships a libmamba release that passes the local-channel installed
+image check.
 Snakemake 9.27.1 has an isolated tool environment because its `packaging<26`
 requirement conflicts with the base image's Conda requirement of
 `packaging>=26.3`. Its private environment uses `packaging` 25.0 and exposes the

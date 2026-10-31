@@ -55,6 +55,16 @@ settings command anchor. The patch now accepts the translator call and
 keeps it intact. The ACP client 0.3.4 change is limited to telemetry, so its
 logging seams are unchanged.
 
+## Base image solver regression
+
+Native arm64 acceptance failed the local-channel Conda checks with
+`CondaMemoryError: std::bad_alloc`. The new base moves libmamba from 2.8.1 to
+2.10.0. The failure reproduced on amd64 with the unmodified base: any
+`file://` channel fails, including an empty one, and the `mamba` binary fails
+the same way. Conda's classic solver and `conda-forge` solves still work.
+libmamba 2.9.0 on the same base passes all six installed checks, so the image
+pins that line and disallows exactly 2.10.0.
+
 ## Holds
 
 - `jupyter-ai-persona-manager` moves to 0.2.3; 0.3.0 is excluded because Jupyter AI 3.2.0

@@ -42,6 +42,19 @@ def test_conda_cannot_restore_the_vulnerable_py_rattler_line():
     assert "conda info --json >/dev/null" in layer
 
 
+def test_conda_keeps_libmamba_off_the_broken_local_channel_release():
+    layer = _conda_install_layer()
+    install = "'libmamba=2.9.0' 'libmambapy=2.9.0' 'mamba=2.9.0'"
+
+    assert install in layer
+    assert layer.index("nb_conda_kernels") < layer.index(install)
+    for package in ("libmamba", "libmambapy"):
+        assert (
+            "conda config --system --append disallowed_packages "
+            f"'{package} ==2.10.0'"
+        ) in layer
+
+
 def test_cve_is_not_suppressed_from_the_image_scan():
     policy = repo_path(".trivyignore.yaml").read_text(encoding="utf-8")
 
