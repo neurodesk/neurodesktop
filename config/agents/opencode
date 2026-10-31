@@ -68,6 +68,7 @@ OPENCODE_DEFAULT_CONFIG_FILE="/opt/jovyan_defaults/.config/opencode/opencode.jso
 OPENCODE_UPDATE_CONFIG_HELPER="/opt/neurodesktop/opencode_update_config.py"
 OPENCODE_STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/opencode"
 OPENCODE_TUI_KV_FILE="${OPENCODE_STATE_DIR}/kv.json"
+OPENCODE_TUI_CLI_FILE="${OPENCODE_CONFIG_DIR}/cli.json"
 
 JETSTREAM_BASE_URL="https://llm.jetstream-cloud.org/v1"
 JETSTREAM_MODEL_ID="gpt-oss-120b"
@@ -122,40 +123,54 @@ ensure_opencode_config_file() {
 }
 
 # Hide the TUI sidebar until the user asks for it: it costs 42 columns on
-# wide terminals. OpenCode persists the ctrl+x b toggle under the "sidebar"
-# key of kv.json, so only seed the key when it is absent and never touch a
-# choice the user has already made.
+# wide terminals. OpenCode 2 keeps the ctrl+x b toggle as session.sidebar in
+# cli.json, which its first TUI start creates by migrating the OpenCode 1
+# kv.json. Seed whichever file is current, only when the choice is absent, and
+# never touch a choice the user has already made.
 ensure_opencode_tui_defaults() {
     if ! command -v python3 >/dev/null 2>&1; then
         return 0
     fi
     mkdir -p "${OPENCODE_STATE_DIR}" 2>/dev/null || return 0
-    python3 - "${OPENCODE_TUI_KV_FILE}" <<'PY'
+    python3 - "${OPENCODE_TUI_CLI_FILE}" "${OPENCODE_TUI_KV_FILE}" <<'PY'
 import json
 import os
 import sys
 
-kv_path = sys.argv[1]
+cli_path, kv_path = sys.argv[1:]
 
-kv = {}
-try:
-    with open(kv_path, "r", encoding="utf-8") as f:
-        kv = json.load(f)
-except (OSError, json.JSONDecodeError):
-    kv = {}
 
-if not isinstance(kv, dict):
-    kv = {}
+def load(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            value = json.load(f)
+    except OSError:
+        return {}
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
 
-if "sidebar" in kv:
+
+def store(path, value):
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(value, f, indent=2)
+    os.replace(tmp_path, path)
+
+
+if os.path.exists(cli_path):
+    cli = load(cli_path)
+    session = cli.get("session", {}) if cli is not None else None
+    if not isinstance(session, dict) or "sidebar" in session:
+        sys.exit(0)
+    cli["session"] = {**session, "sidebar": "hide"}
+    store(cli_path, cli)
     sys.exit(0)
 
-kv["sidebar"] = "hide"
-
-tmp_path = f"{kv_path}.tmp"
-with open(tmp_path, "w", encoding="utf-8") as f:
-    json.dump(kv, f)
-os.replace(tmp_path, kv_path)
+kv = load(kv_path) or {}
+if "sidebar" not in kv:
+    kv["sidebar"] = "hide"
+    store(kv_path, kv)
 PY
 }
 
@@ -1349,6 +1364,22 @@ else
     echo "Brain Researcher MCP server: inactive (decline recorded or token not set)"
 fi
 
-# Start OpenCode using the actual binary path (not this wrapper).
+# Start OpenCode using the actual binary path (not this wrapper). OpenCode 2
+# otherwise attaches to a shared background server that outlives the TUI and
+# keeps the environment of whichever command started it, so the key and token
+# set up above would not reach the providers. A private server per command
+# keeps them current; an explicit --server or --standalone is left alone.
 export TERM=xterm-direct
-exec /usr/bin/opencode "$@"
+case "${1:-}" in
+    upgrade|update|uninstall|acp|debug|auth|mcp|plugin|reload|pair|serve|service)
+        exec /usr/bin/opencode "$@"
+        ;;
+esac
+for arg in "$@"; do
+    case "${arg}" in
+        --standalone|--server|--server=*)
+            exec /usr/bin/opencode "$@"
+            ;;
+    esac
+done
+exec /usr/bin/opencode "$@" --standalone

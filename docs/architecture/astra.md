@@ -195,17 +195,20 @@ and hooks twice.
 OpenCode does not consume the marketplace's Claude/Codex hook manifest. The
 image therefore installs
 [`opencode_lightcone_hooks.js`](../../config/agents/opencode_lightcone_hooks.js)
-as a native OpenCode plugin. It executes the hook scripts from the same pinned
-`reproduction` checkout: `SessionStart` context is added through OpenCode's
-system transform, while the read reminder and write/edit validation results
-are appended to the corresponding tool output so the model sees them. Hook
-failures stay non-blocking, matching the upstream informational hooks.
+as a native OpenCode 2 plugin. It executes the hook scripts from the same pinned
+`reproduction` checkout: `SessionStart` context is added to the system prompt
+through the session `context` hook, while the read reminder and write/edit
+validation results are appended to the completed tool result through the tool
+`execute.after` hook, so the model sees them. OpenCode 2 file tools take a
+`path` argument, which the adapter resolves against the project directory and
+passes to the hooks as `file_path`. Hook failures stay non-blocking, matching
+the upstream informational hooks.
 
 Those hooks parse their payloads with `jq`, which the image installs for that
 purpose. Without it every hook exits non-zero and silently contributes no
 validation context, so `tests/container/test_astra_agent_skills_image.py`
-drives the real hook scripts end to end rather than only checking that the
-plugin is listed. That test also asserts that the pinned marketplace commit's
+drives the real hook scripts end to end through an OpenCode session with a
+scripted model, rather than only checking that the plugin is listed. That test also asserts that the pinned marketplace commit's
 `astra-pins.sh` matches the installed `astra-tools` and `astra-spec`: the skill
 must teach the schema version that `astra validate` actually speaks.
 

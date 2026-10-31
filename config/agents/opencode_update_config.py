@@ -195,66 +195,27 @@ def discover_ollama(
     return OllamaSnapshot(base_url, contexts)
 
 
-def ollama_is_managed(provider: JsonObject, base_url: str) -> bool:
-    options = _object(provider.get("options"))
-    managed_endpoints = {
+def managed_ollama_endpoints(base_url: str) -> list[str]:
+    """Endpoints that mark an Ollama provider as image-managed, not user-owned."""
+    endpoints = [
         ollama_base_url(DEFAULT_OLLAMA_HOST),
         "http://127.0.0.1:11434/v1",
         "http://localhost:11434/v1",
         base_url,
-    }
+    ]
+    return list(dict.fromkeys(endpoint for endpoint in endpoints if endpoint))
+
+
+def ollama_is_managed(provider: JsonObject, base_url: str) -> bool:
+    options = _object(provider.get("options"))
     if provider.get(
         "npm", "@ai-sdk/openai-compatible"
     ) != "@ai-sdk/openai-compatible" or (
-        options.get("baseURL") and options["baseURL"] not in managed_endpoints
+        options.get("baseURL")
+        and options["baseURL"] not in managed_ollama_endpoints(base_url)
     ):
         return False
     return True
-
-
-def quiet_ollama_overlay(
-    snapshot: OllamaSnapshot, existing: JsonObject, defaults: JsonObject
-) -> JsonObject:
-    """Supply only missing Ollama data, keeping caller configuration in place."""
-    provider = _object(_object(existing.get("provider")).get("ollama"))
-    if not ollama_is_managed(provider, snapshot.base_url):
-        return {}
-    saved = _object(provider.get("models"))
-    seeds = _object(
-        _object(_object(defaults.get("provider")).get("ollama")).get("models")
-    )
-    models: JsonObject = {}
-    for name, context in snapshot.contexts.items():
-        current = _object(saved.get(name))
-        limits = _object(current.get("limit"))
-        if current == seeds.get(name):
-            limits = {}
-        context = positive_int(limits.get("context")) or context
-        output = min(
-            positive_int(limits.get("output")) or FALLBACK_OLLAMA_OUTPUT_LIMIT, context
-        )
-        models[name] = {"limit": {"context": context, "output": output}}
-        if "name" not in current:
-            models[name]["name"] = name
-    delta: JsonObject = {"models": models}
-    if not provider.get("npm"):
-        delta["npm"] = "@ai-sdk/openai-compatible"
-    if not provider.get("name"):
-        delta["name"] = "Local Ollama"
-    delta["options"] = {"baseURL": snapshot.base_url}
-    if "whitelist" not in provider:
-        # OpenCode deep-merges model maps. A whitelist hides the image's stale
-        # seed while retaining user models and explicit default selections.
-        visible = dict.fromkeys(snapshot.contexts)
-        visible.update(
-            {name: None for name, model in saved.items() if model != seeds.get(name)}
-        )
-        for key in ("model", "small_model"):
-            selected = existing.get(key)
-            if isinstance(selected, str) and selected.startswith("ollama/"):
-                visible[selected.removeprefix("ollama/")] = None
-        delta["whitelist"] = list(visible)
-    return {"provider": {"ollama": delta}}
 
 
 class ConfigError(Exception):
@@ -537,7 +498,8 @@ def exec_quiet_opencode(binary: str, defaults_path: Path, argv: list[str]) -> No
                 {
                     "base_url": snapshot.base_url,
                     "contexts": snapshot.contexts,
-                    "defaults": str(defaults_path),
+                    "managed": managed_ollama_endpoints(snapshot.base_url),
+                    "seeds": image_ollama_seeds(defaults_path),
                 }
             )
             if len(content.encode()) <= 65536:
@@ -545,25 +507,20 @@ def exec_quiet_opencode(binary: str, defaults_path: Path, argv: list[str]) -> No
     os.execv(binary, [binary, *argv])
 
 
-def quiet_overlay_from_stdin() -> JsonObject:
+def image_ollama_seeds(defaults_path: Path) -> JsonObject:
+    """The image's seed Ollama models, which the plugin hides when stale."""
     try:
-        observation = json.loads(os.environ[OLLAMA_SNAPSHOT_ENV])
-        snapshot = OllamaSnapshot(observation["base_url"], observation["contexts"])
-        defaults_path = Path(observation["defaults"])
         defaults = load_json_object(defaults_path) if defaults_path.exists() else {}
-        existing = json.load(sys.stdin)
-        return quiet_ollama_overlay(snapshot, existing, defaults)
-    except (ConfigError, OSError, ValueError, TypeError, KeyError):
+    except ConfigError:
         return {}
+    provider = _object(_object(defaults.get("provider")).get("ollama"))
+    return _object(provider.get("models"))
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] == "--quiet-exec":
         exec_quiet_opencode(argv[1], Path(argv[2]), argv[3:])
-        return 0
-    if argv == ["--quiet-overlay"]:
-        print(json.dumps(quiet_overlay_from_stdin()))
         return 0
     if argv == ["--discover-ollama"]:
         snapshot = discover_ollama(os.environ.get("OLLAMA_HOST") or DEFAULT_OLLAMA_HOST)

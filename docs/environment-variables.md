@@ -341,10 +341,10 @@ Exact pins for the image build. The default values below are the declared
 pins in the [`Dockerfile`](../Dockerfile) at the time this page was last
 reviewed; the Dockerfile itself is authoritative.
 
-- `OPENCODE_VERSION`: the OpenCode release installed into
-  the image; defaults to the validated pin in the Dockerfile (currently
-  `1.19.5`). OpenCode 2 is held: it changes the plugin SDK the image's
-  OpenCode plugins target and needs its own migration. Override to bump the pin, or set it to an empty value to
+- `OPENCODE_VERSION`: the OpenCode 2 release installed into
+  the image from OpenCode's `/v2/install` script; defaults to the validated pin
+  in the Dockerfile (currently `2.2.5`). That installer accepts only 2.x
+  versions. Override to bump the pin, or set it to an empty value to
   install the latest release
 - `CLAUDE_CODE_VERSION`: exact Claude Code native release installed as the
   image fallback; defaults to `2.1.316`. The direct-version audit compares the

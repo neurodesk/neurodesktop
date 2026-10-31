@@ -688,10 +688,12 @@ The same test checks that the seeded OpenCode instance reports enabled, which
 is the state T3 withholds from a driver it ships disabled. T3 probes OpenCode
 lazily, so that record can still be the unchecked placeholder; a separate image
 test covers the start contract instead. T3 reads a semantic version from
-`--version`, refuses releases below its floor, then runs `serve` and waits for
-the `opencode server listening` line carrying the server URL. OpenCode's ACP
-probe does not cover this path, because T3's driver speaks the OpenCode SDK
-rather than ACP.
+`--version` and selects its OpenCode 2 client for a 2.x release. It runs
+`serve` with a generated `OPENCODE_PASSWORD`, waits for the
+`server listening on` line carrying the server URL, and proves readiness with
+an authenticated `/api/info`. The test also checks that an unauthenticated
+request is rejected. OpenCode's ACP probe does not cover this path, because
+T3's driver speaks the OpenCode SDK rather than ACP.
 
 The checkout test drives the process supervisor with a real temporary child
 process. It also checks the pinned package, image cleanup, server extension,
@@ -714,8 +716,8 @@ provider settings intact.
 fixtures and executes quiet launchers with fresh homes. It covers the total
 deadline, metadata fallback, empty and failed listings, credential isolation,
 concurrent process-local observations, preserved configuration, interpolation
-rejection, and `--version`. The plugin driver executes the actual native config
-hook against resolved fixture objects.
+rejection, and `--version`. The plugin driver runs the plugin's setup and the
+model transform it registers against a resolved provider record.
 
 Inside the image, `pytest /opt/tests/test_t3_ollama.py` starts a private T3 server
 with the image-owned OpenCode path. It authenticates through T3's bearer-session
@@ -725,17 +727,21 @@ model in T3's picker and a completed assistant result in the durable projection.
 The persistent OpenCode config must retain its original bytes. A concurrent
 quiet launch during the controlled turn must leave that turn on its original
 attempt. The same module tests native JSONC merge precedence, saved offline
-configuration, successful empty catalogs, and ACP stdout as JSON. It starts an
+configuration, successful empty catalogs, and a complete ACP session over
+JSON stdout. It reads OpenCode 2's resolved models through the authenticated
+`/api/model` and `/api/model/default` routes for each location. It starts an
 OpenCode server outside a project, creates that project after startup, and
 compares its custom endpoint, model limits, and selection with native OpenCode.
 Environment and file canaries must never appear in discovered model metadata;
 intentional user configuration references must still resolve.
 
-The ACP stdout check sets `npm_config_offline=true` for its child process. Its
-local Ollama plugin needs no npm packages. This keeps the 40-second protocol
-check independent of OpenCode's first-use registry installation while still
-loading the installed plugin and executing the real image binary. Other
-first-use and completion checks retain native dependency installation.
+The ACP session check sets `npm_config_offline=true` for its child process. Its
+local Ollama plugin needs no npm packages. This keeps the protocol check
+independent of OpenCode's first-use registry installation while still loading
+the installed plugin and executing the real image binary. It keeps stdin open
+until each reply arrives, as ACP clients do, because OpenCode 2 exits on end of
+input without answering. Other first-use and completion checks retain native
+dependency installation.
 
 For the live gate, run the image on a Docker network where an Ollama server with
 a downloaded model is reachable as `host.docker.internal:11434`. Set

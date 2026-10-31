@@ -121,6 +121,22 @@ exec-ing the real binary as a TUI. Its Lightcone reproduction skills and the
 native adapter for their ASTRA hooks are described in
 [ASTRA integration](astra.md#lightcone-agent-skills).
 
+OpenCode 2 clients attach to a shared background server by default. That
+server outlives the TUI and keeps the environment of whichever command
+started it, so a key or token the wrapper has just set up would not reach the
+providers. The wrapper therefore appends `--standalone` to the TUI and to the
+`run`, `mini`, `models`, `session`, `stats`, and `api` commands, giving each a
+private server. An explicit `--server` or `--standalone` is passed through
+unchanged, as are the commands that manage OpenCode itself.
+
+The wrapper and the Python helpers still write `opencode.json` in the
+OpenCode 1 layout (`provider`, `options.baseURL`, `npm`, and a flat `mcp`
+map). OpenCode 2 normalizes that layout when it loads the file and leaves it
+on disk as written. Its own `opencode mcp add` adds entries under
+`mcp.servers` beside the existing ones, and both resolve. A hand-written
+OpenCode 2 `providers` block is outside the helpers' model: they refresh only
+the `provider` block.
+
 The shared model helper,
 [`config/agents/opencode_update_config.py`](../../config/agents/opencode_update_config.py),
 is installed as `/opt/neurodesktop/opencode_update_config.py`. Both the terminal
@@ -162,25 +178,30 @@ under the default home's `.config/opencode/plugins/`. Startup restores this
 plugin alongside the existing Lightcone plugin. OpenCode discovers it in the
 user's global plugin directory even when `OPENCODE_CONFIG` or
 `OPENCODE_CONFIG_DIR` selects additional config. It activates only when the quiet
-launcher supplies an observation.
+launcher supplies an observation. The observation carries the discovered
+endpoint and contexts, the endpoints that mark a provider as image-managed, and
+the image's seed Ollama models.
 
-OpenCode 1.19.5 [resolves configuration before initializing plugins](https://github.com/anomalyco/opencode/blob/v1.19.5/packages/opencode/src/project/bootstrap.ts)
-for each directory and awaits each plugin's `config` hook before other services. The hook
-passes that directory's Ollama settings and selected models to the shared
-helper through stdin. The helper returns only missing model metadata and the
-managed endpoint delta. The plugin applies these fields directly to native
-config objects, replacing the provider map because native config merges can
-share nested objects between directories. It never serializes them back through OpenCode's interpolation
-parser or writes user config. T3 can therefore use one OpenCode server for
-projects opened after server startup, each with its own settings.
+OpenCode 2 applies configured providers after plugin provider transforms, so a
+provider transform cannot change a configured endpoint. The plugin registers a
+model transform instead. That transform runs once per location (project
+directory), after the location's configuration has resolved, including
+projects opened after the server started. It reads the resolved Ollama
+provider and leaves it alone when the provider uses another SDK package or an
+endpoint outside the managed set: a custom endpoint or SDK remains user-owned.
+Otherwise it adds each discovered model with its observed context, keeping a
+saved model's own limits unless that entry is the unchanged image seed. It
+puts the observed endpoint on every Ollama model, because model settings are
+the layer that wins over configured provider settings. It disables an
+unchanged seed model that Ollama did not report, which hides it from the
+model list; removing a configured model has no effect in OpenCode 2. User
+models stay visible. It never writes user configuration.
 
-OpenCode merges global, explicit-file, project, and inline configuration in
-that order, with managed administrator configuration last. Provider model maps
-deep-merge. The quiet hook uses the provider's `whitelist` to hide an unchanged
-image seed while preserving user models, model limits, selected defaults, and
-explicit filters. A custom endpoint or SDK remains user-owned. No quiet launch
-prompts, copies project instructions, refreshes NBI, or restarts an active chat.
-`--version` executes the real binary before any setup.
+OpenCode merges managed administrator configuration, project `.opencode`
+files, project `opencode.json` files, and global configuration, with inline
+`OPENCODE_CONFIG_CONTENT` above project files. No quiet launch prompts, copies
+project instructions, refreshes NBI, or restarts an active chat. `--version`
+executes the real binary before any setup.
 
 `nbi_setup.sh` mirrors the OpenCode model selection into Notebook Intelligence
 with
@@ -210,12 +231,14 @@ Session sharing is disabled by default in
 (`"share": "disabled"`) so research conversations are not uploaded to the
 OpenCode share service unless a user opts in.
 
-The wrapper also seeds `~/.local/state/opencode/kv.json` with
-`"sidebar": "hide"` so the TUI's right-hand session sidebar (context usage,
-LSP status) starts hidden and the full width goes to the conversation.
-OpenCode persists the `ctrl+x b` toggle under the same key, so the wrapper
-only writes it when absent and a user who re-enables the sidebar keeps that
-choice.
+The wrapper also hides the TUI's right-hand session sidebar (context usage,
+LSP status) by default so the full width goes to the conversation. OpenCode 2
+keeps that choice as `session.sidebar` in `~/.config/opencode/cli.json`. Its
+first TUI start creates that file by migrating the OpenCode 1
+`~/.local/state/opencode/kv.json`, so the wrapper seeds `"sidebar": "hide"` in
+`kv.json` until `cli.json` exists and in `cli.json` afterwards. It writes the
+value only when absent, so a user who re-enables the sidebar with `ctrl+x b`
+keeps that choice, and it leaves a `cli.json` it cannot parse unchanged.
 
 ## Agent tool shells and preflight
 
@@ -284,7 +307,10 @@ startup can delay the Jupyter server bind, while detaching it can instead
 contend with a newly launched OpenCode process. Database maintenance must be an
 explicit operator action rather than a prerequisite for starting a session.
 
-Three details make the deletion safe and complete:
+OpenCode 2 stores sessions in `session_v2`. When it migrates an OpenCode 1
+home it copies the sessions there and keeps the original `session` table, so
+the tool reads and deletes both. Three details make the deletion safe and
+complete:
 
 - **A missing directory is not enough.** The parent must still exist, which
   proves the filesystem is mounted and the directory really was removed. A
@@ -292,11 +318,13 @@ Three details make the deletion safe and complete:
   missing and is left alone — startup ordering must never be able to destroy
   live history.
 - **`PRAGMA foreign_keys` must be on.** SQLite leaves it off by default, so a
-  plain `DELETE FROM session` orphans every cascading table (`message`,
-  `todo`, `session_share`, `session_message`, `session_input`,
-  `session_context_epoch`, and `part` via `message`).
-- **`event` and `event_sequence` never cascade.** They key off the session id
-  but declare no foreign key, so they are swept explicitly.
+  plain `DELETE` orphans every cascading table: `session_message`,
+  `session_part`, `session_inbox`, the instruction tables, `schedule`, and
+  `blob_ref` in OpenCode 2, and `message`, `part`, `todo`, and
+  `session_share` in the OpenCode 1 tables.
+- **`event_sequence` and `job` never cascade.** They key off the session id
+  but declare no foreign key, so the rows for each pruned session are deleted
+  explicitly; deleting a sequence cascades to its `event` rows.
 
 The pre-prune database is kept as a single rolling `opencode.db.prune-backup`
 so repeated manual maintenance cannot grow backup history without bound.
