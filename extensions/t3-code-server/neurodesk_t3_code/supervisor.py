@@ -22,7 +22,7 @@ import socket
 from collections.abc import Mapping
 
 
-DEFAULT_EXECUTABLE = Path("/opt/t3-code/node_modules/.bin/t3")
+DEFAULT_EXECUTABLE = Path("/opt/t3-code/t3")
 DEFAULT_PROVIDER_BIN = Path("/opt/neurodesktop/t3-provider-bin")
 DEFAULT_PORT = 3773
 

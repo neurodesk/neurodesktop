@@ -7,8 +7,10 @@ if [ -r /opt/neurodesktop/agent_shell_setup.sh ]; then
     . /opt/neurodesktop/agent_shell_setup.sh
 fi
 
+# T3 probes the provider from its own working directory, which may be
+# read-only; seeding guidance must never stop the app server from starting.
 if [ ! -e ./AGENTS.md ] && [ -r /opt/AGENTS.md ]; then
-    cp /opt/AGENTS.md ./AGENTS.md
+    cp /opt/AGENTS.md ./AGENTS.md 2>/dev/null || true
 fi
 
 exec /usr/bin/codex "$@"

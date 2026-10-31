@@ -19,15 +19,12 @@ import pytest
 from testlib import load_source_module
 
 
-def platform_package():
-    """The one self-contained build the install layer keeps for this image."""
-    builds = sorted(Path("/opt/t3-code/node_modules/@t3code").glob("t3-*"))
-    assert len(builds) == 1, builds
-    return builds[0]
+T3_HOME = Path("/opt/t3-code")
 
 
 def test_t3_code_runtime_and_native_terminal_support_are_installed():
-    assert subprocess.check_output(["t3", "--version"], text=True).strip() == "t3 v0.1.0"
+    assert subprocess.check_output(["t3", "--version"], text=True).strip() == "t3 v0.1.5"
+    assert Path(shutil.which("t3")).resolve() == T3_HOME / "t3"
     major, minor, *_ = map(int, subprocess.check_output(["node", "--version"], text=True).strip()[1:].split("."))
     assert (major, minor) >= (24, 10)
     assert shutil.which("codex")
@@ -35,18 +32,16 @@ def test_t3_code_runtime_and_native_terminal_support_are_installed():
     assert shutil.which("opencode")
     assert "2026.10.1" in subprocess.check_output(["cloudflared", "--version"], text=True)
 
-    build = platform_package()
-    machine = {"x86_64": "x64", "aarch64": "arm64"}[os.uname().machine]
-    assert build.name == f"t3-linux-{machine}"
     # The executable, its web client and its PTY binding ship together; the
     # server loads all three from this directory.
-    assert os.access(build / "t3", os.X_OK)
-    assert (build / "client/index.html").is_file()
+    assert os.access(T3_HOME / "t3", os.X_OK)
+    assert (T3_HOME / "client/index.html").is_file()
+    assert "not found" not in subprocess.check_output(["ldd", str(T3_HOME / "t3")], text=True)
     subprocess.run(
         [
             "node",
             "-e",
-            f"const p=require('{build}/node_modules/node-pty');"
+            f"const p=require('{T3_HOME}/node_modules/node-pty');"
             "const x=p.spawn('/bin/sh',['-c','exit 0']);"
             "x.onExit(({exitCode})=>process.exit(exitCode));",
         ],
@@ -55,14 +50,16 @@ def test_t3_code_runtime_and_native_terminal_support_are_installed():
     )
 
 
-def test_t3_code_image_ships_one_platform_build_and_no_build_leftovers():
-    build = platform_package()
+def test_t3_code_image_ships_the_release_build_without_per_user_downloads():
     # A prebuilt, bundled tree: nothing is compiled and no source maps ship.
     # The image ships pty.node prebuilt; a local node-gyp build leaves objects.
-    assert not (build / "node_modules/node-pty/build/Release/obj.target").exists()
-    assert not list(Path("/opt/t3-code").rglob("*.js.map"))
+    assert not (T3_HOME / "node_modules/node-pty/build/Release/obj.target").exists()
+    assert not list(T3_HOME.rglob("*.map"))
     machine = {"x86_64": "x64", "aarch64": "arm64"}[os.uname().machine]
-    assert (build / f"node_modules/node-pty/prebuilds/linux-{machine}/pty.node").is_file()
+    assert (T3_HOME / f"node_modules/node-pty/prebuilds/linux-{machine}/pty.node").is_file()
+    # The npm launcher would download a second copy into ~/.t3/runtime.
+    assert not (T3_HOME / "node_modules/t3").exists()
+    assert not (T3_HOME / "node_modules/.bin/t3").exists()
     assert os.access("/opt/neurodesktop/t3-provider-bin/codex", os.X_OK)
     assert os.access("/opt/neurodesktop/t3-provider-bin/claude", os.X_OK)
     assert os.access("/opt/neurodesktop/t3-provider-bin/opencode", os.X_OK)

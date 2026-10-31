@@ -1,8 +1,0 @@
-{
-  "name": "neurodesktop-t3-code-runtime",
-  "private": true,
-  "version": "0.0.0",
-  "dependencies": {
-    "t3": "0.1.0"
-  }
-}
