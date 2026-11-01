@@ -1,4 +1,5 @@
 """Behavior of the neurodesk-kernel container-kernel CLI against a fake Lmod."""
+import contextlib
 import importlib.util
 import json
 import os
@@ -32,12 +33,27 @@ def write_executable(path: Path, body: str) -> Path:
     return path
 
 
-def container_python(marker: str) -> str:
-    return textwrap.dedent(f"""\
+def container_wrapper(runtime: str) -> str:
+    """A transparent-singularity-style wrapper whose runtime is *runtime*.
+
+    *runtime* is the body of neurodesk_container, which receives the
+    arguments after the command name.
+    """
+    return textwrap.dedent("""\
         #!/bin/bash
-        export NEURODESK_TEST_CONTAINER={shlex.quote(marker)}
-        exec {sys.executable} "$@"
-        """)
+        neurodesk_container() {
+            shift 3
+        %s
+        }
+        neurodesk_container exec "$(dirname "$0")/image.simg" python3 "$@"
+        """) % textwrap.indent(textwrap.dedent(runtime), "    ")
+
+
+def container_python(marker: str, pythonpath: str = "") -> str:
+    exports = f"export NEURODESK_TEST_CONTAINER={shlex.quote(marker)}\n"
+    if pythonpath:
+        exports += f"export PYTHONPATH={shlex.quote(pythonpath)}\n"
+    return container_wrapper(exports + f'exec {sys.executable} "$@"\n')
 
 
 # Fake Lmod. load mirrors Lmod: dependencies first, a reload is a no-op, and
@@ -81,6 +97,22 @@ module() {
         show:joined/1.0) line "$C/joined_bin:$C/joined_python" ;;
         load:quoted/1.0) own quoted/1.0 "$C/quo\"ted" ;;
         show:quoted/1.0) line "$C/quo\"ted" ;;
+        load:hostlink/1.0) own hostlink/1.0 "$C/hostlink_1.0" ;;
+        show:hostlink/1.0) line "$C/hostlink_1.0" ;;
+        load:setenv/1.0) own setenv/1.0 "$C/setenv_bin" ;;
+        show:setenv/1.0) echo "setenv(\"PATH\",\"$C/setenv_bin:$PATH\")" ;;
+        load:documented/1.0) module load demo/2.0; own documented/1.0 "$C/documented_bin" ;;
+        show:documented/1.0)
+            echo 'help([['
+            echo 'Example:'
+            line "$HOST_BIN"
+            line "$C/demo_2.0"
+            echo ']])'
+            echo 'whatis("Description: a multi-line'
+            line "$HOST_BIN"
+            echo 'summary")'
+            echo 'depends_on("demo/2.0")'
+            line "$C/documented_bin" ;;
         load:rootdep/1.0) export ROOTED_HOME="$C/rooted"; own rootdep/1.0 ;;
         load:rooted/1.0) module load rootdep/1.0; own rooted/1.0 "$ROOTED_HOME/bin" ;;
         show:rooted/1.0) echo 'depends_on("rootdep/1.0")'; line "${ROOTED_HOME:-}/bin" ;;
@@ -115,27 +147,27 @@ def lmod(tmp_path, monkeypatch):
     (no_ipykernel / "ipykernel_launcher.py").write_text(
         "raise ModuleNotFoundError(\"No module named 'ipykernel_launcher'\")\n")
     for directory in ("plain_1.0", "withdep_1.0"):
-        write_executable(containers / directory / "python3", textwrap.dedent(f"""\
-            #!/bin/bash
-            export PYTHONPATH={no_ipykernel}
-            exec {sys.executable} "$@"
-            """))
+        write_executable(containers / directory / "python3",
+                         container_python(directory, str(no_ipykernel)))
 
     write_executable(containers / "tool_1.0" / "tool", "#!/bin/bash\n")
-    write_executable(containers / "broken_1.0" / "python3", textwrap.dedent("""\
-        #!/bin/bash
+    write_executable(containers / "broken_1.0" / "python3", container_wrapper("""\
         echo "FATAL: container image not found" >&2
         exit 255
         """))
     pid_file = tmp_path / "slow-child.pid"
     # The wrapper exits on SIGTERM, but its descendant ignores SIGTERM and holds
     # no pipe, like a stuck container runtime.
-    write_executable(containers / "slow_1.0" / "python3", textwrap.dedent(f"""\
-        #!/bin/bash
+    write_executable(containers / "slow_1.0" / "python3", container_wrapper(f"""\
         ( trap '' TERM; exec sleep 300 ) </dev/null >/dev/null 2>&1 &
         echo $! > {pid_file}
         sleep 300
         """))
+    # The image's own Python placed in a module directory is not a container.
+    (containers / "hostlink_1.0").mkdir()
+    (containers / "hostlink_1.0" / "python3").symlink_to(sys.executable)
+    write_executable(containers / "setenv_bin" / "tool", "#!/bin/bash\n")
+    write_executable(containers / "documented_bin" / "tool", "#!/bin/bash\n")
 
     module_init = tmp_path / "module.sh"
     module_init.write_text(MODULE_FUNCTION.replace("@CONTAINERS@", f"'{containers}'"))
@@ -144,6 +176,9 @@ def lmod(tmp_path, monkeypatch):
     monkeypatch.setenv("JUPYTER_DATA_DIR", str(data_dir))
     monkeypatch.delenv("LOADEDMODULES", raising=False)
     monkeypatch.delenv("ROOTED_HOME", raising=False)
+    host_bin = os.path.dirname(sys.executable)
+    monkeypatch.setenv("HOST_BIN", host_bin)
+    monkeypatch.setenv("PATH", f"{host_bin}:{os.environ['PATH']}")
     cli = load_cli()
     monkeypatch.setattr(cli, "MODULE_INIT", str(module_init))
     monkeypatch.setattr(cli, "ENVIRONMENT_SCRIPT", str(tmp_path / "absent.sh"))
@@ -254,6 +289,29 @@ def test_image_python_on_path_never_stands_in_for_the_container(lmod, capsys):
     assert not (lmod.kernels / "neurodesk-tool-1.0").exists()
 
 
+def test_inherited_path_from_setenv_never_admits_the_image_python(lmod, capsys):
+    # setenv("PATH", "<own>:$PATH") carries the image's own Python directory.
+    assert lmod.main(["add", "setenv/1.0"]) == 1
+    assert "adds no command directory to PATH" in capsys.readouterr().err
+    assert not lmod.kernels.exists()
+
+
+def test_path_operations_in_documentation_are_ignored(lmod, capsys):
+    # The help and whatis text name the image's Python and a dependency's
+    # container, but the module itself only adds documented_bin.
+    assert lmod.main(["add", "documented/1.0"]) == 1
+    error = capsys.readouterr().err
+    assert "module 'documented/1.0' provides none of: python3, python" in error
+    assert not (lmod.kernels / "neurodesk-documented-1.0").exists()
+
+
+def test_python_that_is_not_a_container_wrapper_is_skipped(lmod, capsys):
+    assert lmod.main(["add", "hostlink/1.0"]) == 1
+    error = capsys.readouterr().err
+    assert "hostlink_1.0/python3: not a Neurodesk container wrapper; skipped" in error
+    assert not (lmod.kernels / "neurodesk-hostlink-1.0").exists()
+
+
 def test_container_launch_failure_is_not_reported_as_missing_ipykernel(lmod, capsys):
     assert lmod.main(["add", "broken/1.0"]) == 1
     error = capsys.readouterr().err
@@ -354,13 +412,24 @@ def test_list_and_remove_manage_only_container_kernels(lmod, capsys):
     assert "no container kernel matches 'demo/2.0'" in capsys.readouterr().err
 
 
-def test_writes_wait_for_another_invocation_holding_the_kernels_lock(lmod):
+def test_writes_wait_for_another_invocation_holding_the_kernels_lock(lmod, monkeypatch):
+    real_lock = lmod.kernels_lock
+    requested = threading.Event()
+
+    @contextlib.contextmanager
+    def observed_lock():
+        requested.set()
+        with real_lock():
+            yield
+
+    monkeypatch.setattr(lmod, "kernels_lock", observed_lock)
     results = []
     adder = threading.Thread(target=lambda: results.append(lmod.main(["add", "demo"])))
-    with lmod.kernels_lock():
+    with real_lock():
         adder.start()
-        # The probe finishes in well under a second; the write must then wait.
-        adder.join(timeout=5)
+        assert requested.wait(timeout=120), "add never asked for the lock"
+        # Writing takes milliseconds once the lock is granted.
+        adder.join(timeout=2)
         assert adder.is_alive(), "add wrote while another invocation held the lock"
         assert not (lmod.kernels / "neurodesk-demo-2.0").exists()
     adder.join(timeout=30)

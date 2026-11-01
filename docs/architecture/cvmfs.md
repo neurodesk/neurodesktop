@@ -234,14 +234,20 @@ a dependency sets while loading resolve correctly. Lmod renders Lua modulefiles
 as `prepend_path("PATH",…)` and Tcl modulefiles as
 `prepend_path{"PATH",…,delim=":",priority="0"}`. It does not escape quotes
 inside values, so `add` reads each value up to the line's trailer and splits it
-on `:`. The module's directories are then ordered as they appear on the loaded
+on `:`. Only top-level `prepend_path` and `append_path` lines count. Lines inside
+`help([[…]])` blocks and multi-line `whatis("…")` calls are documentation.
+`setenv` and `pushenv` assign a whole `PATH`, usually including the inherited
+one, so they are ignored and such a module is refused. The module's directories are then ordered as they appear on the loaded
 `PATH`, which is the precedence Lmod applied. This works whether or not the
 module is already loaded in the calling shell. Dependencies appear in the
 output as separate load lines, so a dependency's Python is never registered
 under the requested module. `add` looks in those directories first for a
 `python3` wrapper and then for `python`. Use `--python COMMAND` to choose another wrapper the module provides,
-such as `fslpython`. A Python executable elsewhere on `PATH`, including the
-image's own, is never used.
+such as `fslpython`. Each candidate must be a container wrapper: a script of at
+most 64 KiB, starting with `#!`, whose non-comment lines run
+`neurodesk_container`, `apptainer` or `singularity` `exec`. Any other file is
+skipped and reported, so the image's own Python is never registered, even when
+a module puts it in its own directory.
 
 Each wrapper is probed with a short program that reports its Python version and
 then imports `ipykernel_launcher`. A Python that runs but cannot import

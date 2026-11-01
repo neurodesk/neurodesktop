@@ -77,10 +77,18 @@ RESOLVE_ERRORS = {
 # without escaping quotes inside the value, so the value runs to the trailer
 # that ends the line. Dependencies appear as separate load()/depends_on()
 # lines, so only these lines name the module's own command directories.
+# setenv/pushenv are not accepted: their value is a whole PATH, typically
+# including the inherited one.
 PATH_LINE = re.compile(
-    r'^\s*(?:prepend_path|append_path|pushenv|setenv)\s*[({]\s*"PATH"\s*,\s*"(.*?)"'
-    r'(?:\s*,\s*delim\s*=\s*"[^"]*")?(?:\s*,\s*priority\s*=\s*"?[^",}]*"?)?\s*[)}]\s*$',
-    re.MULTILINE)
+    r'^\s*(?:prepend_path|append_path)\s*[({]\s*"PATH"\s*,\s*"(.*?)"'
+    r'(?:\s*,\s*delim\s*=\s*"[^"]*")?(?:\s*,\s*priority\s*=\s*"?[^",}]*"?)?\s*[)}]\s*$')
+LONG_STRING_OPEN = re.compile(r"\[(=*)\[")
+WHATIS_OPEN = re.compile(r"^\s*whatis\s*\(")
+# transparent-singularity wrappers run their command through the container
+# runtime; anything else on a module's PATH is not a container's Python.
+CONTAINER_EXEC = re.compile(
+    r"^[^#\n]*\b(?:neurodesk_container|apptainer|singularity)\b[^\n]*\bexec\b", re.MULTILINE)
+WRAPPER_SIZE_LIMIT = 64 * 1024
 
 
 class KernelError(Exception):
@@ -159,7 +167,7 @@ def resolve_module(requested: str) -> LoadedModule:
         raise KernelError(message.format(init=MODULE_INIT, name=requested))
     name, path, shown = result.stdout.split("\0", 2)
 
-    owned = {entry for value in PATH_LINE.findall(shown)
+    owned = {entry for value in module_path_values(shown)
              for entry in value.split(":") if entry}
     # The loaded shell's PATH gives the precedence Lmod actually applied.
     directories = tuple(dict.fromkeys(
@@ -167,6 +175,46 @@ def resolve_module(requested: str) -> LoadedModule:
     if not directories:
         raise KernelError(f"module {name!r} adds no command directory to PATH.")
     return LoadedModule(name, directories)
+
+
+def module_path_values(shown: str) -> list[str]:
+    """PATH values from top-level prepend_path/append_path lines of Lmod's show.
+
+    Lines inside help([[...]]) blocks and multi-line whatis("...") calls are
+    documentation, even when they look like PATH operations.
+    """
+    values = []
+    block_end: re.Pattern[str] | None = None
+    for line in shown.splitlines():
+        if block_end is not None:
+            if block_end.search(line):
+                block_end = None
+            continue
+        opened = LONG_STRING_OPEN.search(line)
+        if opened:
+            closer = "]" + opened.group(1) + "]"
+            if closer not in line[opened.end():]:
+                block_end = re.compile(re.escape(closer))
+            continue
+        if WHATIS_OPEN.match(line):
+            if not line.rstrip().endswith(")"):
+                block_end = re.compile(r"\)\s*$")
+            continue
+        match = PATH_LINE.match(line)
+        if match:
+            values.append(match.group(1))
+    return values
+
+
+def is_container_wrapper(path: str) -> bool:
+    try:
+        with open(path, "rb") as handle:
+            content = handle.read(WRAPPER_SIZE_LIMIT + 1)
+    except OSError:
+        return False
+    if len(content) > WRAPPER_SIZE_LIMIT or not content.startswith(b"#!"):
+        return False
+    return bool(CONTAINER_EXEC.search(content.decode("utf-8", "replace")))
 
 
 def probe(wrapper: str) -> str | ProbeFailure:
@@ -196,6 +244,10 @@ def find_container_python(module: LoadedModule, commands: tuple[str, ...]) -> Co
         for directory in module.path_entries:
             wrapper = os.path.join(directory, command)
             if not (os.path.isfile(wrapper) and os.access(wrapper, os.X_OK)):
+                continue
+            if not is_container_wrapper(wrapper):
+                failures.append(ProbeFailure(
+                    wrapper, "not a Neurodesk container wrapper; skipped", False))
                 continue
             print(f"Checking {wrapper} ...", file=sys.stderr)
             outcome = probe(wrapper)

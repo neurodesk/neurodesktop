@@ -58,10 +58,19 @@ def test_container_kernel_runs_interrupts_and_is_removed(kernel_data_dir):
         interrupted = client.get_shell_msg(timeout=60)
         assert interrupted["content"].get("ename") == "KeyboardInterrupt"
         assert client.execute_interactive("1", timeout=60)["content"]["status"] == "ok"
+
+        # The shutdown request alone must end the kernel; shutdown_kernel()
+        # would hide a failure by escalating to SIGTERM and SIGKILL.
+        manager.request_shutdown()
+        deadline = time.monotonic() + 60
+        while manager.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.5)
+        assert not manager.is_alive(), "the container kernel ignored the shutdown request"
     finally:
         client.stop_channels()
-        manager.shutdown_kernel(now=False)
-    assert not manager.is_alive()
+        if manager.is_alive():
+            manager.shutdown_kernel(now=True)
+        manager.cleanup_resources()
 
     listed = neurodesk_kernel("list")
     assert f"{KERNEL}\t{MODULE}\t" in listed.stdout
