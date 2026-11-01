@@ -4,7 +4,7 @@ description: CVMFS server selection and mount configuration, and the
   neurocommand CLI/module system for neuroimaging tools
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-23"
+last-reviewed: "2026-11-01"
 ---
 
 # CVMFS and Neurocommand
@@ -213,6 +213,47 @@ the warm-up still benefits from the modulefiles the warm-up has already
 fetched. The warm-up runs whenever the deferred worker does, which includes
 eager CVMFS with the default lazy Slurm. It does not run when both CVMFS and
 Slurm use eager mode.
+
+## Container kernels
+
+`neurodesk-kernel` registers the Python inside a tool container as a Jupyter
+kernel, so a notebook can run with that container's libraries. The command is
+installed from
+[`config/jupyter/neurodesk_kernel.py`](../../config/jupyter/neurodesk_kernel.py):
+
+```bash
+neurodesk-kernel add fsl/6.0.7.16    # or a bare tool name for its default version
+neurodesk-kernel list
+neurodesk-kernel remove fsl/6.0.7.16
+```
+
+`add` loads the module in a subshell and searches only the directories the module
+added to `PATH`, first for a `python3` wrapper and then for `python`. Use
+`--python COMMAND` to choose another wrapper the module provides, such as
+`fslpython`. A Python executable elsewhere on `PATH`, including the image's own,
+is never used. Each wrapper is probed with `import ipykernel_launcher`, and
+the probe allows 10 minutes for the first CVMFS fetch. If no wrapper can run
+ipykernel, `add` lists each one it checked and writes nothing. Nothing is
+installed into the container.
+
+The kernelspec goes in the user's Jupyter data directory as
+`neurodesk-<tool>-<version>`, so it persists with the home directory. Its
+display name is `Python <version> (<module>)`, and the running server lists it
+without a restart. The kernel command is `kernel_wrapper.sh` followed by the
+absolute wrapper path, `-m ipykernel_launcher` and the connection file. The
+transparent-singularity wrapper runs `neurodesk_container exec`, which owns bind
+paths, GPU, overlay and display handling. It also uses `--cleanenv`, so the
+kernel sees the container's own environment, such as FSL's `FSLDIR`, and loading
+the module at launch would add nothing. Jupyter interrupts the kernel's process
+group, which reaches the container's Python through the wrapper. A registered
+kernel needs its container path at launch, so in lazy CVMFS mode it starts once
+CVMFS is mounted.
+
+The kernelspec's `metadata.neurodesk_container` records the module and wrapper.
+`list` and `remove` act only on kernelspecs with that marker. `add` refreshes a
+kernel it created and refuses to replace any other kernelspec with the same name.
+The unit tests use a fake Lmod, and `tests/container/test_container_kernels.py`
+covers a real FSL kernel and the ipykernel refusal in the installed image.
 
 ## Build-time CVMFS setup
 

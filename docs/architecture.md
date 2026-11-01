@@ -18,7 +18,7 @@ under [`docs/architecture/`](architecture/). The wiki entry point is
 
 | Page | Covers |
 | --- | --- |
-| [CVMFS and Neurocommand](architecture/cvmfs.md) | CVMFS server selection, mount configuration, and the neuroimaging tool/module system |
+| [CVMFS and Neurocommand](architecture/cvmfs.md) | CVMFS server selection, mount configuration, the neuroimaging tool/module system, and container kernels |
 | [Desktop environment](architecture/desktop.md) | LXDE over VNC/RDP through Guacamole, clipboard sync, Firefox profiles, office file associations |
 | [Glass runtime](architecture/glass.md) | Experimental CC native desktop, initialization, security and acceptance |
 | [Kasm image](architecture/kasm.md) | Separate Kasm Workspaces image, build and run commands, desktop startup, and home persistence |
