@@ -49,6 +49,7 @@ full ACP session (initialize, new session, prompt) through the launcher.
 - The Ollama overlay no longer keeps a configured default model visible when
   that model is the unchanged image seed and Ollama does not report it. The
   model transform cannot see the configured default.
-- The helpers refresh only the 1.x `provider` block. A user who writes a 2.x
-  `providers` block by hand keeps it, but the wrapper's model refresh does not
-  edit it.
+- The helpers refreshed only the 1.x `provider` block, so a hand-written 2.x
+  `providers` block shadowed every refresh. On 1 November 2026 the helpers
+  moved to the 2.x layout and began moving image-written 1.x entries; see
+  [coding agents](../architecture/coding-agents.md).

@@ -78,6 +78,33 @@ def test_selection_strips_the_trailing_slash_and_lists_managed_urls():
     assert selection.managed_urls == {NEURODESK_URL, JETSTREAM_URL}
 
 
+def test_opencode_2_entries_are_read_and_replace_legacy_entries_of_the_same_name():
+    cfg = opencode(model="neurodesk/model-alpha")
+    cfg["providers"] = {
+        "neurodesk": {
+            "package": "@ai-sdk/openai-compatible",
+            "settings": {"baseURL": "https://proxy.example/v1", "apiKey": "{env:PROXY_KEY}"},
+            "models": {"model-alpha": {"limit": {"context": 4096}}},
+        },
+        "ollama": {
+            "package": "@ai-sdk/openai-compatible",
+            "settings": {"baseURL": "http://127.0.0.1:11434/v1"},
+        },
+    }
+
+    selection = select(cfg, environ={"PROXY_KEY": "proxy-secret"})
+
+    assert selection.base_url == "https://proxy.example/v1"
+    assert selection.api_key == "proxy-secret"
+    assert selection.context_window == "4096"
+    assert selection.managed_urls == {
+        NEURODESK_URL,
+        "https://proxy.example/v1",
+        JETSTREAM_URL,
+        "http://127.0.0.1:11434/v1",
+    }
+
+
 def test_neurodesk_url_stays_managed_when_opencode_drops_the_provider():
     cfg = opencode()
     del cfg["provider"]["neurodesk"]

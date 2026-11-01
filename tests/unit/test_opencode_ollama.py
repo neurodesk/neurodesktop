@@ -141,10 +141,10 @@ def test_discovery_rejects_credentialed_and_invalid_endpoints(endpoint):
 # defaults to the image seed as OpenCode resolves it from opencode.json.
 PLUGIN_DRIVER = """import plugin from './ollama-config.mjs';
 const defaults = JSON.parse(process.env.TEST_DEFAULTS);
-const seed = defaults.provider.ollama;
+const seed = defaults.providers.ollama;
 const resolved = JSON.parse(process.env.TEST_RESOLVED_PROVIDER || 'null') ?? {
   package: '@opencode/ai/providers/openai-compatible',
-  settings: { baseURL: seed.options.baseURL },
+  settings: { baseURL: seed.settings.baseURL },
   models: seed.models,
 };
 const models = new Map(Object.entries(resolved.models ?? {}).map(([id, model]) => [id, { id, ...model }]));
@@ -305,7 +305,7 @@ def test_concurrent_quiet_launches_have_independent_observations(quiet_launcher)
 def test_overlay_hides_only_the_image_seed_and_retains_user_limits(quiet_launcher):
     launcher, home = quiet_launcher
     defaults = json.loads(repo_path("config/agents/opencode_config.json").read_text())
-    models = dict(defaults["provider"]["ollama"]["models"])
+    models = dict(defaults["providers"]["ollama"]["models"])
     models["saved"] = {
         "name": "Mine",
         "limit": {"context": 1024, "output": 512},
@@ -348,8 +348,8 @@ def test_observing_only_ollama_preserves_unobserved_providers_and_selected_defau
         },
     }
     updated = ouc.update_config(existing, {}, ouc.DetectedModels(models={"ollama": []}))
-    assert updated["provider"]["neurodesk"] == existing["provider"]["neurodesk"]
-    assert updated["provider"]["ollama"]["models"] == {}
+    assert updated["provider"] == {"neurodesk": existing["provider"]["neurodesk"]}
+    assert updated["providers"]["ollama"]["models"] == {}
     assert updated["model"] == "ollama/offline-choice"
 
 

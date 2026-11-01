@@ -3,11 +3,11 @@
   "autoupdate": false,
   "share": "disabled",
   "model": "neurodesk/neurodesk",
-  "provider": {
+  "providers": {
     "neurodesk": {
-      "npm": "@ai-sdk/openai-compatible",
+      "package": "@ai-sdk/openai-compatible",
       "name": "Neurodesk LiteLLM",
-      "options": {
+      "settings": {
         "baseURL": "https://llm.neurodesk.org/openai",
         "apiKey": "{env:NEURODESK_API_KEY}"
       },
@@ -22,9 +22,9 @@
       }
     },
     "ollama": {
-      "npm": "@ai-sdk/openai-compatible",
+      "package": "@ai-sdk/openai-compatible",
       "name": "Local Ollama",
-      "options": {
+      "settings": {
         "baseURL": "http://127.0.0.1:11434/v1"
       },
       "models": {
@@ -38,9 +38,9 @@
       }
     },
     "jetstream": {
-      "npm": "@ai-sdk/openai-compatible",
+      "package": "@ai-sdk/openai-compatible",
       "name": "JetStream",
-      "options": {
+      "settings": {
         "baseURL": "https://llm.jetstream-cloud.org/v1"
       },
       "models": {
@@ -50,9 +50,9 @@
       }
     },
     "jetstream-deepseek": {
-      "npm": "@ai-sdk/openai-compatible",
+      "package": "@ai-sdk/openai-compatible",
       "name": "JetStream DeepSeek",
-      "options": {
+      "settings": {
         "baseURL": "https://llm.jetstream-cloud.org/sglang/v1"
       },
       "models": {

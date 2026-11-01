@@ -1151,23 +1151,33 @@ except (OSError, json.JSONDecodeError):
 mcp = cfg.get("mcp")
 if not isinstance(mcp, dict):
     mcp = {}
+servers = mcp.get("servers")
+if not isinstance(servers, dict):
+    servers = {}
+# Earlier images wrote the OpenCode 1.x spelling beside the servers block.
+legacy = mcp.pop("brain-researcher", None)
+existing = servers.get("brain-researcher")
+if not isinstance(existing, dict) and isinstance(legacy, dict):
+    existing = {key: value for key, value in legacy.items() if key != "enabled"}
 
 if want_enabled:
-    mcp["brain-researcher"] = {
+    servers["brain-researcher"] = {
         "type": "remote",
         "url": mcp_url,
-        "enabled": True,
         "oauth": False,
         "headers": {
             "Authorization": "Bearer {env:BR_MCP_TOKEN}"
         }
     }
-    cfg["mcp"] = mcp
-else:
-    existing = mcp.get("brain-researcher")
-    if isinstance(existing, dict):
-        existing["enabled"] = False
-        cfg["mcp"] = mcp
+elif isinstance(existing, dict):
+    existing["disabled"] = True
+    servers["brain-researcher"] = existing
+elif legacy is None:
+    sys.exit(0)
+
+if servers:
+    mcp["servers"] = servers
+cfg["mcp"] = mcp
 
 tmp_path = f"{config_path}.tmp"
 with open(tmp_path, "w", encoding="utf-8") as f:
