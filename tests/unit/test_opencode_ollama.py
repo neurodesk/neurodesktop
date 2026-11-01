@@ -7,6 +7,8 @@ import subprocess
 import threading
 import time
 
+import shutil
+
 import pytest
 
 from testlib import load_source_module, repo_path
@@ -134,28 +136,47 @@ def test_discovery_rejects_credentialed_and_invalid_endpoints(endpoint):
     assert ouc.discover_ollama(endpoint) is None
 
 
+# Drives the plugin the way OpenCode 2 does: setup registers a model transform,
+# which then edits the location's resolved Ollama provider record. The record
+# defaults to the image seed as OpenCode resolves it from opencode.json.
+PLUGIN_DRIVER = """import plugin from './ollama-config.mjs';
+const defaults = JSON.parse(process.env.TEST_DEFAULTS);
+const seed = defaults.provider.ollama;
+const resolved = JSON.parse(process.env.TEST_RESOLVED_PROVIDER || 'null') ?? {
+  package: '@opencode/ai/providers/openai-compatible',
+  settings: { baseURL: seed.options.baseURL },
+  models: seed.models,
+};
+const models = new Map(Object.entries(resolved.models ?? {}).map(([id, model]) => [id, { id, ...model }]));
+const record = { provider: { id: 'ollama', package: resolved.package, settings: resolved.settings }, models };
+const edited = new Map([...models].map(([id, model]) => [id, structuredClone(model)]));
+const editor = {
+  provider: { get: (id) => (id === 'ollama' ? record : undefined) },
+  update(providerID, id, update) {
+    const model = edited.get(id) ?? { id };
+    update(model);
+    edited.set(id, model);
+  },
+};
+const transforms = [];
+await plugin.setup({ model: { transform: async (callback) => { transforms.push(callback); } } });
+for (const transform of transforms) transform(editor);
+// OpenCode lists only enabled models.
+const listed = [...edited].filter(([, model]) => model.enabled !== false);
+process.stdout.write(JSON.stringify(transforms.length ? Object.fromEntries(listed) : null));
+"""
+
+
 @pytest.fixture
 def quiet_launcher(tmp_path):
-    plugin = tmp_path / "ollama-config.mjs"
-    plugin.write_text(
-        repo_path("config/agents/opencode_ollama_config.js")
-        .read_text()
-        .replace(
-            "/opt/neurodesktop/opencode_update_config.py",
-            str(repo_path("config/agents/opencode_update_config.py")),
-        )
-    )
+    shutil.copy(repo_path("config/agents/opencode_ollama_config.js"), tmp_path / "ollama-config.mjs")
     driver = tmp_path / "config-driver.mjs"
-    driver.write_text("""import { OllamaConfig } from './ollama-config.mjs';
-const config = JSON.parse(process.env.TEST_RESOLVED_CONFIG || '{}');
-const hooks = await OllamaConfig({});
-if (hooks.config) await hooks.config(config);
-process.stdout.write(JSON.stringify(config));
-""")
+    driver.write_text(PLUGIN_DRIVER)
     binary = tmp_path / "opencode-real"
     binary.write_text(f"""#!/usr/bin/env python3
 import json,os,sys,subprocess
-resolved = subprocess.check_output(["node", {str(driver)!r}],text=True)
+env = {{**os.environ, "TEST_DEFAULTS": open({str(repo_path("config/agents/opencode_config.json"))!r}).read()}}
+resolved = subprocess.check_output(["node", {str(driver)!r}],text=True,env=env)
 print(json.dumps({{"argv":sys.argv[1:],"inline":os.environ.get("OPENCODE_CONFIG_CONTENT"),"resolved":json.loads(resolved)}}))
 """)
     binary.chmod(0o755)
@@ -196,12 +217,14 @@ def test_fresh_quiet_serve_discovers_without_global_writes_or_setup(quiet_launch
     launcher, home = quiet_launcher
     with ollama_server() as (host, calls):
         result = run_quiet(launcher, home, OLLAMA_HOST=host)
-    provider = result["resolved"]["provider"]["ollama"]
-    assert provider["models"]["actual:latest"]["limit"] == {
-        "context": 4096,
-        "output": 4096,
-    }
-    assert provider["whitelist"] == ["actual:latest"]
+    assert result["resolved"] == {
+        "actual:latest": {
+            "id": "actual:latest",
+            "name": "actual:latest",
+            "limit": {"context": 4096, "output": 4096},
+            "settings": {"baseURL": host + "/v1"},
+        }
+    }, "the stale image seed is hidden"
     assert result["argv"] == ["serve"]
     assert len(calls) == 2
     assert not list(home.iterdir())
@@ -236,19 +259,24 @@ def test_explicit_inline_provider_and_unparsed_inline_content_survive(
     assert result["inline"] == inline
 
 
-def test_custom_resolved_provider_survives(quiet_launcher):
+@pytest.mark.parametrize(
+    "package,base_url",
+    [
+        ("aisdk:my-provider", "http://127.0.0.1:11434/v1"),
+        ("@opencode/ai/providers/openai-compatible", "https://mine/v1"),
+    ],
+    ids=["custom-sdk", "custom-endpoint"],
+)
+def test_custom_resolved_provider_survives(quiet_launcher, package, base_url):
     launcher, home = quiet_launcher
-    resolved = {
-        "provider": {
-            "ollama": {"npm": "my-provider", "options": {"baseURL": "https://mine/v1"}}
-        }
-    }
+    saved = {"chosen": {"name": "Chosen", "limit": {"context": 1, "output": 1}}}
+    resolved = {"package": package, "settings": {"baseURL": base_url}, "models": saved}
     with ollama_server() as (host, _):
         result = run_quiet(
-            launcher, home, OLLAMA_HOST=host, TEST_RESOLVED_CONFIG=json.dumps(resolved)
+            launcher, home, OLLAMA_HOST=host, TEST_RESOLVED_PROVIDER=json.dumps(resolved)
         )
     assert result["inline"] is None
-    assert result["resolved"] == resolved
+    assert result["resolved"] == {"chosen": {"id": "chosen", **saved["chosen"]}}
 
 
 def test_offline_preserves_saved_configs_and_inline_settings(quiet_launcher):
@@ -260,6 +288,7 @@ def test_offline_preserves_saved_configs_and_inline_settings(quiet_launcher):
         launcher, home, OLLAMA_HOST="http://127.0.0.1:1", OPENCODE_CONFIG_CONTENT=inline
     )
     assert result["inline"] == inline
+    assert result["resolved"] is None, "no observation leaves the plugin inactive"
     assert config.read_text() == '{"model":"ollama/saved"}'
 
 
@@ -273,24 +302,41 @@ def test_concurrent_quiet_launches_have_independent_observations(quiet_launcher)
     assert not list(home.iterdir())
 
 
-def test_overlay_hides_only_the_image_seed_and_retains_user_limits_and_defaults():
+def test_overlay_hides_only_the_image_seed_and_retains_user_limits(quiet_launcher):
+    launcher, home = quiet_launcher
     defaults = json.loads(repo_path("config/agents/opencode_config.json").read_text())
-    existing = json.loads(json.dumps(defaults))
-    existing["model"] = "ollama/saved"
-    existing["provider"]["ollama"]["models"]["saved"] = {
+    models = dict(defaults["provider"]["ollama"]["models"])
+    models["saved"] = {
         "name": "Mine",
         "limit": {"context": 1024, "output": 512},
         "temperature": 0.3,
     }
-    snapshot = ouc.OllamaSnapshot(
-        "http://host.docker.internal:11434/v1", {"saved": 8192, "fresh": 2048}
-    )
-    delta = ouc.quiet_ollama_overlay(snapshot, existing, defaults)
-    provider = delta["provider"]["ollama"]
-    assert provider["whitelist"] == ["saved", "fresh"]
-    assert provider["models"]["saved"] == {"limit": {"context": 1024, "output": 512}}
-    assert "model" not in delta
-    assert existing["provider"]["ollama"]["models"]["saved"]["temperature"] == 0.3
+    resolved = {
+        "package": "@opencode/ai/providers/openai-compatible",
+        "settings": {"baseURL": "http://127.0.0.1:11434/v1"},
+        "models": models,
+    }
+    tags = {"models": [{"name": "saved"}, {"name": "fresh"}]}
+    with ollama_server(tags=tags) as (host, _):
+        result = run_quiet(
+            launcher, home, OLLAMA_HOST=host, TEST_RESOLVED_PROVIDER=json.dumps(resolved)
+        )
+    endpoint = {"baseURL": host + "/v1"}
+    assert result["resolved"] == {
+        "saved": {
+            "id": "saved",
+            "name": "Mine",
+            "limit": {"context": 1024, "output": 512},
+            "temperature": 0.3,
+            "settings": endpoint,
+        },
+        "fresh": {
+            "id": "fresh",
+            "name": "fresh",
+            "limit": {"context": 4096, "output": 4096},
+            "settings": endpoint,
+        },
+    }
 
 
 def test_observing_only_ollama_preserves_unobserved_providers_and_selected_default():
@@ -323,7 +369,7 @@ def test_model_ids_remain_data_at_the_shell_boundary(quiet_launcher):
     model = "-model;$(touch injected)"
     with ollama_server(tags={"models": [{"name": model}]}) as (host, _):
         result = run_quiet(launcher, home, OLLAMA_HOST=host)
-    assert model in result["resolved"]["provider"]["ollama"]["models"]
+    assert model in result["resolved"]
     assert not (home / "injected").exists()
 
 

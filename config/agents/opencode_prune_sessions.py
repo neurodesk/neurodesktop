@@ -28,11 +28,21 @@ DEFAULT_DB = "~/.local/share/opencode/opencode.db"
 BACKUP_SUFFIX = ".prune-backup"
 DISABLE_ENV = "NEURODESKTOP_OPENCODE_PRUNE_SESSIONS"
 
-# message/todo/session_share/session_message/session_input/session_context_epoch
-# declare ON DELETE CASCADE from session, and part cascades from message, so
-# PRAGMA foreign_keys=ON clears them all. These two key off the session id but
-# declare no foreign key, so they must be swept by hand or they accumulate.
-ORPHAN_TABLES = ("event", "event_sequence")
+# OpenCode 2 keeps sessions in session_v2. A home upgraded from OpenCode 1 also
+# keeps the migrated rows in the original session table, so both are pruned.
+SESSION_TABLES = ("session_v2", "session")
+
+# Every per-session table declares ON DELETE CASCADE from its session table,
+# so PRAGMA foreign_keys=ON clears messages, parts, inboxes, instructions,
+# schedules and blob references. These key off the session id but declare no
+# foreign key, so they must be swept by hand or they accumulate. Deleting an
+# event_sequence row cascades to its events.
+ORPHAN_COLUMNS = (
+    ("event_sequence", "aggregate_id"),
+    ("event", "aggregate_id"),
+    ("job", "session_id"),
+    ("job", "child_session_id"),
+)
 
 
 def directory_is_stale(directory, isdir=os.path.isdir):
@@ -53,12 +63,24 @@ def directory_is_stale(directory, isdir=os.path.isdir):
     return isdir(parent)
 
 
+def _tables(connection):
+    return {
+        row[0]
+        for row in connection.execute("select name from sqlite_master where type='table'")
+    }
+
+
 def stale_sessions(connection, isdir=os.path.isdir):
-    """Return the session rows whose working directory is gone."""
-    rows = connection.execute(
-        "select id, directory, title, time_created from session"
-    ).fetchall()
-    return [row for row in rows if directory_is_stale(row["directory"], isdir)]
+    """Return the session rows whose working directory is gone, once per id."""
+    tables = _tables(connection)
+    rows = {}
+    for table in SESSION_TABLES:
+        if table in tables:
+            for row in connection.execute(
+                f"select id, directory, title, time_created from {table}"
+            ):
+                rows.setdefault(row["id"], row)
+    return [row for row in rows.values() if directory_is_stale(row["directory"], isdir)]
 
 
 def _connect(db_path):
@@ -109,15 +131,17 @@ def prune(db_path, apply=False, isdir=os.path.isdir, log=print):
         except (OSError, sqlite3.Error) as exc:
             log(f"[WARN] could not back up {db_path}: {exc}")
 
+        ids = [(row["id"],) for row in doomed]
+        tables = _tables(connection)
         with connection:
-            connection.executemany(
-                "delete from session where id=?", [(row["id"],) for row in doomed]
-            )
-            for table in ORPHAN_TABLES:
-                connection.execute(
-                    f"delete from {table} "
-                    "where aggregate_id not in (select id from session)"
-                )
+            for table in SESSION_TABLES:
+                if table in tables:
+                    connection.executemany(f"delete from {table} where id=?", ids)
+            for table, column in ORPHAN_COLUMNS:
+                if table in tables:
+                    connection.executemany(
+                        f"delete from {table} where {column}=?", ids
+                    )
     except sqlite3.Error as exc:
         log(f"[WARN] could not prune {db_path}: {exc}")
         return 0

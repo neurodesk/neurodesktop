@@ -380,8 +380,11 @@ tool-call start and per once-a-second progress tick, so a single persona reply
 floods the Jupyter server log with thousands of lines. A second anchored
 build-time patch (`patch_jupyter_ai_acp_client.py`) demotes those four
 per-event log statements to DEBUG; rarer events such as permission requests
-stay at INFO. Like the issue-271 patch, it fails the image build if a future
-release changes any source seam.
+stay at INFO. The same patcher widens the OpenCode persona's version guard,
+which rejects every release from 2.0 on, to admit the OpenCode 2 line: OpenCode
+2 still speaks ACP through `opencode acp`, and the image test runs an ACP
+session through it. Like the issue-271 patch, it fails the image build if a
+future release changes any source seam.
 
 `jupyter-server-mcp` 0.3.0 starts FastMCP through its own embedded HTTP
 runner and prints the FastMCP ASCII banner unconditionally, ignoring
