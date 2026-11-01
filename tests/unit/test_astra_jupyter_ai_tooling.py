@@ -68,14 +68,6 @@ def test_opencode_adapts_the_pinned_lightcone_hooks():
         in DOCKERFILE
     )
     assert "plugins/reproduction" in OPENCODE_HOOKS
-    assert '"experimental.chat.system.transform"' in OPENCODE_HOOKS
-    assert '"tool.execute.after"' in OPENCODE_HOOKS
-    for script in (
-        "astra-session-start.sh",
-        "activate-on-read.sh",
-        "validate-on-save.sh",
-    ):
-        assert script in OPENCODE_HOOKS
 
 
 def test_codex_warmup_state_is_scrubbed_from_the_defaults_tree():

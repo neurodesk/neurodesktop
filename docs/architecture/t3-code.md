@@ -368,8 +368,10 @@ No terminal OpenCode launch is needed. The default server is
 The [shared discovery contract](coding-agents.md#opencode-terminal-wrapper)
 describes deadlines, custom configuration, offline behavior, and process-local
 configuration. Discovery runs only when starting a new OpenCode server or ACP
-process. A native config plugin applies the observation separately after each
-project's settings resolve, including projects opened later in the same server.
+process. A native model-transform plugin applies the observation separately
+after each project's settings resolve, including projects opened later in the
+same server. T3 0.1.5 drives OpenCode 2 through its own OpenCode 2 client: it
+supplies `OPENCODE_PASSWORD`, which the quiet launcher passes through.
 Existing chats keep their running server and selected model.
 
 T3 reloads the login-shell `PATH` at startup, which can put the interactive

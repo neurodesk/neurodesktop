@@ -1095,6 +1095,70 @@ def test_opencode_wrapper_keeps_user_sidebar_choice(tmp_path):
     assert kv["sidebar"] == "auto"
     assert kv["theme"] == "tokyonight"
 
+def test_opencode_wrapper_seeds_the_sidebar_in_opencode_2_cli_config(tmp_path):
+    """Once OpenCode 2 has migrated kv.json, cli.json holds the sidebar choice."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    cli_file = home_dir / ".config" / "opencode" / "cli.json"
+    cli_file.parent.mkdir(parents=True)
+    cli_file.write_text(
+        json.dumps({"$schema": "https://opencode.ai/v2/cli.json", "session": {"tabs": 1}}),
+        encoding="utf-8",
+    )
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)], "neurodesk-test-key\n1\nn\n", cwd=tmp_path, env=env
+    )
+
+    assert returncode == 0, output
+    assert json.loads(cli_file.read_text(encoding="utf-8")) == {
+        "$schema": "https://opencode.ai/v2/cli.json",
+        "session": {"tabs": 1, "sidebar": "hide"},
+    }
+    kv_file = home_dir / ".local" / "state" / "opencode" / "kv.json"
+    assert not kv_file.exists(), "the migrated OpenCode 1 store is not recreated"
+
+@pytest.mark.parametrize(
+    "content",
+    ['{"session": {"sidebar": "auto"}}', '{"session": {}, // JSONC\n}'],
+    ids=["user-choice", "unparsed"],
+)
+def test_opencode_wrapper_keeps_opencode_2_cli_config(tmp_path, content):
+    """A sidebar choice, or a file the wrapper cannot parse, stays as written."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    cli_file = home_dir / ".config" / "opencode" / "cli.json"
+    cli_file.parent.mkdir(parents=True)
+    cli_file.write_text(content, encoding="utf-8")
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)], "neurodesk-test-key\n1\nn\n", cwd=tmp_path, env=env
+    )
+
+    assert returncode == 0, output
+    assert cli_file.read_text(encoding="utf-8") == content
+
+@pytest.mark.parametrize(
+    "args,expected",
+    [
+        ([], "FAKE_OPENCODE:--standalone"),
+        (["/tmp/project"], "FAKE_OPENCODE:/tmp/project --standalone"),
+        (["run", "hello"], "FAKE_OPENCODE:run hello --standalone"),
+        (["session", "list"], "FAKE_OPENCODE:session list --standalone"),
+        (["--server", "http://127.0.0.1:1"], "FAKE_OPENCODE:--server http://127.0.0.1:1"),
+        (["--standalone"], "FAKE_OPENCODE:--standalone"),
+        (["mcp", "list"], "FAKE_OPENCODE:mcp list"),
+    ],
+)
+def test_opencode_wrapper_uses_a_private_server_for_each_command(tmp_path, args, expected):
+    """OpenCode 2's shared background server would keep a stale key and token."""
+    test_wrapper, _home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper), *args], "neurodesk-test-key\n1\nn\n", cwd=tmp_path, env=env
+    )
+
+    assert returncode == 0, output
+    assert output.splitlines()[-1].strip() == expected
+
 def test_opencode_wrapper_skips_nbi_sync_when_script_missing(tmp_path):
     """Verify a missing nbi_setup.sh is not an error (non-container installs)."""
     test_wrapper, _home_dir, env = make_opencode_litellm_wrapper(tmp_path)

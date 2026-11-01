@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import json
 from pathlib import Path
 import re
+import secrets
 import shutil
 import signal
 import socket
@@ -223,16 +225,19 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
 
 
 def test_t3_opencode_provider_initializes_through_the_image_launcher(tmp_path):
-    """Cover the OpenCode contract T3's own driver depends on.
+    """Cover the OpenCode 2 contract T3's own driver depends on.
 
     T3 does not reach OpenCode over ACP. It reads a semantic version from
-    `--version`, refuses releases below its floor, then starts `serve` and waits
-    for the announcement line carrying the server URL. An OpenCode upgrade that
-    renames that line or drops below the floor breaks every OpenCode thread
-    while the CLI itself still looks healthy.
+    `--version` and picks its OpenCode 2 client for any 2.x release. It then
+    starts `serve` with a generated `OPENCODE_PASSWORD`, waits for the
+    `server listening on URL` line, and proves readiness with an authenticated
+    `/api/info`. An OpenCode upgrade that renames that line, ignores the
+    password, or moves the info route breaks every OpenCode thread while the
+    CLI itself still looks healthy.
     """
     launcher = "/opt/neurodesktop/t3-provider-bin/opencode"
-    environment = {**os.environ, "HOME": str(tmp_path)}
+    password = secrets.token_urlsafe(32)
+    environment = {**os.environ, "HOME": str(tmp_path), "OPENCODE_PASSWORD": password}
     # Startup restores this config into the home before any agent runs, so lay
     # the home out that way before the CLI can create its own directory here.
     destination = tmp_path / ".config/opencode"
@@ -248,7 +253,7 @@ def test_t3_opencode_provider_initializes_through_the_image_launcher(tmp_path):
     ).stdout
     found = re.search(r"\bv?(\d+\.\d+\.\d+)\b", reported)
     assert found, reported
-    assert tuple(int(part) for part in found[1].split(".")) >= (1, 14, 19), reported
+    assert int(found[1].split(".")[0]) == 2, reported
 
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
@@ -265,18 +270,26 @@ def test_t3_opencode_provider_initializes_through_the_image_launcher(tmp_path):
         while time.monotonic() < deadline:
             output = log.read_text(errors="replace")
             assert server.poll() is None, f"OpenCode server exited:\n{output}"
-            announced = [
-                line for line in output.splitlines()
-                if line.startswith("opencode server listening")
-            ]
+            announced = re.search(r"server listening on\s+(https?://\S+)", output, re.I)
             if announced:
-                assert re.search(r"on\s+https?://\S+", announced[0]), announced[0]
                 break
             time.sleep(0.2)
         else:
             raise AssertionError(
                 f"OpenCode server never announced its URL:\n{log.read_text()}"
             )
+        assert password not in output, "the supplied password is never echoed"
+        info_url = announced[1].rstrip("/") + "/api/info"
+        token = base64.b64encode(f"opencode:{password}".encode()).decode()
+        request = urllib.request.Request(info_url, headers={"Authorization": f"Basic {token}"})
+        with urllib.request.urlopen(request, timeout=15) as response:
+            assert response.headers.get_content_type() == "application/json"
+            info = json.load(response)
+        assert info["version"] == found[1], info
+        assert isinstance(info["pid"], int), info
+        with pytest.raises(urllib.error.HTTPError) as rejected:
+            urllib.request.urlopen(info_url, timeout=15)
+        assert rejected.value.code == 401
     finally:
         os.killpg(server.pid, signal.SIGTERM)
         try:

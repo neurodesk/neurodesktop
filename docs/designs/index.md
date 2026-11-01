@@ -17,6 +17,7 @@ current behavior see [Architecture](../architecture.md),
 
 | Record | Status | What it decided |
 | --- | --- | --- |
+| [OpenCode 2 migration, 31 October 2026](opencode-2-migration-2026-10-31.md) | implemented | Install OpenCode 2.2.5, port the Ollama and Lightcone plugins to the OpenCode 2 plugin API, and give each wrapper command a private server |
 | [Container package upgrade, 31 October 2026](container-upgrade-2026-10-31.md) | implemented | Apply the pending Renovate backlog early, adapt the Notebook Intelligence 6.3 patch, and hold OpenCode 2 and persona manager 0.3 |
 | [Container package and Lightcone upgrade, 16 October 2026](container-upgrade-2026-10-16.md) | implemented | Upgrade direct packages, port the Ubuntu 26 desktop build, and adopt native Lightcone 0.5 execution with explicit scientific module profiles |
 | [Globus pipelines assessment](globus-pipelines-assessment.md) | proposed | Plan analyses in Neurodesk and coordinate transfers and scheduled HPC execution through Globus Flows and Compute |

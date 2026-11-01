@@ -8,11 +8,23 @@ OpenCode -- which has no Lightcone marketplace client -- still finds every
 skill and runs the upstream hooks from a restored home.
 """
 
+import base64
+from contextlib import contextmanager
+import http.server
 import importlib.metadata
 import json
 import os
 import re
+import secrets
 import shutil
+import signal
+import socket
+import subprocess
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 import yaml
@@ -34,6 +46,107 @@ BET_PROJECT = Path("/opt/neurodesktop/examples/astra-bet")
 
 CODEX_ENV = {"HOME": "/opt/jovyan_defaults", "CODEX_HOME": "/opt/jovyan_defaults/.codex"}
 CLAUDE_ENV = {"HOME": "/opt/jovyan_defaults", "DISABLE_TELEMETRY": "1"}
+
+
+@contextmanager
+def opencode_server(home, cwd):
+    """Serve OpenCode 2 for ``home`` and yield a reader for its location API."""
+    password = secrets.token_urlsafe(16)
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    environment = {
+        **{k: v for k, v in os.environ.items() if not k.startswith(("OPENCODE_", "XDG_"))},
+        "HOME": str(home),
+        "OPENCODE_PASSWORD": password,
+        "OPENCODE_DISABLE_MODELS_FETCH": "true",
+    }
+    log = home / "opencode-serve.log"
+    with log.open("w") as stream:
+        server = subprocess.Popen(
+            ["/usr/bin/opencode", "serve", "--hostname=127.0.0.1", f"--port={port}"],
+            cwd=cwd, env=environment, stdout=stream, stderr=stream,
+            start_new_session=True,
+        )
+    token = base64.b64encode(f"opencode:{password}".encode()).decode()
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    def get(path, directory):
+        query = urllib.parse.urlencode({"location[directory]": str(directory)})
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}{path}?{query}",
+            headers={"Authorization": f"Basic {token}"},
+        )
+        with opener.open(request, timeout=30) as response:
+            return json.load(response)["data"]
+
+    try:
+        deadline = time.monotonic() + 60
+        while "server listening on" not in log.read_text():
+            assert server.poll() is None, log.read_text()
+            assert time.monotonic() < deadline, log.read_text()
+            time.sleep(0.2)
+        yield get
+    finally:
+        os.killpg(server.pid, signal.SIGTERM)
+        try:
+            server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.killpg(server.pid, signal.SIGKILL)
+            server.wait(timeout=5)
+
+
+@contextmanager
+def scripted_model(tool_calls):
+    """An OpenAI-compatible endpoint that plays ``tool_calls``, then answers.
+
+    Requests without tools (title generation) get a plain reply, so the script
+    advances only on agent turns. Every request body is recorded.
+    """
+    requests, pending = [], list(tool_calls)
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests.append(body)
+            if body.get("tools") and pending:
+                name, arguments = pending.pop(0)
+                delta = {"role": "assistant", "tool_calls": [{
+                    "index": 0, "id": f"call_{len(requests)}", "type": "function",
+                    "function": {"name": name, "arguments": json.dumps(arguments)},
+                }]}
+                finish = "tool_calls"
+            else:
+                delta, finish = {"role": "assistant", "content": "DONE"}, "stop"
+            chunks = [
+                {"choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}],
+                 "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+            ]
+            payload = "".join(
+                "data: " + json.dumps({"id": "x", "object": "chat.completion.chunk",
+                                       "created": 1, "model": "m", **chunk}) + "\n\n"
+                for chunk in chunks
+            ) + "data: [DONE]\n\n"
+            data = payload.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/v1", requests
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join()
 
 
 def run_hook(script, payload, env=None):
@@ -231,24 +344,30 @@ def test_opencode_finds_every_reproduction_skill_in_a_restored_home(tmp_path):
     # particular, the Lightcone adapter runs its session-start hook while it
     # loads, which makes this read-only assertion depend on unrelated external
     # work. The adapter itself is exercised by the focused test below.
-    # OpenCode also discovers skills from the working directory, so run it from
-    # an empty project. It truncates piped output at 64 KiB; read a file instead.
+    # OpenCode also discovers skills from the working directory, so serve it
+    # from an empty project. OpenCode 2 indexes skills in the background, so
+    # the first listings can still be incomplete.
+    shutil.rmtree(home / ".config/opencode/plugins")
     project = tmp_path / "project"
     project.mkdir()
-    listing = tmp_path / "skills.json"
-    code, output = run_cmd(
-        f"/usr/bin/opencode debug skill --pure > {listing}",
-        cwd=project,
-        env={"HOME": str(home)},
-        timeout=30,
-    )
-    assert code == 0, output
-    discovered = {skill["name"] for skill in json.loads(listing.read_text())}
-    assert skill_names <= discovered
+    with opencode_server(home, project) as get:
+        deadline = time.monotonic() + 60
+        while True:
+            discovered = {skill["id"] for skill in get("/api/skill", project)}
+            if skill_names <= discovered or time.monotonic() > deadline:
+                break
+            time.sleep(0.5)
+    assert skill_names <= discovered, discovered
 
 
 def test_opencode_adapter_runs_the_upstream_astra_hooks(tmp_path):
-    """The adapter must return hook context to the model, not only run a script."""
+    """An OpenCode 2 session must return hook context to the model.
+
+    A scripted model reads the ASTRA spec twice and then rewrites it unchanged.
+    The requests OpenCode sends back prove that the session-start context
+    reached the system prompt, that the first read activated the skill once,
+    and that the save ran validation.
+    """
     assert OPENCODE_HOOKS.is_file()
     assert not OPENCODE_HOOKS.is_symlink()
     home = tmp_path / "home"
@@ -263,41 +382,49 @@ def test_opencode_adapter_runs_the_upstream_astra_hooks(tmp_path):
     assert restored_hooks.is_file(), output
     project = tmp_path / "project"
     shutil.copytree(BET_PROJECT, project)
-    runner = tmp_path / "run-hooks.mjs"
-    runner.write_text(
-        f'''import {{ LightconeHooks }} from "file://{restored_hooks}"
-const directory = process.argv[2]
-const filePath = `${{directory}}/astra.yaml`
-const hooks = await LightconeHooks({{ directory }})
-const system = {{ system: [] }}
-await hooks["experimental.chat.system.transform"]({{}}, system)
-const edited = {{ output: "Edited", metadata: {{ filepath: filePath }} }}
-await hooks["tool.execute.after"](
-  {{ tool: "edit", sessionID: "image-edit", callID: "1", args: {{ filePath }} }},
-  edited,
-)
-const read = {{ output: "Read", metadata: {{}} }}
-await hooks["tool.execute.after"](
-  {{ tool: "read", sessionID: "image-read", callID: "2", args: {{ filePath }} }},
-  read,
-)
-const readAgain = {{ output: "Read again", metadata: {{}} }}
-await hooks["tool.execute.after"](
-  {{ tool: "read", sessionID: "image-read", callID: "3", args: {{ filePath }} }},
-  readAgain,
-)
-console.log(JSON.stringify({{ system, edited, read, readAgain }}))
-''',
-        encoding="utf-8",
+    spec = project / "astra.yaml"
+    script = [
+        ("read", {"path": str(spec)}),
+        ("read", {"path": str(spec)}),
+        ("write", {"path": str(spec), "content": spec.read_text(encoding="utf-8")}),
+    ]
+    with scripted_model(script) as (endpoint, requests):
+        inline = {
+            "provider": {"scripted": {
+                "npm": "@ai-sdk/openai-compatible",
+                "options": {"baseURL": endpoint},
+                "models": {"m": {"name": "m"}},
+            }},
+            "model": "scripted/m",
+        }
+        environment = {
+            **{k: v for k, v in os.environ.items() if not k.startswith(("OPENCODE_", "XDG_"))},
+            "HOME": str(home),
+            "OPENCODE_CONFIG_CONTENT": json.dumps(inline),
+            "OPENCODE_DISABLE_MODELS_FETCH": "true",
+        }
+        result = subprocess.run(
+            ["/usr/bin/opencode", "run", "--standalone", "--auto", "-m", "scripted/m",
+             "Check the ASTRA spec."],
+            cwd=project, env=environment, capture_output=True, text=True, timeout=300,
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    turns = [request for request in requests if request.get("tools")]
+    assert len(turns) == 4, [request["messages"][-1] for request in requests]
+    system = "\n".join(
+        str(message["content"]) for message in turns[0]["messages"]
+        if message["role"] == "system"
     )
-
-    code, output = run_cmd(f"node {runner} {project}", timeout=120)
-    assert code == 0, output
-    result = json.loads(output)
-    assert "ASTRA project" in "\n".join(result["system"]["system"])
-    assert "validation passed" in result["edited"]["output"]
-    assert "astra skill" in result["read"]["output"]
-    assert result["readAgain"]["output"] == "Read again"
+    assert "ASTRA project" in system
+    results = [
+        json.dumps(message["content"]) for message in turns[-1]["messages"]
+        if message["role"] == "tool"
+    ]
+    assert len(results) == 3, results
+    first_read, second_read, written = results
+    assert "astra skill" in first_read
+    assert "astra skill" not in second_read
+    assert "validation passed" in written
 
 
 def test_validate_on_save_hook_reports_a_passing_project(tmp_path):

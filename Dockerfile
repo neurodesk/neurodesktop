@@ -1030,11 +1030,12 @@ RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_C
 # Install OpenCode CLI (open source AI coding agent). OPENCODE_VERSION pins
 # the release so the terminal wrapper and the default config are tested as a
 # set; override at build time to bump it, or set it to an empty value to
-# install the latest release.
-ARG OPENCODE_VERSION="1.19.5"
-RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash -s -- ${OPENCODE_VERSION:+--version "${OPENCODE_VERSION}"}' \
+# install the latest release. OpenCode 2 ships from its own installer: the
+# original one refuses every 2.x version.
+ARG OPENCODE_VERSION="2.2.5"
+RUN retry bash -o pipefail -c 'curl -fsSL https://opencode.ai/v2/install | bash -s -- ${OPENCODE_VERSION:+--version "${OPENCODE_VERSION}"}' \
     && mv /home/jovyan/.opencode/bin/opencode /usr/bin/opencode \
-    && rm -rf /home/${NB_USER}/.cache /home/${NB_USER}/.local
+    && rm -rf /home/${NB_USER}/.opencode /home/${NB_USER}/.cache /home/${NB_USER}/.local
 
 # Install only the static Tailscale CLI and daemon; starting and authenticating
 # the userspace daemon is an explicit user action. Do not install systemd units.

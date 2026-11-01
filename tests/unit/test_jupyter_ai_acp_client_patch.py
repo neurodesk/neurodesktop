@@ -1,4 +1,6 @@
-"""Build-time workaround contract for jupyter-ai-acp-client per-event logging."""
+"""Build-time workarounds for jupyter-ai-acp-client logging and OpenCode 2."""
+
+import re
 
 import pytest
 
@@ -35,6 +37,18 @@ MANAGER_SOURCE = '''class ToolCallManager:
         )
 '''
 
+OPENCODE_SOURCE = '''def _check_opencode() -> None:
+    version_str = version_match.group(1)
+    current_version = tuple(int(x) for x in version_str.split("."))
+
+    if current_version < (1, 0, 0) or current_version[0] >= 2:
+        raise PersonaRequirementsUnmet(
+            f"opencode version {version_str} is installed,"
+            " but version >=1.0.0,<2 is required."
+            " Please upgrade opencode. See https://opencode.ai for instructions."
+        )
+'''
+
 
 def load_patcher_module():
     return load_source_module(
@@ -47,6 +61,29 @@ def load_patcher_module():
 def write_upstream_fixture(package_dir):
     (package_dir / "default_acp_client.py").write_text(CLIENT_SOURCE, encoding="utf-8")
     (package_dir / "tool_call_manager.py").write_text(MANAGER_SOURCE, encoding="utf-8")
+    (package_dir / "acp_personas").mkdir()
+    (package_dir / "acp_personas/opencode.py").write_text(OPENCODE_SOURCE, encoding="utf-8")
+
+
+def opencode_guard(package_dir):
+    """Run the patched persona version guard against an ``opencode --version``."""
+
+    class PersonaRequirementsUnmet(Exception):
+        pass
+
+    def check(version):
+        namespace = {
+            "PersonaRequirementsUnmet": PersonaRequirementsUnmet,
+            "version_match": re.search(r"(\d+\.\d+\.\d+)", version),
+        }
+        exec((package_dir / "acp_personas/opencode.py").read_text(), namespace)
+        try:
+            namespace["_check_opencode"]()
+        except PersonaRequirementsUnmet as error:
+            return str(error)
+        return None
+
+    return check
 
 
 def test_patch_demotes_all_per_event_logging_and_is_idempotent(tmp_path):
@@ -67,6 +104,20 @@ def test_patch_demotes_all_per_event_logging_and_is_idempotent(tmp_path):
     assert manager.count("persona.log.debug(") == 2
 
     assert not patcher.patch_package(tmp_path)
+
+
+def test_patch_admits_opencode_2_and_still_rejects_other_majors(tmp_path):
+    patcher = load_patcher_module()
+    write_upstream_fixture(tmp_path)
+    check = opencode_guard(tmp_path)
+    assert "<2 is required" in check("opencode v2.2.5")
+
+    assert patcher.patch_package(tmp_path)
+
+    assert check("opencode v2.2.5") is None
+    assert check("1.19.5") is None
+    assert "<3 is required" in check("opencode v3.0.0")
+    assert "<3 is required" in check("0.9.0")
 
 
 def test_patch_refuses_anchor_drift_without_partial_changes(tmp_path):

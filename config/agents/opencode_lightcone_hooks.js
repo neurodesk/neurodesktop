@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process"
+import { resolve } from "node:path"
 
 const DEFAULT_PLUGIN_ROOT =
   "/opt/neurodesktop/agent-skills/plugins/reproduction"
@@ -48,14 +49,16 @@ function runHook(script, payload, cwd, timeoutMs) {
   })
 }
 
-function toolPayload(input, output, directory) {
-  const filePath = input.args?.filePath || output.metadata?.filepath
+function toolPayload(event, directory) {
+  const input = event.input && typeof event.input === "object" ? event.input : {}
+  const filePath =
+    typeof input.path === "string" ? resolve(directory, input.path) : undefined
   return {
     cwd: directory,
-    session_id: input.sessionID,
-    tool_name: input.tool,
+    session_id: event.sessionID,
+    tool_name: event.tool,
     tool_input: {
-      ...input.args,
+      ...input,
       file_path: filePath,
     },
     tool_response: {
@@ -64,43 +67,52 @@ function toolPayload(input, output, directory) {
   }
 }
 
-function appendContext(output, context) {
-  if (!context) return
-  const current = typeof output.output === "string" ? output.output : ""
-  output.output = current ? `${current}\n\n${context}` : context
+function appendContext(event, context) {
+  if (!context || event.status !== "completed") return
+  const content = event.result.content
+  event.result = {
+    ...event.result,
+    content: Array.isArray(content)
+      ? [...content, { type: "text", text: context }]
+      : content
+        ? `${content}\n\n${context}`
+        : context,
+  }
 }
 
-export const LightconeHooks = async ({ directory }) => {
-  // OpenCode has no SessionStart context channel. Its system transform is the
-  // durable equivalent: the upstream hook runs once when the plugin loads and
-  // its result remains visible to the model throughout the session.
-  const sessionContext = await runHook(
-    "astra-session-start.sh",
-    { cwd: directory },
-    directory,
-    15_000,
-  )
+export default {
+  id: "neurodesktop-lightcone-hooks",
+  async setup(ctx) {
+    const directory = ctx.location.directory
+    // OpenCode has no SessionStart context channel. The session context hook
+    // is the durable equivalent: the upstream hook runs once when the plugin
+    // loads and its result reaches every model request in this location.
+    const sessionContext = await runHook(
+      "astra-session-start.sh",
+      { cwd: directory },
+      directory,
+      15_000,
+    )
 
-  return {
-    "experimental.chat.system.transform": async (_input, output) => {
-      if (sessionContext) output.system.push(sessionContext)
-    },
-    "tool.execute.after": async (input, output) => {
+    await ctx.session.hook("context", (event) => {
+      if (sessionContext) event.system.push({ type: "text", text: sessionContext })
+    })
+    await ctx.tool.hook("execute.after", async (event) => {
       const script =
-        input.tool === "read"
+        event.tool === "read"
           ? "activate-on-read.sh"
-          : input.tool === "write" || input.tool === "edit"
+          : event.tool === "write" || event.tool === "edit"
             ? "validate-on-save.sh"
             : undefined
       if (!script) return
 
       const context = await runHook(
         script,
-        toolPayload(input, output, directory),
+        toolPayload(event, directory),
         directory,
         script === "activate-on-read.sh" ? 5_000 : 30_000,
       )
-      appendContext(output, context)
-    },
-  }
+      appendContext(event, context)
+    })
+  },
 }

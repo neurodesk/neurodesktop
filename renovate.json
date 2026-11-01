@@ -147,13 +147,6 @@
       "allowedVersions": "<0.3.0"
     },
     {
-      "description": "Hold: OpenCode 2 changes the plugin SDK that the image's OpenCode plugins target.",
-      "matchDepNames": [
-        "anomalyco/opencode"
-      ],
-      "allowedVersions": "<2"
-    },
-    {
       "description": "Hold: Jupyter AI 3.2 requires jupyterlab-commands-toolkit>=0.2.0,<0.3.0.",
       "matchDepNames": [
         "jupyterlab-commands-toolkit"
