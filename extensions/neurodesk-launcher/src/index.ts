@@ -13,7 +13,7 @@ import { Notification } from '@jupyterlab/apputils';
 
 import { ILauncher } from '@jupyterlab/launcher';
 
-import { LabIcon } from '@jupyterlab/ui-components';
+import { LabIcon, notebookIcon } from '@jupyterlab/ui-components';
 
 import { ServerConnection } from '@jupyterlab/services';
 
@@ -36,6 +36,9 @@ interface IServerProcess {
 interface IServersInfoResponse {
   server_processes: IServerProcess[];
 }
+
+const GETTING_STARTED_URL =
+  'https://neurodesk.org/edu/tutorials/about-neurodesk/accessing-neurodesk-tools';
 
 const DONATION_URL = 'https://neurodesk.org/overview/donate/';
 const DONATION_MESSAGE =
@@ -464,6 +467,21 @@ const plugin: JupyterFrontEndPlugin<void> = {
   activate: async (app: JupyterFrontEnd, launcher: ILauncher) => {
     void showDonationNotificationOnStartup(app);
     startResourceUsageUnitOverride();
+
+    // Registered before servers-info so onboarding survives a proxy failure.
+    app.commands.addCommand('neurodesk-launcher:getting-started', {
+      label: 'Getting started',
+      caption: 'Open the Neurodesk getting started tutorial',
+      icon: notebookIcon,
+      execute: () => {
+        window.open(GETTING_STARTED_URL, '_blank', 'noopener');
+      }
+    });
+    launcher.add({
+      command: 'neurodesk-launcher:getting-started',
+      category: 'Neurodesk',
+      rank: 1
+    });
 
     const settings = ServerConnection.makeSettings();
     const infoUrl = URLExt.join(

@@ -4,7 +4,7 @@ description: Container-backed and hosted webapps, launcher tiles and icons,
   and the build-time Jupyter config generation that wires them up
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-21"
+last-reviewed: "2026-11-01"
 ---
 
 # Webapp System
@@ -44,6 +44,12 @@ The Webapps section heading uses the same icon as the More webapps tile.
 The launcher copies the rendered catalog SVG into the heading after React
 updates, retaining the heading dimensions. The catalog has the last launcher
 rank and a final CSS order so it stays after local apps when tiles refresh.
+
+The Neurodesk section includes a **Getting started** tile that opens the
+[Accessing Tools in Neurodesk](https://neurodesk.org/edu/tutorials/about-neurodesk/accessing-neurodesk-tools)
+tutorial in a new browser tab. It follows the server-proxy tiles and precedes
+the terminal. The launcher registers it before requesting server-proxy metadata,
+so it remains available if that request fails.
 
 The Neurodesk Slurm tile invokes `jupyterlab-slurm:open`, the command supplied
 by the pinned NERSC extension. Its label and icon come from that command;
