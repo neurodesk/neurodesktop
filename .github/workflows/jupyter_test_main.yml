@@ -121,9 +121,9 @@ jobs:
         echo "Waiting for server to start..."
         SERVER_STARTED=false
 
-        # Cold deployments can spend more than four minutes pulling and
-        # mounting the image while the Hub legitimately reports pending:spawn.
-        # Give the Hub ten minutes to finish before treating the spawn as stuck.
+        # The Hub enforces its own spawn timeout and reports an abandoned or
+        # failed spawn by returning the server to stopped. The ten-minute cap
+        # only bounds a spawn the Hub never resolves.
         for i in {1..60}; do
           sleep 10
           STATE=$(server_state)
@@ -132,6 +132,10 @@ jobs:
             echo "✅ Server started successfully (${i}0s elapsed)"
             SERVER_STARTED=true
             break
+          elif [ "$STATE" = "stopped" ]; then
+            echo "❌ JupyterHub abandoned the spawn: the server returned to stopped after ${i}0s."
+            echo "   This is a Hub-side spawn failure; check the deployment's spawner logs and pod events."
+            exit 1
           elif [ "$STATE" = "pending:spawn" ]; then
             echo "Server is still starting... (${i}0s elapsed)"
           else
