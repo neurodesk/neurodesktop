@@ -7,21 +7,19 @@ import pytest
 from testlib import repo_path
 
 
-def test_slurm_tile_uses_the_upstream_command():
-    modules = os.environ.get('NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES')
-    if not modules or not shutil.which('node'):
-        pytest.fail('Set NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES as described in docs/testing.md.')
-    script = r'''
+MAIN_PLUGIN_HARNESS = r'''
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const ts = require(process.env.NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES + '/typescript');
 const { JSDOM } = require(process.env.NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES + '/jsdom');
 const dom = new JSDOM('');
+const opened = [];
+dom.window.open = (...args) => { opened.push(args); return null; };
 const modules = {
   './workspaceLinks': {}, './astraViewer': {}, './t3Code': {},
   './webappsAppearance': {},
   '@jupyterlab/apputils': {}, '@jupyterlab/launcher': { ILauncher: {} },
-  '@jupyterlab/ui-components': {},
+  '@jupyterlab/ui-components': { notebookIcon: { name: 'ui-components:notebook' } },
   '@jupyterlab/coreutils': {
     PageConfig: { getOption: () => 'true' },
     URLExt: { join: (...parts) => parts.join('/') }
@@ -40,16 +38,36 @@ new Function('exports', 'require', 'window', 'document', 'MutationObserver',
     assert.ok(Object.hasOwn(modules, name), name);
     return modules[name];
   }, dom.window, dom.window.document, dom.window.MutationObserver, () => 1);
-// Contract from the pinned NERSC extension: it registers no slurm:open alias.
-let opened = 0;
-const commands = new Map([['jupyterlab-slurm:open', {
-  label: 'Slurm Dashboard', iconClass: 'jp-SlurmWidget-NerscLaunchIcon',
-  execute: () => opened++
-}]]);
-(async () => {
+const commands = new Map();
+const app = { commands: { addCommand: (id, options) => commands.set(id, options) } };
+async function activateLauncher() {
   const entries = [];
   await exported.default.find(p => p.id === 'neurodesk-launcher:plugin')
-    .activate({}, { add: entry => entries.push(entry) });
+    .activate(app, { add: entry => entries.push(entry) });
+  return entries;
+}
+'''
+
+
+def run_main_plugin_case(case):
+    modules = os.environ.get('NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES')
+    if not modules or not shutil.which('node'):
+        pytest.fail('Set NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES as described in docs/testing.md.')
+    script = MAIN_PLUGIN_HARNESS + "(async () => {" + case + "\n})().catch(error => { console.error(error); process.exitCode = 1; })" \
+        ".finally(() => dom.window.close());"
+    subprocess.run(['node', '-e', script, str(repo_path(
+        'extensions/neurodesk-launcher/src/index.ts'))], check=True, timeout=30)
+
+
+def test_slurm_tile_uses_the_upstream_command():
+    run_main_plugin_case(r'''
+  // Contract from the pinned NERSC extension: it registers no slurm:open alias.
+  let slurmOpened = 0;
+  commands.set('jupyterlab-slurm:open', {
+    label: 'Slurm Dashboard', iconClass: 'jp-SlurmWidget-NerscLaunchIcon',
+    execute: () => slurmOpened++
+  });
+  const entries = await activateLauncher();
   const tile = entries.find(entry => entry.category === 'Neurodesk' && entry.rank === 4);
   assert.ok(tile, 'Slurm tile must remain in the Neurodesk category');
   const command = commands.get(tile.command);
@@ -57,12 +75,38 @@ const commands = new Map([['jupyterlab-slurm:open', {
   assert.equal(command.label, 'Slurm Dashboard');
   assert.equal(command.iconClass, 'jp-SlurmWidget-NerscLaunchIcon');
   command.execute();
-  assert.equal(opened, 1);
-  dom.window.close();
-})().catch(error => { console.error(error); process.exitCode = 1; });
-'''
-    subprocess.run(['node', '-e', script, str(repo_path(
-        'extensions/neurodesk-launcher/src/index.ts'))], check=True, timeout=30)
+  assert.equal(slurmOpened, 1);
+''')
+
+
+def test_getting_started_tile_opens_the_tutorial_in_a_new_tab():
+    run_main_plugin_case(r'''
+  const entries = await activateLauncher();
+  const neurodesk = entries.filter(entry => entry.category === 'Neurodesk');
+  const tile = neurodesk.find(entry => commands.get(entry.command)?.label === 'Getting started');
+  assert.ok(tile, 'Getting started tile must be in the Neurodesk category');
+  assert.ok(neurodesk.every(entry => entry === tile || entry.rank > tile.rank),
+    'Getting started must precede the built-in Neurodesk tools');
+  const command = commands.get(tile.command);
+  assert.equal(command.icon.name, 'ui-components:notebook');
+  assert.equal(opened.length, 0, 'activation must not open a tab');
+  command.execute();
+  assert.deepEqual(opened, [[
+    'https://neurodesk.org/edu/tutorials/about-neurodesk/accessing-neurodesk-tools',
+    '_blank', 'noopener'
+  ]]);
+''')
+
+
+def test_getting_started_tile_survives_an_unavailable_server_proxy():
+    run_main_plugin_case(r'''
+  modules['@jupyterlab/services'].ServerConnection.makeRequest = async () => ({ ok: false, status: 503 });
+  const originalError = console.error;
+  console.error = () => {};
+  const entries = await activateLauncher().finally(() => { console.error = originalError; });
+  assert.ok(entries.some(entry => commands.get(entry.command)?.label === 'Getting started'),
+    'Getting started must not depend on servers-info');
+''')
 
 
 def test_webapps_catalog_order_and_heading_survive_rerender():
