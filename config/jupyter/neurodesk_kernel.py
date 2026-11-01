@@ -12,6 +12,11 @@ Specs record the absolute wrapper path rather than a module name: the wrapper
 runs with ``--cleanenv``, so loading the module at launch would add nothing,
 and a bare ``python3`` would silently fall back to the image's own Python
 whenever the module was not loaded.
+
+A wrapper belongs to the requested module when the container image it runs is
+named after that module: ``fsl/6.0.7.16`` runs ``fsl_6.0.7.16_<date>.simg``.
+Searching the loaded PATH for such a wrapper never admits a dependency's
+container or the image's own Python, and needs no parsing of modulefiles.
 """
 
 import argparse
@@ -52,8 +57,6 @@ except ImportError as error:
     sys.exit({NO_IPYKERNEL_STATUS})
 """
 
-# Load and show run in one shell: a modulefile can build its PATH from
-# variables that its dependencies set while loading.
 RESOLVE_SCRIPT = r"""
 source "$1" >/dev/null 2>&1
 source "$2" >/dev/null 2>&1 || exit 3
@@ -63,31 +66,18 @@ name=
 IFS=: read -r -a loaded <<< "${LOADEDMODULES:-}"
 for entry in "${loaded[@]}"; do [ "${entry%%/*}" = "$tool" ] && name=$entry; done
 [ -n "$name" ] || exit 5
-printf '%s\0%s\0' "$name" "$PATH"
-module --redirect show "$name" || exit 6
+printf '%s\0%s' "$name" "$PATH"
 """
 RESOLVE_ERRORS = {
     3: "Lmod is unavailable: could not source {init}.",
     4: "could not load module {name!r}. Run 'ml av' to list available modules.",
     5: "module {name!r} loaded but is not listed as loaded.",
-    6: "Lmod could not show module {name!r}.",
 }
-# Lmod prints every modulefile in its Lua form: prepend_path("PATH","dir")
-# for Lua and prepend_path{"PATH","dir",delim=":",priority="0"} for Tcl,
-# without escaping quotes inside the value, so the value runs to the trailer
-# that ends the line. Dependencies appear as separate load()/depends_on()
-# lines, so only these lines name the module's own command directories.
-# setenv/pushenv are not accepted: their value is a whole PATH, typically
-# including the inherited one.
-PATH_LINE = re.compile(
-    r'^\s*(?:prepend_path|append_path)\s*[({]\s*"PATH"\s*,\s*"(.*?)"'
-    r'(?:\s*,\s*delim\s*=\s*"[^"]*")?(?:\s*,\s*priority\s*=\s*"?[^",}]*"?)?\s*[)}]\s*$')
-LONG_STRING_OPEN = re.compile(r"\[(=*)\[")
-WHATIS_OPEN = re.compile(r"^\s*whatis\s*\(")
 # transparent-singularity wrappers run their command through the container
-# runtime; anything else on a module's PATH is not a container's Python.
+# runtime with the image path on the same line.
 CONTAINER_EXEC = re.compile(
-    r"^[^#\n]*\b(?:neurodesk_container|apptainer|singularity)\b[^\n]*\bexec\b", re.MULTILINE)
+    r"^[^#\n]*\b(?:neurodesk_container|apptainer|singularity)\b[^\n]*\bexec\b[^\n]*?"
+    r"([A-Za-z0-9._+-]+)\.(?:simg|sif)\b", re.MULTILINE)
 WRAPPER_SIZE_LIMIT = 64 * 1024
 
 
@@ -98,7 +88,11 @@ class KernelError(Exception):
 @dataclass(frozen=True)
 class LoadedModule:
     name: str
-    path_entries: tuple[str, ...]
+    path: tuple[str, ...]
+
+    @property
+    def image_prefix(self) -> str:
+        return self.name.replace("/", "_") + "_"
 
 
 @dataclass(frozen=True)
@@ -165,56 +159,22 @@ def resolve_module(requested: str) -> LoadedModule:
     if result.returncode != 0:
         message = RESOLVE_ERRORS.get(result.returncode, RESOLVE_ERRORS[4])
         raise KernelError(message.format(init=MODULE_INIT, name=requested))
-    name, path, shown = result.stdout.split("\0", 2)
-
-    owned = {entry for value in module_path_values(shown)
-             for entry in value.split(":") if entry}
+    name, path = result.stdout.split("\0", 1)
     # The loaded shell's PATH gives the precedence Lmod actually applied.
-    directories = tuple(dict.fromkeys(
-        entry for entry in path.split(":") if entry in owned))
-    if not directories:
-        raise KernelError(f"module {name!r} adds no command directory to PATH.")
-    return LoadedModule(name, directories)
+    return LoadedModule(name, tuple(dict.fromkeys(e for e in path.split(":") if e)))
 
 
-def module_path_values(shown: str) -> list[str]:
-    """PATH values from top-level prepend_path/append_path lines of Lmod's show.
-
-    Lines inside help([[...]]) blocks and multi-line whatis("...") calls are
-    documentation, even when they look like PATH operations.
-    """
-    values = []
-    block_end: re.Pattern[str] | None = None
-    for line in shown.splitlines():
-        if block_end is not None:
-            if block_end.search(line):
-                block_end = None
-            continue
-        opened = LONG_STRING_OPEN.search(line)
-        if opened:
-            closer = "]" + opened.group(1) + "]"
-            if closer not in line[opened.end():]:
-                block_end = re.compile(re.escape(closer))
-            continue
-        if WHATIS_OPEN.match(line):
-            if not line.rstrip().endswith(")"):
-                block_end = re.compile(r"\)\s*$")
-            continue
-        match = PATH_LINE.match(line)
-        if match:
-            values.append(match.group(1))
-    return values
-
-
-def is_container_wrapper(path: str) -> bool:
+def wrapper_image(path: str) -> str | None:
+    """The image a transparent-singularity wrapper runs, or None."""
     try:
         with open(path, "rb") as handle:
             content = handle.read(WRAPPER_SIZE_LIMIT + 1)
     except OSError:
-        return False
+        return None
     if len(content) > WRAPPER_SIZE_LIMIT or not content.startswith(b"#!"):
-        return False
-    return bool(CONTAINER_EXEC.search(content.decode("utf-8", "replace")))
+        return None
+    match = CONTAINER_EXEC.search(content.decode("utf-8", "replace"))
+    return match.group(1) if match else None
 
 
 def probe(wrapper: str) -> str | ProbeFailure:
@@ -241,13 +201,12 @@ def probe(wrapper: str) -> str | ProbeFailure:
 def find_container_python(module: LoadedModule, commands: tuple[str, ...]) -> ContainerPython:
     failures: list[ProbeFailure] = []
     for command in commands:
-        for directory in module.path_entries:
+        for directory in module.path:
             wrapper = os.path.join(directory, command)
             if not (os.path.isfile(wrapper) and os.access(wrapper, os.X_OK)):
                 continue
-            if not is_container_wrapper(wrapper):
-                failures.append(ProbeFailure(
-                    wrapper, "not a Neurodesk container wrapper; skipped", False))
+            image = wrapper_image(wrapper)
+            if image is None or not image.startswith(module.image_prefix):
                 continue
             print(f"Checking {wrapper} ...", file=sys.stderr)
             outcome = probe(wrapper)
@@ -256,7 +215,8 @@ def find_container_python(module: LoadedModule, commands: tuple[str, ...]) -> Co
             failures.append(outcome)
     if not failures:
         raise KernelError(
-            f"module {module.name!r} provides none of: {', '.join(commands)}.")
+            f"module {module.name!r} provides no {' or '.join(commands)} wrapper for its "
+            f"container ({module.image_prefix}*). Use --python to name another command.")
     details = "\n".join(f"  {failure.wrapper}: {failure.reason}" for failure in failures)
     if all(failure.missing_ipykernel for failure in failures):
         raise KernelError(

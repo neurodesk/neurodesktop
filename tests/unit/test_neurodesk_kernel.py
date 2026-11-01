@@ -33,33 +33,32 @@ def write_executable(path: Path, body: str) -> Path:
     return path
 
 
-def container_wrapper(runtime: str) -> str:
-    """A transparent-singularity-style wrapper whose runtime is *runtime*.
+def container_wrapper(image: str, runtime: str) -> str:
+    """A transparent-singularity-style wrapper that runs *image*.
 
     *runtime* is the body of neurodesk_container, which receives the
     arguments after the command name.
     """
     return textwrap.dedent("""\
         #!/bin/bash
+        # neurodesk-artifact-v2
         neurodesk_container() {
             shift 3
         %s
         }
-        neurodesk_container exec "$(dirname "$0")/image.simg" python3 "$@"
-        """) % textwrap.indent(textwrap.dedent(runtime), "    ")
+        neurodesk_container exec "$(dirname "$0")/"%s.simg python3 "$@"
+        """) % (textwrap.indent(textwrap.dedent(runtime), "    "), image)
 
 
-def container_python(marker: str, pythonpath: str = "") -> str:
+def container_python(image: str, marker: str, pythonpath: str = "") -> str:
     exports = f"export NEURODESK_TEST_CONTAINER={shlex.quote(marker)}\n"
     if pythonpath:
         exports += f"export PYTHONPATH={shlex.quote(pythonpath)}\n"
-    return container_wrapper(exports + f'exec {sys.executable} "$@"\n')
+    return container_wrapper(image, exports + f'exec {sys.executable} "$@"\n')
 
 
-# Fake Lmod. load mirrors Lmod: dependencies first, a reload is a no-op, and
-# each prepend lands in front of the previous one. show evaluates in the
-# calling shell and prints the modulefile's PATH lines in file order, without
-# escaping quotes, like `module --redirect show`.
+# Fake Lmod: dependencies load first, a reload is a no-op, and each prepend
+# lands in front of the previous one, as with Lmod.
 MODULE_FUNCTION = r"""
 C=@CONTAINERS@
 own() {  # own <name> <dir>...: prepend each dir and record the module
@@ -68,97 +67,71 @@ own() {  # own <name> <dir>...: prepend each dir and record the module
     local dir; for dir in "$@"; do export PATH="$dir:$PATH"; done
     export LOADEDMODULES="${LOADEDMODULES:+$LOADEDMODULES:}$name"
 }
-line() { echo "prepend_path(\"PATH\",\"$1\")"; }
 module() {
-    local action=$1 target=$2
-    if [ "$1 $2" = "--redirect show" ]; then action=show; target=$3; fi
-    case "$action:$target" in
-        load:demo|load:demo/2.0) own demo/2.0 "$C/demo_2.0" ;;
-        show:demo/2.0) line "$C/demo_2.0" ;;
-        load:plain/1.0) own plain/1.0 "$C/plain_1.0" ;;
-        show:plain/1.0) line "$C/plain_1.0" ;;
-        load:withdep/1.0) module load demo/2.0; own withdep/1.0 "$C/withdep_1.0" ;;
-        show:withdep/1.0) echo 'depends_on("demo/2.0")'; line "$C/withdep_1.0" ;;
-        load:tool/1.0) own tool/1.0 "$C/tool_1.0" ;;
-        show:tool/1.0) line "$C/tool_1.0" ;;
-        load:broken/1.0) own broken/1.0 "$C/broken_1.0" ;;
-        show:broken/1.0) line "$C/broken_1.0" ;;
-        load:slow/1.0) own slow/1.0 "$C/slow_1.0" ;;
-        show:slow/1.0) line "$C/slow_1.0" ;;
-        load:tool/1-2) own tool/1-2 "$C/tool_1-2" ;;
-        show:tool/1-2) line "$C/tool_1-2" ;;
-        load:tool-1/2) own tool-1/2 "$C/tool-1_2" ;;
-        show:tool-1/2) line "$C/tool-1_2" ;;
-        load:tcl/1.0) own tcl/1.0 "$C/tcl_1.0" ;;
-        show:tcl/1.0) echo "prepend_path{\"PATH\",\"$C/tcl_1.0\",delim=\":\",priority=\"0\"}" ;;
-        load:multi/1.0) own multi/1.0 "$C/multi_first" "$C/multi_second" ;;
-        show:multi/1.0) line "$C/multi_first"; line "$C/multi_second" ;;
-        load:joined/1.0) own joined/1.0 "$C/joined_bin:$C/joined_python" ;;
-        show:joined/1.0) line "$C/joined_bin:$C/joined_python" ;;
-        load:quoted/1.0) own quoted/1.0 "$C/quo\"ted" ;;
-        show:quoted/1.0) line "$C/quo\"ted" ;;
-        load:hostlink/1.0) own hostlink/1.0 "$C/hostlink_1.0" ;;
-        show:hostlink/1.0) line "$C/hostlink_1.0" ;;
-        load:setenv/1.0) own setenv/1.0 "$C/setenv_bin" ;;
-        show:setenv/1.0) echo "setenv(\"PATH\",\"$C/setenv_bin:$PATH\")" ;;
-        load:documented/1.0) module load demo/2.0; own documented/1.0 "$C/documented_bin" ;;
-        show:documented/1.0)
-            echo 'help([['
-            echo 'Example:'
-            line "$HOST_BIN"
-            line "$C/demo_2.0"
-            echo ']])'
-            echo 'whatis("Description: a multi-line'
-            line "$HOST_BIN"
-            echo 'summary")'
-            echo 'depends_on("demo/2.0")'
-            line "$C/documented_bin" ;;
-        load:rootdep/1.0) export ROOTED_HOME="$C/rooted"; own rootdep/1.0 ;;
-        load:rooted/1.0) module load rootdep/1.0; own rooted/1.0 "$ROOTED_HOME/bin" ;;
-        show:rooted/1.0) echo 'depends_on("rootdep/1.0")'; line "${ROOTED_HOME:-}/bin" ;;
-        *) echo "Lmod has detected the following error: unknown $target" >&2; return 1 ;;
+    [ "$1" = load ] || return 1
+    case "$2" in
+        demo|demo/2.0) own demo/2.0 "$C/demo_2.0" ;;
+        plain/1.0) own plain/1.0 "$C/plain_1.0" ;;
+        withdep/1.0) module load demo/2.0; own withdep/1.0 "$C/withdep_1.0" ;;
+        meta/1.0) module load demo/2.0; own meta/1.0 ;;
+        tool/1.0) own tool/1.0 "$C/tool_1.0" ;;
+        broken/1.0) own broken/1.0 "$C/broken_1.0" ;;
+        slow/1.0) own slow/1.0 "$C/slow_1.0" ;;
+        tool/1-2) own tool/1-2 "$C/tool_1-2" ;;
+        tool-1/2) own tool-1/2 "$C/tool-1_2" ;;
+        multi/1.0) own multi/1.0 "$C/multi_first" "$C/multi_second" ;;
+        mixed/1.0) own mixed/1.0 "$C/mixed_1.0" ;;
+        hostlink/1.0) own hostlink/1.0 "$C/hostlink_1.0" ;;
+        fsl_arm64/6.0) own fsl_arm64/6.0 "$C/fsl_arm64_6.0" ;;
+        *) echo "Lmod has detected the following error: unknown $2" >&2; return 1 ;;
     esac
 }
 """
-
-WORKING_CONTAINERS = (
-    "demo_2.0", "tool_1-2", "tool-1_2", "tcl_1.0", "multi_first", "multi_second",
-    "joined_python", 'quo"ted', "rooted/bin",
-)
 
 
 @pytest.fixture
 def lmod(tmp_path, monkeypatch):
     """A fake Lmod whose modules expose transparent-singularity-style wrappers.
 
-    Each working container's python3 runs the test interpreter with a marker
-    variable naming its directory. plain and withdep shadow ipykernel_launcher
-    so the import fails the way it does in a container without ipykernel;
-    withdep also loads demo, whose Python does have ipykernel.
+    Each wrapper names the image of the module it belongs to, and its runtime
+    runs the test interpreter with a marker variable naming its directory.
+    plain and withdep shadow ipykernel_launcher so the import fails the way it
+    does in a container without ipykernel; withdep and meta load demo, whose
+    Python does have ipykernel.
     """
     containers = tmp_path / "containers"
-    for directory in WORKING_CONTAINERS:
-        write_executable(containers / directory / "python3", container_python(directory))
-    write_executable(containers / "demo_2.0" / "fslpython", container_python("demo-fslpython"))
-    write_executable(containers / "joined_bin" / "tool", "#!/bin/bash\n")
-
     no_ipykernel = tmp_path / "no-ipykernel"
     no_ipykernel.mkdir()
     (no_ipykernel / "ipykernel_launcher.py").write_text(
         "raise ModuleNotFoundError(\"No module named 'ipykernel_launcher'\")\n")
-    for directory in ("plain_1.0", "withdep_1.0"):
-        write_executable(containers / directory / "python3",
-                         container_python(directory, str(no_ipykernel)))
 
+    def python(directory, image, pythonpath=""):
+        write_executable(containers / directory / "python3",
+                         container_python(image, directory, pythonpath))
+
+    python("demo_2.0", "demo_2.0_20260101")
+    write_executable(containers / "demo_2.0" / "fslpython", container_python(
+        "demo_2.0_20260101", "demo-fslpython").replace(" python3 ", " fslpython "))
+    python("plain_1.0", "plain_1.0_20260101", str(no_ipykernel))
+    python("withdep_1.0", "withdep_1.0_20260101", str(no_ipykernel))
+    python("tool_1-2", "tool_1-2_20260101")
+    python("tool-1_2", "tool-1_2_20260101")
+    python("multi_first", "multi_1.0_20260101")
+    python("multi_second", "multi_1.0_20260101")
+    python("fsl_arm64_6.0", "fsl_arm64_6.0_20260101")
+    # A wrapper in mixed's own directory that runs a different container.
+    python("mixed_1.0", "other_9.9_20260101")
     write_executable(containers / "tool_1.0" / "tool", "#!/bin/bash\n")
-    write_executable(containers / "broken_1.0" / "python3", container_wrapper("""\
+    write_executable(containers / "broken_1.0" / "python3", container_wrapper(
+        "broken_1.0_20260101", """\
         echo "FATAL: container image not found" >&2
         exit 255
         """))
     pid_file = tmp_path / "slow-child.pid"
     # The wrapper exits on SIGTERM, but its descendant ignores SIGTERM and holds
     # no pipe, like a stuck container runtime.
-    write_executable(containers / "slow_1.0" / "python3", container_wrapper(f"""\
+    write_executable(containers / "slow_1.0" / "python3", container_wrapper(
+        "slow_1.0_20260101", f"""\
         ( trap '' TERM; exec sleep 300 ) </dev/null >/dev/null 2>&1 &
         echo $! > {pid_file}
         sleep 300
@@ -166,19 +139,15 @@ def lmod(tmp_path, monkeypatch):
     # The image's own Python placed in a module directory is not a container.
     (containers / "hostlink_1.0").mkdir()
     (containers / "hostlink_1.0" / "python3").symlink_to(sys.executable)
-    write_executable(containers / "setenv_bin" / "tool", "#!/bin/bash\n")
-    write_executable(containers / "documented_bin" / "tool", "#!/bin/bash\n")
 
     module_init = tmp_path / "module.sh"
-    module_init.write_text(MODULE_FUNCTION.replace("@CONTAINERS@", f"'{containers}'"))
+    module_init.write_text(MODULE_FUNCTION.replace("@CONTAINERS@", shlex.quote(str(containers))))
 
     data_dir = tmp_path / "jupyter-data"
     monkeypatch.setenv("JUPYTER_DATA_DIR", str(data_dir))
     monkeypatch.delenv("LOADEDMODULES", raising=False)
-    monkeypatch.delenv("ROOTED_HOME", raising=False)
-    host_bin = os.path.dirname(sys.executable)
-    monkeypatch.setenv("HOST_BIN", host_bin)
-    monkeypatch.setenv("PATH", f"{host_bin}:{os.environ['PATH']}")
+    # Put the image's own Python first on PATH, as in the Neurodesktop image.
+    monkeypatch.setenv("PATH", f"{os.path.dirname(sys.executable)}:{os.environ['PATH']}")
     cli = load_cli()
     monkeypatch.setattr(cli, "MODULE_INIT", str(module_init))
     monkeypatch.setattr(cli, "ENVIRONMENT_SCRIPT", str(tmp_path / "absent.sh"))
@@ -195,6 +164,11 @@ def lmod(tmp_path, monkeypatch):
 
 def registered(cli, name):
     return json.loads((cli.kernels / name / "kernel.json").read_text())
+
+
+def wrapper_for(cli, module):
+    assert cli.main(["add", module]) == 0
+    return registered(cli, cli.kernel_name_for(module))["argv"][1]
 
 
 def test_added_kernel_runs_inside_the_module_container(lmod, capsys):
@@ -228,40 +202,19 @@ def test_bare_module_name_registers_the_loaded_default_version(lmod):
     }
 
 
-def test_tcl_modulefile_command_directory_is_found(lmod):
-    assert lmod.main(["add", "tcl/1.0"]) == 0
-    assert registered(lmod, "neurodesk-tcl-1.0")["argv"][1] == str(
-        lmod.containers / "tcl_1.0" / "python3")
-
-
-def wrapper_for(cli, module):
-    assert cli.main(["add", module]) == 0
-    name = cli.kernel_name_for(module)
-    return registered(cli, name)["argv"][1]
+def test_module_already_loaded_in_the_calling_shell_registers(lmod, monkeypatch):
+    monkeypatch.setenv("PATH", f"{lmod.containers / 'demo_2.0'}:{os.environ['PATH']}")
+    monkeypatch.setenv("LOADEDMODULES", "demo/2.0")
+    assert wrapper_for(lmod, "demo/2.0") == str(lmod.containers / "demo_2.0" / "python3")
 
 
 def test_later_prepend_takes_precedence_like_the_loaded_path(lmod):
     assert wrapper_for(lmod, "multi/1.0") == str(lmod.containers / "multi_second" / "python3")
 
 
-def test_colon_joined_path_value_is_split_into_directories(lmod):
-    assert wrapper_for(lmod, "joined/1.0") == str(lmod.containers / "joined_python" / "python3")
-
-
-def test_unescaped_quote_in_a_directory_is_kept_whole(lmod):
-    assert wrapper_for(lmod, "quoted/1.0") == str(lmod.containers / 'quo"ted' / "python3")
-
-
-def test_path_built_from_a_dependency_variable_resolves(lmod):
-    assert wrapper_for(lmod, "rooted/1.0") == str(lmod.containers / "rooted" / "bin" / "python3")
-
-
-def test_module_already_loaded_in_the_calling_shell_registers(lmod, monkeypatch):
-    monkeypatch.setenv("PATH", f"{lmod.containers / 'demo_2.0'}:{os.environ['PATH']}")
-    monkeypatch.setenv("LOADEDMODULES", "demo/2.0")
-    assert lmod.main(["add", "demo"]) == 0
-    assert registered(lmod, "neurodesk-demo-2.0")["argv"][1] == str(
-        lmod.containers / "demo_2.0" / "python3")
+def test_architecture_variant_module_matches_its_image(lmod):
+    assert wrapper_for(lmod, "fsl_arm64/6.0") == str(
+        lmod.containers / "fsl_arm64_6.0" / "python3")
 
 
 def test_python_without_ipykernel_is_refused_without_writing_a_kernel(lmod, capsys):
@@ -279,37 +232,28 @@ def test_a_dependency_python_never_stands_in_for_the_requested_module(lmod, caps
     error = capsys.readouterr().err
     assert "ipykernel is not installed in the container" in error
     assert "demo_2.0" not in error
-    assert not (lmod.kernels / "neurodesk-withdep-1.0").exists()
-
-
-def test_image_python_on_path_never_stands_in_for_the_container(lmod, capsys):
-    # The host python3 is on PATH, but tool/1.0 itself provides no Python.
-    assert lmod.main(["add", "tool/1.0"]) == 1
-    assert "provides none of: python3, python" in capsys.readouterr().err
-    assert not (lmod.kernels / "neurodesk-tool-1.0").exists()
-
-
-def test_inherited_path_from_setenv_never_admits_the_image_python(lmod, capsys):
-    # setenv("PATH", "<own>:$PATH") carries the image's own Python directory.
-    assert lmod.main(["add", "setenv/1.0"]) == 1
-    assert "adds no command directory to PATH" in capsys.readouterr().err
+    # meta has no container of its own; only its dependency has a Python.
+    assert lmod.main(["add", "meta/1.0"]) == 1
+    assert ("module 'meta/1.0' provides no python3 or python wrapper for its container "
+            "(meta_1.0_*)") in capsys.readouterr().err
     assert not lmod.kernels.exists()
 
 
-def test_path_operations_in_documentation_are_ignored(lmod, capsys):
-    # The help and whatis text name the image's Python and a dependency's
-    # container, but the module itself only adds documented_bin.
-    assert lmod.main(["add", "documented/1.0"]) == 1
-    error = capsys.readouterr().err
-    assert "module 'documented/1.0' provides none of: python3, python" in error
-    assert not (lmod.kernels / "neurodesk-documented-1.0").exists()
+def test_wrapper_for_another_container_in_the_module_directory_is_ignored(lmod, capsys):
+    assert lmod.main(["add", "mixed/1.0"]) == 1
+    assert "provides no python3 or python wrapper for its container (mixed_1.0_*)" in (
+        capsys.readouterr().err)
+    assert not lmod.kernels.exists()
 
 
-def test_python_that_is_not_a_container_wrapper_is_skipped(lmod, capsys):
+def test_image_python_never_stands_in_for_the_container(lmod, capsys):
+    # The image's own python3 is first on PATH, and tool/1.0 provides none.
+    assert lmod.main(["add", "tool/1.0"]) == 1
+    assert "provides no python3 or python wrapper" in capsys.readouterr().err
+    # hostlink/1.0 puts the image's own interpreter in its own directory.
     assert lmod.main(["add", "hostlink/1.0"]) == 1
-    error = capsys.readouterr().err
-    assert "hostlink_1.0/python3: not a Neurodesk container wrapper; skipped" in error
-    assert not (lmod.kernels / "neurodesk-hostlink-1.0").exists()
+    assert "provides no python3 or python wrapper" in capsys.readouterr().err
+    assert not lmod.kernels.exists()
 
 
 def test_container_launch_failure_is_not_reported_as_missing_ipykernel(lmod, capsys):
@@ -348,7 +292,7 @@ def test_python_option_selects_another_module_command(lmod, capsys):
     assert registered(lmod, "neurodesk-demo-2.0")["argv"][1] == str(
         lmod.containers / "demo_2.0" / "fslpython")
     assert lmod.main(["add", "plain/1.0", "--python", "fslpython"]) == 1
-    assert "provides none of: fslpython" in capsys.readouterr().err
+    assert "provides no fslpython wrapper" in capsys.readouterr().err
     with pytest.raises(SystemExit):
         lmod.main(["add", "demo/2.0", "--python", "/usr/bin/python3"])
 
