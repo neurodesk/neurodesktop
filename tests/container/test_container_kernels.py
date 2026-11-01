@@ -1,6 +1,7 @@
 """Installed-image acceptance for neurodesk-kernel against a real CVMFS container."""
 import json
 import os
+import re
 import subprocess
 import time
 
@@ -59,7 +60,8 @@ def test_container_kernel_runs_interrupts_and_is_removed(kernel_data_dir):
         assert client.execute_interactive("1", timeout=60)["content"]["status"] == "ok"
     finally:
         client.stop_channels()
-        manager.shutdown_kernel(now=True)
+        manager.shutdown_kernel(now=False)
+    assert not manager.is_alive()
 
     listed = neurodesk_kernel("list")
     assert f"{KERNEL}\t{MODULE}\t" in listed.stdout
@@ -72,4 +74,21 @@ def test_container_python_without_ipykernel_is_refused(kernel_data_dir):
     refused = neurodesk_kernel("add", "datalad/1.7.2")
     assert refused.returncode == 1
     assert "ipykernel is not installed in the container" in refused.stderr
+    # The container's Python must have started: a runtime failure is not this.
+    assert re.search(
+        r"/cvmfs/neurodesk\.ardc\.edu\.au/containers/datalad_1\.7\.2_\d+/python3: "
+        r"Python 3\.\d+ runs, but importing ipykernel failed: No module named",
+        refused.stderr), refused.stderr
     assert not (kernel_data_dir / "kernels").exists()
+
+
+def test_tcl_only_modulefile_registers(kernel_data_dir):
+    # fsl/6.0.7.16 ships only a Tcl modulefile, which Lmod renders differently.
+    modulefiles = "/cvmfs/neurodesk.ardc.edu.au/neurodesk-modules/arterial_spin_labelling/fsl"
+    assert os.path.isfile(f"{modulefiles}/6.0.7.16")
+    assert not os.path.exists(f"{modulefiles}/6.0.7.16.lua")
+    added = neurodesk_kernel("add", "fsl/6.0.7.16")
+    assert added.returncode == 0, added.stdout + added.stderr
+    spec = json.loads(
+        (kernel_data_dir / "kernels" / "neurodesk-fsl-6.0.7.16" / "kernel.json").read_text())
+    assert spec["argv"][1] == "/cvmfs/neurodesk.ardc.edu.au/containers/fsl_6.0.7.16_20250131/python3"

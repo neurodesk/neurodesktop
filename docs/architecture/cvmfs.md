@@ -227,14 +227,27 @@ neurodesk-kernel list
 neurodesk-kernel remove fsl/6.0.7.16
 ```
 
-`add` loads the module in a subshell and searches only the directories the module
-added to `PATH`, first for a `python3` wrapper and then for `python`. Use
-`--python COMMAND` to choose another wrapper the module provides, such as
-`fslpython`. A Python executable elsewhere on `PATH`, including the image's own,
-is never used. Each wrapper is probed with `import ipykernel_launcher`, and
-the probe allows 10 minutes for the first CVMFS fetch. If no wrapper can run
-ipykernel, `add` lists each one it checked and writes nothing. Nothing is
-installed into the container.
+`add` loads the module in a subshell to resolve its full name, so a bare tool
+name selects the default version. It then reads the module's own `PATH`
+directories from `module --redirect show`. Lmod renders Lua modulefiles as
+`prepend_path("PATH",…)` and Tcl modulefiles as `prepend_path{"PATH",…}`;
+`add` accepts both. This works whether or not the module is already loaded in
+the calling shell. Dependencies appear in that output as separate load lines,
+so a dependency's Python is never registered under the requested module.
+`add` looks in those directories first for a `python3` wrapper and then for
+`python`. Use `--python COMMAND` to choose another wrapper the module provides,
+such as `fslpython`. A Python executable elsewhere on `PATH`, including the
+image's own, is never used.
+
+Each wrapper is probed with a short program that reports its Python version and
+then imports `ipykernel_launcher`. A Python that runs but cannot import
+ipykernel is reported as missing ipykernel. Any other failure, such as a missing
+image or an Apptainer error, is reported as a launch failure with its last
+error line. If no wrapper can run ipykernel, `add` lists each one it checked and
+writes nothing. Nothing is installed into the container. The probe allows 10
+minutes for the first CVMFS fetch and each Lmod call allows 5 minutes. Both run
+in their own session, so a timeout stops the whole process tree, including
+Apptainer and the container's processes.
 
 The kernelspec goes in the user's Jupyter data directory as
 `neurodesk-<tool>-<version>`, so it persists with the home directory. Its
@@ -250,10 +263,18 @@ kernel needs its container path at launch, so in lazy CVMFS mode it starts once
 CVMFS is mounted.
 
 The kernelspec's `metadata.neurodesk_container` records the module and wrapper.
-`list` and `remove` act only on kernelspecs with that marker. `add` refreshes a
-kernel it created and refuses to replace any other kernelspec with the same name.
-The unit tests use a fake Lmod, and `tests/container/test_container_kernels.py`
-covers a real FSL kernel and the ipykernel refusal in the installed image.
+`list` and `remove` act only on kernelspecs with that marker, and `remove`
+matches the exact kernel name or stored module. `add` refreshes a kernel it
+created for the same module. It refuses to replace an unmarked kernelspec, a
+symbolic link, or a kernel created for a different module whose name maps to
+the same kernel name. Writes go through a unique temporary file and an atomic
+rename, under a lock in the kernels directory that serializes concurrent
+invocations. The unit tests use a fake Lmod. `tests/container/test_container_kernels.py`
+covers, in the installed image:
+
+- a real FSL kernel, including interrupt and graceful shutdown;
+- a Tcl-only modulefile;
+- the ipykernel refusal, with evidence that the container's Python ran.
 
 ## Build-time CVMFS setup
 
