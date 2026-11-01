@@ -52,20 +52,35 @@ except ImportError as error:
     sys.exit({NO_IPYKERNEL_STATUS})
 """
 
-MODULE_SCRIPT = r"""
+# Load and show run in one shell: a modulefile can build its PATH from
+# variables that its dependencies set while loading.
+RESOLVE_SCRIPT = r"""
 source "$1" >/dev/null 2>&1
 source "$2" >/dev/null 2>&1 || exit 3
-case "$3" in
-    load) module load "$4" >&2 || exit 4; printf '%s' "${LOADEDMODULES:-}" ;;
-    show) module --redirect show "$4" || exit 4 ;;
-esac
+module load "$3" >&2 || exit 4
+tool=${3%%/*}
+name=
+IFS=: read -r -a loaded <<< "${LOADEDMODULES:-}"
+for entry in "${loaded[@]}"; do [ "${entry%%/*}" = "$tool" ] && name=$entry; done
+[ -n "$name" ] || exit 5
+printf '%s\0%s\0' "$name" "$PATH"
+module --redirect show "$name" || exit 6
 """
+RESOLVE_ERRORS = {
+    3: "Lmod is unavailable: could not source {init}.",
+    4: "could not load module {name!r}. Run 'ml av' to list available modules.",
+    5: "module {name!r} loaded but is not listed as loaded.",
+    6: "Lmod could not show module {name!r}.",
+}
 # Lmod prints every modulefile in its Lua form: prepend_path("PATH","dir")
-# for Lua and prepend_path{"PATH","dir",delim=":",...} for Tcl. Dependencies
-# appear as load()/depends_on() lines, so only these name the module's own
-# command directories.
+# for Lua and prepend_path{"PATH","dir",delim=":",priority="0"} for Tcl,
+# without escaping quotes inside the value, so the value runs to the trailer
+# that ends the line. Dependencies appear as separate load()/depends_on()
+# lines, so only these lines name the module's own command directories.
 PATH_LINE = re.compile(
-    r'^\s*(?:prepend|append)_path\s*[({]\s*"PATH"\s*,\s*"([^"]+)"', re.MULTILINE)
+    r'^\s*(?:prepend_path|append_path|pushenv|setenv)\s*[({]\s*"PATH"\s*,\s*"(.*?)"'
+    r'(?:\s*,\s*delim\s*=\s*"[^"]*")?(?:\s*,\s*priority\s*=\s*"?[^",}]*"?)?\s*[)}]\s*$',
+    re.MULTILINE)
 
 
 class KernelError(Exception):
@@ -108,7 +123,9 @@ def run_bounded(argv: list[str], timeout: int, stderr: int | None = subprocess.P
     """Run *argv* in its own session and kill the whole session on timeout.
 
     Wrappers start Apptainer and the container's processes as descendants, and
-    ``subprocess.run`` would only kill the direct child.
+    ``subprocess.run`` would only kill the direct child. The group is killed
+    after the grace period even when the leader has already exited, because a
+    descendant can ignore SIGTERM and hold no pipe open.
     """
     process = subprocess.Popen(
         argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=stderr,
@@ -116,43 +133,37 @@ def run_bounded(argv: list[str], timeout: int, stderr: int | None = subprocess.P
     try:
         stdout, err = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        for sig in (signal.SIGTERM, signal.SIGKILL):
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(process.pid, sig)
-            try:
-                process.communicate(timeout=5)
-                break
-            except subprocess.TimeoutExpired:
-                continue
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGTERM)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.communicate(timeout=5)
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.communicate(timeout=5)
         raise
     return subprocess.CompletedProcess(argv, process.returncode, stdout, err)
 
 
-def run_module(action: str, name: str) -> str:
+def resolve_module(requested: str) -> LoadedModule:
     try:
         result = run_bounded(
-            ["bash", "-c", MODULE_SCRIPT, "neurodesk-kernel",
-             ENVIRONMENT_SCRIPT, MODULE_INIT, action, name],
+            ["bash", "-c", RESOLVE_SCRIPT, "neurodesk-kernel",
+             ENVIRONMENT_SCRIPT, MODULE_INIT, requested],
             MODULE_TIMEOUT_SECONDS, stderr=None)
     except subprocess.TimeoutExpired:
         raise KernelError(
-            f"Lmod did not answer within {MODULE_TIMEOUT_SECONDS} s for {name!r}.") from None
-    if result.returncode == 3:
-        raise KernelError(f"Lmod is unavailable: could not source {MODULE_INIT}.")
+            f"Lmod did not answer within {MODULE_TIMEOUT_SECONDS} s for {requested!r}.") from None
     if result.returncode != 0:
-        raise KernelError(
-            f"could not load module {name!r}. Run 'ml av' to list available modules.")
-    return result.stdout
+        message = RESOLVE_ERRORS.get(result.returncode, RESOLVE_ERRORS[4])
+        raise KernelError(message.format(init=MODULE_INIT, name=requested))
+    name, path, shown = result.stdout.split("\0", 2)
 
-
-def resolve_module(requested: str) -> LoadedModule:
-    tool = requested.split("/", 1)[0]
-    loaded = run_module("load", requested).split(":")
-    matches = [m for m in loaded if m.split("/", 1)[0] == tool]
-    if not matches:
-        raise KernelError(f"module {requested!r} loaded but is not listed as loaded.")
-    name = matches[-1]
-    directories = tuple(dict.fromkeys(PATH_LINE.findall(run_module("show", name))))
+    owned = {entry for value in PATH_LINE.findall(shown)
+             for entry in value.split(":") if entry}
+    # The loaded shell's PATH gives the precedence Lmod actually applied.
+    directories = tuple(dict.fromkeys(
+        entry for entry in path.split(":") if entry in owned))
     if not directories:
         raise KernelError(f"module {name!r} adds no command directory to PATH.")
     return LoadedModule(name, directories)
@@ -354,7 +365,11 @@ def main(argv: list[str] | None = None) -> int:
         return args.handler(args)
     except KernelError as error:
         print(f"neurodesk-kernel: error: {error}", file=sys.stderr)
-        return 1
+    except OSError as error:
+        location = f": {error.filename}" if error.filename else ""
+        print(f"neurodesk-kernel: error: {error.strerror or error}{location}. "
+              "Check the permissions of your Jupyter kernels directory.", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":

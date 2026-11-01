@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import os
+import shlex
 import sys
 import textwrap
 import threading
@@ -34,70 +35,80 @@ def write_executable(path: Path, body: str) -> Path:
 def container_python(marker: str) -> str:
     return textwrap.dedent(f"""\
         #!/bin/bash
-        export NEURODESK_TEST_CONTAINER={marker}
+        export NEURODESK_TEST_CONTAINER={shlex.quote(marker)}
         exec {sys.executable} "$@"
         """)
 
 
-# Fake modules: name -> (default alias, command directory, dependencies).
-MODULES = {
-    "demo/2.0": ("demo", "demo_2.0", ()),
-    "plain/1.0": ("", "plain_1.0", ()),
-    "withdep/1.0": ("", "withdep_1.0", ("demo/2.0",)),
-    "tool/1.0": ("", "tool_1.0", ()),
-    "broken/1.0": ("", "broken_1.0", ()),
-    "slow/1.0": ("", "slow_1.0", ()),
-    "tool/1-2": ("", "tool_1-2", ()),
-    "tool-1/2": ("", "tool-1_2", ()),
-    "tcl/1.0": ("", "tcl_1.0", ()),
+# Fake Lmod. load mirrors Lmod: dependencies first, a reload is a no-op, and
+# each prepend lands in front of the previous one. show evaluates in the
+# calling shell and prints the modulefile's PATH lines in file order, without
+# escaping quotes, like `module --redirect show`.
+MODULE_FUNCTION = r"""
+C=@CONTAINERS@
+own() {  # own <name> <dir>...: prepend each dir and record the module
+    local name=$1; shift
+    case ":${LOADEDMODULES:-}:" in *":$name:"*) return 0 ;; esac
+    local dir; for dir in "$@"; do export PATH="$dir:$PATH"; done
+    export LOADEDMODULES="${LOADEDMODULES:+$LOADEDMODULES:}$name"
 }
-
-MODULE_FUNCTION = """\
-lookup() {
-    case "$1" in
-%s
-        *) echo "Lmod has detected the following error: unknown $1" >&2; return 1 ;;
+line() { echo "prepend_path(\"PATH\",\"$1\")"; }
+module() {
+    local action=$1 target=$2
+    if [ "$1 $2" = "--redirect show" ]; then action=show; target=$3; fi
+    case "$action:$target" in
+        load:demo|load:demo/2.0) own demo/2.0 "$C/demo_2.0" ;;
+        show:demo/2.0) line "$C/demo_2.0" ;;
+        load:plain/1.0) own plain/1.0 "$C/plain_1.0" ;;
+        show:plain/1.0) line "$C/plain_1.0" ;;
+        load:withdep/1.0) module load demo/2.0; own withdep/1.0 "$C/withdep_1.0" ;;
+        show:withdep/1.0) echo 'depends_on("demo/2.0")'; line "$C/withdep_1.0" ;;
+        load:tool/1.0) own tool/1.0 "$C/tool_1.0" ;;
+        show:tool/1.0) line "$C/tool_1.0" ;;
+        load:broken/1.0) own broken/1.0 "$C/broken_1.0" ;;
+        show:broken/1.0) line "$C/broken_1.0" ;;
+        load:slow/1.0) own slow/1.0 "$C/slow_1.0" ;;
+        show:slow/1.0) line "$C/slow_1.0" ;;
+        load:tool/1-2) own tool/1-2 "$C/tool_1-2" ;;
+        show:tool/1-2) line "$C/tool_1-2" ;;
+        load:tool-1/2) own tool-1/2 "$C/tool-1_2" ;;
+        show:tool-1/2) line "$C/tool-1_2" ;;
+        load:tcl/1.0) own tcl/1.0 "$C/tcl_1.0" ;;
+        show:tcl/1.0) echo "prepend_path{\"PATH\",\"$C/tcl_1.0\",delim=\":\",priority=\"0\"}" ;;
+        load:multi/1.0) own multi/1.0 "$C/multi_first" "$C/multi_second" ;;
+        show:multi/1.0) line "$C/multi_first"; line "$C/multi_second" ;;
+        load:joined/1.0) own joined/1.0 "$C/joined_bin:$C/joined_python" ;;
+        show:joined/1.0) line "$C/joined_bin:$C/joined_python" ;;
+        load:quoted/1.0) own quoted/1.0 "$C/quo\"ted" ;;
+        show:quoted/1.0) line "$C/quo\"ted" ;;
+        load:rootdep/1.0) export ROOTED_HOME="$C/rooted"; own rootdep/1.0 ;;
+        load:rooted/1.0) module load rootdep/1.0; own rooted/1.0 "$ROOTED_HOME/bin" ;;
+        show:rooted/1.0) echo 'depends_on("rootdep/1.0")'; line "${ROOTED_HOME:-}/bin" ;;
+        *) echo "Lmod has detected the following error: unknown $target" >&2; return 1 ;;
     esac
 }
-module() {
-    local own_name own_dir dep
-    if [ "$1" = load ]; then
-        lookup "$2" || return 1
-        own_name=$name
-        own_dir=$dir
-        for dep in $deps; do module load "$dep" || return 1; done
-        case ":${LOADEDMODULES:-}:" in *":$own_name:"*) return 0 ;; esac
-        export PATH="$own_dir:$PATH"
-        export LOADEDMODULES="${LOADEDMODULES:+$LOADEDMODULES:}$own_name"
-    elif [ "$1 $2" = "--redirect show" ]; then
-        lookup "$3" || return 1
-        for dep in $deps; do echo "depends_on(\\"$dep\\")"; done
-        case "$name" in
-            # Lmod renders a Tcl modulefile's prepend-path as a table call.
-            tcl/*) echo "prepend_path{\\"PATH\\",\\"$dir\\",delim=\\":\\",priority=\\"0\\"}" ;;
-            *) echo "prepend_path(\\"PATH\\",\\"$dir\\")" ;;
-        esac
-    else
-        return 1
-    fi
-}
 """
+
+WORKING_CONTAINERS = (
+    "demo_2.0", "tool_1-2", "tool-1_2", "tcl_1.0", "multi_first", "multi_second",
+    "joined_python", 'quo"ted', "rooted/bin",
+)
 
 
 @pytest.fixture
 def lmod(tmp_path, monkeypatch):
     """A fake Lmod whose modules expose transparent-singularity-style wrappers.
 
-    Each container's python3 runs the test interpreter with a marker variable.
-    plain and withdep shadow ipykernel_launcher so the import fails the way it
-    does in a container without ipykernel; withdep also loads demo, whose
-    Python does have ipykernel, as a dependency. Like Lmod, loading a module
-    that is already loaded changes nothing.
+    Each working container's python3 runs the test interpreter with a marker
+    variable naming its directory. plain and withdep shadow ipykernel_launcher
+    so the import fails the way it does in a container without ipykernel;
+    withdep also loads demo, whose Python does have ipykernel.
     """
     containers = tmp_path / "containers"
-    for directory in {entry[1] for entry in MODULES.values()}:
+    for directory in WORKING_CONTAINERS:
         write_executable(containers / directory / "python3", container_python(directory))
     write_executable(containers / "demo_2.0" / "fslpython", container_python("demo-fslpython"))
+    write_executable(containers / "joined_bin" / "tool", "#!/bin/bash\n")
 
     no_ipykernel = tmp_path / "no-ipykernel"
     no_ipykernel.mkdir()
@@ -110,7 +121,6 @@ def lmod(tmp_path, monkeypatch):
             exec {sys.executable} "$@"
             """))
 
-    (containers / "tool_1.0" / "python3").unlink()
     write_executable(containers / "tool_1.0" / "tool", "#!/bin/bash\n")
     write_executable(containers / "broken_1.0" / "python3", textwrap.dedent("""\
         #!/bin/bash
@@ -118,23 +128,22 @@ def lmod(tmp_path, monkeypatch):
         exit 255
         """))
     pid_file = tmp_path / "slow-child.pid"
+    # The wrapper exits on SIGTERM, but its descendant ignores SIGTERM and holds
+    # no pipe, like a stuck container runtime.
     write_executable(containers / "slow_1.0" / "python3", textwrap.dedent(f"""\
         #!/bin/bash
-        sleep 300 &
+        ( trap '' TERM; exec sleep 300 ) </dev/null >/dev/null 2>&1 &
         echo $! > {pid_file}
-        wait
+        sleep 300
         """))
 
-    cases = "\n".join(
-        f'        {name}{"|" + alias if alias else ""}) '
-        f'name={name}; dir={containers / directory}; deps="{" ".join(deps)}" ;;'
-        for name, (alias, directory, deps) in MODULES.items())
     module_init = tmp_path / "module.sh"
-    module_init.write_text(MODULE_FUNCTION % cases)
+    module_init.write_text(MODULE_FUNCTION.replace("@CONTAINERS@", f"'{containers}'"))
 
     data_dir = tmp_path / "jupyter-data"
     monkeypatch.setenv("JUPYTER_DATA_DIR", str(data_dir))
     monkeypatch.delenv("LOADEDMODULES", raising=False)
+    monkeypatch.delenv("ROOTED_HOME", raising=False)
     cli = load_cli()
     monkeypatch.setattr(cli, "MODULE_INIT", str(module_init))
     monkeypatch.setattr(cli, "ENVIRONMENT_SCRIPT", str(tmp_path / "absent.sh"))
@@ -188,6 +197,28 @@ def test_tcl_modulefile_command_directory_is_found(lmod):
     assert lmod.main(["add", "tcl/1.0"]) == 0
     assert registered(lmod, "neurodesk-tcl-1.0")["argv"][1] == str(
         lmod.containers / "tcl_1.0" / "python3")
+
+
+def wrapper_for(cli, module):
+    assert cli.main(["add", module]) == 0
+    name = cli.kernel_name_for(module)
+    return registered(cli, name)["argv"][1]
+
+
+def test_later_prepend_takes_precedence_like_the_loaded_path(lmod):
+    assert wrapper_for(lmod, "multi/1.0") == str(lmod.containers / "multi_second" / "python3")
+
+
+def test_colon_joined_path_value_is_split_into_directories(lmod):
+    assert wrapper_for(lmod, "joined/1.0") == str(lmod.containers / "joined_python" / "python3")
+
+
+def test_unescaped_quote_in_a_directory_is_kept_whole(lmod):
+    assert wrapper_for(lmod, "quoted/1.0") == str(lmod.containers / 'quo"ted' / "python3")
+
+
+def test_path_built_from_a_dependency_variable_resolves(lmod):
+    assert wrapper_for(lmod, "rooted/1.0") == str(lmod.containers / "rooted" / "bin" / "python3")
 
 
 def test_module_already_loaded_in_the_calling_shell_registers(lmod, monkeypatch):
@@ -323,18 +354,34 @@ def test_list_and_remove_manage_only_container_kernels(lmod, capsys):
     assert "no container kernel matches 'demo/2.0'" in capsys.readouterr().err
 
 
-def test_concurrent_adds_leave_one_complete_kernel(lmod):
+def test_writes_wait_for_another_invocation_holding_the_kernels_lock(lmod):
     results = []
-    threads = [threading.Thread(target=lambda: results.append(lmod.main(["add", "demo"])))
-               for _ in range(4)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-    assert results == [0, 0, 0, 0]
+    adder = threading.Thread(target=lambda: results.append(lmod.main(["add", "demo"])))
+    with lmod.kernels_lock():
+        adder.start()
+        # The probe finishes in well under a second; the write must then wait.
+        adder.join(timeout=5)
+        assert adder.is_alive(), "add wrote while another invocation held the lock"
+        assert not (lmod.kernels / "neurodesk-demo-2.0").exists()
+    adder.join(timeout=30)
+    assert results == [0]
     spec_dir = lmod.kernels / "neurodesk-demo-2.0"
     assert [p.name for p in spec_dir.iterdir()] == ["kernel.json"]
     assert registered(lmod, "neurodesk-demo-2.0")["display_name"].endswith("(demo/2.0)")
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+def test_unwritable_kernels_directory_is_reported_without_a_traceback(lmod, capsys):
+    assert lmod.main(["add", "demo"]) == 0
+    lock = lmod.kernels / ".neurodesk-kernel.lock"
+    lock.chmod(0o444)
+    try:
+        assert lmod.main(["remove", "demo/2.0"]) == 1
+    finally:
+        lock.chmod(0o644)
+    error = capsys.readouterr().err
+    assert f"Permission denied: {lock}. Check the permissions" in error
+    assert "Traceback" not in error
 
 
 def test_re_adding_refreshes_the_kernel_in_place(lmod):

@@ -228,14 +228,18 @@ neurodesk-kernel remove fsl/6.0.7.16
 ```
 
 `add` loads the module in a subshell to resolve its full name, so a bare tool
-name selects the default version. It then reads the module's own `PATH`
-directories from `module --redirect show`. Lmod renders Lua modulefiles as
-`prepend_path("PATH",…)` and Tcl modulefiles as `prepend_path{"PATH",…}`;
-`add` accepts both. This works whether or not the module is already loaded in
-the calling shell. Dependencies appear in that output as separate load lines,
-so a dependency's Python is never registered under the requested module.
-`add` looks in those directories first for a `python3` wrapper and then for
-`python`. Use `--python COMMAND` to choose another wrapper the module provides,
+name selects the default version. In the same subshell it reads the module's own
+`PATH` values from `module --redirect show`, so values built from variables that
+a dependency sets while loading resolve correctly. Lmod renders Lua modulefiles
+as `prepend_path("PATH",…)` and Tcl modulefiles as
+`prepend_path{"PATH",…,delim=":",priority="0"}`. It does not escape quotes
+inside values, so `add` reads each value up to the line's trailer and splits it
+on `:`. The module's directories are then ordered as they appear on the loaded
+`PATH`, which is the precedence Lmod applied. This works whether or not the
+module is already loaded in the calling shell. Dependencies appear in the
+output as separate load lines, so a dependency's Python is never registered
+under the requested module. `add` looks in those directories first for a
+`python3` wrapper and then for `python`. Use `--python COMMAND` to choose another wrapper the module provides,
 such as `fslpython`. A Python executable elsewhere on `PATH`, including the
 image's own, is never used.
 
@@ -245,9 +249,12 @@ ipykernel is reported as missing ipykernel. Any other failure, such as a missing
 image or an Apptainer error, is reported as a launch failure with its last
 error line. If no wrapper can run ipykernel, `add` lists each one it checked and
 writes nothing. Nothing is installed into the container. The probe allows 10
-minutes for the first CVMFS fetch and each Lmod call allows 5 minutes. Both run
-in their own session, so a timeout stops the whole process tree, including
-Apptainer and the container's processes.
+minutes for the first CVMFS fetch, and module resolution allows 5 minutes. Both
+run in their own session. On timeout, the session receives SIGTERM and, after a
+5-second grace period, SIGKILL. That stops the whole process tree, including
+Apptainer, the container's processes, and descendants that ignore SIGTERM.
+Filesystem errors, such as an unwritable kernels directory, are reported with
+the affected path instead of a traceback.
 
 The kernelspec goes in the user's Jupyter data directory as
 `neurodesk-<tool>-<version>`, so it persists with the home directory. Its
