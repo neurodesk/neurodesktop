@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Prune OpenCode sessions whose working directory no longer exists.
+"""Prune OpenCode sessions and projects whose directory no longer exists.
 
 OpenCode keeps session history in ~/.local/share/opencode/opencode.db, not in
 the working directory, and never prunes it. Deleting a project directory
-therefore leaves its sessions in the database, pointing at paths that are gone.
+therefore leaves its sessions and project in the database, pointing at paths
+that are gone, and OpenCode's unscoped session and project lists keep showing
+them.
 
 This is a manual recovery and administration tool. It is deliberately not run
 at container startup: applying it writes a full database backup and runs
@@ -42,6 +44,16 @@ ORPHAN_COLUMNS = (
     ("event", "aggregate_id"),
     ("job", "session_id"),
     ("job", "child_session_id"),
+)
+
+# A project's sessions, permissions, directories and worktrees cascade from it,
+# so a project is only removed once none of its sessions survive. Its events
+# key off the project id without a foreign key.
+GLOBAL_PROJECT = "global"
+PROJECT_DIRECTORY_TABLES = ("project_directory", "worktree")
+PROJECT_ORPHAN_COLUMNS = (
+    ("event_sequence", "aggregate_id"),
+    ("event", "aggregate_id"),
 )
 
 
@@ -83,6 +95,34 @@ def stale_sessions(connection, isdir=os.path.isdir):
     return [row for row in rows.values() if directory_is_stale(row["directory"], isdir)]
 
 
+def stale_projects(connection, doomed_ids, isdir=os.path.isdir):
+    """Return the project rows whose every directory is gone and whose
+    sessions are all in ``doomed_ids``."""
+    tables = _tables(connection)
+    if "project" not in tables:
+        return []
+    directories = {}
+    for row in connection.execute("select id, worktree from project"):
+        directories[row["id"]] = [row["worktree"]]
+    for table in PROJECT_DIRECTORY_TABLES:
+        if table in tables:
+            for row in connection.execute(f"select project_id, directory from {table}"):
+                directories.setdefault(row["project_id"], []).append(row["directory"])
+    survivors = set()
+    for table in SESSION_TABLES:
+        if table in tables:
+            for row in connection.execute(f"select id, project_id from {table}"):
+                if row["id"] not in doomed_ids:
+                    survivors.add(row["project_id"])
+    return [
+        (project_id, paths[0])
+        for project_id, paths in directories.items()
+        if project_id != GLOBAL_PROJECT
+        and project_id not in survivors
+        and all(directory_is_stale(path, isdir) for path in paths)
+    ]
+
+
 def _connect(db_path):
     """Open the database with cascades on and a lock wait, or return None."""
     if not os.path.isfile(db_path):
@@ -95,7 +135,9 @@ def _connect(db_path):
 
 
 def prune(db_path, apply=False, isdir=os.path.isdir, log=print):
-    """Remove sessions for deleted directories. Returns how many went.
+    """Remove sessions and projects for deleted directories.
+
+    Returns how many sessions went.
 
     Never raises for an absent or locked database: this runs unattended during
     startup, where failing loudly would be worse than skipping a cleanup.
@@ -110,17 +152,23 @@ def prune(db_path, apply=False, isdir=os.path.isdir, log=print):
 
     try:
         doomed = stale_sessions(connection, isdir)
-        if not doomed:
+        projects = stale_projects(connection, {row["id"] for row in doomed}, isdir)
+        if not doomed and not projects:
             return 0
 
         for row in doomed:
             when = datetime.datetime.fromtimestamp(
                 (row["time_created"] or 0) / 1000
             ).strftime("%Y-%m-%d")
-            log(f"  {when}  {row['directory']}  {row['title']}")
+            log(f"  {when}  {row['directory']}  {row['title'] or ''}")
+        for _, worktree in projects:
+            log(f"  project  {worktree}")
 
         if not apply:
-            log(f"[INFO] {len(doomed)} stale session(s); pass --apply to delete")
+            log(
+                f"[INFO] {len(doomed)} stale session(s) and {len(projects)} stale "
+                "project(s); pass --apply to delete"
+            )
             return 0
 
         # A single rolling backup rather than one per run, so repeated manual
@@ -142,6 +190,13 @@ def prune(db_path, apply=False, isdir=os.path.isdir, log=print):
                     connection.executemany(
                         f"delete from {table} where {column}=?", ids
                     )
+            project_ids = [(project_id,) for project_id, _ in projects]
+            connection.executemany("delete from project where id=?", project_ids)
+            for table, column in PROJECT_ORPHAN_COLUMNS:
+                if table in tables:
+                    connection.executemany(
+                        f"delete from {table} where {column}=?", project_ids
+                    )
     except sqlite3.Error as exc:
         log(f"[WARN] could not prune {db_path}: {exc}")
         return 0
@@ -158,7 +213,10 @@ def prune(db_path, apply=False, isdir=os.path.isdir, log=print):
     except sqlite3.Error as exc:
         log(f"[WARN] could not vacuum {db_path}: {exc}")
 
-    log(f"[INFO] pruned {len(doomed)} OpenCode session(s) for deleted directories")
+    log(
+        f"[INFO] pruned {len(doomed)} OpenCode session(s) and {len(projects)} "
+        "project(s) for deleted directories"
+    )
     return len(doomed)
 
 

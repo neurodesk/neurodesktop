@@ -308,8 +308,8 @@ the deleted directory's sessions and project. OpenCode 2 offers only
 
 [`config/agents/opencode_prune_sessions.py`](../../config/agents/opencode_prune_sessions.py)
 (installed as `/opt/neurodesktop/opencode_prune_sessions.py`) is a manual
-recovery and administration tool that removes sessions whose working directory
-no longer exists. Run it without `--apply` to review a dry-run report, then run
+recovery and administration tool that removes sessions and projects whose
+directory no longer exists. Run it without `--apply` to review a dry-run report, then run
 it with `--apply` to perform the deletion. It is never invoked automatically by
 container startup. `NEURODESKTOP_OPENCODE_PRUNE_SESSIONS=0` disables an
 explicit invocation, which can be useful as a site-level safety override.
@@ -339,6 +339,15 @@ complete:
 - **`event_sequence` and `job` never cascade.** They key off the session id
   but declare no foreign key, so the rows for each pruned session are deleted
   explicitly; deleting a sequence cascades to its `event` rows.
+
+A project is removed only when every directory recorded for it (its worktree,
+`project_directory`, and `worktree` rows) passes the same deleted-directory
+test and none of its sessions survive the prune. Deleting a project cascades
+to its sessions, so a project that still holds a live session is kept. The
+`global` project is never removed. Its `permission`, `project_directory`, and
+`worktree` rows cascade, and its `event_sequence` rows are deleted explicitly.
+Against OpenCode 2.2.5, a pruned session and project stay absent from
+`/api/session` and `/api/project` after the server restarts.
 
 The pre-prune database is kept as a single rolling `opencode.db.prune-backup`
 so repeated manual maintenance cannot grow backup history without bound.

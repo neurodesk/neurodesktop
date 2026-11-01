@@ -149,6 +149,70 @@ def test_prune_keeps_sessions_under_an_unmounted_volume(tmp_path):
     assert _counts(db)["session_v2"] == 1
 
 
+def _add_project(db, project_id, worktree, sessions=(), directories=()):
+    """Add a project with its own sessions, grants, directories and events."""
+    con = sqlite3.connect(db)
+    _insert(con, "project", id=project_id, worktree=str(worktree))
+    _insert(con, "permission", project_id=project_id, action="a", resource="r")
+    _insert(con, "event_sequence", aggregate_id=project_id, seq=1)
+    for directory in directories:
+        _insert(con, "project_directory", project_id=project_id, directory=str(directory))
+        _insert(con, "worktree", project_id=project_id, directory=str(directory))
+    for session_id, directory in sessions:
+        _insert(con, "session_v2", id=session_id, project_id=project_id,
+                directory=str(directory), title="t", time_created=1785000000000)
+    con.commit()
+    con.close()
+
+
+def _ids(db, table, column="id"):
+    con = sqlite3.connect(db)
+    ids = sorted(r[0] for r in con.execute(f"select {column} from {table}"))
+    con.close()
+    return ids
+
+
+def test_prune_removes_projects_of_deleted_directories_with_their_rows(tmp_path):
+    """A deleted directory's project goes once none of its sessions survive."""
+    live = tmp_path / "live"
+    live.mkdir()
+    gone = tmp_path / "gone"
+    db = tmp_path / "opencode.db"
+    _make_db(db, [])
+    _add_project(db, "prj_gone", gone, [("ses_gone", gone)], [gone, tmp_path / "wt"])
+    _add_project(db, "prj_empty", tmp_path / "never-used")
+    # A deleted worktree keeps a project whose sessions or directories live on.
+    _add_project(db, "prj_session_lives", tmp_path / "old", [("ses_live", live)])
+    _add_project(db, "prj_dir_lives", tmp_path / "old2", directories=[live])
+    _add_project(db, "prj_unmounted", tmp_path / "unmounted" / "project")
+    _add_project(db, "global", tmp_path / "gone-global")
+
+    removed = ocp.prune(str(db), apply=True, log=lambda *a: None)
+
+    assert removed == 1
+    kept = ["global", "prj", "prj_dir_lives", "prj_session_lives", "prj_unmounted"]
+    assert _ids(db, "project") == kept
+    assert _ids(db, "session_v2") == ["ses_live"]
+    assert _ids(db, "permission", "project_id") == [p for p in kept if p != "prj"]
+    assert _ids(db, "event_sequence", "aggregate_id") == kept
+    assert _ids(db, "project_directory", "project_id") == ["prj_dir_lives"]
+    assert _ids(db, "worktree", "project_id") == ["prj_dir_lives"]
+
+
+def test_dry_run_reports_stale_projects_without_deleting(tmp_path):
+    db = tmp_path / "opencode.db"
+    _make_db(db, [])
+    _add_project(db, "prj_gone", tmp_path / "gone")
+    before = _counts(db)
+    lines = []
+
+    assert ocp.prune(str(db), apply=False, log=lines.append) == 0
+
+    assert _counts(db) == before
+    assert f"  project  {tmp_path / 'gone'}" in lines
+    assert lines[-1].startswith("[INFO] 0 stale session(s) and 1 stale project(s)")
+
+
 def test_directory_is_stale_requires_a_missing_dir_with_a_live_parent():
     """The staleness rule itself, independent of any database."""
     existing = {"/home/jovyan", "/home/jovyan/live", "/tmp"}
