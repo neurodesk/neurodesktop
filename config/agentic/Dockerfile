@@ -1,7 +1,7 @@
-FROM node:24.22.0-bookworm-slim AS node
-RUN npm install --global @openai/codex@0.162.1 && npm cache clean --force
+FROM node:24.22.2-bookworm-slim AS node
+RUN npm install --global @openai/codex@0.166.0 && npm cache clean --force
 
-FROM python:3.15.0-slim-bookworm
+FROM python:3.15.2-slim-bookworm
 ARG WORKER_UID=1000
 ARG WORKER_GID=1000
 RUN (getent group "$WORKER_GID" || groupadd --gid "$WORKER_GID" codex) \
