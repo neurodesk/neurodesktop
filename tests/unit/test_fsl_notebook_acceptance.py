@@ -29,6 +29,8 @@ def server(tmp_path_factory, request):
         f'--ServerApp.port={port}', '--ServerApp.port_retries=0',
         '--ServerApp.base_url=/acceptance/', f'--ServerApp.root_dir={directory}',
         f'--IdentityProvider.token={token}',
+        # The trash may be unwritable for a temporary directory on another mount.
+        '--FileContentsManager.delete_to_trash=False',
         *(['--ZMQChannelsWebsocketConnection.kernel_ws_protocol=']
           if request.param == 'legacy' else []),
     ], env={**os.environ, 'JUPYTER_DATA_DIR': str(directory / 'jupyter-data')},

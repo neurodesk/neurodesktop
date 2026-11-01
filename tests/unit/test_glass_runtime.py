@@ -51,7 +51,8 @@ def test_unsafe_token_is_rejected_without_modifying_it(launcher, tmp_path, unsaf
 
 def test_state_directory_symlink_does_not_change_target_permissions(launcher, tmp_path):
     target = tmp_path / "unrelated"
-    target.mkdir(mode=0o755)
+    target.mkdir()
+    target.chmod(0o755)
     (tmp_path / "neurodesktop").symlink_to(target)
     with pytest.raises(ValueError):
         launcher.private_directory()

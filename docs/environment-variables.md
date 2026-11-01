@@ -327,8 +327,8 @@ Connect procedures.
 - `NEURODESKTOP_OPENCODE_PRUNE_SESSIONS`: set to `0` (or `false`/`no`/`off`)
   to disable an explicit invocation of the manual recovery tool
   `/opt/neurodesktop/opencode_prune_sessions.py`. Container startup never runs
-  the tool automatically. Without `--apply` it reports sessions whose working
-  directory has been deleted; with `--apply` it drops them from
+  the tool automatically. Without `--apply` it reports sessions and projects
+  whose directory has been deleted; with `--apply` it drops them from
   `~/.local/share/opencode/opencode.db`, writes a single rolling
   `opencode.db.prune-backup`, and runs `VACUUM`. Sessions whose whole parent
   tree is missing are left alone, so an unmounted volume is not mistaken for a
