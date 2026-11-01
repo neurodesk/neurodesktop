@@ -1086,9 +1086,9 @@ It prefers `servers[""]` and falls back to the top-level `server` and
 `pending` fields. The Hub keeps the `server` key as `null` once a server
 stops, so cleanup waits for `stopped` rather than for the key to disappear.
 After the spawn request, startup succeeds only when the default server reports
-`ready`. A return to `stopped` means the Hub abandoned the spawn, usually through
-its own spawn timeout, so the step fails at once and reports a Hub-side spawn
-failure. A response without a server state, such as a proxy error page, does
+`ready`. A return to `stopped` means the Hub abandoned the spawn, through its
+own spawn timeout or a spawner error, so the step fails at once and reports a
+Hub-side spawn failure. A response without a server state, such as a proxy error page, does
 not end the wait. Ten minutes of `pending:spawn` is the backstop for a spawn the
 Hub never resolves. Cleanup repeats the stop request while a timed-out spawn is
 still pending. The unit tier runs both workflow steps against a stubbed `curl`
