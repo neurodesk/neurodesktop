@@ -16,6 +16,7 @@ from testlib import repo_path
 
 HELPER = repo_path(".github/workflows/jupyterhub_server_state.sh")
 WORKFLOW = repo_path(".github/workflows/jupyter_test_main.yml")
+NOTEBOOK_WORKFLOW = repo_path(".github/workflows/notebook_(FSL_bet)_workflow.yml")
 
 
 def _model(server=None, pending=None, default=None):
@@ -156,6 +157,105 @@ def _run_step(tmp_path, name, models, **env_overrides):
     return result, log.read_text().split()
 
 
+NOTEBOOK_CLEANUP_CURL_STUB = r"""#!/usr/bin/env bash
+method=GET
+output=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --request)
+            method="$2"
+            shift 2
+            ;;
+        --output)
+            output="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+echo "$method" >> "$CURL_STUB_LOG"
+delete_calls=$(grep -c DELETE "$CURL_STUB_LOG" || true)
+get_calls=$(grep -c GET "$CURL_STUB_LOG" || true)
+
+if [ "$method" = DELETE ]; then
+    if [ "$CURL_STUB_SCENARIO" = refused-spawn ] && [ "$delete_calls" -eq 1 ]; then
+        exit 22
+    fi
+    printf 'http=204 curl_exit=0\n'
+    exit 0
+fi
+
+case "$CURL_STUB_SCENARIO" in
+    refused-spawn)
+        if [ "$delete_calls" -lt 2 ]; then
+            body="$CURL_STUB_SPAWNING"
+        else
+            body="$CURL_STUB_STOPPED"
+        fi
+        ;;
+    stopping)
+        if [ "$get_calls" -eq 1 ]; then
+            body="$CURL_STUB_STOPPING"
+        else
+            body="$CURL_STUB_STOPPED"
+        fi
+        ;;
+esac
+
+printf '%s' "$body" > "$output"
+printf 'http=200 curl_exit=0\n'
+"""
+
+
+def _run_notebook_cleanup(tmp_path, scenario):
+    workflow = yaml.safe_load(NOTEBOOK_WORKFLOW.read_text())
+    steps = workflow["jobs"]["test-notebooks"]["steps"]
+    script = next(
+        step["run"] for step in steps if step.get("name") == "Stop JupyterHub Server"
+    ).replace("${{ matrix.server_name }}", "play-eu")
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "curl").write_text(NOTEBOOK_CLEANUP_CURL_STUB)
+    (bin_dir / "sleep").write_text("#!/bin/sh\nexit 0\n")
+    for stub in bin_dir.iterdir():
+        stub.chmod(0o755)
+
+    log = tmp_path / "log"
+    log.write_text("")
+    github_env = tmp_path / "github_env"
+    github_env.write_text("")
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "CURL_STUB_LOG": str(log),
+            "CURL_STUB_SCENARIO": scenario,
+            "CURL_STUB_SPAWNING": json.dumps(SPAWNING),
+            "CURL_STUB_STOPPING": json.dumps(STOPPING),
+            "CURL_STUB_STOPPED": json.dumps(STOPPED),
+            "USER_TOKEN": "secret-token",
+            "USER": "akshitbeniwal",
+            "API_URL": "https://hub.example",
+            "GITHUB_ENV": str(github_env),
+            "GITHUB_RUN_ID": "123",
+            "GITHUB_RUN_ATTEMPT": "1",
+        }
+    )
+    result = subprocess.run(
+        ["bash", "-e", "-c", script],
+        cwd=repo_path("."),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    return result, log.read_text().split(), github_env.read_text()
+
+
 def test_cleanup_stops_waiting_once_the_hub_reports_server_null(tmp_path):
     # Issue #990: the old loop waited for the "server" key to vanish, which the
     # Hub never does, so every run sat out the full 120 seconds.
@@ -177,6 +277,22 @@ def test_cleanup_retries_stop_while_spawn_is_still_pending(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "✅ Server stopped successfully" in result.stdout
     assert calls == ["DELETE", "GET", "DELETE", "GET", "GET"]
+
+
+def test_notebook_cleanup_retries_delete_refused_during_spawn(tmp_path):
+    result, calls, github_env = _run_notebook_cleanup(tmp_path, "refused-spawn")
+
+    assert result.returncode == 0, result.stderr
+    assert "✅ Server stopped successfully" in result.stdout
+    assert calls == ["DELETE", "GET", "DELETE", "GET"]
+    assert "SERVER_STOP_SUCCEEDED=true" in github_env
+
+
+def test_notebook_cleanup_does_not_repeat_delete_while_stop_is_pending(tmp_path):
+    result, calls, _ = _run_notebook_cleanup(tmp_path, "stopping")
+
+    assert result.returncode == 0, result.stderr
+    assert calls == ["DELETE", "GET", "GET"]
 
 
 def test_start_waits_through_pending_spawn_until_ready(tmp_path):

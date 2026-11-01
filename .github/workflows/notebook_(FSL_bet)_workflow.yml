@@ -346,6 +346,12 @@ jobs:
             SERVER_STOPPED=true
             break
           fi
+          # JupyterHub can refuse DELETE while a spawn is pending. Retry once
+          # the state has been observed unless the Hub is already stopping it.
+          if [ "$SERVER_PENDING" != "stop" ]; then
+            echo "Server is not stopping; retrying stop request"
+            api_request DELETE "$SERVER_START_URL" || true
+          fi
           echo "Waiting for server to stop... (${i}0s elapsed)"
         done
 
