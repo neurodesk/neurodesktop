@@ -121,7 +121,10 @@ jobs:
         echo "Waiting for server to start..."
         SERVER_STARTED=false
 
-        for i in {1..24}; do
+        # Cold deployments can spend more than four minutes pulling and
+        # mounting the image while the Hub legitimately reports pending:spawn.
+        # Give the Hub ten minutes to finish before treating the spawn as stuck.
+        for i in {1..60}; do
           sleep 10
           STATE=$(server_state)
 

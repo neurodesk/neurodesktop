@@ -1079,8 +1079,13 @@ model with `jq` into `ready`, `pending:<action>`, `starting`, or `stopped`.
 It prefers `servers[""]` and falls back to the top-level `server` and
 `pending` fields. The Hub keeps the `server` key as `null` once a server
 stops, so cleanup waits for `stopped` rather than for the key to disappear.
-Cleanup repeats the stop request while a timed-out spawn is still pending.
-The unit tier runs both workflow steps against a stubbed `curl` and `sleep`.
+Startup allows ten minutes for a cold deployment to finish while the Hub
+continues to report `pending:spawn`; this does not turn a pending server into a
+success, because the step still requires the Hub's default server model to
+report `ready`. Cleanup repeats the stop request while a timed-out spawn is
+still pending. The unit tier runs both workflow steps against a stubbed `curl`
+and `sleep`, including a spawn that becomes ready after the former four-minute
+limit.
 
 ### Lmod extension listing
 
