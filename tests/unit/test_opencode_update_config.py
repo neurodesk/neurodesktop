@@ -46,12 +46,13 @@ def test_missing_models_take_metadata_from_the_image_defaults():
         {"provider": {}}, shipped_defaults(), detected(neurodesk=["neurodesk"])
     )
 
-    assert cfg["provider"]["neurodesk"]["models"] == {
+    assert "provider" not in cfg
+    assert cfg["providers"]["neurodesk"]["models"] == {
         "neurodesk": {"name": "neurodesk", "limit": {"context": 131000, "output": 8192}}
     }
     # The image default names the provider "Neurodesk LiteLLM"; the refresh
     # owns that label.
-    assert cfg["provider"]["neurodesk"]["name"] == "Neurodesk LLMs"
+    assert cfg["providers"]["neurodesk"]["name"] == "Neurodesk LLMs"
 
 
 def test_user_model_settings_win_over_image_defaults():
@@ -66,6 +67,7 @@ def test_user_model_settings_win_over_image_defaults():
     assert cfg["provider"]["jetstream"]["models"] == {
         "gpt-oss-120b": {"name": "Mine", "x": 1}
     }
+    assert "providers" not in cfg
 
 
 def test_unmanaged_providers_and_top_level_keys_are_untouched():
@@ -80,6 +82,71 @@ def test_unmanaged_providers_and_top_level_keys_are_untouched():
     assert cfg["theme"] == "dark"
     assert cfg["mcp"] == {"brain-researcher": {"enabled": True}}
     assert cfg["provider"]["jetstream-deepseek"] == {"models": {"DeepSeek-R1": {}}}
+
+
+def test_an_image_written_legacy_entry_moves_to_the_opencode_2_layout():
+    legacy = {
+        "npm": "@ai-sdk/openai-compatible",
+        "name": "JetStream",
+        "options": {"baseURL": "https://old.example/v1"},
+        "models": {"a": {"name": "a", "limit": {"context": 8, "output": 4}}},
+    }
+    user = {"provider": {"jetstream": legacy, "mine": {"npm": "x"}}}
+
+    cfg = ouc.update_config(user, {}, detected(jetstream=["a", "b"]))
+
+    assert cfg["provider"] == {"mine": {"npm": "x"}}
+    assert cfg["providers"]["jetstream"] == {
+        "package": "@ai-sdk/openai-compatible",
+        "name": "JetStream",
+        "settings": {"baseURL": "https://llm.jetstream-cloud.org/v1"},
+        "models": {
+            "a": {"name": "a", "limit": {"context": 8, "output": 4}},
+            "b": {"name": "b"},
+        },
+    }
+
+
+def test_an_opencode_2_entry_is_refreshed_in_place_and_shadows_the_legacy_one():
+    user = {
+        "model": "neurodesk/kept",
+        "provider": {"neurodesk": {"models": {"stale": {}}}},
+        "providers": {
+            "neurodesk": {
+                "package": "@ai-sdk/openai-compatible",
+                "settings": {"baseURL": "https://old.example", "timeout": 5},
+                "headers": {"X-Mine": "1"},
+                "models": {"kept": {"name": "Kept", "disabled": True}},
+            }
+        },
+    }
+
+    cfg = ouc.update_config(
+        user, {}, detected(neurodesk=["kept", "new"]), "neurodesk/stale"
+    )
+
+    entry = cfg["providers"]["neurodesk"]
+    assert entry["settings"] == {
+        "baseURL": "https://llm.neurodesk.org/openai",
+        "timeout": 5,
+        "apiKey": "{env:NEURODESK_API_KEY}",
+    }
+    assert entry["headers"] == {"X-Mine": "1"}
+    assert entry["models"] == {
+        "kept": {"name": "Kept", "disabled": True},
+        "new": {"name": "new"},
+    }
+    # OpenCode 2 ignores the shadowed legacy entry, so neither is its model.
+    assert cfg["provider"] == {"neurodesk": {"models": {"stale": {}}}}
+    assert cfg["model"] == "neurodesk/kept"
+
+
+def test_an_unobserved_opencode_2_provider_still_supplies_the_default():
+    user = {"providers": {"neurodesk": {"models": {"m": {}}}}}
+
+    cfg = ouc.update_config(user, {}, detected())
+
+    assert cfg["model"] == "neurodesk/m"
 
 
 def test_input_config_is_not_mutated():
@@ -123,11 +190,12 @@ def test_providers_absent_everywhere_use_builtin_definitions():
 
     cfg = ouc.update_config({}, {}, models)
 
-    assert cfg["provider"] == {
+    assert "provider" not in cfg
+    assert cfg["providers"] == {
         "neurodesk": {
-            "npm": "@ai-sdk/openai-compatible",
+            "package": "@ai-sdk/openai-compatible",
             "name": "Neurodesk LLMs",
-            "options": {
+            "settings": {
                 "baseURL": "https://neurodesk.example/openai",
                 "apiKey": "{env:NEURODESK_API_KEY}",
             },
@@ -150,8 +218,10 @@ def test_malformed_provider_entries_are_rebuilt():
         user, {}, detected(jetstream=["j"], ollama=["o"], neurodesk=["n", ""])
     )
 
+    assert cfg["providers"]["jetstream"]["models"] == {"j": {"name": "j"}}
+    # Entries holding fields a move could lose are repaired where they are.
     providers = cfg["provider"]
-    assert providers["jetstream"]["models"] == {"j": {"name": "j"}}
+    assert set(providers) == {"ollama", "neurodesk"}
     assert providers["ollama"]["options"] == {"baseURL": "http://127.0.0.1:11434/v1"}
     assert providers["ollama"]["models"]["o"]["limit"] == {
         "context": 16384,
@@ -164,7 +234,8 @@ def test_malformed_provider_entries_are_rebuilt():
 def test_a_non_object_provider_section_is_replaced():
     cfg = ouc.update_config({"provider": ["broken"]}, {}, detected(jetstream=["j"]))
 
-    assert set(cfg["provider"]) == {"jetstream"}
+    assert "provider" not in cfg
+    assert set(cfg["providers"]) == {"jetstream"}
 
 
 @pytest.mark.parametrize(
@@ -293,11 +364,11 @@ def test_cli_updates_the_config_atomically_and_keeps_its_mode(tmp_path, config_p
     cfg = json.loads(text)
     assert cfg["theme"] == "x"
     assert cfg["model"] == "neurodesk/-dash-model"
-    assert cfg["provider"]["ollama"]["models"]["o"]["limit"] == {
+    assert cfg["providers"]["ollama"]["models"]["o"]["limit"] == {
         "context": 4096,
         "output": 4096,
     }
-    assert cfg["provider"]["ollama"]["options"]["baseURL"] == "http://127.0.0.1:9/v1"
+    assert cfg["providers"]["ollama"]["settings"]["baseURL"] == "http://127.0.0.1:9/v1"
     assert config_path.stat().st_mode & 0o777 == 0o600
     assert sorted(p.name for p in tmp_path.iterdir()) == ["opencode.json"]
 
@@ -324,7 +395,7 @@ def test_cli_ignores_unusable_probed_contexts(tmp_path, config_path, contexts):
     )
 
     assert result.returncode == 0, result.stderr
-    limit = json.loads(config_path.read_text("utf-8"))["provider"]["ollama"][
+    limit = json.loads(config_path.read_text("utf-8"))["providers"]["ollama"][
         "models"
     ]["o"]["limit"]
     assert limit == {"context": 16384, "output": 8192}

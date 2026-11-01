@@ -254,11 +254,11 @@ def make_opencode_litellm_wrapper(tmp_path):
             {
                 "$schema": "https://opencode.ai/config.json",
                 "model": "neurodesk/gpt-oss",
-                "provider": {
+                "providers": {
                     "neurodesk": {
-                        "npm": "@ai-sdk/openai-compatible",
+                        "package": "@ai-sdk/openai-compatible",
                         "name": "Neurodesk vLLM",
-                        "options": {
+                        "settings": {
                             "baseURL": "https://llm.neurodesk.org/openai",
                             "apiKey": "{env:NEURODESK_API_KEY}",
                         },
@@ -470,11 +470,11 @@ def test_opencode_shows_litellm_models_after_api_key_creation(tmp_path):
             encoding="utf-8"
         )
     )
-    neurodesk_provider = user_config["provider"]["neurodesk"]
+    neurodesk_provider = user_config["providers"]["neurodesk"]
     assert user_config["model"] == "neurodesk/openai/gpt-4.1-mini"
     assert neurodesk_provider["name"] == "Neurodesk LLMs"
     assert (
-        neurodesk_provider["options"]["baseURL"]
+        neurodesk_provider["settings"]["baseURL"]
         == "https://llm.neurodesk.org/openai"
     )
     assert list(neurodesk_provider["models"]) == ["model-alpha", "openai/gpt-4.1-mini"]
@@ -609,6 +609,8 @@ def test_opencode_model_refresh_preserves_user_settings_across_runs(tmp_path):
     }
     assert cfg["model"] == "neurodesk/model-alpha"
 
+    # A timeout option has another OpenCode 2 spelling, so this entry is
+    # refreshed in the 1.x layout; the plain Ollama entry moves.
     neurodesk = cfg["provider"]["neurodesk"]
     assert neurodesk["name"] == "Neurodesk LLMs"
     assert neurodesk["options"] == {
@@ -624,8 +626,9 @@ def test_opencode_model_refresh_preserves_user_settings_across_runs(tmp_path):
         "openai/gpt-4.1-mini": {"name": "openai/gpt-4.1-mini"},
     }
 
-    ollama = cfg["provider"]["ollama"]
-    assert ollama["options"]["baseURL"] == "http://127.0.0.1:9/v1"
+    assert set(cfg["provider"]) == {"anthropic", "neurodesk"}
+    ollama = cfg["providers"]["ollama"]
+    assert ollama["settings"]["baseURL"] == "http://127.0.0.1:9/v1"
     # The output budget may never exceed the model's context window.
     assert ollama["models"] == {
         "local-model:latest": {
@@ -634,7 +637,7 @@ def test_opencode_model_refresh_preserves_user_settings_across_runs(tmp_path):
         }
     }
     # Jetstream is unreachable in the fixture, so it keeps no models.
-    assert "jetstream" not in cfg["provider"]
+    assert "jetstream" not in cfg["providers"]
 
     returncode, output = _run_opencode_with_model_profile(
         test_wrapper, env, tmp_path
@@ -667,10 +670,11 @@ def test_opencode_model_refresh_seeds_providers_and_ollama_limits(tmp_path):
     )
     assert cfg["$schema"] == "https://opencode.ai/config.json"
     assert cfg["model"] == "ollama/local-model:latest"
-    assert cfg["provider"]["ollama"] == {
-        "npm": "@ai-sdk/openai-compatible",
+    assert "provider" not in cfg
+    assert cfg["providers"]["ollama"] == {
+        "package": "@ai-sdk/openai-compatible",
         "name": "Local Ollama",
-        "options": {"baseURL": "http://127.0.0.1:9/v1"},
+        "settings": {"baseURL": "http://127.0.0.1:9/v1"},
         "models": {
             "local-model:latest": {
                 "name": "local-model:latest",
@@ -678,10 +682,10 @@ def test_opencode_model_refresh_seeds_providers_and_ollama_limits(tmp_path):
             }
         },
     }
-    assert "jetstream" not in cfg["provider"]
-    neurodesk = cfg["provider"]["neurodesk"]
-    assert neurodesk["npm"] == "@ai-sdk/openai-compatible"
-    assert neurodesk["options"]["apiKey"] == "{env:NEURODESK_API_KEY}"
+    assert "jetstream" not in cfg["providers"]
+    neurodesk = cfg["providers"]["neurodesk"]
+    assert neurodesk["package"] == "@ai-sdk/openai-compatible"
+    assert neurodesk["settings"]["apiKey"] == "{env:NEURODESK_API_KEY}"
     assert list(neurodesk["models"]) == ["model-alpha", "openai/gpt-4.1-mini"]
 
 
@@ -731,10 +735,10 @@ def test_opencode_model_refresh_records_probed_ollama_context(tmp_path):
         )
     )
     assert cfg["model"] == "ollama/local-model:latest"
-    assert cfg["provider"]["ollama"]["options"]["baseURL"] == (
+    assert cfg["providers"]["ollama"]["settings"]["baseURL"] == (
         f"http://127.0.0.1:{port}/v1"
     )
-    assert cfg["provider"]["ollama"]["models"]["local-model:latest"]["limit"] == {
+    assert cfg["providers"]["ollama"]["models"]["local-model:latest"]["limit"] == {
         "context": 65536,
         "output": 8192,
     }
@@ -949,7 +953,7 @@ def test_opencode_rejected_neurodesk_key_points_to_litellm_site(tmp_path):
     )
     assert user_config["model"] == "neurodesk/model-alpha"
     assert (
-        user_config["provider"]["neurodesk"]["options"]["baseURL"]
+        user_config["providers"]["neurodesk"]["settings"]["baseURL"]
         == "https://llm.neurodesk.org/openai"
     )
 
@@ -995,10 +999,10 @@ def test_opencode_rejected_neurodesk_key_refreshes_before_mixed_model_picker(tmp
             encoding="utf-8"
         )
     )
-    neurodesk_provider = user_config["provider"]["neurodesk"]
+    neurodesk_provider = user_config["providers"]["neurodesk"]
     assert user_config["model"] == "neurodesk/openai/gpt-4.1-mini"
     assert (
-        neurodesk_provider["options"]["baseURL"]
+        neurodesk_provider["settings"]["baseURL"]
         == "https://llm.neurodesk.org/openai"
     )
     assert list(neurodesk_provider["models"]) == ["model-alpha", "openai/gpt-4.1-mini"]
@@ -1523,15 +1527,16 @@ def test_opencode_brain_researcher_mcp_setup_accept(tmp_path):
             encoding="utf-8"
         )
     )
-    mcp_cfg = user_config.get("mcp", {})
-    assert "brain-researcher" in mcp_cfg
-    brain_cfg = mcp_cfg["brain-researcher"]
-    assert brain_cfg["type"] == "remote"
-    assert brain_cfg["url"] == "https://brain-researcher.com/mcp"
-    assert brain_cfg["enabled"] is True
-    assert (
-        brain_cfg["headers"]["Authorization"] == "Bearer {env:BR_MCP_TOKEN}"
-    )
+    assert user_config["mcp"] == {
+        "servers": {
+            "brain-researcher": {
+                "type": "remote",
+                "url": "https://brain-researcher.com/mcp",
+                "oauth": False,
+                "headers": {"Authorization": "Bearer {env:BR_MCP_TOKEN}"},
+            }
+        }
+    }
 
 
 def test_opencode_brain_researcher_mcp_setup_decline(tmp_path):
@@ -1558,9 +1563,7 @@ def test_opencode_brain_researcher_mcp_setup_decline(tmp_path):
             encoding="utf-8"
         )
     )
-    mcp_cfg = user_config.get("mcp", {})
-    if "brain-researcher" in mcp_cfg:
-        assert mcp_cfg["brain-researcher"].get("enabled") is False
+    assert "brain-researcher" not in user_config.get("mcp", {}).get("servers", {})
 
 
 def test_opencode_brain_researcher_prompt_skipped_when_token_exists(tmp_path):
@@ -1583,8 +1586,44 @@ def test_opencode_brain_researcher_prompt_skipped_when_token_exists(tmp_path):
             encoding="utf-8"
         )
     )
-    mcp_cfg = user_config.get("mcp", {})
-    assert mcp_cfg.get("brain-researcher", {}).get("enabled") is True
+    brain_cfg = user_config["mcp"]["servers"]["brain-researcher"]
+    assert "disabled" not in brain_cfg
+
+
+@pytest.mark.parametrize(
+    ("token", "answers"),
+    [("preexisting-token", "neurodesk-test-key\n2\n"), (None, "neurodesk-test-key\n2\nn\n")],
+)
+def test_opencode_moves_the_legacy_brain_researcher_entry(tmp_path, token, answers):
+    """An OpenCode 1.x MCP entry moves into OpenCode 2's servers block."""
+    test_wrapper, home_dir, env = make_opencode_litellm_wrapper(tmp_path)
+    if token:
+        env["BR_MCP_TOKEN"] = token
+    config_path = home_dir / ".config" / "opencode" / "opencode.json"
+    config_path.parent.mkdir(parents=True)
+    legacy = {
+        "type": "remote",
+        "url": "https://brain-researcher.com/mcp",
+        "enabled": True,
+        "oauth": False,
+        "headers": {"Authorization": "Bearer {env:BR_MCP_TOKEN}"},
+    }
+    config_path.write_text(
+        json.dumps({"mcp": {"brain-researcher": legacy, "custom": {"enabled": False}}}),
+        encoding="utf-8",
+    )
+
+    returncode, output = run_pty_command(
+        [str(test_wrapper)], answers, cwd=tmp_path, env=env
+    )
+
+    assert returncode == 0, output
+    mcp_cfg = json.loads(config_path.read_text(encoding="utf-8"))["mcp"]
+    assert set(mcp_cfg) == {"custom", "servers"}
+    expected = {key: value for key, value in legacy.items() if key != "enabled"}
+    if not token:
+        expected["disabled"] = True
+    assert mcp_cfg["servers"] == {"brain-researcher": expected}
 
 
 def _make_claude_wrapper_with_token(tmp_path, bashrc_contents, env_token=None):

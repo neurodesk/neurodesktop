@@ -17,7 +17,7 @@ Usage::
 
 Credentials arrive through the environment, never argv: the Neurodesk key in
 ``NEURODESK_API_KEY_VALUE`` and any other ``{env:VAR}`` placeholder in
-OpenCode's provider options from ``VAR``. Nothing is written to stdout. When
+OpenCode's provider settings from ``VAR``. Nothing is written to stdout. When
 either config is missing, corrupt or names no usable openai-compatible model,
 the helper exits 0 without writing. When NBI changes, the config is replaced
 atomically with a 0600 file and one line naming the selection goes to stderr.
@@ -42,7 +42,7 @@ from provider_security import is_neurodesk_endpoint
 JsonObject = dict[str, Any]
 
 NBI_SECTIONS = ("chat_model", "inline_completion_model")
-OPENAI_COMPATIBLE_NPM = "@ai-sdk/openai-compatible"
+OPENAI_COMPATIBLE_PACKAGE = "@ai-sdk/openai-compatible"
 NBI_OPENAI_COMPATIBLE = "openai-compatible"
 NEURODESK_KEY_VARIABLE = "NEURODESK_API_KEY"
 # Always managed, even if a user's opencode.json no longer lists it.
@@ -70,10 +70,31 @@ class Selection:
         return f"{self.provider_key}/{self.model_id}"
 
 
-def _base_url(options: object) -> str:
-    if not isinstance(options, dict):
+def _base_url(settings: object) -> str:
+    if not isinstance(settings, dict):
         return ""
-    return str(options.get("baseURL") or "").rstrip("/")
+    return str(settings.get("baseURL") or "").rstrip("/")
+
+
+def _providers(
+    opencode_cfg: JsonObject,
+) -> dict[str, tuple[object, object, JsonObject]]:
+    """Each provider's package, settings and entry, as OpenCode 2 resolves them.
+
+    A 2.x ``providers`` entry replaces a 1.x ``provider`` entry of the same name.
+    """
+    resolved: dict[str, tuple[object, object, JsonObject]] = {}
+    for block, package, settings in (
+        ("provider", "npm", "options"),
+        ("providers", "package", "settings"),
+    ):
+        entries = opencode_cfg.get(block)
+        if not isinstance(entries, dict):
+            continue
+        for key, entry in entries.items():
+            if isinstance(entry, dict):
+                resolved[key] = (entry.get(package), entry.get(settings), entry)
+    return resolved
 
 
 def _context_window(provider_cfg: JsonObject, model_id: str) -> str:
@@ -116,15 +137,12 @@ def read_selection(
     if not isinstance(model_ref, str) or "/" not in model_ref:
         return None
     provider_key, model_id = model_ref.split("/", 1)
-    providers = opencode_cfg.get("provider")
-    if not isinstance(providers, dict):
+    providers = _providers(opencode_cfg)
+    if provider_key not in providers:
         return None
-    provider_cfg = providers.get(provider_key)
-    if not isinstance(provider_cfg, dict):
+    package, options, provider_cfg = providers[provider_key]
+    if package != OPENAI_COMPATIBLE_PACKAGE:
         return None
-    if provider_cfg.get("npm") != OPENAI_COMPATIBLE_NPM:
-        return None
-    options = provider_cfg.get("options")
     base_url = _base_url(options)
     if not base_url or not model_id:
         return None
@@ -132,11 +150,10 @@ def read_selection(
     # Every baseURL OpenCode knows about counts as managed; an NBI section
     # pointing anywhere else was configured by hand.
     managed_urls = {NEURODESK_BASE_URL}
-    for candidate in providers.values():
-        if isinstance(candidate, dict):
-            url = _base_url(candidate.get("options"))
-            if url:
-                managed_urls.add(url)
+    for _, settings, _ in providers.values():
+        url = _base_url(settings)
+        if url:
+            managed_urls.add(url)
     return Selection(
         provider_key=provider_key,
         model_id=model_id,

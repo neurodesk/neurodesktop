@@ -526,7 +526,7 @@ def test_installed_opencode_merge_precedence_and_quiet_overlay(tmp_path):
     global_config = home / ".config/opencode/opencode.json"
     global_config.parent.mkdir(parents=True)
     defaults = json.loads(DEFAULTS.read_text())
-    defaults["provider"]["ollama"]["models"]["user-saved"] = {
+    defaults["providers"]["ollama"]["models"]["user-saved"] = {
         "name": "User saved",
         "limit": {"context": 4096, "output": 512},
     }
@@ -839,7 +839,7 @@ def test_quiet_empty_catalog_and_offline_saved_models(tmp_path, online):
     path.parent.mkdir(parents=True)
     config = json.loads(DEFAULTS.read_text())
     config["model"] = "ollama/user-saved"
-    config["provider"]["ollama"]["models"]["user-saved"] = {
+    config["providers"]["ollama"]["models"]["user-saved"] = {
         "name": "Saved",
         "limit": {"context": 2048, "output": 512},
     }
@@ -851,7 +851,7 @@ def test_quiet_empty_catalog_and_offline_saved_models(tmp_path, online):
         with running_opencode(home, home, environment) as read_config:
             actual = read_config()
             assert actual["model"] == "ollama/user-saved"
-            saved = config["provider"]["ollama"]["models"]
+            saved = config["providers"]["ollama"]["models"]
             endpoint = host + "/v1" if online else "http://127.0.0.1:11434/v1"
             expected = {
                 name: {"name": model["name"], "limit": model["limit"], "baseURL": endpoint}

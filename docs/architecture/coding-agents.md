@@ -4,7 +4,7 @@ description: Claude Code and Codex installation, the OpenCode terminal wrapper,
   and OpenCode session pruning
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-16"
+last-reviewed: "2026-11-01"
 ---
 
 # Coding agents
@@ -129,13 +129,23 @@ providers. The wrapper therefore appends `--standalone` to the TUI and to the
 private server. An explicit `--server` or `--standalone` is passed through
 unchanged, as are the commands that manage OpenCode itself.
 
-The wrapper and the Python helpers still write `opencode.json` in the
-OpenCode 1 layout (`provider`, `options.baseURL`, `npm`, and a flat `mcp`
-map). OpenCode 2 normalizes that layout when it loads the file and leaves it
-on disk as written. Its own `opencode mcp add` adds entries under
-`mcp.servers` beside the existing ones, and both resolve. A hand-written
-OpenCode 2 `providers` block is outside the helpers' model: they refresh only
-the `provider` block.
+The image default config and the helpers write `opencode.json` in the
+OpenCode 2 layout. A managed provider is a `providers` entry with `package`,
+`settings.baseURL`, and `settings.apiKey`, and the Brain Researcher server is
+an `mcp.servers` entry that a decline marks `disabled`. OpenCode 2 still reads
+the OpenCode 1 layout (`provider`, `npm`, `options`, and a flat `mcp` map) and
+normalizes each file before merging, so a project's 1.x override still applies
+over the global 2.x entry. Within one file, a `providers` entry replaces a
+`provider` entry of the same name entirely.
+
+Homes written by earlier images move to the new layout as the wrapper
+refreshes them. A managed 1.x provider entry moves to `providers` when it
+holds only the fields the image wrote (`npm`, `name`, `options.baseURL`,
+`options.apiKey`, and model names and limits). An entry with any other field
+is refreshed where it is, because that field's OpenCode 2 spelling differs. A
+user's own Ollama entry with a custom SDK or endpoint is never moved. A
+malformed managed entry is replaced. The old `mcp.brain-researcher` entry
+moves to `mcp.servers`.
 
 The shared model helper,
 [`config/agents/opencode_update_config.py`](../../config/agents/opencode_update_config.py),
@@ -290,7 +300,11 @@ job IDs and the next status command instead of chaining shell sleeps.
 OpenCode keeps session history in `~/.local/share/opencode/opencode.db`, not in
 the working directory, and never prunes it. Deleting a project directory
 therefore leaves its sessions in OpenCode's session index forever, pointing at
-paths that are gone.
+paths that are gone. OpenCode 2.2.5 still behaves this way. Its
+`opencode session list` shows only the current project, but the server's
+unscoped `/api/session` and `/api/project` lists, which the web app reads, keep
+the deleted directory's sessions and project. OpenCode 2 offers only
+`opencode session delete <id>`, with no bulk or stale-directory pruning.
 
 [`config/agents/opencode_prune_sessions.py`](../../config/agents/opencode_prune_sessions.py)
 (installed as `/opt/neurodesktop/opencode_prune_sessions.py`) is a manual
