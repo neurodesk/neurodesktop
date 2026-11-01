@@ -83,6 +83,8 @@ module() {
         mixed/1.0) own mixed/1.0 "$C/mixed_1.0" ;;
         hostlink/1.0) own hostlink/1.0 "$C/hostlink_1.0" ;;
         fsl_arm64/6.0) own fsl_arm64/6.0 "$C/fsl_arm64_6.0" ;;
+        amico/2.1.0) own amico/2.1.0 "$C/amico_2.1.0" ;;
+        amico_2.1.0/arm64) own amico_2.1.0/arm64 "$C/amico_2.1.0_arm64" ;;
         *) echo "Lmod has detected the following error: unknown $2" >&2; return 1 ;;
     esac
 }
@@ -119,6 +121,9 @@ def lmod(tmp_path, monkeypatch):
     python("multi_first", "multi_1.0_20260101")
     python("multi_second", "multi_1.0_20260101")
     python("fsl_arm64_6.0", "fsl_arm64_6.0_20260101")
+    # amico/2.1.0's image name is a prefix of amico_2.1.0/arm64's.
+    python("amico_2.1.0", "amico_2.1.0_20260101", str(no_ipykernel))
+    python("amico_2.1.0_arm64", "amico_2.1.0_arm64_20260101")
     # A wrapper in mixed's own directory that runs a different container.
     python("mixed_1.0", "other_9.9_20260101")
     write_executable(containers / "tool_1.0" / "tool", "#!/bin/bash\n")
@@ -215,6 +220,20 @@ def test_later_prepend_takes_precedence_like_the_loaded_path(lmod):
 def test_architecture_variant_module_matches_its_image(lmod):
     assert wrapper_for(lmod, "fsl_arm64/6.0") == str(
         lmod.containers / "fsl_arm64_6.0" / "python3")
+
+
+def test_module_whose_name_prefixes_another_module_image_never_borrows_it(lmod, monkeypatch, capsys):
+    # amico_2.1.0/arm64 is already loaded and its Python has ipykernel;
+    # amico/2.1.0's own Python does not.
+    monkeypatch.setenv("PATH", f"{lmod.containers / 'amico_2.1.0_arm64'}:{os.environ['PATH']}")
+    monkeypatch.setenv("LOADEDMODULES", "amico_2.1.0/arm64")
+    assert lmod.main(["add", "amico/2.1.0"]) == 1
+    error = capsys.readouterr().err
+    assert "ipykernel is not installed in the container" in error
+    assert "amico_2.1.0_arm64" not in error
+    assert not lmod.kernels.exists()
+    assert wrapper_for(lmod, "amico_2.1.0/arm64") == str(
+        lmod.containers / "amico_2.1.0_arm64" / "python3")
 
 
 def test_python_without_ipykernel_is_refused_without_writing_a_kernel(lmod, capsys):

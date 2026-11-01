@@ -14,7 +14,8 @@ and a bare ``python3`` would silently fall back to the image's own Python
 whenever the module was not loaded.
 
 A wrapper belongs to the requested module when the container image it runs is
-named after that module: ``fsl/6.0.7.16`` runs ``fsl_6.0.7.16_<date>.simg``.
+named after that module and its build date: ``fsl/6.0.7.16`` runs
+``fsl_6.0.7.16_<YYYYMMDD>.simg``.
 Searching the loaded PATH for such a wrapper never admits a dependency's
 container or the image's own Python, and needs no parsing of modulefiles.
 """
@@ -93,6 +94,11 @@ class LoadedModule:
     @property
     def image_prefix(self) -> str:
         return self.name.replace("/", "_") + "_"
+
+    def owns_image(self, image: str) -> bool:
+        # Exact match up to the build date: a bare prefix would also accept
+        # amico_2.1.0_arm64_<date>, the image of module amico_2.1.0/arm64.
+        return re.fullmatch(re.escape(self.image_prefix) + r"\d{8}", image) is not None
 
 
 @dataclass(frozen=True)
@@ -206,7 +212,7 @@ def find_container_python(module: LoadedModule, commands: tuple[str, ...]) -> Co
             if not (os.path.isfile(wrapper) and os.access(wrapper, os.X_OK)):
                 continue
             image = wrapper_image(wrapper)
-            if image is None or not image.startswith(module.image_prefix):
+            if image is None or not module.owns_image(image):
                 continue
             print(f"Checking {wrapper} ...", file=sys.stderr)
             outcome = probe(wrapper)

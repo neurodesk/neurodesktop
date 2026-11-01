@@ -237,11 +237,14 @@ in order, first for a `python3` wrapper and then for `python`. Use
 A candidate counts only if it is a container wrapper for the requested module.
 That means a script of at most 64 KiB, starting with `#!`, whose non-comment
 lines run `neurodesk_container`, `apptainer` or `singularity` `exec` on an image
-named after the module. The image name is the module name with `/` replaced by
-`_`, then `_`: `fsl/6.0.7.16` runs `fsl_6.0.7.16_20250131.simg`, and
-`fsl_arm64/6.0.7.23` runs `fsl_arm64_6.0.7.23_20261013.simg`. All published
-CVMFS modulefiles except the `bidstools` meta-module follow this rule; that
-module has no container of its own and is refused. Provenance comes from the
+named after the module. The image name must be exactly the module name with `/`
+replaced by `_`, then `_` and an eight-digit build date: `fsl/6.0.7.16` runs
+`fsl_6.0.7.16_20250131.simg`, and `fsl_arm64/6.0.7.23` runs
+`fsl_arm64_6.0.7.23_20261013.simg`. A prefix match is not enough:
+`amico/2.1.0` must not accept `amico_2.1.0_arm64_20250512.simg`, which belongs
+to the separate module `amico_2.1.0/arm64`. All published CVMFS modulefiles
+except the `bidstools` meta-module follow this rule; that module has no
+container of its own and is refused. Provenance comes from the
 wrapper itself, not from parsing modulefiles, because Lmod's `show` output does
 not escape quotes or brackets inside values. As a result, neither a
 dependency's container nor the image's own Python is ever registered under the
