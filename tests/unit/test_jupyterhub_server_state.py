@@ -128,7 +128,9 @@ def _run_step(tmp_path, name, models, **env_overrides):
     for stub in bin_dir.iterdir():
         stub.chmod(0o755)
     model_file = tmp_path / "models"
-    model_file.write_text("".join(json.dumps(m) + "\n" for m in models))
+    model_file.write_text(
+        "".join((m if isinstance(m, str) else json.dumps(m)) + "\n" for m in models)
+    )
     log = tmp_path / "log"
     log.write_text("")
 
@@ -192,6 +194,21 @@ def test_start_waits_through_pending_spawn_until_ready(tmp_path):
     assert calls == ["STATUS", "GET", "POST", "GET", "GET", "GET"]
 
 
+def test_start_allows_a_slow_spawn_to_finish(tmp_path):
+    # The probe's cap must not cut off a spawn the Hub is still pursuing;
+    # run 41257003887 failed while play-eu still reported pending:spawn.
+    result, calls = _run_step(
+        tmp_path,
+        "Start JupyterHub Server",
+        [STOPPED, *([SPAWNING] * 24), READY],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Server is still starting... (240s elapsed)" in result.stdout
+    assert "✅ Server started successfully (250s elapsed)" in result.stdout
+    assert calls == ["STATUS", "GET", "POST", *(["GET"] * 25)]
+
+
 def test_start_restarts_a_running_server_before_spawning(tmp_path):
     result, calls = _run_step(
         tmp_path, "Start JupyterHub Server", [READY, STOPPED, SPAWNING, READY]
@@ -203,12 +220,49 @@ def test_start_restarts_a_running_server_before_spawning(tmp_path):
 
 
 def test_start_times_out_reporting_the_last_state(tmp_path):
-    result, _ = _run_step(tmp_path, "Start JupyterHub Server", [STOPPED, SPAWNING])
+    result, calls = _run_step(
+        tmp_path, "Start JupyterHub Server", [STOPPED, SPAWNING]
+    )
 
     assert result.returncode == 1
+    assert "Server is still starting... (600s elapsed)" in result.stdout
     assert "Server failed to start within timeout (last state: pending:spawn)" in (
         result.stdout
     )
+    assert calls == ["STATUS", "GET", "POST", *(["GET"] * 60)]
+
+
+def test_start_fails_fast_when_the_hub_abandons_the_spawn(tmp_path):
+    # Run 41273966444: play-eu reported pending:spawn, then the Hub's own
+    # spawn timeout returned the server to stopped. Polling on after that
+    # cannot succeed, so the step reports a Hub-side failure immediately.
+    result, calls = _run_step(
+        tmp_path,
+        "Start JupyterHub Server",
+        [STOPPED, SPAWNING, SPAWNING, STOPPED, READY],
+    )
+
+    assert result.returncode == 1
+    assert "JupyterHub abandoned the spawn" in result.stdout
+    assert "after 30s" in result.stdout
+    assert "within timeout" not in result.stdout
+    assert calls == ["STATUS", "GET", "POST", "GET", "GET", "GET"]
+
+
+def test_start_keeps_waiting_through_an_unreadable_hub_response(tmp_path):
+    # A proxy error page has no server state; it is not evidence that the
+    # Hub abandoned the spawn.
+    result, _ = _run_step(
+        tmp_path,
+        "Start JupyterHub Server",
+        [STOPPED, SPAWNING, "<html>502 Bad Gateway</html>", READY],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Waiting for server to start (state: unknown)... (20s elapsed)" in (
+        result.stdout
+    )
+    assert "✅ Server started successfully (30s elapsed)" in result.stdout
 
 
 def test_start_rejects_an_invalid_token(tmp_path):
