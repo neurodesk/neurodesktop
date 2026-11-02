@@ -53,6 +53,7 @@ jobs:
       OUTPUT_NAME: "FSL_course_bet_test_output.ipynb"
       SERVER_START_SUCCEEDED: "false"
       SERVER_START_DIAGNOSTIC: "not-attempted"
+      SERVER_CLEANUP_REQUIRED: "false"
       SERVER_STOP_SUCCEEDED: "false"
       NOTEBOOK_SUCCESS: "false"
     
@@ -92,6 +93,7 @@ jobs:
         {
           echo "SERVER_START_SUCCEEDED=false"
           echo "SERVER_START_DIAGNOSTIC=not-attempted"
+          echo "SERVER_CLEANUP_REQUIRED=false"
           echo "SERVER_STOP_SUCCEEDED=false"
           echo "NOTEBOOK_SUCCESS=false"
         } >> "$GITHUB_ENV"
@@ -175,6 +177,10 @@ jobs:
           set_start_diagnostic "initial-state-request-failed"
           exit 1
         fi
+
+        # From here the workflow may stop an existing server or submit a spawn.
+        # Cleanup must run even when a later mutating request loses its response.
+        echo "SERVER_CLEANUP_REQUIRED=true" >> "$GITHUB_ENV"
 
         SHOULD_POST=true
         if [ "$SERVER_READY" = "true" ] && [ -n "$SERVER_PATH" ]; then
@@ -291,6 +297,11 @@ jobs:
       if: always()
       run: |
         echo "=== Stopping JupyterHub Server ==="
+        if [ "${SERVER_CLEANUP_REQUIRED:-false}" != "true" ]; then
+          echo "Server cleanup not required; no Hub state was observed and no server mutation was attempted."
+          exit 0
+        fi
+
         SERVER_API_URL="${API_URL}/hub/api/users/${USER}"
         SERVER_START_URL="${SERVER_API_URL}/server"
         RESPONSE_BODY=$(mktemp)
@@ -359,11 +370,17 @@ jobs:
       if: always()
       run: |
         echo "Server start: ${SERVER_START_SUCCEEDED:-false}"
-        echo "Server stop: ${SERVER_STOP_SUCCEEDED:-false}"
+        if [ "${SERVER_CLEANUP_REQUIRED:-false}" = "true" ]; then
+          echo "Server stop: ${SERVER_STOP_SUCCEEDED:-false}"
+        else
+          echo "Server stop: not required"
+        fi
         echo "Executed notebook and numerical BET validation: ${NOTEBOOK_SUCCESS:-false}"
         if [ "${SERVER_START_SUCCEEDED:-false}" != "true" ]; then
           echo "Primary diagnostic: ${SERVER_START_DIAGNOSTIC:-unknown}"
         fi
         test "${SERVER_START_SUCCEEDED:-false}" = "true"
-        test "${SERVER_STOP_SUCCEEDED:-false}" = "true"
+        if [ "${SERVER_CLEANUP_REQUIRED:-false}" = "true" ]; then
+          test "${SERVER_STOP_SUCCEEDED:-false}" = "true"
+        fi
         test "${NOTEBOOK_SUCCESS:-false}" = "true"
