@@ -172,6 +172,9 @@ A review whose PR closed or merged during execution ends successfully with a
 `superseded` step summary before changing PR text, posting comments, or pushing
 commits. This applies to change, no-change, and blocked outcomes, including
 incident-linked reviews.
+For change outcomes, the publisher refreshes PR state after listing open PRs
+and before applying the patch, so closure during that lookup also supersedes
+the review.
 A review whose PR branch moved during the run ends without pushing or
 commenting; CodeRabbit's summary of the newer push starts its review.
 Rerunning a failed publisher reconciles the same task branch and PR. Rerunning

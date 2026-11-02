@@ -1279,6 +1279,44 @@ def test_review_closed_during_run_is_superseded(
     assert worker.git("rev-parse", "main", cwd=remote) == task["base_sha"]
 
 
+@pytest.mark.parametrize("incident", [False, True])
+def test_review_closed_after_initial_lookup_is_superseded(
+    worker, proposal, publisher_api, monkeypatch, tmp_path, incident,
+):
+    task, output, repo, remote = proposal
+    task["kind"] = "review"
+    issue, binding = workflow_incident()
+    if incident:
+        task.update(incident=binding, incident_subject="7")
+    worker.git("push", "origin", f"HEAD:refs/heads/{task['branch']}", cwd=repo)
+    current = pull(number=42, body="<!-- neurodesktop-agentic:issue:7 -->\nFixes #7")
+    calls, _, original_api = publisher_api
+    original_pages = worker.pages
+
+    def api(path, payload=None):
+        if path == "repos/owner/repo/pulls/42":
+            calls.append((path, payload))
+            return json.loads(json.dumps(current))
+        if path == "repos/owner/repo/issues/7":
+            return issue
+        return original_api(path, payload)
+
+    def pages(path):
+        if path == "repos/owner/repo/pulls?state=open&per_page=100":
+            current["state"] = "closed"
+        return original_pages(path)
+
+    monkeypatch.setattr(worker, "api", api)
+    monkeypatch.setattr(worker, "pages", pages)
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    assert worker.publish(task, output, repo) is None
+    assert "superseded: PR closed during review" in summary.read_text()
+    assert not [payload for _, payload in calls if payload is not None]
+    assert worker.git("rev-parse", task["branch"], cwd=remote) == task["base_sha"]
+    assert worker.git("rev-parse", "HEAD", cwd=repo) == task["base_sha"]
+
+
 def test_workflow_incident_publication_cannot_close_it(worker, proposal, publisher_api, monkeypatch):
     task, output, repo, remote = proposal
     issue, binding = workflow_incident()
