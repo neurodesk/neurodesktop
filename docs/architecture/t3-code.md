@@ -4,7 +4,7 @@ description: T3 Code in JupyterLab, server lifecycle, provider paths, persistent
   state, and desktop connection procedures
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-16"
+last-reviewed: "2026-11-02"
 ---
 
 # T3 Code remote access
@@ -37,9 +37,16 @@ Provider authentication still belongs to the container, as described
 This route requires only the Jupyter endpoint, including its existing HTTPS
 and JupyterHub user prefix. It does not require Tailscale or a separately
 published T3 port. Leave `NEURODESKTOP_T3_CODE_HOST` at its loopback default
-when using only JupyterLab. The launcher reports when the sidecar is not ready. The supervisor requires
-an HTTP response from T3's local environment endpoint before reporting readiness;
-a listening TCP port alone does not mean startup has finished.
+when using only JupyterLab. The launcher reports when the sidecar is still
+starting. The supervisor requires an HTTP response from T3's local environment
+endpoint before reporting readiness; a listening TCP port alone does not mean
+startup has finished.
+
+If every start attempt fails, the launcher offers **Retry SciGent**. It restarts
+only the T3 process group with a fresh retry budget. Jupyter kernels, terminals
+and open notebooks keep running. Retry has no effect while T3 is starting or
+ready, so it cannot interrupt an active chat. See
+[Lifecycle and state](#lifecycle-and-state) for the retry budget.
 
 The server extension authenticates `/neurodesk-t3/` and proxies HTTP and
 WebSockets to its supervised process. It strips Jupyter credentials before
@@ -296,10 +303,15 @@ that login node. It does not enter the Neurodesktop allocation.
 ## Lifecycle and state
 
 [`neurodesk_t3_code`](../../extensions/t3-code-server/neurodesk_t3_code/)
-is a Jupyter `ExtensionApp`. It owns one T3 process group, waits for the fixed
-port, restarts a failed server up to five times, and stops the process group
-when Jupyter stops. A port conflict parks the sidecar and leaves Jupyter
-available.
+is a Jupyter `ExtensionApp`. It owns one T3 process group and stops it when
+Jupyter stops. Each start attempt has
+`NEURODESKTOP_T3_CODE_STARTUP_TIMEOUT` seconds, 120 by default, to answer HTTP
+before the supervisor stops that attempt. It makes up to five attempts, waiting
+1, 2, 4 and 8 seconds between them, then parks the sidecar and leaves Jupyter
+available. A port conflict parks the sidecar at once. Readiness waiters,
+including the T3 Connect restore, wait for the final outcome of the whole retry
+budget rather than one attempt. `POST /neurodesk-t3-retry` starts a parked
+sidecar again; it requires Jupyter authentication and XSRF protection.
 
 The extension runs T3 only as the notebook user. It refuses uid 0 and a home
 directory owned by another uid. T3 stores its database, connection identity,
