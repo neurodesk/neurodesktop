@@ -3,7 +3,7 @@ title: Agentic CI workflows
 description: Failure reporting, issue repair, scheduled maintenance, and subscription-authenticated Codex execution through conventional Actions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-23"
+last-reviewed: "2026-11-02"
 ---
 
 # Agentic CI workflows
@@ -168,6 +168,10 @@ publisher owns GitHub write credentials. Patches are bounded and cannot add
 credential paths, Git metadata, symlinks, or submodules. Proposed workflow
 changes do not replace the current run's separately prepared controller.
 The publisher rejects a stale target rather than overwriting a newer change.
+A review whose PR closed or merged during execution ends successfully with a
+`superseded` step summary before changing PR text, posting comments, or pushing
+commits. This applies to change, no-change, and blocked outcomes, including
+incident-linked reviews.
 A review whose PR branch moved during the run ends without pushing or
 commenting; CodeRabbit's summary of the newer push starts its review.
 Rerunning a failed publisher reconciles the same task branch and PR. Rerunning
