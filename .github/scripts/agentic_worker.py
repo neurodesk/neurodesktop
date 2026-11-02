@@ -993,6 +993,11 @@ def publish(task, output, workspace):
     result = validate_result(json.loads((output / "result.json").read_text()))
     validation = (output / "validation.txt").read_text()
     repo = task["repo"]
+    if task["kind"] == "review":
+        pr = api(f"repos/{repo}/pulls/{task['subject']}")
+        if pr["state"] == "closed":
+            step_summary("superseded: PR closed during review")
+            return None
     if result["outcome"] != "change":
         check_publication_incident(task)
         if task.get("incident"):
@@ -1024,6 +1029,9 @@ def publish(task, output, workspace):
             return complete_publication(task, existing, result, workspace, validation)
     else:
         pr = api(f"repos/{repo}/pulls/{task['subject']}")
+        if pr["state"] == "closed":
+            step_summary("superseded: PR closed during review")
+            return None
         issue_task = {**task, "kind": "issue", "subject": task.get("incident_subject", task["subject"])}
         if pr["state"] != "open" or not owned_pull(pr, repo) or (
             task.get("incident") and (not incident_pull(pr, issue_task) or pr["head"]["ref"] != task["branch"])
