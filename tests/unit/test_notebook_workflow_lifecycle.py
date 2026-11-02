@@ -3,6 +3,7 @@
 import os
 import subprocess
 
+import pytest
 import yaml
 
 from testlib import repo_path
@@ -36,12 +37,13 @@ if [ "${CURL_STUB_SCENARIO:-stopped}" = "unreachable" ]; then
     exit 28
 fi
 
-printf '%s' '{"server":null,"pending":null}' > "$output"
+printf '%s' "$CURL_STUB_RESPONSE" > "$output"
 printf '%s\n' 'http=200 remote_ip=192.0.2.1 curl_exit=0'
 """
 
 
 def _step_script(name):
+    """Extract the real workflow step and substitute its matrix server name."""
     workflow = yaml.safe_load(WORKFLOW.read_text())
     steps = workflow["jobs"]["test-notebooks"]["steps"]
     script = next(step["run"] for step in steps if step.get("name") == name)
@@ -49,6 +51,7 @@ def _step_script(name):
 
 
 def _run_step(tmp_path, name, **env_overrides):
+    """Execute a step with fake HTTP responses and return its result, calls and state."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     (bin_dir / "curl").write_text(CURL_STUB)
@@ -65,6 +68,7 @@ def _run_step(tmp_path, name, **env_overrides):
         {
             "PATH": f"{bin_dir}:{env['PATH']}",
             "CURL_STUB_LOG": str(log),
+            "CURL_STUB_RESPONSE": '{"name":"akshitbeniwal","server":null,"pending":null}',
             "USER_TOKEN": "secret-token",
             "USER": "akshitbeniwal",
             "API_URL": "https://hub.example",
@@ -85,11 +89,22 @@ def _run_step(tmp_path, name, **env_overrides):
     return result, log.read_text().splitlines(), github_env.read_text()
 
 
-def test_unreachable_initial_state_does_not_trigger_cleanup_requests(tmp_path):
+@pytest.mark.parametrize(
+    "failure_env",
+    [
+        pytest.param({"CURL_STUB_SCENARIO": "unreachable"}, id="unreachable"),
+        pytest.param({"CURL_STUB_RESPONSE": "{}"}, id="empty-object"),
+        pytest.param(
+            {"CURL_STUB_RESPONSE": '{"message":"service unavailable"}'},
+            id="error-object",
+        ),
+    ],
+)
+def test_unusable_initial_state_does_not_trigger_cleanup_requests(tmp_path, failure_env):
     start, start_calls, start_env = _run_step(
         tmp_path,
         "Start JupyterHub Server",
-        CURL_STUB_SCENARIO="unreachable",
+        **failure_env,
     )
 
     assert start.returncode == 1
@@ -99,14 +114,15 @@ def test_unreachable_initial_state_does_not_trigger_cleanup_requests(tmp_path):
     cleanup, cleanup_calls, _ = _run_step(
         tmp_path,
         "Stop JupyterHub Server",
-        CURL_STUB_SCENARIO="unreachable",
-        SERVER_CLEANUP_REQUIRED="false",
+        **failure_env,
+        **dict(line.split("=", 1) for line in start_env.splitlines()),
     )
 
     assert cleanup.returncode == 0, cleanup.stderr
     assert cleanup_calls == start_calls
     assert "Server cleanup not required" in cleanup.stdout
     assert "SERVER_CLEANUP_REQUIRED=false" in start_env
+    assert "SERVER_CLEANUP_REQUIRED=true" not in start_env
 
 
 def test_required_cleanup_still_stops_and_verifies_the_server(tmp_path):
