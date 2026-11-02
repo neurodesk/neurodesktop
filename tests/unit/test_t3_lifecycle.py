@@ -220,7 +220,17 @@ def test_retry_is_unavailable_without_a_configured_sidecar(lifecycle):
 
 def test_retry_requires_jupyter_authentication():
     from neurodesk_t3_code.web import T3RetryHandler
-    from jupyter_server.base.handlers import APIHandler
+    from tornado.web import HTTPError
 
-    assert issubclass(T3RetryHandler, APIHandler)
-    assert hasattr(T3RetryHandler.post, "__wrapped__")
+    calls = []
+    handler = SimpleNamespace(
+        current_user=None,
+        request=SimpleNamespace(method="POST"),
+        t3_app=SimpleNamespace(_supervisor=object(), retry=lambda: calls.append("retry")),
+        set_header=lambda *args: None,
+        finish=lambda *args: None,
+    )
+    with pytest.raises(HTTPError) as error:
+        T3RetryHandler.post(handler)
+    assert error.value.status_code == 403
+    assert calls == []

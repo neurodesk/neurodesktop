@@ -399,8 +399,8 @@ class T3Supervisor:
 
             while failures < self.restart_limit:
                 self.state = ServiceState.STARTING
-                self.policy.base_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
                 try:
+                    self.policy.base_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
                     prepare_startup_settings(self.policy)
                     self.connect_tunnel_limit = None
                     self._process = await asyncio.create_subprocess_exec(
@@ -459,6 +459,8 @@ class T3Supervisor:
             await self._stop_output_reader()
             if self.state is not ServiceState.PARKED:
                 self.state = ServiceState.STOPPED
+            # wait_ready() has no default deadline, so every exit must release it.
+            self._ready.set()
 
     async def close(self) -> None:
         """Cancel supervision and stop the complete T3 process group."""
@@ -468,8 +470,12 @@ class T3Supervisor:
             self.state = ServiceState.STOPPED
             return
         task.cancel()
-        with suppress(asyncio.CancelledError):
+        try:
             await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as error:
+            self.log.warning("T3 Code supervision failed: %s", type(error).__name__)
         self._task = None
         self.pid = None
         self.state = ServiceState.STOPPED

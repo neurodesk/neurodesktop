@@ -712,7 +712,7 @@ SLOW_T3 = """#!/usr/bin/env python3
 import os, signal, socket, sys, time
 sys.exit(1) if os.path.exists(os.environ["FAIL_FLAG"]) else None
 with open(os.environ["SPAWN_LOG"], "a") as log:
-    log.write("spawn\\n")
+    log.write(f"spawn {os.getpid()}\\n")
 time.sleep(float(os.environ["SLOW_START"]))
 host = sys.argv[sys.argv.index("--host") + 1]
 port = int(sys.argv[sys.argv.index("--port") + 1])
@@ -767,6 +767,9 @@ def test_startup_timeout_lets_a_slow_server_finish_its_first_start(tmp_path, mon
 
     assert asyncio.run(start("0.3")) is supervisor.ServiceState.PARKED
     assert spawn_log.read_text().count("spawn") == 2
+    for line in spawn_log.read_text().splitlines():
+        with pytest.raises(ProcessLookupError):
+            os.kill(int(line.split()[1]), 0)
     spawn_log.unlink()
     assert asyncio.run(start("10")) is supervisor.ServiceState.READY
     assert spawn_log.read_text().count("spawn") == 1
@@ -845,6 +848,44 @@ def test_waiters_follow_a_restart_after_a_ready_server_exits(tmp_path, monkeypat
         await service.wait_ready(timeout=10)
         assert service.state is supervisor.ServiceState.READY
         assert service.pid != first
+        await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_unusable_state_directory_parks_instead_of_hanging_waiters(tmp_path):
+    supervisor = _supervisor_module()
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("", encoding="utf-8")
+    policy = supervisor.policy_from_environment(
+        {**_policy_environment(tmp_path), "NEURODESKTOP_T3_CODE_HOME": str(blocker / ".t3")},
+        euid=os.geteuid(),
+    )
+
+    async def scenario():
+        service = supervisor.T3Supervisor(policy, restart_limit=1)
+        service.start()
+        with pytest.raises(RuntimeError, match="parked"):
+            await service.wait_ready(timeout=5)
+        await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_unexpected_supervisor_failure_releases_waiters(tmp_path, monkeypatch):
+    supervisor = _supervisor_module()
+    policy = supervisor.policy_from_environment(_policy_environment(tmp_path), euid=os.geteuid())
+
+    def broken(_policy):
+        raise RuntimeError("unexpected settings failure")
+
+    monkeypatch.setattr(supervisor, "prepare_startup_settings", broken)
+
+    async def scenario():
+        service = supervisor.T3Supervisor(policy)
+        service.start()
+        with pytest.raises(RuntimeError, match="did not start: stopped"):
+            await service.wait_ready(timeout=5)
         await service.close()
 
     asyncio.run(scenario())
