@@ -134,7 +134,7 @@ jobs:
         }
 
         parse_server_state() {
-          if ! jq -e 'type == "object" and has("name")' "$RESPONSE_BODY" >/dev/null; then
+          if ! bash .github/workflows/jupyterhub_server_state.sh < "$RESPONSE_BODY" >/dev/null; then
             echo "❌ JupyterHub returned an invalid user model"
             return 1
           fi

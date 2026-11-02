@@ -1095,8 +1095,9 @@ still pending. The unit tier runs both workflow steps against a stubbed `curl`
 and `sleep`.
 
 The FSL notebook workflow records whether startup reached a valid Hub state
-before it can stop or spawn a server. The response must be a JSON object with
-the user-model `name` field, matching the shared Hub state validator. If the
+before it can stop or spawn a server. Startup uses the shared Hub state
+validator to require exactly one JSON object with the user-model `name` field.
+Empty bodies and streams of multiple JSON values are invalid responses. If the
 initial state request never connects or returns only invalid responses, cleanup
 is not required and makes no DELETE or polling requests; the
 startup failure remains the authoritative result. Once a state is observed,

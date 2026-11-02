@@ -98,9 +98,19 @@ def _run_step(tmp_path, name, **env_overrides):
             {"CURL_STUB_RESPONSE": '{"message":"service unavailable"}'},
             id="error-object",
         ),
+        pytest.param({"CURL_STUB_RESPONSE": ""}, id="empty-response"),
+        pytest.param(
+            {"CURL_STUB_RESPONSE": '{} {"name":"akshitbeniwal","server":null,"pending":null}'},
+            id="multiple-values",
+        ),
+        pytest.param(
+            {"CURL_STUB_RESPONSE": '{"name":"akshitbeniwal"} {"name":"akshitbeniwal"}'},
+            id="multiple-user-models",
+        ),
     ],
 )
 def test_unusable_initial_state_does_not_trigger_cleanup_requests(tmp_path, failure_env):
+    """Reject unusable Hub responses before mutation and carry that state into cleanup."""
     start, start_calls, start_env = _run_step(
         tmp_path,
         "Start JupyterHub Server",
