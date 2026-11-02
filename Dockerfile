@@ -1641,6 +1641,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/guacamole/ensure_rdp_backend.sh /opt/neurodesktop/ensure_rdp_backend.sh \
     && install -m 0755 /tmp/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh \
     && install -m 0755 /tmp/jupyter/kernel_wrapper.sh /opt/neurodesktop/kernel_wrapper.sh \
+    && install -m 0755 /tmp/jupyter/neurodesk_kernel.py /usr/local/bin/neurodesk-kernel \
     && install -m 0755 /tmp/jupyter/jupyterlmod_modulepath.py /opt/neurodesktop/jupyterlmod_modulepath.py \
     && install -m 0644 /tmp/jupyter/jupyter_ai_workspace.py /opt/neurodesktop/jupyter_ai_workspace.py \
     && install -m 0755 /tmp/jupyter/external_webapp_redirect.py /opt/neurodesktop/external_webapp_redirect.py \

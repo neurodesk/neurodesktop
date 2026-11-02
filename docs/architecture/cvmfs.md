@@ -4,7 +4,7 @@ description: CVMFS server selection and mount configuration, and the
   neurocommand CLI/module system for neuroimaging tools
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-23"
+last-reviewed: "2026-11-01"
 ---
 
 # CVMFS and Neurocommand
@@ -213,6 +213,82 @@ the warm-up still benefits from the modulefiles the warm-up has already
 fetched. The warm-up runs whenever the deferred worker does, which includes
 eager CVMFS with the default lazy Slurm. It does not run when both CVMFS and
 Slurm use eager mode.
+
+## Container kernels
+
+`neurodesk-kernel` registers the Python inside a tool container as a Jupyter
+kernel, so a notebook can run with that container's libraries. The command is
+installed from
+[`config/jupyter/neurodesk_kernel.py`](../../config/jupyter/neurodesk_kernel.py):
+
+```bash
+neurodesk-kernel add fsl/6.0.7.16    # or a bare tool name for its default version
+neurodesk-kernel list
+neurodesk-kernel remove fsl/6.0.7.16
+```
+
+`add` loads the module in a subshell to resolve its full name, so a bare tool
+name selects the default version. This works whether or not the module is
+already loaded in the calling shell. It then searches the loaded shell's `PATH`,
+in order, first for a `python3` wrapper and then for `python`. Use
+`--python COMMAND` to choose another wrapper the module provides, such as
+`fslpython`.
+
+A candidate counts only if it is a container wrapper for the requested module.
+That means a script of at most 64 KiB, starting with `#!`, whose non-comment
+lines run `neurodesk_container`, `apptainer` or `singularity` `exec` on an image
+named after the module. The image name must be exactly the module name with `/`
+replaced by `_`, then `_` and an eight-digit build date: `fsl/6.0.7.16` runs
+`fsl_6.0.7.16_20250131.simg`, and `fsl_arm64/6.0.7.23` runs
+`fsl_arm64_6.0.7.23_20261013.simg`. A prefix match is not enough:
+`amico/2.1.0` must not accept `amico_2.1.0_arm64_20250512.simg`, which belongs
+to the separate module `amico_2.1.0/arm64`. All published CVMFS modulefiles
+except the `bidstools` meta-module follow this rule; that module has no
+container of its own and is refused. Provenance comes from the
+wrapper itself, not from parsing modulefiles, because Lmod's `show` output does
+not escape quotes or brackets inside values. As a result, neither a
+dependency's container nor the image's own Python is ever registered under the
+requested module, whatever the modulefile does to `PATH`.
+
+Each wrapper is probed with a short program that reports its Python version and
+then imports `ipykernel_launcher`. A Python that runs but cannot import
+ipykernel is reported as missing ipykernel. Any other failure, such as a missing
+image or an Apptainer error, is reported as a launch failure with its last
+error line. If no wrapper can run ipykernel, `add` lists each one it checked and
+writes nothing. Nothing is installed into the container. The probe allows 10
+minutes for the first CVMFS fetch, and module resolution allows 5 minutes. Both
+run in their own session. On timeout, the session receives SIGTERM and, after a
+5-second grace period, SIGKILL. That stops the whole process tree, including
+Apptainer, the container's processes, and descendants that ignore SIGTERM.
+Filesystem errors, such as an unwritable kernels directory, are reported with
+the affected path instead of a traceback.
+
+The kernelspec goes in the user's Jupyter data directory as
+`neurodesk-<tool>-<version>`, so it persists with the home directory. Its
+display name is `Python <version> (<module>)`, and the running server lists it
+without a restart. The kernel command is `kernel_wrapper.sh` followed by the
+absolute wrapper path, `-m ipykernel_launcher` and the connection file. The
+transparent-singularity wrapper runs `neurodesk_container exec`, which owns bind
+paths, GPU, overlay and display handling. It also uses `--cleanenv`, so the
+kernel sees the container's own environment, such as FSL's `FSLDIR`, and loading
+the module at launch would add nothing. Jupyter interrupts the kernel's process
+group, which reaches the container's Python through the wrapper. A registered
+kernel needs its container path at launch, so in lazy CVMFS mode it starts once
+CVMFS is mounted.
+
+The kernelspec's `metadata.neurodesk_container` records the module and wrapper.
+`list` and `remove` act only on kernelspecs with that marker, and `remove`
+matches the exact kernel name or stored module. `add` refreshes a kernel it
+created for the same module. It refuses to replace an unmarked kernelspec, a
+symbolic link, or a kernel created for a different module whose name maps to
+the same kernel name. Writes go through a unique temporary file and an atomic
+rename, under a lock in the kernels directory that serializes concurrent
+invocations. The unit tests use a fake Lmod. `tests/container/test_container_kernels.py`
+covers, in the installed image:
+
+- a real FSL kernel, including interrupt and graceful shutdown;
+- a Tcl-only modulefile;
+- the ipykernel refusal, with evidence that the container's Python ran.
 
 ## Build-time CVMFS setup
 
