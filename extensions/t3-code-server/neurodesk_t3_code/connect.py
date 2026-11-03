@@ -319,7 +319,7 @@ class ConnectManager:
             if saved.get('desired') and saved.get('authenticated'):
                 await self._wait_reachable()
         async with self.lock:
-            if self.task is None:
+            if self.task is None or self.task.done():
                 self.task = asyncio.create_task(self._run(check))
 
     async def _unlink(self):
