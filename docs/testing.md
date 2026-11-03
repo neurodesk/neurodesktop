@@ -790,6 +790,8 @@ timed-out launch shutting down while the next launch starts.
 
 The desktop tunnel test acts as a Guacamole protocol client: it acknowledges
 `sync` instructions and sends `nop` keepalives while waiting for pixels.
+Unit tests capture its outbound sync replies for both legacy and Guacamole 1.6
+messages, and verify periodic keepalives continue during idle observation.
 The combined-backend SSH-disabled case observes the rendered session for
 20 seconds after the first pixels arrive, beyond guacd's 15-second
 client-input timeout, even when initial rendering nearly exhausts its deadline. Error frames and
