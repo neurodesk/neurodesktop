@@ -386,10 +386,12 @@ class T3Supervisor:
         """Start, monitor, and restart the child within a bounded budget."""
 
         failures = 0
+        # Publish PARKED only after cleanup: Retry starts a new task only once
+        # this one has finished.
+        parked = False
         try:
             if await self._port_accepting():
-                self.state = ServiceState.PARKED
-                self._ready.set()
+                parked = True
                 self.log.warning(
                     "T3 Code could not start because %s:%s is in use.",
                     self.policy.host,
@@ -447,8 +449,7 @@ class T3Supervisor:
                     self.state = ServiceState.BACKING_OFF
                     await asyncio.sleep(min(2 ** (failures - 1), 8))
 
-            self.state = ServiceState.PARKED
-            self._ready.set()
+            parked = True
             self.log.warning(
                 "T3 Code stopped after %s failed starts; Jupyter remains available. "
                 "Retry SciGent from the launcher to start it again.",
@@ -457,7 +458,7 @@ class T3Supervisor:
         except Exception as error:
             # Park rather than stop so Retry SciGent can recover once the cause
             # (for example a user settings file) is repaired.
-            self.state = ServiceState.PARKED
+            parked = True
             self.log.warning(
                 "T3 Code supervision failed (%s); Jupyter remains available. "
                 "Retry SciGent from the launcher to start it again.",
@@ -466,8 +467,7 @@ class T3Supervisor:
         finally:
             await self._terminate_process()
             await self._stop_output_reader()
-            if self.state is not ServiceState.PARKED:
-                self.state = ServiceState.STOPPED
+            self.state = ServiceState.PARKED if parked else ServiceState.STOPPED
             # wait_ready() has no default deadline, so every exit must release it.
             self._ready.set()
 

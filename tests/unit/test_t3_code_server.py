@@ -918,3 +918,34 @@ def _assert_exited(pid):
             return
         time.sleep(0.05)
     raise AssertionError(f"process {pid} is still running")
+
+
+def test_retry_at_the_first_parked_instant_really_restarts(tmp_path, monkeypatch):
+    """PARKED must not be visible while the failed task is still cleaning up."""
+    supervisor, environment, _flag, _log = _slow_t3(
+        tmp_path, monkeypatch, slow_start=0, failing=False
+    )
+    policy = supervisor.policy_from_environment(environment, euid=os.geteuid())
+
+    async def scenario():
+        service = supervisor.T3Supervisor(policy)
+        listener = service._wait_for_listener
+
+        async def fail_with_child_running():
+            await asyncio.sleep(0.3)
+            raise RuntimeError("unexpected supervision failure")
+
+        service._wait_for_listener = fail_with_child_running
+        service.start()
+        while service.state is not supervisor.ServiceState.PARKED:
+            await asyncio.sleep(0)
+        failed_task = service._task
+        service._wait_for_listener = listener
+        service.start()
+        assert service._task is not failed_task, "Retry must start a new supervision task"
+        assert service.state is supervisor.ServiceState.STARTING
+        await service.wait_ready(timeout=10)
+        assert service.state is supervisor.ServiceState.READY
+        await service.close()
+
+    asyncio.run(scenario())

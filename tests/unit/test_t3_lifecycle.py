@@ -26,12 +26,15 @@ class FakeSupervisor:
 
     def start(self):
         self.events.append("start")
+        self.ready.clear()
         self.state = serverext_state().STARTING
 
     async def wait_ready(self):
         await self.ready.wait()
         if self.failure is not None:
             raise self.failure
+        if self.state is not serverext_state().READY:
+            raise RuntimeError(f"T3 Code did not start: {self.state.value}")
 
     async def close(self):
         self.events.append("close")
@@ -93,6 +96,7 @@ def test_connect_restores_after_readiness_and_shutdown_closes_both(lifecycle):
         await _settle()
         assert connect.events == []
 
+        supervisor.state = serverext_state().READY
         supervisor.ready.set()
         await app._readiness_task
         assert connect.events == ["restore"]
@@ -234,3 +238,34 @@ def test_retry_requires_jupyter_authentication():
         T3RetryHandler.post(handler)
     assert error.value.status_code == 403
     assert calls == []
+
+
+def test_retry_racing_the_previous_watcher_still_restores_connect(lifecycle, caplog):
+    """The parked watcher may be woken but not yet resumed when Retry starts T3."""
+    serverext, created = lifecycle
+    ServiceState = serverext_state()
+
+    async def scenario():
+        app = serverext.NeurodeskT3CodeApp()
+        app.log = logging.getLogger("t3-lifecycle-test")
+        await app._start_jupyter_server_extension(object())
+        supervisor, connect = created["supervisor"], created["connect"]
+        await _settle()
+        stale = app._readiness_task
+
+        supervisor.state = ServiceState.PARKED
+        supervisor.ready.set()
+        app.retry()  # No await: the stale watcher has not resumed yet.
+        assert app._readiness_task is not stale
+        await _settle()
+        assert stale.done()
+
+        supervisor.state = ServiceState.READY
+        supervisor.ready.set()
+        await app._readiness_task
+        assert connect.events == ["restore"]
+        await app.stop_extension()
+
+    with caplog.at_level(logging.WARNING, logger="t3-lifecycle-test"):
+        asyncio.run(scenario())
+    assert "did not start: starting" not in caplog.text

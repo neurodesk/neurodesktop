@@ -67,10 +67,13 @@ class NeurodeskT3CodeApp(ExtensionApp):
         if supervisor.state is not ServiceState.PARKED:
             return
         supervisor.start()
-        if self._readiness_task is None or self._readiness_task.done():
-            self._readiness_task = asyncio.create_task(
-                self._report_readiness(supervisor, connect)
-            )
+        # A previous watcher may already be woken by the park; it must not
+        # report on this new start.
+        if self._readiness_task is not None:
+            self._readiness_task.cancel()
+        self._readiness_task = asyncio.create_task(
+            self._report_readiness(supervisor, connect)
+        )
 
     async def _report_readiness(
         self, supervisor: T3Supervisor, connect: ConnectManager
