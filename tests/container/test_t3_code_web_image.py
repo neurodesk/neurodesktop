@@ -11,8 +11,8 @@ import websocket
 
 import pytest
 
-from test_rise_slides_image import _BidiSession, _unused_port, _wait_for_server, _stop
-from testlib import reload_browsing_context
+from test_rise_slides_image import _BidiSession, _wait_for_server, _stop
+from testlib import reload_browsing_context, reserved_tcp_ports
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -77,7 +77,12 @@ def wait_connected(bidi, context):
 
 @pytest.mark.parametrize("base,hub_xsrf", [("/", False), ("/user/t3-test/", False), ("/user/t3-test/", True)])
 def test_t3_web_in_jupyter(tmp_path: Path, base, hub_xsrf):
-    server_port, t3_port, browser_port = _unused_port(), _unused_port(), _unused_port()
+    with reserved_tcp_ports(3) as reservations:
+        _run_t3_web_in_jupyter(tmp_path, base, hub_xsrf, reservations)
+
+
+def _run_t3_web_in_jupyter(tmp_path, base, hub_xsrf, reservations):
+    server_port, t3_port, browser_port = [sock.getsockname()[1] for sock in reservations]
     origin = f"http://127.0.0.1:{server_port}"
     prefix = origin + base
     token = "t3-browser-test-jupyter"
@@ -112,6 +117,9 @@ async def hub_prepare(self, *args, **kwargs):
 T3ProxyHandler.prepare = hub_prepare
 """ if hub_xsrf else "")
     with log_path.open("w") as log, (tmp_path / "firefox.log").open("w") as browser_log:
+        # Jupyter starts its T3 child, so release their ports together.
+        reservations[0].close()
+        reservations[1].close()
         server = subprocess.Popen([
             "jupyter", "lab", "--no-browser", "--LabApp.expose_app_in_browser=True", f"--ServerApp.port={server_port}",
             "--ServerApp.port_retries=0", f"--ServerApp.base_url={base}",
@@ -119,10 +127,7 @@ T3ProxyHandler.prepare = hub_prepare
             f"--ServerApp.root_dir={tmp_path}", f"--FileContentsManager.preferred_dir={tmp_path}", f"--IdentityProvider.token={token}",
             '--ServerApp.jpserver_extensions={"jupyterlab":True,"neurodesk_t3_code":True}',
         ], env=environment, stdout=log, stderr=subprocess.STDOUT)
-        browser = subprocess.Popen([
-            "/usr/bin/firefox", "--headless", "--profile", str(profile),
-            f"--remote-debugging-port={browser_port}", "about:blank",
-        ], env=environment, stdout=browser_log, stderr=subprocess.STDOUT)
+        browser = None
         bidi = None
         try:
             _wait_for_server(prefix + "api/status?token=" + token, server, log_path)
@@ -130,10 +135,19 @@ T3ProxyHandler.prepare = hub_prepare
             while time.monotonic() < deadline:
                 with urllib.request.urlopen(prefix + "neurodesk-t3-status?token=" + token) as response:
                     state = json.load(response)
-                if state["state"] == "ready":
+                if state["state"] in {"ready", "parked"}:
                     break
                 time.sleep(.2)
-            assert state["state"] == "ready", state
+            assert state["state"] == "ready", (
+                f"T3 startup failed: {state}; ports: Jupyter={server_port}, "
+                f"T3={t3_port}, Firefox={browser_port}\n"
+                + log_path.read_text(errors="replace").replace(token, "<redacted>")
+            )
+            reservations[2].close()
+            browser = subprocess.Popen([
+                "/usr/bin/firefox", "--headless", "--profile", str(profile),
+                f"--remote-debugging-port={browser_port}", "about:blank",
+            ], env=environment, stdout=browser_log, stderr=subprocess.STDOUT)
             assert_jupyter_auth_required(prefix)
             bidi = _BidiSession(f"ws://127.0.0.1:{browser_port}/session", browser)
             bidi.request("session.new", {"capabilities": {}})
@@ -205,5 +219,6 @@ T3ProxyHandler.prepare = hub_prepare
         finally:
             if bidi:
                 bidi.close()
-            _stop(browser)
+            if browser is not None:
+                _stop(browser)
             _stop(server)
