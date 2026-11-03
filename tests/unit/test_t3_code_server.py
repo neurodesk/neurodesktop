@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import stat
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -709,10 +710,11 @@ def test_readiness_waits_for_http_after_tcp_listener_opens(tmp_path):
 # Answers only after SLOW_START seconds, and exits at once while FAIL_FLAG exists,
 # standing in for a T3 server that is slow or broken under load.
 SLOW_T3 = """#!/usr/bin/env python3
-import os, signal, socket, sys, time
+import os, signal, socket, subprocess, sys, time
 sys.exit(1) if os.path.exists(os.environ["FAIL_FLAG"]) else None
+helper = subprocess.Popen(["sleep", "60"])
 with open(os.environ["SPAWN_LOG"], "a") as log:
-    log.write(f"spawn {os.getpid()}\\n")
+    log.write(f"spawn {os.getpid()} {helper.pid}\\n")
 time.sleep(float(os.environ["SLOW_START"]))
 host = sys.argv[sys.argv.index("--host") + 1]
 port = int(sys.argv[sys.argv.index("--port") + 1])
@@ -768,8 +770,8 @@ def test_startup_timeout_lets_a_slow_server_finish_its_first_start(tmp_path, mon
     assert asyncio.run(start("0.3")) is supervisor.ServiceState.PARKED
     assert spawn_log.read_text().count("spawn") == 2
     for line in spawn_log.read_text().splitlines():
-        with pytest.raises(ProcessLookupError):
-            os.kill(int(line.split()[1]), 0)
+        for pid in line.split()[1:]:
+            _assert_exited(int(pid))
     spawn_log.unlink()
     assert asyncio.run(start("10")) is supervisor.ServiceState.READY
     assert spawn_log.read_text().count("spawn") == 1
@@ -872,20 +874,47 @@ def test_unusable_state_directory_parks_instead_of_hanging_waiters(tmp_path):
     asyncio.run(scenario())
 
 
-def test_unexpected_supervisor_failure_releases_waiters(tmp_path, monkeypatch):
-    supervisor = _supervisor_module()
-    policy = supervisor.policy_from_environment(_policy_environment(tmp_path), euid=os.geteuid())
+def test_unexpected_failure_parks_so_retry_recovers_after_repair(tmp_path, monkeypatch):
+    """A RecursionError from deeply nested settings must not need a Jupyter restart."""
+    supervisor, environment, _flag, _log = _slow_t3(
+        tmp_path, monkeypatch, slow_start=0, failing=False
+    )
+    policy = supervisor.policy_from_environment(environment, euid=os.geteuid())
+    prepare = supervisor.prepare_startup_settings
+    repaired = False
 
-    def broken(_policy):
-        raise RuntimeError("unexpected settings failure")
+    def settings(policy):
+        if not repaired:
+            raise RecursionError("maximum recursion depth exceeded")
+        prepare(policy)
 
-    monkeypatch.setattr(supervisor, "prepare_startup_settings", broken)
+    monkeypatch.setattr(supervisor, "prepare_startup_settings", settings)
 
     async def scenario():
+        nonlocal repaired
         service = supervisor.T3Supervisor(policy)
         service.start()
-        with pytest.raises(RuntimeError, match="did not start: stopped"):
+        with pytest.raises(RuntimeError, match="did not start: parked"):
             await service.wait_ready(timeout=5)
+        repaired = True
+        service.start()
+        await service.wait_ready(timeout=10)
+        assert service.state is supervisor.ServiceState.READY
         await service.close()
+        assert service.state is supervisor.ServiceState.STOPPED
 
     asyncio.run(scenario())
+
+
+def _assert_exited(pid):
+    """Probe a process that may be a reparented zombie awaiting reaping by init."""
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            with open(f"/proc/{pid}/stat", encoding="utf-8") as stat_file:
+                if stat_file.read().rsplit(")", 1)[1].split()[0] == "Z":
+                    return
+        except FileNotFoundError:
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"process {pid} is still running")

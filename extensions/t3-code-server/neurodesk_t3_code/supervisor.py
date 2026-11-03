@@ -454,6 +454,15 @@ class T3Supervisor:
                 "Retry SciGent from the launcher to start it again.",
                 failures,
             )
+        except Exception as error:
+            # Park rather than stop so Retry SciGent can recover once the cause
+            # (for example a user settings file) is repaired.
+            self.state = ServiceState.PARKED
+            self.log.warning(
+                "T3 Code supervision failed (%s); Jupyter remains available. "
+                "Retry SciGent from the launcher to start it again.",
+                type(error).__name__,
+            )
         finally:
             await self._terminate_process()
             await self._stop_output_reader()
@@ -470,12 +479,8 @@ class T3Supervisor:
             self.state = ServiceState.STOPPED
             return
         task.cancel()
-        try:
+        with suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
-        except Exception as error:
-            self.log.warning("T3 Code supervision failed: %s", type(error).__name__)
         self._task = None
         self.pid = None
         self.state = ServiceState.STOPPED

@@ -308,7 +308,8 @@ Jupyter stops. Each start attempt has
 `NEURODESKTOP_T3_CODE_STARTUP_TIMEOUT` seconds, 120 by default, to answer HTTP
 before the supervisor stops that attempt. It makes up to five attempts, waiting
 1, 2, 4 and 8 seconds between them, then parks the sidecar and leaves Jupyter
-available. A port conflict parks the sidecar at once. Readiness waiters,
+available. A port conflict or an unexpected supervisor error parks the sidecar
+at once, so **Retry SciGent** can recover it after the cause is repaired. Readiness waiters,
 including the T3 Connect restore, wait for the final outcome of the whole retry
 budget rather than one attempt. `POST /neurodesk-t3-retry` starts a parked
 sidecar again; it requires Jupyter authentication and XSRF protection.
