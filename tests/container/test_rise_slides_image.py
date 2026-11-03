@@ -16,10 +16,22 @@ import pytest
 import websocket
 
 
+def _unused_ports(count: int) -> tuple[int, ...]:
+    """Allocate a distinct batch of currently unused loopback ports."""
+    reservations = []
+    try:
+        for _ in range(count):
+            reservation = socket.socket()
+            reservations.append(reservation)
+            reservation.bind(("127.0.0.1", 0))
+        return tuple(reservation.getsockname()[1] for reservation in reservations)
+    finally:
+        for reservation in reservations:
+            reservation.close()
+
+
 def _unused_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+    return _unused_ports(1)[0]
 
 
 def _wait_for_server(

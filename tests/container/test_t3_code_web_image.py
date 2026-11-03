@@ -11,7 +11,7 @@ import websocket
 
 import pytest
 
-from test_rise_slides_image import _BidiSession, _unused_port, _wait_for_server, _stop
+from test_rise_slides_image import _BidiSession, _unused_ports, _wait_for_server, _stop
 from testlib import reload_browsing_context
 
 
@@ -77,7 +77,7 @@ def wait_connected(bidi, context):
 
 @pytest.mark.parametrize("base,hub_xsrf", [("/", False), ("/user/t3-test/", False), ("/user/t3-test/", True)])
 def test_t3_web_in_jupyter(tmp_path: Path, base, hub_xsrf):
-    server_port, t3_port, browser_port = _unused_port(), _unused_port(), _unused_port()
+    server_port, t3_port, browser_port = _unused_ports(3)
     origin = f"http://127.0.0.1:{server_port}"
     prefix = origin + base
     token = "t3-browser-test-jupyter"
