@@ -160,3 +160,90 @@ def test_sftp_sshd_obeys_startup_policy_for_restored_config(
     selected_config = ssh_dir / ("sshd_config.fallback" if use_fallback else "sshd_config")
     assert f"-f\n{selected_config}\n" in arguments.read_text()
     assert (ssh_dir / "sshd_config").read_text() == saved_config
+
+
+def test_sftp_sshd_retries_when_selected_port_is_claimed_before_bind(tmp_path):
+    """A shared-netns port race must not leave Guacamole without SFTP."""
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    hostkeys = ssh_dir / "hostkeys"
+    hostkeys.mkdir(parents=True)
+    (hostkeys / "ssh_host_ed25519_key").write_text("test key\n")
+    (hostkeys / "ssh_host_rsa_key").write_text("test key\n")
+    (ssh_dir / "sshd_config").write_text(
+        "Port 2222\nListenAddress 127.0.0.1\nPasswordAuthentication no\n"
+    )
+
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    startup_attempts = tmp_path / "startup-attempts"
+    started_port = tmp_path / "started-port"
+    arguments = tmp_path / "sshd-arguments"
+
+    fake_sshd = bin_dir / "sshd"
+    fake_sshd.write_text(
+        "#!/bin/bash\n"
+        'previous=""\n'
+        'for argument in "$@"; do\n'
+        '  if [ "$previous" = "-p" ]; then port=$argument; fi\n'
+        '  if [ "$previous" = "-o" ] && [[ "$argument" == PidFile=* ]]; then\n'
+        '    pid_file=${argument#PidFile=}\n'
+        "  fi\n"
+        '  previous=$argument\n'
+        "done\n"
+        'if [[ " $* " == *" -T "* ]]; then\n'
+        "  printf 'listenaddress 127.0.0.1:%s\\n' \"$port\"\n"
+        "  exit 0\n"
+        "fi\n"
+        'if [[ " $* " == *" -t "* ]]; then exit 0; fi\n'
+        'attempts=$(cat "$FAKE_STARTUP_ATTEMPTS" 2>/dev/null || printf 0)\n'
+        'printf "%s\\n" "$((attempts + 1))" > "$FAKE_STARTUP_ATTEMPTS"\n'
+        'if [ "$attempts" -eq 0 ]; then\n'
+        '  printf "Bind to port %s on 127.0.0.1 failed: Address already in use.\\n" "$port" >&2\n'
+        "  exit 98\n"
+        "fi\n"
+        'printf "%s\\n" "$@" > "$FAKE_SSHD_ARGUMENTS"\n'
+        'printf "4242\\n" > "$pid_file"\n'
+        'printf "%s\\n" "$port" > "$FAKE_STARTED_PORT"\n'
+    )
+    fake_sshd.chmod(0o755)
+
+    (bin_dir / "sudo").write_text("#!/bin/bash\nexit 1\n")
+    (bin_dir / "sudo").chmod(0o755)
+    (bin_dir / "ss").write_text(
+        "#!/bin/bash\n"
+        'if [ -s "$FAKE_STARTED_PORT" ]; then\n'
+        '  port=$(cat "$FAKE_STARTED_PORT")\n'
+        "  printf 'State Recv-Q Send-Q Local Address:Port Peer Address:Port\\n'\n"
+        "  printf 'LISTEN 0 128 127.0.0.1:%s 0.0.0.0:*\\n' \"$port\"\n"
+        "fi\n"
+    )
+    (bin_dir / "ss").chmod(0o755)
+
+    driver = tmp_path / "ensure_sftp_sshd.sh"
+    driver.write_text(
+        ENSURE_SFTP_SSHD.read_text().replace("/usr/sbin/sshd", str(fake_sshd))
+    )
+    driver.chmod(0o755)
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "NEURODESKTOP_RUNTIME_DIR": str(runtime),
+        "FAKE_STARTUP_ATTEMPTS": str(startup_attempts),
+        "FAKE_STARTED_PORT": str(started_port),
+        "FAKE_SSHD_ARGUMENTS": str(arguments),
+    }
+    env.pop("SFTP_SSH_PORT", None)
+    env.pop("NEURODESKTOP_DISABLE_SSH", None)
+
+    result = subprocess.run(
+        ["bash", str(driver)], env=env, capture_output=True, text=True, timeout=10
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert startup_attempts.read_text() == "2\n"
+    assert (runtime / "sftp_port").read_text() == "2223\n"
+    assert "-p\n2223\n" in arguments.read_text()

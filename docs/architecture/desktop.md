@@ -118,7 +118,10 @@ The SSH daemon used only for Guacamole's VNC SFTP side-channel listens on
 from included files. A saved configuration that allows another address uses a
 minimal loopback-only fallback without replacing the saved file. This prevents
 persisted configurations from exposing the service on a container or shared
-HPC network interface. Its PID file also stays in the user's mode-0700 SSH
+HPC network interface. On shared-network runtimes, an automatically selected
+port is retried when another session claims it between the availability probe
+and sshd's bind; a caller-specified port remains strict. Its PID file also stays
+in the user's mode-0700 SSH
 directory, so another UID on a shared host cannot replace the daemon's state
 path between startup checks and the daemon opening it. Startup checks the local
 listener rather than trusting a saved PID, which can be reused after a container

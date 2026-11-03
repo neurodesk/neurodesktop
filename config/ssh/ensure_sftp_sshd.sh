@@ -46,9 +46,16 @@ find_free_tcp_port_for_sftp() {
 }
 
 # Pick a unique SFTP/SSH port on shared Apptainer HPC nodes. 2222 may be taken
-# by another user's sibling container, so probe from 2222 upwards.
+# by another user's sibling container, so probe from 2222 upwards. Remember
+# whether the caller selected an exact port: automatic selections may retry a
+# bind race, but an explicit request must either use that port or fail.
+SFTP_SSH_PORT_EXPLICIT=1
 if [ -z "${SFTP_SSH_PORT:-}" ]; then
-    SFTP_SSH_PORT="$(find_free_tcp_port_for_sftp 2222 20 || true)"
+    SFTP_SSH_PORT_EXPLICIT=0
+    if ! SFTP_SSH_PORT="$(find_free_tcp_port_for_sftp 2222 20)"; then
+        echo "[WARN] No free SSH/SFTP port found from 2222 through 2241."
+        exit 1
+    fi
 fi
 export NEURODESKTOP_SFTP_PORT="${SFTP_SSH_PORT}"
 
@@ -193,7 +200,8 @@ start_sshd() {
     local ssh_config_to_use validation_log startup_log fallback_config
 
     if port_is_listening; then
-        return 0
+        warn "Port ${SFTP_SSH_PORT} became unavailable before sshd startup."
+        return 75
     fi
 
     # A persisted PID can belong to another host or a previous container.
@@ -274,12 +282,54 @@ start_sshd() {
         -o "PubkeyAuthentication=yes" >"${startup_log}" 2>&1; then
         warn "Failed to start sshd on port ${SFTP_SSH_PORT}."
         emit_sshd_log_preview "${startup_log}"
+        if grep -qi 'address already in use' "${startup_log}"; then
+            rm -f "${validation_log}" "${startup_log}" "${SFTP_SSH_PID_FILE}"
+            return 75
+        fi
         rm -f "${validation_log}" "${startup_log}"
         return 1
     fi
 
     rm -f "${validation_log}" "${startup_log}"
     return 0
+}
+
+start_sshd_with_port_retry() {
+    local attempt=1
+    local max_attempts=20
+    local next_port remaining_attempts selected_port startup_status
+
+    while [ "${attempt}" -le "${max_attempts}" ]; do
+        start_sshd
+        startup_status=$?
+        if [ "${startup_status}" -eq 0 ]; then
+            if port_is_listening; then
+                return 0
+            fi
+            warn "sshd returned success but nothing is listening on ${SFTP_SSH_PORT}."
+            return 1
+        fi
+
+        if [ "${startup_status}" -ne 75 ] || [ "${SFTP_SSH_PORT_EXPLICIT}" -eq 1 ]; then
+            return "${startup_status}"
+        fi
+
+        next_port=$((SFTP_SSH_PORT + 1))
+        remaining_attempts=$((max_attempts - attempt))
+        if [ "${remaining_attempts}" -le 0 ] \
+            || ! selected_port="$(find_free_tcp_port_for_sftp "${next_port}" "${remaining_attempts}")"; then
+            warn "Could not start sshd after ${attempt} automatic port attempts."
+            return 1
+        fi
+
+        warn "Retrying SSH/SFTP startup on port ${selected_port}."
+        SFTP_SSH_PORT="${selected_port}"
+        export NEURODESKTOP_SFTP_PORT="${SFTP_SSH_PORT}"
+        SFTP_SSH_PID_FILE="${SSH_DIR}/sshd_${SFTP_SSH_PORT}.pid"
+        attempt=$((attempt + 1))
+    done
+
+    return 1
 }
 
 main() {
@@ -301,14 +351,10 @@ main() {
     fi
     ensure_host_keys
     ensure_authorized_sftp_key || true
-    if ! start_sshd; then
-        return 1
-    fi
-    # Confirm the port really is listening before advertising it to
-    # guacamole.sh. start_sshd can exit 0 yet still lose the race against
-    # another process that just bound the same port.
-    if ! port_is_listening; then
-        warn "sshd returned success but nothing is listening on ${SFTP_SSH_PORT}."
+    # Port probes cannot reserve a socket. On a shared Apptainer network,
+    # another session can bind the selected port before sshd does. Retry an
+    # automatically selected port and publish only a confirmed listener.
+    if ! start_sshd_with_port_retry; then
         return 1
     fi
     printf '%s\n' "${SFTP_SSH_PORT}" \
