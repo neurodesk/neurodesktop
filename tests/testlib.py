@@ -10,6 +10,9 @@ Both tiers resolve their subject through the helpers here so that no test has to
 know which layout it is running in.
 """
 
+from contextlib import ExitStack, contextmanager
+import socket
+
 import importlib.util
 import os
 import subprocess
@@ -125,3 +128,15 @@ def run_cmd(cmd, cwd=None, env=None, timeout=None):
         timeout=timeout,
     )
     return process.returncode, process.stdout.strip()
+
+
+@contextmanager
+def reserved_tcp_ports(count):
+    """Hold distinct loopback ports until callers close them or the scope exits."""
+    with ExitStack() as stack:
+        reservations = []
+        for _ in range(count):
+            sock = stack.enter_context(socket.socket())
+            sock.bind(("127.0.0.1", 0))
+            reservations.append(sock)
+        yield reservations

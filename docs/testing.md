@@ -660,6 +660,14 @@ the remote providers. Then rerun `t3_neurodesk_setup --check`.
 
 ### T3 Code server
 
+The T3 browser acceptance test reserves distinct loopback ports for Jupyter,
+T3, and Firefox together. It releases the Jupyter/T3 pair immediately before
+starting Jupyter, which owns T3 startup, and starts Firefox only after T3 is
+ready. This prevents the test's own port selections from colliding, while an
+unrelated process could still take a port during handoff. A parked T3 service
+fails immediately with the selected ports and the test Jupyter log, with its
+synthetic authentication token redacted.
+
 The web unit tests require `jupyter-server-proxy` and Node.js. CI installs the
 local T3 extension to supply the proxy dependency. They cover the URL-prefix
 adapter, upstream drift, credential stripping, and fetch/WebSocket behavior.
