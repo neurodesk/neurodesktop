@@ -1148,23 +1148,23 @@ def test_vnc_backends_bind_localhost_only(sftp_config, monkeypatch):
     """VNC and its SFTP side-channel must be reachable only on loopback."""
     monkeypatch.setenv("NEURODESKTOP_DISABLE_SSH", "false")
     nb_user, home_dir, _, guacamole_home = _prepare_guacamole_runtime()
-    if sftp_config != "default":
-        ssh_dir = Path(home_dir) / ".ssh"
-        config = Path("/opt/jovyan_defaults/.ssh/sshd_config").read_text()
-        config = config.replace("/home/jovyan", home_dir)
-        if sftp_config == "legacy-session":
-            config = config.replace("DisableForwarding yes", "DisableForwarding no")
-            config = config.replace("ForceCommand internal-sftp", "ForceCommand /bin/sh")
-            config = config.replace("PermitTTY no", "PermitTTY yes")
-            config = config.replace("X11Forwarding no", "X11Forwarding yes")
-        else:
-            unsafe_listeners = "ListenAddress 0.0.0.0\nListenAddress ::\n"
-            if sftp_config == "include":
-                included_config = ssh_dir / "listeners.conf"
-                included_config.write_text(unsafe_listeners)
-                unsafe_listeners = f'Include "{included_config}"\n'
-            config = config.replace("ListenAddress 127.0.0.1\n", unsafe_listeners)
-        (ssh_dir / "sshd_config").write_text(config)
+    ssh_dir = Path(home_dir) / ".ssh"
+    config = Path("/opt/jovyan_defaults/.ssh/sshd_config").read_text()
+    config = config.replace("/home/jovyan", home_dir)
+    config = f'AuthorizedKeysFile "{ssh_dir / "authorized_keys"}"\n' + config
+    if sftp_config == "legacy-session":
+        config = config.replace("DisableForwarding yes", "DisableForwarding no")
+        config = config.replace("ForceCommand internal-sftp", "ForceCommand /bin/sh")
+        config = config.replace("PermitTTY no", "PermitTTY yes")
+        config = config.replace("X11Forwarding no", "X11Forwarding yes")
+    elif sftp_config != "default":
+        unsafe_listeners = "ListenAddress 0.0.0.0\nListenAddress ::\n"
+        if sftp_config == "include":
+            included_config = ssh_dir / "listeners.conf"
+            included_config.write_text(unsafe_listeners)
+            unsafe_listeners = f'Include "{included_config}"\n'
+        config = config.replace("ListenAddress 127.0.0.1\n", unsafe_listeners)
+    (ssh_dir / "sshd_config").write_text(config)
     process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home, backend="vnc")
     try:
         _guacamole_ready(process.tomcat_port, home_dir=home_dir, process=process)
