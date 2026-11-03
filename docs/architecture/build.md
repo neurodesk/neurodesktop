@@ -23,6 +23,12 @@ candidates for a specific run and attempt, test and scan them, and then promote
 the same candidates to release tags. Native runtime checks cover both image
 architectures. A date tag never substitutes for building the run's source SHA.
 
+Image scan jobs install Trivy 0.70.0 directly from its GitHub release using
+[the shared installer](../../.github/scripts/install_trivy.sh). The installer
+selects the native architecture, retries downloads, and verifies the release
+checksum before installing. Scan and SBOM actions reuse that binary rather
+than downloading it through `get.trivy.dev`.
+
 The shared [Trivy policy](../../.trivyignore.yaml) records individual scan
 exceptions. [Issues #1142](https://github.com/neurodesk/neurodesktop/issues/1142)
 and [#1152](https://github.com/neurodesk/neurodesktop/issues/1152) identified

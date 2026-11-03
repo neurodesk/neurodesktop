@@ -52,9 +52,12 @@ jobs:
             VCS_REF=${{ github.sha }}
             NEURODESKTOP_VERSION=pr-${{ github.event.pull_request.number || github.run_id }}
           cache-from: type=registry,ref=ghcr.io/neurodesk/neurodesktop:latest
+      - name: Install pinned Trivy from GitHub releases
+        run: bash .github/scripts/install_trivy.sh
       - name: Scan local candidate
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          skip-setup-trivy: true
           image-ref: ${{ env.IMAGE_REF }}
           format: table
           exit-code: "1"
