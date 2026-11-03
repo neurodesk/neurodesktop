@@ -788,6 +788,13 @@ routes return 404, mode `0600` after the rename, signal forwarding, early exit,
 cleanup of code-server when the launcher is killed, and an orphan from a
 timed-out launch shutting down while the next launch starts.
 
+The desktop tunnel test acts as a Guacamole protocol client: it acknowledges
+`sync` instructions and sends `nop` keepalives while waiting for pixels.
+The combined-backend SSH-disabled case observes the rendered session for
+20 seconds, beyond guacd's 15-second client-input timeout. Error frames and
+premature disconnects fail even after pixels arrive. Failure reports include
+the expected VNC port instead of the credential-bearing connection XML.
+
 Desktop smoke tests keep Guacamole, Tomcat, VNC, and credential state in
 temporary per-test homes by default. VNC tunnel cases cover fresh and legacy
 homes without the XDG config parent, an absolute override, and an ignored
