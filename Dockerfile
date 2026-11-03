@@ -701,6 +701,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     osfclient \
     watermark \
     ipyniivue==${IPYNIIVUE_VERSION} \
+    jupyterlab-niivue==0.2.7 \
     jupyter-server-proxy==4.6.0 \
     jupyterlmod \
     jupyterlab-git \
@@ -1172,15 +1173,17 @@ RUN --mount=type=bind,source=config/lightcone,target=/tmp/lightcone-adapter,ro \
     && PATH=/opt/uv/tools/lightcone-cli/bin:${PATH} dask --version \
     && rm -rf /tmp/lightcone-cli-src /tmp/lightcone-cli.tar.gz
 
-# Neurodesk's FreeBrowse fork supplies the authenticated document viewer.
+# Neurodesk's FreeBrowse fork supplies the optional authenticated document viewer.
 # Build both the serverless app and federated extension from the same source.
 ARG FREEBROWSE_REF="5f64059c81b7b9eb01ca6a0d261aeb17d27053d2"
-RUN retry git clone https://github.com/neurodesk/freebrowse.git /tmp/freebrowse \
+RUN --mount=type=bind,source=config/jupyter/configure_freebrowse_defaults.py,target=/tmp/configure_freebrowse_defaults.py,ro \
+    retry git clone https://github.com/neurodesk/freebrowse.git /tmp/freebrowse \
     && git -C /tmp/freebrowse checkout --detach "${FREEBROWSE_REF}" \
     && test "$(git -C /tmp/freebrowse rev-parse HEAD)" = "${FREEBROWSE_REF}" \
     && cd /tmp/freebrowse/frontend \
     && npm_config_cache=/tmp/freebrowse-npm-cache retry npm ci --no-audit --no-fund \
     && npm run build:jupyter \
+    && /opt/conda/bin/python /tmp/configure_freebrowse_defaults.py /tmp/freebrowse/jupyter/src/index.ts \
     && cd /tmp/freebrowse/jupyter \
     && YARN_ENABLE_IMMUTABLE_INSTALLS=0 retry /opt/conda/bin/jlpm install \
     && /opt/conda/bin/jlpm build:lib \

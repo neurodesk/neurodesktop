@@ -82,6 +82,7 @@ CATALOG = (
     CatalogEntry("arg:ASTRA_TOOLS_VERSION", "pypi:astra-tools", "pypi"),
     CatalogEntry("arg:ANYWIDGET_VERSION", "pypi:anywidget", "pypi"),
     CatalogEntry("arg:IPYNIIVUE_VERSION", "pypi:ipyniivue", "pypi"),
+    CatalogEntry("requirement:pypi:jupyterlab-niivue", "pypi:jupyterlab-niivue", "pypi"),
     CatalogEntry("arg:SNAKEMAKE_VERSION", "pypi:snakemake", "pypi"),
     CatalogEntry("arg:PYJWT_VERSION", "pypi:PyJWT", "pypi"),
     CatalogEntry("arg:BROTLI_VERSION", "pypi:brotli", "pypi"),

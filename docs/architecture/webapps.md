@@ -105,9 +105,11 @@ it tracking `origin/main` so the runtime Update launcher can use
 
 The image builds [Neurodesk's FreeBrowse fork](https://github.com/neurodesk/freebrowse/tree/main/jupyter)
 from the commit pinned by `FREEBROWSE_REF` in the Dockerfile. Double-clicking
-`.nii`, `.nii.gz`, or `.nvd` files opens FreeBrowse in a JupyterLab document tab.
+`.nii` or `.nii.gz` files opens Korbinian Eckstein's NiiVue viewer
+(`jupyterlab-niivue`). FreeBrowse remains available through **Open With**;
+`.nvd` documents still open in FreeBrowse by default.
 The file browser also offers **Open in FreeBrowse** in its context menu.
-FreeBrowse replaces `jupyterlab-niivue` as the default document viewer;
+The build limits FreeBrowse's default registration to `.nvd` documents;
 `ipyniivue` remains available in notebooks.
 
 The serverless frontend is built with upstream's `build:jupyter` target and
