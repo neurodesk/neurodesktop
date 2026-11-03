@@ -171,9 +171,12 @@ ChallengeResponseAuthentication no
 UsePAM no
 PermitRootLogin no
 X11Forwarding no
+DisableForwarding yes
+PermitTTY no
 StrictModes no
 PidFile ${SFTP_SSH_PID_FILE}
 Subsystem sftp internal-sftp
+ForceCommand internal-sftp
 EOF
 }
 
@@ -250,6 +253,10 @@ start_sshd() {
     #                    wrote ourselves; no weaker security posture.
     # ListenAddress supplies the loopback default for legacy configurations.
     # The effective-address check above excludes additional saved listeners.
+    # This daemon exists only for Guacamole file transfer. Persisted home
+    # configs predate that boundary, so enforce it on the command line too:
+    # internal-sftp denies shell/command execution, DisableForwarding covers
+    # TCP, stream-local, agent and X11 forwarding, and no client needs a TTY.
     if ! "${sshd_prefix[@]}" /usr/sbin/sshd \
         -f "${ssh_config_to_use}" \
         -p "${SFTP_SSH_PORT}" \
@@ -259,6 +266,9 @@ start_sshd() {
         -o "UsePAM=no" \
         -o "StrictModes=no" \
         -o "ListenAddress=127.0.0.1" \
+        -o "DisableForwarding=yes" \
+        -o "ForceCommand=internal-sftp" \
+        -o "PermitTTY=no" \
         -o "KbdInteractiveAuthentication=no" \
         -o "PasswordAuthentication=no" \
         -o "PubkeyAuthentication=yes" >"${startup_log}" 2>&1; then

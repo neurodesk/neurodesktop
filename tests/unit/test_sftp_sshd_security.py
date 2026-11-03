@@ -53,6 +53,7 @@ def test_sftp_sshd_obeys_startup_policy_for_restored_config(
     # Existing home configs are deliberately preserved by the startup script.
     saved_config = (
         "Port 2222\nPasswordAuthentication no\nKbdInteractiveAuthentication no\n"
+        "DisableForwarding no\nForceCommand /bin/sh\nPermitTTY yes\n"
         + saved_listeners
     )
     (ssh_dir / "sshd_config").write_text(saved_config)
@@ -81,6 +82,9 @@ def test_sftp_sshd_obeys_startup_policy_for_restored_config(
         "if [[ \" $* \" == *\" -t \"* ]]; then exit 0; fi\n"
         'printf "%s\\n" "$@" > "$FAKE_SSHD_ARGUMENTS"\n'
         'if [[ \" $* \" != *\" -o ListenAddress=127.0.0.1 \"* ]]; then exit 64; fi\n'
+        'if [[ \" $* \" != *\" -o DisableForwarding=yes \"* ]]; then exit 65; fi\n'
+        'if [[ \" $* \" != *\" -o ForceCommand=internal-sftp \"* ]]; then exit 66; fi\n'
+        'if [[ \" $* \" != *\" -o PermitTTY=no \"* ]]; then exit 67; fi\n'
         'previous=""\n'
         'for argument in "$@"; do\n'
         '  if [ "$previous" = "-o" ] && [[ "$argument" == PidFile=* ]]; then\n'
@@ -150,6 +154,9 @@ def test_sftp_sshd_obeys_startup_policy_for_restored_config(
     assert (ssh_dir / "sshd_2222.pid").read_text() == "4242\n"
     assert ssh_dir.stat().st_mode & 0o777 == 0o700
     assert "ListenAddress=127.0.0.1\n" in arguments.read_text()
+    assert "DisableForwarding=yes\n" in arguments.read_text()
+    assert "ForceCommand=internal-sftp\n" in arguments.read_text()
+    assert "PermitTTY=no\n" in arguments.read_text()
     selected_config = ssh_dir / ("sshd_config.fallback" if use_fallback else "sshd_config")
     assert f"-f\n{selected_config}\n" in arguments.read_text()
     assert (ssh_dir / "sshd_config").read_text() == saved_config
