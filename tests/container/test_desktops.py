@@ -501,7 +501,7 @@ def _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30, stable_seconds
             # Give the backend a moment to flush a few more frames so the test
             # can demonstrate a stable session (not just a single flash before
             # disconnect).
-            deadline = min(deadline, time.time() + stable_seconds)
+            deadline = time.time() + stable_seconds
 
     if not saw_pixels:
         raise AssertionError(
