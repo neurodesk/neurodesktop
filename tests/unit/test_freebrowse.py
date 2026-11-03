@@ -23,6 +23,8 @@ def copied_integration(root):
     package = root / "jupyterlab_freebrowse"
     package.mkdir()
     shutil.copy(FIXTURES / "index.ts", root / "src/index.ts")
+    subprocess.run([sys.executable, str(repo_path("config/jupyter/configure_freebrowse_defaults.py")),
+                    str(root / "src/index.ts")], check=True)
     shutil.copy(FIXTURES / "package.json", root / "package.json")
     shutil.copy(FIXTURES / "handlers.py", package / "handlers.py")
 
@@ -97,7 +99,7 @@ for (const base of ['/', '/user/alice/', 'https://mgh.neurodesk.org/user/stebo85
     contextMenu: { addItem: item => menus.push(item) },
     docRegistry: { addFileType: type => types.push(type), addWidgetFactory: f => factories.push(f) }
   }, { tracker: { currentWidget: { selectedItems: function* () { if (selected) yield selected; } } } });
-  assert.deepEqual(Array.from(factories[0].options.defaultFor), ['nifti', 'nifti-gz', 'nvd']);
+  assert.deepEqual(Array.from(factories[0].options.defaultFor), ['nvd']);
   assert.equal(factories[0].options.name, 'FreeBrowse');
   assert.equal(menus[0].command, 'freebrowse:open');
   const command = commands.get('freebrowse:open');
@@ -333,9 +335,10 @@ def test_static_route_rejects_traversal(viewer_http):
     assert "private outside file" not in response.text
 
 
-def test_image_build_replaces_niivue_with_both_freebrowse_bundles():
+def test_image_build_installs_niivue_and_both_freebrowse_bundles():
     dockerfile = repo_path("Dockerfile").read_text()
-    assert "jupyterlab-niivue==" not in dockerfile
+    assert "jupyterlab-niivue==0.2.7" in dockerfile
+    assert "python /tmp/configure_freebrowse_defaults.py /tmp/freebrowse/jupyter/src/index.ts" in dockerfile
     ref = (FIXTURES / "REF").read_text().strip()
     assert f'ARG FREEBROWSE_REF="{ref}"' in dockerfile
     assert "https://github.com/neurodesk/freebrowse.git" in dockerfile

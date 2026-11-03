@@ -1,4 +1,4 @@
-"""Open a local NIfTI through the installed default FreeBrowse factory."""
+"""Check NiiVue defaults and open a local NIfTI with optional FreeBrowse."""
 
 import base64
 import io
@@ -25,8 +25,9 @@ from test_widget_compatibility_image import (
     reason="Run the graphics acceptance profile to provision a display",
 )
 @pytest.mark.parametrize("base_path", ["/", "/user/alice/"])
+@pytest.mark.parametrize("viewer", ["default", "FreeBrowse"])
 # Pytest registers the imported fixture and injects its value by parameter name.
-def test_default_freebrowse_opens_and_renders_local_volume(tmp_path, graphics_display, base_path):  # noqa: F811
+def test_document_viewers_open_and_render_local_volume(tmp_path, graphics_display, base_path, viewer):  # noqa: F811
     filename = "brain # & ü.nii.gz"
     volume = np.random.default_rng(0).normal(size=(48, 48, 48)).astype("float32")
     nib.save(nib.Nifti1Image(volume, np.eye(4)), tmp_path / filename)
@@ -58,7 +59,7 @@ def test_default_freebrowse_opens_and_renders_local_volume(tmp_path, graphics_di
             bidi.evaluate(context, "window.jupyterapp.started.then(() => true)")
             factory = bidi.evaluate(context,
                 f"window.jupyterapp.docRegistry.defaultWidgetFactory({json.dumps(filename)}).name")
-            assert factory == "FreeBrowse"
+            assert factory == "Niivue Viewer"
             file_node = ("[...document.querySelectorAll('.jp-DirListing-itemText')]"
                          f".find(node => node.textContent === {json.dumps(filename)})")
             _wait_for_expression(bidi, context, f"Boolean({file_node})", log_paths=logs)
@@ -71,28 +72,35 @@ def test_default_freebrowse_opens_and_renders_local_volume(tmp_path, graphics_di
                 "window.open = function(...args) { window.__opened.push(args[0]); return open.apply(this, args); }; return true; })()")
             original_tabs = {tab["context"] for tab in
                              bidi.request("browsingContext.getTree", {})["contexts"]}
-            point = json.loads(bidi.evaluate(context,
-                f"JSON.stringify((() => {{const r = ({file_node}).getBoundingClientRect();"
-                "return {x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2)};})())"))
-            bidi.request("input.performActions", {"context": context, "actions": [{
-                "type": "pointer", "id": "mouse", "parameters": {"pointerType": "mouse"},
-                "actions": [
-                    {"type": "pointerMove", "duration": 0, "origin": "viewport", **point},
-                    {"type": "pointerDown", "button": 0}, {"type": "pointerUp", "button": 0},
-                    {"type": "pause", "duration": 80},
-                    {"type": "pointerDown", "button": 0}, {"type": "pointerUp", "button": 0},
-                ],
-            }]})
-            frame = "document.querySelector('iframe[title=\"FreeBrowse\"]')"
+            if viewer == "default":
+                point = json.loads(bidi.evaluate(context,
+                    f"JSON.stringify((() => {{const r = ({file_node}).getBoundingClientRect();"
+                    "return {x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2)};})())"))
+                bidi.request("input.performActions", {"context": context, "actions": [{
+                    "type": "pointer", "id": "mouse", "parameters": {"pointerType": "mouse"},
+                    "actions": [
+                        {"type": "pointerMove", "duration": 0, "origin": "viewport", **point},
+                        {"type": "pointerDown", "button": 0}, {"type": "pointerUp", "button": 0},
+                        {"type": "pause", "duration": 80},
+                        {"type": "pointerDown", "button": 0}, {"type": "pointerUp", "button": 0},
+                    ],
+                }]})
+            else:
+                bidi.evaluate(context,
+                    "window.jupyterapp.commands.execute('docmanager:open', "
+                    + json.dumps({"path": filename, "factory": viewer}) + ").then(() => true)")
+            frame = ("document.querySelector('iframe[title=\"FreeBrowse\"]')" if viewer == "FreeBrowse"
+                     else "document.querySelector('.jp-NiivueWidget iframe')")
             _wait_for_expression(bidi, context, f"Boolean({frame})", log_paths=logs)
             contexts = bidi.request("browsingContext.getTree", {})["contexts"]
-            assert {tab["context"] for tab in contexts} == original_tabs, "FreeBrowse opened an external browser tab"
+            assert {tab["context"] for tab in contexts} == original_tabs, "Viewer opened an external browser tab"
             assert bidi.evaluate(context, "window.__opened.length") == 0
-            viewer_url = bidi.evaluate(context, f"{frame}.src")
-            query = parse_qs(urlsplit(viewer_url).query)
-            assert query["vol"][0].startswith(f"blob:{origin}/")
-            assert query["filename"] == [filename]
-            assert token not in viewer_url
+            if viewer == "FreeBrowse":
+                viewer_url = bidi.evaluate(context, f"{frame}.src")
+                query = parse_qs(urlsplit(viewer_url).query)
+                assert query["vol"][0].startswith(f"blob:{origin}/")
+                assert query["filename"] == [filename]
+                assert token not in viewer_url
             canvas = f"{frame}?.contentDocument?.querySelector('canvas')"
             _wait_for_expression(bidi, context, f"Boolean({canvas})", log_paths=logs)
             rectangle = json.loads(bidi.evaluate(context,
@@ -110,10 +118,11 @@ def test_default_freebrowse_opens_and_renders_local_volume(tmp_path, graphics_di
                 if grays.size > red.size // 10 and np.unique(grays).size > 50:
                     (tmp_path / "freebrowse-volume.png").write_bytes(png)
                     break
-                assert time.monotonic() < deadline, "FreeBrowse did not render the local image"
+                assert time.monotonic() < deadline, f"{viewer} did not render the local image"
                 time.sleep(0.2)
-            _wait_for_expression(bidi, context,
-                f"{frame}.contentDocument.body.innerText.includes({json.dumps(filename)})", log_paths=logs)
+            if viewer == "FreeBrowse":
+                _wait_for_expression(bidi, context,
+                    f"{frame}.contentDocument.body.innerText.includes({json.dumps(filename)})", log_paths=logs)
             _click_dom_element(bidi, context,
                 "document.querySelector('.lm-TabBar-tab.lm-mod-current .lm-TabBar-tabCloseIcon')")
             _wait_for_expression(bidi, context, f"!({frame})", log_paths=logs)
