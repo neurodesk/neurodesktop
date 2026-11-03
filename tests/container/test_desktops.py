@@ -21,6 +21,7 @@ import pytest
 import websocket
 from native_desktop_driver import start_display
 from rdp_keyboard_target import RdpKeyboardTarget
+from testlib import GuacamoleInstructions, guacamole_instruction
 
 
 def run_cmd(cmd):
@@ -448,7 +449,7 @@ def _open_guacamole_tunnel(port, token, data_source, connection_id, width=1280, 
     return tunnel
 
 
-def _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30):
+def _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30, stable_seconds=3):
     """Wait for real desktop pixels and reject any Guacamole error frames.
 
     Guacamole sends a .sync instruction as a handshake ack before the backend
@@ -466,34 +467,41 @@ def _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30):
     deadline = time.time() + timeout_seconds
     frames = []
     saw_pixels = False
+    parser = GuacamoleInstructions()
+    next_keepalive = 0.0
 
     while time.time() < deadline:
+        if time.monotonic() >= next_keepalive:
+            tunnel.send("3.nop;")
+            next_keepalive = time.monotonic() + 2
         try:
             frame = tunnel.recv()
         except websocket.WebSocketTimeoutException:
-            if saw_pixels:
-                # Backend rendered at least once; idle frames are fine.
-                return frames
             continue
         except Exception as error:  # pragma: no cover - unexpected tunnel death
-            frames.append(f"<tunnel recv failed: {error}>")
-            break
+            raise AssertionError("Guacamole tunnel closed before observation finished") from error
 
         frames.append(frame)
+        if not frame:
+            raise AssertionError("Guacamole tunnel closed before observation finished")
         if not isinstance(frame, str):
             continue
+        instructions = parser.feed(frame)
+        for instruction in instructions:
+            if instruction[0] == "sync":
+                tunnel.send(guacamole_instruction(*instruction))
 
-        if ".error," in frame:
+        if any(instruction[0] == "error" for instruction in instructions):
             raise AssertionError(
                 f"Guacamole tunnel returned an error frame: {frame!r}\n"
                 f"All frames: {frames}"
             )
-        if any(op in frame for op in (".img,", ".png,", ".jpeg,")):
+        if not saw_pixels and any(instruction[0] in {"img", "png", "jpeg"} for instruction in instructions):
             saw_pixels = True
             # Give the backend a moment to flush a few more frames so the test
             # can demonstrate a stable session (not just a single flash before
             # disconnect).
-            deadline = min(deadline, time.time() + 3)
+            deadline = time.time() + stable_seconds
 
     if not saw_pixels:
         raise AssertionError(
@@ -1381,7 +1389,10 @@ def test_guac_vnc_tunnel(scenario, monkeypatch):
             vnc_connection_id,
         )
         try:
-            _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30)
+            _collect_guacamole_desktop_frames(
+                tunnel, timeout_seconds=45,
+                stable_seconds=20 if scenario == "ssh-disabled-both" else 3,
+            )
         except AssertionError as exc:
             # Pull the Guacamole log so we can see whether the failure was an
             # auth rejection, a connection refused, or something downstream.
@@ -1393,16 +1404,10 @@ def test_guac_vnc_tunnel(scenario, monkeypatch):
             _, vnc_tail = run_cmd(
                 f"ls -t {shlex.quote(vnc_logs)}/*:*.log 2>/dev/null | head -n1 | xargs -I {{}} tail -n 80 {{}}"
             )
-            vnc_block = "(mapping had no vnc connection)"
-            # Find the <connection> block that contains <protocol>vnc</protocol>.
-            for m in re.finditer(r'<connection[^>]*>[\s\S]*?</connection>', mapping_text):
-                if "<protocol>vnc</protocol>" in m.group(0):
-                    vnc_block = m.group(0)
-                    break
             raise AssertionError(
                 f"{exc}\n--- catalina.out tail ---\n{extra}\n"
                 f"--- latest Xvnc log ---\n{vnc_tail}\n"
-                f"--- mapping VNC entry ---\n{vnc_block}"
+                f"--- expected VNC port ---\n{mapping_vnc_port}"
             ) from exc
     finally:
         if tunnel is not None:

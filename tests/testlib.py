@@ -140,3 +140,34 @@ def reserved_tcp_ports(count):
             sock.bind(("127.0.0.1", 0))
             reservations.append(sock)
         yield reservations
+
+
+class GuacamoleInstructions:
+    """Decode length-prefixed instructions across WebSocket message boundaries."""
+
+    def __init__(self):
+        self.buffer = ""
+        self.elements = []
+
+    def feed(self, text):
+        self.buffer += text
+        instructions = []
+        while "." in self.buffer:
+            dot = self.buffer.index(".")
+            length = int(self.buffer[:dot])
+            end = dot + 1 + length
+            if len(self.buffer) <= end:
+                break
+            separator = self.buffer[end]
+            if separator not in ",;":
+                raise ValueError("Invalid Guacamole element separator")
+            self.elements.append(self.buffer[dot + 1:end])
+            self.buffer = self.buffer[end + 1:]
+            if separator == ";":
+                instructions.append(self.elements)
+                self.elements = []
+        return instructions
+
+
+def guacamole_instruction(*elements):
+    return ",".join(f"{len(element)}.{element}" for element in elements) + ";"
