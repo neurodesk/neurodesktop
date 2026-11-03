@@ -36,6 +36,13 @@ These twelve exceptions match only the assessed Ubuntu package and versions,
 on either architecture, and expire on 2026-11-20 for reassessment. Other
 package versions, kernel packages, and CVEs remain subject to the scan gate.
 
+An additional exception covers
+[CVE-2026-98432](https://ubuntu.com/security/CVE-2026-98432), an IPv4 TCP
+use-after-free in the running kernel. Inspection of `linux-libc-dev` 7.0.0-42.42
+confirmed that its files are headers and documentation. Its exception matches
+only that version and expires on 2026-11-20; it does not exempt host kernels
+or other package versions.
+
 ## Base image dependencies
 
 The base image uses Ubuntu 26.04. Guacamole builds against FreeRDP 3 and ships
