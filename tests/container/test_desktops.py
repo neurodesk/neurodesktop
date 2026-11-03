@@ -1143,7 +1143,7 @@ def test_guac_login_rejects_legacy_default_password():
         _cleanup_guacamole_process(process, home_dir=home_dir, guacamole_home=guacamole_home)
 
 
-@pytest.mark.parametrize("sftp_config", ["default", "wildcard", "include"])
+@pytest.mark.parametrize("sftp_config", ["default", "legacy-session", "wildcard", "include"])
 def test_vnc_backends_bind_localhost_only(sftp_config, monkeypatch):
     """VNC and its SFTP side-channel must be reachable only on loopback."""
     monkeypatch.setenv("NEURODESKTOP_DISABLE_SSH", "false")
@@ -1152,12 +1152,18 @@ def test_vnc_backends_bind_localhost_only(sftp_config, monkeypatch):
         ssh_dir = Path(home_dir) / ".ssh"
         config = Path("/opt/jovyan_defaults/.ssh/sshd_config").read_text()
         config = config.replace("/home/jovyan", home_dir)
-        unsafe_listeners = "ListenAddress 0.0.0.0\nListenAddress ::\n"
-        if sftp_config == "include":
-            included_config = ssh_dir / "listeners.conf"
-            included_config.write_text(unsafe_listeners)
-            unsafe_listeners = f'Include "{included_config}"\n'
-        config = config.replace("ListenAddress 127.0.0.1\n", unsafe_listeners)
+        if sftp_config == "legacy-session":
+            config = config.replace("DisableForwarding yes", "DisableForwarding no")
+            config = config.replace("ForceCommand internal-sftp", "ForceCommand /bin/sh")
+            config = config.replace("PermitTTY no", "PermitTTY yes")
+            config = config.replace("X11Forwarding no", "X11Forwarding yes")
+        else:
+            unsafe_listeners = "ListenAddress 0.0.0.0\nListenAddress ::\n"
+            if sftp_config == "include":
+                included_config = ssh_dir / "listeners.conf"
+                included_config.write_text(unsafe_listeners)
+                unsafe_listeners = f'Include "{included_config}"\n'
+            config = config.replace("ListenAddress 127.0.0.1\n", unsafe_listeners)
         (ssh_dir / "sshd_config").write_text(config)
     process = _start_guacamole_as_user(nb_user, home_dir, guacamole_home, backend="vnc")
     try:
@@ -1201,21 +1207,33 @@ def test_vnc_backends_bind_localhost_only(sftp_config, monkeypatch):
         assert listen_addresses == [f"127.0.0.1:{sftp_port}"], \
             f"SFTP sshd must bind IPv4 loopback only; listen addresses were {listen_addresses}"
 
-        if sftp_config != "default":
-            source = Path(home_dir) / "sftp-probe.txt"
-            downloaded = Path(home_dir) / "sftp-downloaded.txt"
-            source.write_text("Guacamole SFTP loopback probe\n")
-            transfer = subprocess.run(
-                ["sftp", "-b", "-", "-P", str(sftp_port),
-                 "-i", str(Path(home_dir) / ".ssh/guacamole_rsa"),
-                 "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
-                 "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
-                 f"{nb_user}@127.0.0.1"],
-                input=f'get "{source}" "{downloaded}"\n',
-                capture_output=True, text=True, timeout=30,
-            )
-            assert transfer.returncode == 0, transfer.stdout + transfer.stderr
-            assert downloaded.read_text() == "Guacamole SFTP loopback probe\n"
+        source = Path(home_dir) / "sftp-probe.txt"
+        downloaded = Path(home_dir) / "sftp-downloaded.txt"
+        identity = str(Path(home_dir) / ".ssh/guacamole_rsa")
+        connection_options = [
+            "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
+            "-o", "IdentityAgent=none", "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+        ]
+        source.write_text("Guacamole SFTP loopback probe\n")
+        transfer = subprocess.run(
+            ["sftp", "-b", "-", "-P", str(sftp_port), "-i", identity,
+             *connection_options, f"{nb_user}@127.0.0.1"],
+            input=f'get "{source}" "{downloaded}"\n',
+            capture_output=True, text=True, timeout=30,
+        )
+        assert transfer.returncode == 0, transfer.stdout + transfer.stderr
+        assert downloaded.read_text() == "Guacamole SFTP loopback probe\n"
+
+        # The same key is deliberately sufficient for Guacamole file transfer,
+        # but it must not provide an interactive or command-execution channel.
+        shell = subprocess.run(
+            ["ssh", "-T", "-p", str(sftp_port), "-i", identity,
+             *connection_options, f"{nb_user}@127.0.0.1", "printf", "shell-open"],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert shell.returncode != 0, shell.stdout + shell.stderr
+        assert "shell-open" not in shell.stdout
     finally:
         _cleanup_guacamole_process(process, home_dir=home_dir, guacamole_home=guacamole_home)
 

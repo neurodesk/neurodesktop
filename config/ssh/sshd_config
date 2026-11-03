@@ -88,13 +88,13 @@ KbdInteractiveAuthentication no
 # and KbdInteractiveAuthentication to 'no'.
 UsePAM yes
 
-#AllowAgentForwarding yes
-#AllowTcpForwarding yes
+# This daemon is only the Guacamole SFTP side-channel.
+DisableForwarding yes
 #GatewayPorts no
-X11Forwarding yes
+X11Forwarding no
 #X11DisplayOffset 10
 #X11UseLocalhost yes
-#PermitTTY yes
+PermitTTY no
 PrintMotd no
 #PrintLastLog yes
 #TCPKeepAlive yes
@@ -118,14 +118,10 @@ AcceptEnv LANG LC_*
 
 # override default of no subsystems
 Subsystem	sftp	/usr/lib/openssh/sftp-server
+ForceCommand internal-sftp
 
 # Example of overriding settings on a per-user basis
 #Match User anoncvs
-X11Forwarding yes
-#	X11Forwarding no
-#	AllowTcpForwarding no
-#	PermitTTY no
-#	ForceCommand cvs server
 
 # Enable RSA support for Apache Guacamole
 # HostbasedAcceptedKeyTypes +ssh-rsa

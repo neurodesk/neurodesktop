@@ -122,7 +122,11 @@ HPC network interface. Its PID file also stays in the user's mode-0700 SSH
 directory, so another UID on a shared host cannot replace the daemon's state
 path between startup checks and the daemon opening it. Startup checks the local
 listener rather than trusting a saved PID, which can be reused after a container
-restart or belong to another host sharing the home directory.
+restart or belong to another host sharing the home directory. Startup also
+forces every authenticated session through OpenSSH's in-process SFTP server and
+disables TCP, Unix-socket, agent, and X11 forwarding plus TTY allocation. These
+command-line restrictions apply even when an older home directory restores a
+configuration that previously allowed an interactive shell or forwarding.
 
 Set `NEURODESKTOP_DISABLE_SSH=true` before startup to disable that daemon and
 the separate `jupyter-sshd-proxy` endpoint. Guacamole startup removes stale SFTP

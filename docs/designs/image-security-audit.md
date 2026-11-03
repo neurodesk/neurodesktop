@@ -15,7 +15,7 @@ See [Architecture](../architecture.md), [runtime variables](../environment-varia
 and [testing](../testing.md) for the current operational contracts.
 
 Follow-up changes address findings 1, 2, 4, the default sudo policy in 5, and
-the Tomcat listener portion of finding 6.
+the Tomcat listener plus SSH command/forwarding portions of finding 6.
 See [desktop security](../architecture/desktop.md#credentials-and-service-access)
 and [startup privileges](../environment-variables.md#startup-privileges) for the
 implemented behavior. The findings below retain the original audit snapshot.

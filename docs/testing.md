@@ -608,7 +608,7 @@ non-obvious tiers protect.
 | Sherlock launcher (`scripts/connectSherlock.sh`) | `pytest tests/unit/test_connect_sherlock.py` | — |
 | Neurocommand container-store layout | `pytest tests/unit/test_container_storage_link.py` | `pytest /opt/tests/test_neurocommand_storage_image.py` |
 | Guacamole/Tomcat listener confinement | `pytest tests/unit/test_configure_tomcat.py tests/unit/test_desktop_launcher_modes.py` | `pytest /opt/tests/test_desktops.py -k guac_api_connections` |
-| SSH startup opt-out | `pytest tests/unit/test_sftp_sshd_security.py tests/unit/test_ssh_proxy_policy.py tests/unit/test_connect_sherlock.py` | `pytest /opt/tests/test_ssh_proxy_policy.py /opt/tests/test_desktops.py -k 'ssh_proxy or ssh-disabled or vnc_backends_bind_localhost_only'` |
+| SSH/SFTP confinement and startup opt-out | `pytest tests/unit/test_sftp_sshd_security.py tests/unit/test_ssh_proxy_policy.py tests/unit/test_connect_sherlock.py` | `pytest /opt/tests/test_ssh_proxy_policy.py /opt/tests/test_desktops.py -k 'ssh_proxy or ssh-disabled or vnc_backends_bind_localhost_only'` |
 | T3 Code server, web UI, lifecycle, and packaging | `pytest tests/unit/test_t3_code_server.py tests/unit/test_t3_startup_settings.py tests/unit/test_t3_code_web.py` | `pytest /opt/tests/test_t3_code_server_image.py /opt/tests/test_t3_code_web_image.py` |
 | Tailscale binary packaging | `pytest tests/unit/test_tailscale_packaging.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_tailscale_image.py` |
 | Guided T3/Tailscale setup | `pytest tests/unit/test_t3_neurodesk_setup.py tests/unit/test_t3_code_server.py` | `pytest /opt/tests/test_tailscale_image.py /opt/tests/test_t3_code_server_image.py` |
