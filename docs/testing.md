@@ -799,7 +799,10 @@ SSH proxy tests load the shipped Jupyter configuration and verify that the
 `sshd` route and its host-key generation disappear only when
 `NEURODESKTOP_DISABLE_SSH=true`.
 The VNC tunnel cases require saved settings to survive TigerVNC's migration
-and actual desktop frames to arrive over the authenticated tunnel.
+and actual desktop frames to arrive over the authenticated tunnel. Their test
+client acknowledges Guacamole `sync` instructions while it waits for pixels,
+matching the browser protocol and preventing guacd's client timeout from being
+mistaken for a desktop failure during slower combined-backend startup.
 Tests that need to start the global xrdp service are skipped unless
 `NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1` is set. The build scripts and
 GitHub Actions set this only for disposable test containers; do not set it in a

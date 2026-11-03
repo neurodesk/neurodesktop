@@ -451,10 +451,11 @@ def _open_guacamole_tunnel(port, token, data_source, connection_id, width=1280, 
 def _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30):
     """Wait for real desktop pixels and reject any Guacamole error frames.
 
-    Guacamole sends a .sync instruction as a handshake ack before the backend
-    (Xvnc) has even accepted the connection. The previous collector returned
-    success as soon as it saw that .sync, so an auth failure that arrived 200ms
-    later was never detected. This collector requires:
+    Guacamole sends a .sync instruction before the backend (Xvnc) has even
+    accepted the connection. The client must echo each sync timestamp or guacd
+    terminates the tunnel with CLIENT_TIMEOUT. The previous collector returned
+    success as soon as it saw the first .sync, so an auth failure that arrived
+    200ms later was never detected. This collector requires:
 
       * at least one .img, frame (actual pixel data from the backend), OR
         one .png, / .jpeg, frame (alternative pixel encodings), AND
@@ -488,6 +489,18 @@ def _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30):
                 f"Guacamole tunnel returned an error frame: {frame!r}\n"
                 f"All frames: {frames}"
             )
+
+        # A Guacamole client acknowledges every sync instruction by echoing the
+        # timestamp. Frames can contain several semicolon-delimited instructions,
+        # so acknowledge each well-formed sync rather than assuming one frame is
+        # one instruction. Without this, slower desktop starts hit guacd's client
+        # timeout (0x0308) even after VNC authentication succeeds.
+        for match in re.finditer(r"(?:^|;)4\.sync,(\d+)\.([0-9]+);", frame):
+            timestamp_length = int(match.group(1))
+            timestamp = match.group(2)
+            if len(timestamp) == timestamp_length:
+                tunnel.send(f"4.sync,{timestamp_length}.{timestamp};")
+
         if any(op in frame for op in (".img,", ".png,", ".jpeg,")):
             saw_pixels = True
             # Give the backend a moment to flush a few more frames so the test
