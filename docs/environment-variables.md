@@ -241,6 +241,9 @@ T3 starts automatically with Jupyter as the notebook user.
   Public Hub URLs take precedence over the remembered authenticated request
   hostname. Outside JupyterHub, T3 keeps its normal hostname fallback. An
   explicit `/etc/machine-info` pretty hostname remains T3's first choice.
+- `NEURODESKTOP_T3_CODE_STARTUP_TIMEOUT`: seconds each start attempt may take
+  before T3 answers HTTP; defaults to `120`. Accepts values above `0` up to
+  `3600`. Raise it on hosts where heavy user activity slows the first start.
 - `NEURODESKTOP_T3_CODE_HOME`: persistent T3 data directory; defaults to
   `~/.t3`
 - `NEURODESKTOP_T3_CODE_WORKDIR`: initial project directory; defaults to the

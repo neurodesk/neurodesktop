@@ -10,6 +10,26 @@ import { codeIcon } from '@jupyterlab/ui-components';
 import { Widget } from '@lumino/widgets';
 import { createConnectPanel } from './t3Connect';
 
+/** Restart only the parked SciGent process group after the supervisor's retries ran out. */
+async function offerRetry(settings: ServerConnection.ISettings): Promise<void> {
+  const choice = await showDialog({
+    title: 'scigent.ai',
+    body: 'SciGent did not start after several attempts. Retry SciGent restarts only SciGent; ' +
+      'your Jupyter kernels and terminals keep running.',
+    buttons: [Dialog.cancelButton(), Dialog.okButton({ label: 'Retry SciGent' })]
+  });
+  if (!choice.button.accept) return;
+  const response = await ServerConnection.makeRequest(
+    URLExt.join(settings.baseUrl, 'neurodesk-t3-retry'), { method: 'POST' }, settings
+  );
+  if (!response.ok) throw new Error('Could not restart SciGent. Check the Jupyter server log.');
+  await showDialog({
+    title: 'scigent.ai',
+    body: 'SciGent is restarting. Reopen scigent.ai from the launcher in a minute or two.',
+    buttons: [Dialog.okButton()]
+  });
+}
+
 const plugin: JupyterFrontEndPlugin<void> = {
   id: 'neurodesk-launcher:t3-code',
   autoStart: true,
@@ -41,8 +61,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
           );
           if (!response.ok) throw new Error('The scigent.ai server extension is unavailable.');
           const status = await response.json();
+          if (status.state === 'parked') {
+            await offerRetry(settings);
+            return;
+          }
           if (status.state !== 'ready') {
-            throw new Error('scigent.ai is not ready. Wait a moment and reopen it. If this persists, check the Jupyter server log.');
+            throw new Error('scigent.ai is still starting. Wait a moment and reopen it.');
           }
           const session = await ServerConnection.makeRequest(
             URLExt.join(settings.baseUrl, 'neurodesk-t3', '_session'),

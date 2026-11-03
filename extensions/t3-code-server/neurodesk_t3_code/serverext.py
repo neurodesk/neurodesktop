@@ -9,9 +9,14 @@ import os
 from jupyter_server.extension.application import ExtensionApp
 
 from .connect import ConnectManager, T3ConnectHandler
-from .web import T3ProxyHandler, T3SessionHandler, T3StatusHandler
+from .web import T3ProxyHandler, T3RetryHandler, T3SessionHandler, T3StatusHandler
 
-from .supervisor import ConfigError, T3Supervisor, policy_from_environment
+from .supervisor import (
+    ConfigError,
+    ServiceState,
+    T3Supervisor,
+    policy_from_environment,
+)
 
 
 class NeurodeskT3CodeApp(ExtensionApp):
@@ -30,6 +35,7 @@ class NeurodeskT3CodeApp(ExtensionApp):
         self.handlers.extend(
             [
                 (r"/neurodesk-t3-status", T3StatusHandler, {"t3_app": self}),
+                (r"/neurodesk-t3-retry", T3RetryHandler, {"t3_app": self}),
                 (r"/neurodesk-t3/_session", T3SessionHandler, {"t3_app": self}),
                 (r"/neurodesk-t3/_connect", T3ConnectHandler, {"t3_app": self}),
                 (r"/neurodesk-t3/(.*)", T3ProxyHandler, {"t3_app": self}),
@@ -48,6 +54,23 @@ class NeurodeskT3CodeApp(ExtensionApp):
         connect = ConnectManager(supervisor)
         self._supervisor = supervisor
         self._connect = connect
+        self._readiness_task = asyncio.create_task(
+            self._report_readiness(supervisor, connect)
+        )
+
+    def retry(self) -> None:
+        """Start a parked sidecar again without touching Jupyter's own processes."""
+
+        supervisor, connect = self._supervisor, self._connect
+        if supervisor is None or connect is None:
+            return
+        if supervisor.state is not ServiceState.PARKED:
+            return
+        supervisor.start()
+        # A previous watcher may already be woken by the park; it must not
+        # report on this new start.
+        if self._readiness_task is not None:
+            self._readiness_task.cancel()
         self._readiness_task = asyncio.create_task(
             self._report_readiness(supervisor, connect)
         )

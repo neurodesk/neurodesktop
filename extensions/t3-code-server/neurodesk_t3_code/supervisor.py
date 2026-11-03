@@ -25,6 +25,8 @@ from collections.abc import Mapping
 DEFAULT_EXECUTABLE = Path("/opt/t3-code/t3")
 DEFAULT_PROVIDER_BIN = Path("/opt/neurodesktop/t3-provider-bin")
 DEFAULT_PORT = 3773
+DEFAULT_STARTUP_TIMEOUT = 120.0
+MAX_STARTUP_TIMEOUT = 3600.0
 
 
 def relay_tunnel_limit(output: bytes) -> int | None:
@@ -49,6 +51,7 @@ class Policy:
     port: int
     executable: Path
     provider_bin: Path
+    startup_timeout: float
 
     @property
     def readiness_host(self) -> str:
@@ -119,6 +122,21 @@ def policy_from_environment(
         environ.get("NEURODESKTOP_T3_CODE_PROVIDER_BIN", str(DEFAULT_PROVIDER_BIN)),
         "NEURODESKTOP_T3_CODE_PROVIDER_BIN",
     )
+
+    try:
+        startup_timeout = float(
+            environ.get(
+                "NEURODESKTOP_T3_CODE_STARTUP_TIMEOUT", str(DEFAULT_STARTUP_TIMEOUT)
+            )
+        )
+    except ValueError as error:
+        raise ConfigError(
+            "NEURODESKTOP_T3_CODE_STARTUP_TIMEOUT must be a number of seconds"
+        ) from error
+    if not 0 < startup_timeout <= MAX_STARTUP_TIMEOUT:
+        raise ConfigError(
+            "NEURODESKTOP_T3_CODE_STARTUP_TIMEOUT must be between 0 and 3600 seconds"
+        )
     return Policy(
         home=home,
         base_dir=base_dir.resolve(),
@@ -127,6 +145,7 @@ def policy_from_environment(
         port=port,
         executable=executable.resolve(),
         provider_bin=provider_bin,
+        startup_timeout=startup_timeout,
     )
 
 
@@ -312,13 +331,11 @@ class T3Supervisor:
         *,
         environ: Mapping[str, str] | None = None,
         logger: logging.Logger | None = None,
-        readiness_timeout: float = 20.0,
         restart_limit: int = 5,
     ) -> None:
         self.policy = policy
         self.environ = dict(os.environ if environ is None else environ)
         self.log = logger or logging.getLogger(__name__)
-        self.readiness_timeout = readiness_timeout
         self.restart_limit = restart_limit
         self.state = ServiceState.STOPPED
         self.pid: int | None = None
@@ -347,20 +364,21 @@ class T3Supervisor:
             self._output_reader = None
 
     def start(self) -> None:
-        """Start ownership once; repeated calls keep the existing task."""
+        """Start ownership once; repeated calls keep the existing task.
+
+        Calling this after the sidecar parks starts a fresh restart budget.
+        """
 
         if self._task is not None and not self._task.done():
             return
         self._ready.clear()
+        self.state = ServiceState.STARTING
         self._task = asyncio.create_task(self.run(), name="neurodesk-t3-code")
 
     async def wait_ready(self, *, timeout: float | None = None) -> None:
-        """Wait until T3 answers HTTP requests or startup parks."""
+        """Wait until T3 answers HTTP requests or the restart budget parks it."""
 
-        await asyncio.wait_for(
-            self._ready.wait(),
-            timeout=self.readiness_timeout if timeout is None else timeout,
-        )
+        await asyncio.wait_for(self._ready.wait(), timeout=timeout)
         if self.state is not ServiceState.READY:
             raise RuntimeError(f"T3 Code did not start: {self.state.value}")
 
@@ -368,10 +386,12 @@ class T3Supervisor:
         """Start, monitor, and restart the child within a bounded budget."""
 
         failures = 0
+        # Publish PARKED only after cleanup: Retry starts a new task only once
+        # this one has finished.
+        parked = False
         try:
             if await self._port_accepting():
-                self.state = ServiceState.PARKED
-                self._ready.set()
+                parked = True
                 self.log.warning(
                     "T3 Code could not start because %s:%s is in use.",
                     self.policy.host,
@@ -381,8 +401,8 @@ class T3Supervisor:
 
             while failures < self.restart_limit:
                 self.state = ServiceState.STARTING
-                self.policy.base_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
                 try:
+                    self.policy.base_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
                     prepare_startup_settings(self.policy)
                     self.connect_tunnel_limit = None
                     self._process = await asyncio.create_subprocess_exec(
@@ -420,6 +440,7 @@ class T3Supervisor:
                         self.pid,
                     )
                     await self._process.wait()
+                    self._ready.clear()
                 await self._stop_output_reader()
                 failures += 1
                 self.pid = None
@@ -428,17 +449,27 @@ class T3Supervisor:
                     self.state = ServiceState.BACKING_OFF
                     await asyncio.sleep(min(2 ** (failures - 1), 8))
 
-            self.state = ServiceState.PARKED
-            self._ready.set()
+            parked = True
             self.log.warning(
-                "T3 Code stopped after %s failed starts; Jupyter remains available.",
+                "T3 Code stopped after %s failed starts; Jupyter remains available. "
+                "Retry SciGent from the launcher to start it again.",
                 failures,
+            )
+        except Exception as error:
+            # Park rather than stop so Retry SciGent can recover once the cause
+            # (for example a user settings file) is repaired.
+            parked = True
+            self.log.warning(
+                "T3 Code supervision failed (%s); Jupyter remains available. "
+                "Retry SciGent from the launcher to start it again.",
+                type(error).__name__,
             )
         finally:
             await self._terminate_process()
             await self._stop_output_reader()
-            if self.state is not ServiceState.PARKED:
-                self.state = ServiceState.STOPPED
+            self.state = ServiceState.PARKED if parked else ServiceState.STOPPED
+            # wait_ready() has no default deadline, so every exit must release it.
+            self._ready.set()
 
     async def close(self) -> None:
         """Cancel supervision and stop the complete T3 process group."""
@@ -456,13 +487,17 @@ class T3Supervisor:
 
     async def _wait_for_listener(self) -> bool:
         """Wait for HTTP readiness within the startup deadline, terminating on timeout."""
-        deadline = asyncio.get_running_loop().time() + self.readiness_timeout
+        deadline = asyncio.get_running_loop().time() + self.policy.startup_timeout
         while asyncio.get_running_loop().time() < deadline:
             if self._process is None or self._process.returncode is not None:
                 return False
             if await self._http_responding():
                 return True
             await asyncio.sleep(0.1)
+        self.log.warning(
+            "T3 Code did not answer within %s seconds; stopping this attempt.",
+            self.policy.startup_timeout,
+        )
         await self._terminate_process()
         return False
 

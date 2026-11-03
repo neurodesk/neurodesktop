@@ -176,6 +176,21 @@ class T3StatusHandler(APIHandler):
         })
 
 
+class T3RetryHandler(APIHandler):
+    """Restart only a parked T3 process group; kernels and terminals are untouched."""
+
+    def initialize(self, t3_app):
+        self.t3_app = t3_app
+
+    @web.authenticated
+    def post(self):
+        self.set_header("Cache-Control", "no-store")
+        if self.t3_app._supervisor is None:
+            raise web.HTTPError(503, reason="T3 Code is not configured.")
+        self.t3_app.retry()
+        self.finish({"state": self.t3_app._supervisor.state.value})
+
+
 class T3ProxyHandler(ProxyHandler):
     def initialize(self, t3_app):
         self.t3_app = t3_app

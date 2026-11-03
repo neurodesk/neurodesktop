@@ -82,6 +82,32 @@ def test_restore_checks_reachability_without_reauthorizing(manager):
     run(scenario())
 
 
+def test_restore_rechecks_after_a_retried_sidecar_but_never_interrupts_a_task(manager):
+    """Retry SciGent restores again; the first startup's finished check must not block it."""
+    async def scenario():
+        manager.saved_status = AsyncMock(return_value={'desired': True, 'authenticated': True})
+        manager._wait_reachable = AsyncMock()
+        await manager.restore()
+        await manager.task
+        await manager.restore()
+        await manager.task
+        assert manager._wait_reachable.await_count == 2
+
+        release = asyncio.Event()
+        async def blocked():
+            await release.wait()
+        manager._wait_reachable = AsyncMock(side_effect=blocked)
+        await manager.restore()
+        active = manager.task
+        await asyncio.sleep(0)
+        await manager.restore()
+        assert manager.task is active, 'an active check is left alone'
+        release.set()
+        await active
+        manager._wait_reachable.assert_awaited_once()
+    run(scenario())
+
+
 def test_busy_actions_and_cancellation(manager):
     async def scenario():
         stopped = asyncio.Event()

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import os
 from pathlib import Path
 import re
 import stat
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -58,6 +60,42 @@ def test_automatic_policy_is_user_owned_and_has_safe_defaults(tmp_path, retired_
     assert policy.port == 3773
     assert policy.base_dir == tmp_path / ".t3"
     assert policy.workdir == tmp_path
+    assert policy.startup_timeout == 120
+
+
+@pytest.mark.parametrize("raw,expected", [("45", 45), ("2.5", 2.5), ("3600", 3600)])
+def test_startup_timeout_is_configurable(tmp_path, raw, expected):
+    supervisor = _supervisor_module()
+    policy = supervisor.policy_from_environment(
+        {**_policy_environment(tmp_path), "NEURODESKTOP_T3_CODE_STARTUP_TIMEOUT": raw},
+        euid=os.geteuid(),
+    )
+    assert policy.startup_timeout == expected
+
+
+@pytest.mark.parametrize("raw", ["", "soon", "0", "-5", "3601", "nan", "inf"])
+def test_unusable_startup_timeout_is_rejected(tmp_path, raw):
+    supervisor = _supervisor_module()
+    with pytest.raises(supervisor.ConfigError, match="STARTUP_TIMEOUT"):
+        supervisor.policy_from_environment(
+            {**_policy_environment(tmp_path), "NEURODESKTOP_T3_CODE_STARTUP_TIMEOUT": raw},
+            euid=os.geteuid(),
+        )
+
+
+def _policy_environment(tmp_path, executable=None):
+    if executable is None:
+        executable = tmp_path / "t3"
+        executable.write_text("#!/bin/sh\n", encoding="utf-8")
+        executable.chmod(0o755)
+    provider_bin = tmp_path / "providers"
+    provider_bin.mkdir(exist_ok=True)
+    return {
+        "HOME": str(tmp_path),
+        "NEURODESKTOP_T3_CODE_PORT": str(_supervisor_module().find_free_port()),
+        "NEURODESKTOP_T3_CODE_EXECUTABLE": str(executable),
+        "NEURODESKTOP_T3_CODE_PROVIDER_BIN": str(provider_bin),
+    }
 
 
 def test_policy_rejects_root_and_foreign_home(tmp_path):
@@ -214,7 +252,7 @@ def test_spawn_failure_parks_sidecar_without_escaping_into_jupyter(tmp_path):
 
     async def scenario():
         service = supervisor.T3Supervisor(
-            policy, readiness_timeout=0.2, restart_limit=1
+            dataclasses.replace(policy, startup_timeout=0.2), restart_limit=1
         )
         service.start()
         with pytest.raises(RuntimeError, match="parked"):
@@ -648,9 +686,9 @@ def test_readiness_waits_for_http_after_tcp_listener_opens(tmp_path):
 
         server = await asyncio.start_server(handle, '127.0.0.1', 0)
         async with server:
-            policy = SimpleNamespace(readiness_host='127.0.0.1',
+            policy = SimpleNamespace(readiness_host='127.0.0.1', startup_timeout=3,
                                      port=server.sockets[0].getsockname()[1])
-            service = supervisor.T3Supervisor(policy, readiness_timeout=3)
+            service = supervisor.T3Supervisor(policy)
             service._process = SimpleNamespace(returncode=None)
             pending = asyncio.create_task(service._wait_for_listener())
             try:
@@ -665,5 +703,249 @@ def test_readiness_waits_for_http_after_tcp_listener_opens(tmp_path):
             finally:
                 pending.cancel()
                 await asyncio.gather(pending, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+# Answers only after SLOW_START seconds, and exits at once while FAIL_FLAG exists,
+# standing in for a T3 server that is slow or broken under load.
+SLOW_T3 = """#!/usr/bin/env python3
+import os, signal, socket, subprocess, sys, time
+sys.exit(1) if os.path.exists(os.environ["FAIL_FLAG"]) else None
+helper = subprocess.Popen(["sleep", "60"])
+with open(os.environ["SPAWN_LOG"], "a") as log:
+    log.write(f"spawn {os.getpid()} {helper.pid}\\n")
+time.sleep(float(os.environ["SLOW_START"]))
+host = sys.argv[sys.argv.index("--host") + 1]
+port = int(sys.argv[sys.argv.index("--port") + 1])
+sock = socket.socket()
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.bind((host, port))
+sock.listen()
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+while True:
+    client, _ = sock.accept()
+    with client:
+        if client.recv(4096):
+            client.sendall(b"HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\n\\r\\n{}")
+"""
+
+
+def _slow_t3(tmp_path, monkeypatch, *, slow_start, failing):
+    supervisor = _supervisor_module()
+    executable = tmp_path / "slow-t3"
+    executable.write_text(SLOW_T3, encoding="utf-8")
+    executable.chmod(0o755)
+    fail_flag, spawn_log = tmp_path / "fail", tmp_path / "spawns"
+    if failing:
+        fail_flag.touch()
+    monkeypatch.setenv("FAIL_FLAG", str(fail_flag))
+    monkeypatch.setenv("SPAWN_LOG", str(spawn_log))
+    monkeypatch.setenv("SLOW_START", str(slow_start))
+    environment = _policy_environment(tmp_path, executable)
+    return supervisor, environment, fail_flag, spawn_log
+
+
+def test_startup_timeout_lets_a_slow_server_finish_its_first_start(tmp_path, monkeypatch):
+    """A loaded host can take longer than the old fixed 20 second deadline."""
+    supervisor, environment, _flag, spawn_log = _slow_t3(
+        tmp_path, monkeypatch, slow_start=1.0, failing=False
+    )
+
+    async def start(timeout):
+        policy = supervisor.policy_from_environment(
+            {**environment, "NEURODESKTOP_T3_CODE_STARTUP_TIMEOUT": timeout},
+            euid=os.geteuid(),
+        )
+        service = supervisor.T3Supervisor(policy, restart_limit=2)
+        service.start()
+        try:
+            await service.wait_ready(timeout=15)
+            return service.state
+        except RuntimeError:
+            return service.state
+        finally:
+            await service.close()
+
+    assert asyncio.run(start("0.3")) is supervisor.ServiceState.PARKED
+    assert spawn_log.read_text().count("spawn") == 2
+    for line in spawn_log.read_text().splitlines():
+        for pid in line.split()[1:]:
+            _assert_exited(int(pid))
+    spawn_log.unlink()
+    assert asyncio.run(start("10")) is supervisor.ServiceState.READY
+    assert spawn_log.read_text().count("spawn") == 1
+
+
+def test_waiting_covers_every_retry_rather_than_one_startup_timeout(tmp_path, monkeypatch):
+    """Readiness waiters must see the final outcome after backoff, not give up early."""
+    supervisor, environment, fail_flag, _log = _slow_t3(
+        tmp_path, monkeypatch, slow_start=0, failing=True
+    )
+    policy = supervisor.policy_from_environment(
+        {**environment, "NEURODESKTOP_T3_CODE_STARTUP_TIMEOUT": "0.5"}, euid=os.geteuid()
+    )
+
+    async def scenario():
+        service = supervisor.T3Supervisor(policy, restart_limit=3)
+        service.start()
+        # Backoff of 1 s and 2 s already exceeds the 0.5 s startup timeout.
+        asyncio.get_running_loop().call_later(2.0, fail_flag.unlink)
+        await service.wait_ready()
+        assert service.state is supervisor.ServiceState.READY
+        await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_parked_sidecar_restarts_without_touching_other_processes(tmp_path, monkeypatch):
+    """Retry SciGent starts a fresh budget and leaves a kernel-like sibling running."""
+    import subprocess
+
+    supervisor, environment, fail_flag, _log = _slow_t3(
+        tmp_path, monkeypatch, slow_start=0, failing=True
+    )
+    policy = supervisor.policy_from_environment(environment, euid=os.geteuid())
+    kernel = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+
+    async def scenario():
+        service = supervisor.T3Supervisor(policy, restart_limit=1)
+        service.start()
+        with pytest.raises(RuntimeError, match="parked"):
+            await service.wait_ready(timeout=5)
+        fail_flag.unlink()
+        service.start()
+        assert service.state is supervisor.ServiceState.STARTING
+        await service.wait_ready(timeout=10)
+        assert service.state is supervisor.ServiceState.READY
+        service_pid = service.pid
+        await service.close()
+        return service_pid
+
+    try:
+        service_pid = asyncio.run(scenario())
+        assert service_pid != kernel.pid
+        assert kernel.poll() is None, "restarting SciGent must not stop kernels"
+    finally:
+        kernel.kill()
+        kernel.wait()
+
+
+def test_waiters_follow_a_restart_after_a_ready_server_exits(tmp_path, monkeypatch):
+    import signal
+
+    supervisor, environment, _flag, _log = _slow_t3(
+        tmp_path, monkeypatch, slow_start=0, failing=False
+    )
+    policy = supervisor.policy_from_environment(environment, euid=os.geteuid())
+
+    async def scenario():
+        service = supervisor.T3Supervisor(policy, restart_limit=3)
+        service.start()
+        await service.wait_ready(timeout=5)
+        first = service.pid
+        os.killpg(first, signal.SIGKILL)
+        while service.state is supervisor.ServiceState.READY:
+            await asyncio.sleep(0.01)
+        await service.wait_ready(timeout=10)
+        assert service.state is supervisor.ServiceState.READY
+        assert service.pid != first
+        await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_unusable_state_directory_parks_instead_of_hanging_waiters(tmp_path):
+    supervisor = _supervisor_module()
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("", encoding="utf-8")
+    policy = supervisor.policy_from_environment(
+        {**_policy_environment(tmp_path), "NEURODESKTOP_T3_CODE_HOME": str(blocker / ".t3")},
+        euid=os.geteuid(),
+    )
+
+    async def scenario():
+        service = supervisor.T3Supervisor(policy, restart_limit=1)
+        service.start()
+        with pytest.raises(RuntimeError, match="parked"):
+            await service.wait_ready(timeout=5)
+        await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_unexpected_failure_parks_so_retry_recovers_after_repair(tmp_path, monkeypatch):
+    """A RecursionError from deeply nested settings must not need a Jupyter restart."""
+    supervisor, environment, _flag, _log = _slow_t3(
+        tmp_path, monkeypatch, slow_start=0, failing=False
+    )
+    policy = supervisor.policy_from_environment(environment, euid=os.geteuid())
+    prepare = supervisor.prepare_startup_settings
+    repaired = False
+
+    def settings(policy):
+        if not repaired:
+            raise RecursionError("maximum recursion depth exceeded")
+        prepare(policy)
+
+    monkeypatch.setattr(supervisor, "prepare_startup_settings", settings)
+
+    async def scenario():
+        nonlocal repaired
+        service = supervisor.T3Supervisor(policy)
+        service.start()
+        with pytest.raises(RuntimeError, match="did not start: parked"):
+            await service.wait_ready(timeout=5)
+        repaired = True
+        service.start()
+        await service.wait_ready(timeout=10)
+        assert service.state is supervisor.ServiceState.READY
+        await service.close()
+        assert service.state is supervisor.ServiceState.STOPPED
+
+    asyncio.run(scenario())
+
+
+def _assert_exited(pid):
+    """Probe a process that may be a reparented zombie awaiting reaping by init."""
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            with open(f"/proc/{pid}/stat", encoding="utf-8") as stat_file:
+                if stat_file.read().rsplit(")", 1)[1].split()[0] == "Z":
+                    return
+        except FileNotFoundError:
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"process {pid} is still running")
+
+
+def test_retry_at_the_first_parked_instant_really_restarts(tmp_path, monkeypatch):
+    """PARKED must not be visible while the failed task is still cleaning up."""
+    supervisor, environment, _flag, _log = _slow_t3(
+        tmp_path, monkeypatch, slow_start=0, failing=False
+    )
+    policy = supervisor.policy_from_environment(environment, euid=os.geteuid())
+
+    async def scenario():
+        service = supervisor.T3Supervisor(policy)
+        listener = service._wait_for_listener
+
+        async def fail_with_child_running():
+            await asyncio.sleep(0.3)
+            raise RuntimeError("unexpected supervision failure")
+
+        service._wait_for_listener = fail_with_child_running
+        service.start()
+        while service.state is not supervisor.ServiceState.PARKED:
+            await asyncio.sleep(0)
+        failed_task = service._task
+        service._wait_for_listener = listener
+        service.start()
+        assert service._task is not failed_task, "Retry must start a new supervision task"
+        assert service.state is supervisor.ServiceState.STARTING
+        await service.wait_ready(timeout=10)
+        assert service.state is supervisor.ServiceState.READY
+        await service.close()
 
     asyncio.run(scenario())
