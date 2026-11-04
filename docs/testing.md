@@ -1426,5 +1426,5 @@ The graphics acceptance profile also runs
 [`test_freebrowse_image.py`](../tests/container/test_freebrowse_image.py).
 It opens a generated volume with special characters in its filename through both factories,
 checks NiiVue is the volume default, explicitly opens an embedded FreeBrowse tab
-without a popup, and checks rendered
+without a popup, and waits for the asynchronous volume URL before checking it, and checks rendered
 image pixels under `/` and `/user/alice/`.
