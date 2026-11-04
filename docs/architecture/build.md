@@ -23,6 +23,12 @@ candidates for a specific run and attempt, test and scan them, and then promote
 the same candidates to release tags. Native runtime checks cover both image
 architectures. A date tag never substitutes for building the run's source SHA.
 
+Image scan jobs install Trivy 0.70.0 directly from its GitHub release using
+[the shared installer](../../.github/scripts/install_trivy.sh). The installer
+selects the native architecture, retries downloads, and verifies the release
+checksum before installing. Scan and SBOM actions reuse that binary rather
+than downloading it through `get.trivy.dev`.
+
 The shared [Trivy policy](../../.trivyignore.yaml) records individual scan
 exceptions. [Issues #1142](https://github.com/neurodesk/neurodesktop/issues/1142)
 and [#1152](https://github.com/neurodesk/neurodesktop/issues/1152) identified
@@ -35,6 +41,13 @@ the host kernel, whose security updates remain the host administrator's responsi
 These twelve exceptions match only the assessed Ubuntu package and versions,
 on either architecture, and expire on 2026-11-20 for reassessment. Other
 package versions, kernel packages, and CVEs remain subject to the scan gate.
+
+An additional exception covers
+[CVE-2026-98432](https://ubuntu.com/security/CVE-2026-98432), an IPv4 TCP
+use-after-free in the running kernel. Inspection of `linux-libc-dev` 7.0.0-42.42
+confirmed that its files are headers and documentation. Its exception matches
+only that version and expires on 2026-11-20; it does not exempt host kernels
+or other package versions.
 
 ## Base image dependencies
 

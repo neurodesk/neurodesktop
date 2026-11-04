@@ -111,9 +111,12 @@ jobs:
           cid=$(docker create "$IMAGE")
           trap 'docker rm "$cid" >/dev/null' EXIT
           docker export "$cid" | wc -c > evidence/rootfs-bytes.txt
+      - name: Install pinned Trivy from GitHub releases
+        run: bash .github/scripts/install_trivy.sh
       - name: Generate SBOM
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          skip-setup-trivy: true
           image-ref: ${{ steps.inputs.outputs.image }}
           timeout: 25m0s
           format: spdx-json
@@ -121,6 +124,7 @@ jobs:
       - name: Scan release candidate
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          skip-setup-trivy: true
           image-ref: ${{ steps.inputs.outputs.image }}
           timeout: 25m0s
           format: json

@@ -247,3 +247,66 @@ def test_sftp_sshd_retries_when_selected_port_is_claimed_before_bind(tmp_path):
     assert startup_attempts.read_text() == "2\n"
     assert (runtime / "sftp_port").read_text() == "2223\n"
     assert "-p\n2223\n" in arguments.read_text()
+
+
+@pytest.mark.parametrize("startup", ["delayed", "never", "failed"])
+def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup):
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    keys = ssh_dir / "hostkeys"
+    keys.mkdir(parents=True)
+    for name in ("ssh_host_ed25519_key", "ssh_host_rsa_key"):
+        (keys / name).write_text("test key\n")
+    (ssh_dir / "sshd_config").write_text("ListenAddress 127.0.0.1\n")
+    runtime = home / "runtime"
+    runtime.mkdir()
+    (runtime / "sftp_port").write_text("2299\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    marker = tmp_path / "listening"
+    programs = {
+        "sudo": "exit 1\n",
+        "sshd": (
+            'if [[ " $* " == *" -T "* ]]; then\n'
+            "  echo 'listenaddress 127.0.0.1:2222'; exit 0\n"
+            "fi\n"
+            'case "$STARTUP" in\n'
+            '  delayed) (sleep 0.3; touch "$LISTENING") >/dev/null 2>&1 & ;;\n'
+            "  never) echo 'daemon could not bind' ;;\n"
+            "  failed) echo 'daemon launch failed'; exit 1 ;;\n"
+            "esac\n"
+        ),
+        "ss": (
+            "echo 'State Recv-Q Send-Q Local Address:Port Peer Address:Port'\n"
+            'if [ -f "$LISTENING" ]; then\n'
+            "  echo 'LISTEN 0 128 127.0.0.1:2222 0.0.0.0:*'\n"
+            "fi\n"
+        ),
+    }
+    for name, body in programs.items():
+        executable = bin_dir / name
+        executable.write_text("#!/bin/bash\n" + body)
+        executable.chmod(0o755)
+    script = ENSURE_SFTP_SSHD.read_text().replace("/usr/sbin/sshd", str(bin_dir / "sshd"))
+    result = subprocess.run(
+        ["bash"], input=script, capture_output=True, text=True, timeout=10,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "NEURODESKTOP_RUNTIME_DIR": str(runtime),
+            "NEURODESKTOP_DISABLE_SSH": "false",
+            "SFTP_SSH_PORT": "2222",
+            "STARTUP": startup,
+            "LISTENING": str(marker),
+        },
+    )
+    if startup == "delayed":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert marker.exists(), "Published the port before the daemon was listening"
+        assert (runtime / "sftp_port").read_text() == "2222\n"
+    else:
+        assert result.returncode != 0
+        assert not (runtime / "sftp_port").exists()
+        expected = "daemon could not bind" if startup == "never" else "daemon launch failed"
+        assert expected in result.stdout

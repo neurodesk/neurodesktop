@@ -355,12 +355,8 @@ def test_mount_recovery_has_no_privileged_effects(tmp_path):
     assert "systemctl restart" not in calls
 
 
-@pytest.mark.parametrize(
-    ("first_read_seconds", "retry_limit"), ((45, 45), (103, 10), (104, None))
-)
-def test_negative_cache_wait_fits_verification_budget(
-    tmp_path, first_read_seconds, retry_limit
-):
+@pytest.mark.parametrize("first_read_seconds", (45, 103, 104))
+def test_negative_cache_wait_fits_verification_budget(tmp_path, first_read_seconds):
     result, calls = run_health(
         tmp_path,
         "check_cvmfs_mount.sh",
@@ -368,14 +364,25 @@ def test_negative_cache_wait_fits_verification_budget(
         first_read="timeout",
         clock_advances=(first_read_seconds,),
     )
-    if retry_limit:
+    first_attempt = re.search(r"attempt=1 .* elapsed=(\d+)s", result.stdout)
+    assert first_attempt
+    measured_elapsed = int(first_attempt.group(1))
+    # The controlled command advance and real runner time both consume the budget.
+    # At 103 seconds, one whole-second SECONDS tick legitimately changes whether a
+    # ten-second retry still fits, so derive the expectation from the time the
+    # script actually measured instead of assuming the runner added no time.
+    retry_limit = 180 - measured_elapsed - 61 - 6
+    if retry_limit >= 10:
         assert calls.count("sleep 61\n") == 1
         limits = re.findall(r"^limit (\d+) ls$", calls, re.M)
-        # Bash's whole-second clock may tick once between steps.
         assert limits[0] == "45"
-        assert int(limits[1]) in (retry_limit - 1, retry_limit)
+        # Bash's whole-second clock may tick once between the decision and retry.
+        bounded_retry_limit = min(45, retry_limit)
+        assert int(limits[1]) in (bounded_retry_limit - 1, bounded_retry_limit)
+        assert "Not enough verification budget" not in result.stdout
     else:
         assert result.returncode == 1
         assert "sleep" not in calls
         assert calls.count("read\n") == 1
+        assert "Not enough verification budget" in result.stdout
         assert result.stdout.count("::error title=CVMFS mount unavailable::") == 1

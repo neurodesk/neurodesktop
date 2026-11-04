@@ -125,7 +125,11 @@ in the user's mode-0700 SSH
 directory, so another UID on a shared host cannot replace the daemon's state
 path between startup checks and the daemon opening it. Startup checks the local
 listener rather than trusting a saved PID, which can be reused after a container
-restart or belong to another host sharing the home directory. Startup also
+restart or belong to another host sharing the home directory. After launching
+sshd, startup polls for the listener for up to five seconds before publishing
+the SFTP port: the daemon parent can exit before its child binds. If the
+listener never appears, startup reports the SSH diagnostic and leaves SFTP
+disabled. Startup also
 forces every authenticated session through OpenSSH's in-process SFTP server and
 disables TCP, Unix-socket, agent, and X11 forwarding plus TTY allocation. These
 command-line restrictions apply even when an older home directory restores a
