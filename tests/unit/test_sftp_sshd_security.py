@@ -96,7 +96,7 @@ def test_sftp_sshd_obeys_startup_policy_for_restored_config(
         '  rm -f "$pid_file"\n'
         '  ln -s "$FAKE_ATTACK_TARGET" "$pid_file"\n'
         'fi\n'
-        'printf "4242\\n" > "$pid_file"\n'
+        f'printf "{os.getpid()}\\n" > "$pid_file"\n'
         'touch "$FAKE_SSHD_STARTED"\n'
     )
     fake_sshd.chmod(0o755)
@@ -107,7 +107,7 @@ def test_sftp_sshd_obeys_startup_policy_for_restored_config(
         "#!/bin/bash\n"
         'if [ -e "$FAKE_SSHD_STARTED" ]; then\n'
         "  printf 'State Recv-Q Send-Q Local Address:Port Peer Address:Port\\n'\n"
-        "  printf 'LISTEN 0 128 127.0.0.1:2222 0.0.0.0:*\\n'\n"
+        f"  printf 'LISTEN 0 128 127.0.0.1:2222 0.0.0.0:* users:((\"sshd\",pid={os.getpid()},fd=3))\\n'\n"
         "fi\n"
     )
     (bin_dir / "ss").chmod(0o755)
@@ -151,7 +151,7 @@ def test_sftp_sshd_obeys_startup_policy_for_restored_config(
     assert (runtime / "sftp_port").read_text() == "2222\n"
     assert attack_target.read_text() == "private\n"
     assert f"PidFile={ssh_dir / 'sshd_2222.pid'}\n" in arguments.read_text()
-    assert (ssh_dir / "sshd_2222.pid").read_text() == "4242\n"
+    assert (ssh_dir / "sshd_2222.pid").read_text() == f"{os.getpid()}\n"
     assert ssh_dir.stat().st_mode & 0o777 == 0o700
     assert "ListenAddress=127.0.0.1\n" in arguments.read_text()
     assert "DisableForwarding=yes\n" in arguments.read_text()
@@ -205,7 +205,7 @@ def test_sftp_sshd_retries_when_selected_port_is_claimed_before_bind(tmp_path):
         "  exit 98\n"
         "fi\n"
         'printf "%s\\n" "$@" > "$FAKE_SSHD_ARGUMENTS"\n'
-        'printf "4242\\n" > "$pid_file"\n'
+        f'printf "{os.getpid()}\\n" > "$pid_file"\n'
         'printf "%s\\n" "$port" > "$FAKE_STARTED_PORT"\n'
     )
     fake_sshd.chmod(0o755)
@@ -217,7 +217,7 @@ def test_sftp_sshd_retries_when_selected_port_is_claimed_before_bind(tmp_path):
         'if [ -s "$FAKE_STARTED_PORT" ]; then\n'
         '  port=$(cat "$FAKE_STARTED_PORT")\n'
         "  printf 'State Recv-Q Send-Q Local Address:Port Peer Address:Port\\n'\n"
-        "  printf 'LISTEN 0 128 127.0.0.1:%s 0.0.0.0:*\\n' \"$port\"\n"
+        f"  printf 'LISTEN 0 128 127.0.0.1:%s 0.0.0.0:* users:((\"sshd\",pid={os.getpid()},fd=3))\\n' \"$port\"\n"
         "fi\n"
     )
     (bin_dir / "ss").chmod(0o755)
@@ -270,6 +270,7 @@ def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup):
             'if [[ " $* " == *" -T "* ]]; then\n'
             "  echo 'listenaddress 127.0.0.1:2222'; exit 0\n"
             "fi\n"
+            f'for arg in "$@"; do [[ "$arg" == PidFile=* ]] && echo {os.getpid()} > "${{arg#PidFile=}}"; done\n'
             'case "$STARTUP" in\n'
             '  delayed) (sleep 0.3; touch "$LISTENING") >/dev/null 2>&1 & ;;\n'
             "  never) echo 'daemon could not bind' ;;\n"
@@ -279,7 +280,7 @@ def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup):
         "ss": (
             "echo 'State Recv-Q Send-Q Local Address:Port Peer Address:Port'\n"
             'if [ -f "$LISTENING" ]; then\n'
-            "  echo 'LISTEN 0 128 127.0.0.1:2222 0.0.0.0:*'\n"
+            f"  echo 'LISTEN 0 128 127.0.0.1:2222 0.0.0.0:* users:((\"sshd\",pid={os.getpid()},fd=3))'\n"
             "fi\n"
         ),
     }
@@ -310,3 +311,71 @@ def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup):
         assert not (runtime / "sftp_port").exists()
         expected = "daemon could not bind" if startup == "never" else "daemon launch failed"
         assert expected in result.stdout
+
+
+@pytest.mark.parametrize("explicit", [True, False])
+def test_real_daemon_collision(tmp_path, explicit):
+    """Inject a real competing socket after the final availability probe."""
+    import shutil
+    import socket
+
+    if not shutil.which("ss") or not os.path.exists("/usr/sbin/sshd"):
+        pytest.skip("OpenSSH and iproute2 required")
+    home = tmp_path / "home"
+    ssh = home / ".ssh"
+    ssh.mkdir(parents=True)
+    (ssh / "sshd_config").write_text("ListenAddress 127.0.0.1\nUsePAM no\n")
+    runtime = tmp_path / "runtime"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "sudo").write_text("#!/bin/sh\nexit 1\n")
+    (bin_dir / "sudo").chmod(0o755)
+    ready = tmp_path / "ready"
+    competitor = tmp_path / "competitor"
+    marker = tmp_path / "injected"
+    real_ss = shutil.which("ss")
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1] if explicit else 2222
+    wrapper = bin_dir / "ss"
+    wrapper.write_text(f'''#!/bin/bash
+out=$({real_ss} "$@")
+printf '%s\\n' "$out"
+if [ "$1" = -lnt ] && [ ! -e {marker} ]; then
+  n=$(cat {tmp_path}/count 2>/dev/null || echo 0)
+  n=$((n+1)); echo "$n" > {tmp_path}/count
+  if [ "$n" = {1 if explicit else 2} ]; then
+    touch {marker}
+    python3 -c 'import socket,time,os; s=socket.socket(); s.bind(("127.0.0.1",{port})); s.listen(); open("{competitor}","w").write(str(os.getpid())); open("{ready}","w").close(); time.sleep(30)' >/dev/null 2>&1 &
+    for i in {{1..100}}; do [ -e {ready} ] && break; sleep .01; done
+  fi
+fi
+''')
+    wrapper.chmod(0o755)
+    env = {**os.environ, "HOME": str(home), "PATH": f"{bin_dir}:{os.environ['PATH']}",
+           "NEURODESKTOP_RUNTIME_DIR": str(runtime), "NEURODESKTOP_DISABLE_SSH": "false"}
+    env.pop("SFTP_SSH_PORT", None)
+    if explicit:
+        env["SFTP_SSH_PORT"] = str(port)
+    try:
+        result = subprocess.run(["bash", str(ENSURE_SFTP_SSHD)], env=env,
+                                capture_output=True, text=True, timeout=15)
+        assert ready.exists(), result.stdout + result.stderr
+        assert "Address already in use" in result.stdout
+        if explicit:
+            assert result.returncode != 0
+            assert not (runtime / "sftp_port").exists()
+        else:
+            assert result.returncode == 0, result.stdout + result.stderr
+            published = int((runtime / "sftp_port").read_text())
+            assert published != port
+            pid = int((ssh / f"sshd_{published}.pid").read_text())
+            owners = subprocess.check_output([real_ss, "-lntpH", f"sport = :{published}"], text=True)
+            assert f"pid={pid}," in owners
+    finally:
+        for pid_file in [competitor, *ssh.glob("sshd_*.pid")]:
+            if pid_file.exists():
+                try:
+                    os.kill(int(pid_file.read_text()), 15)
+                except ProcessLookupError:
+                    pass

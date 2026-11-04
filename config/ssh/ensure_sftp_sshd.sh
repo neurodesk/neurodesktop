@@ -195,6 +195,14 @@ port_is_listening() {
     ss -lnt 2>/dev/null | awk 'NR>1 {print $4}' | grep -Eq "(^|:)${SFTP_SSH_PORT}$"
 }
 
+sshd_owns_listener() {
+    local pid
+    pid="$(cat "${SFTP_SSH_PID_FILE}" 2>/dev/null)" || return 1
+    [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
+    "${sshd_prefix[@]}" kill -0 "${pid}" 2>/dev/null || return 1
+    "${sshd_prefix[@]}" ss -lntpH "sport = :${SFTP_SSH_PORT}" 2>/dev/null | grep -Eq "pid=${pid},"
+}
+
 start_sshd() {
     local -a sshd_prefix=()
     local ssh_config_to_use validation_log startup_log fallback_config
@@ -266,6 +274,7 @@ start_sshd() {
     # internal-sftp denies shell/command execution, DisableForwarding covers
     # TCP, stream-local, agent and X11 forwarding, and no client needs a TTY.
     if ! "${sshd_prefix[@]}" /usr/sbin/sshd \
+        -E "${startup_log}" \
         -f "${ssh_config_to_use}" \
         -p "${SFTP_SSH_PORT}" \
         -h "${SSH_HOST_ED25519_KEY}" \
@@ -294,9 +303,14 @@ start_sshd() {
     # until readiness is known, and never advertise a merely successful fork.
     local attempt
     for ((attempt = 0; attempt < 50; attempt++)); do
-        if port_is_listening; then
+        if sshd_owns_listener; then
             rm -f "${validation_log}" "${startup_log}"
             return 0
+        fi
+        if grep -qi 'address already in use' "${startup_log}"; then
+            emit_sshd_log_preview "${startup_log}"
+            rm -f "${validation_log}" "${startup_log}" "${SFTP_SSH_PID_FILE}"
+            return 75
         fi
         sleep 0.1
     done
@@ -315,11 +329,7 @@ start_sshd_with_port_retry() {
         start_sshd
         startup_status=$?
         if [ "${startup_status}" -eq 0 ]; then
-            if port_is_listening; then
-                return 0
-            fi
-            warn "sshd returned success but nothing is listening on ${SFTP_SSH_PORT}."
-            return 1
+            return 0
         fi
 
         if [ "${startup_status}" -ne 75 ] || [ "${SFTP_SSH_PORT_EXPLICIT}" -eq 1 ]; then
