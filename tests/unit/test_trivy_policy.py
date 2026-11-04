@@ -38,3 +38,13 @@ def test_kernel_exceptions_apply_only_to_the_assessed_ubuntu_headers():
         assert finding["expired_at"] <= date(2026, 11, 20)
         assert "host kernel" in finding["statement"]
     assert not policy.get("secrets")
+
+
+def test_ipv4_tcp_exception_is_limited_to_inspected_header_version():
+    policy = yaml.safe_load(repo_path(".trivyignore.yaml").read_text())
+    finding = next(item for item in policy["vulnerabilities"]
+                   if item["id"] == "CVE-2026-98432")
+    assert finding["purls"] == ["pkg:deb/ubuntu/linux-libc-dev@7.0.0-42.42"]
+    assert finding["expired_at"] == date(2026, 11, 20)
+    assert "host kernel" in finding["statement"]
+    assert "https://ubuntu.com/security/CVE-2026-98432" in finding["statement"]

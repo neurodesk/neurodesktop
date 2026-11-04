@@ -278,8 +278,20 @@ start_sshd() {
         return 1
     fi
 
+    # sshd's parent exits before its daemon child binds. Keep the startup log
+    # until readiness is known, and never advertise a merely successful fork.
+    local attempt
+    for ((attempt = 0; attempt < 50; attempt++)); do
+        if port_is_listening; then
+            rm -f "${validation_log}" "${startup_log}"
+            return 0
+        fi
+        sleep 0.1
+    done
+    warn "sshd did not start listening on ${SFTP_SSH_PORT} within 5 seconds."
+    emit_sshd_log_preview "${startup_log}"
     rm -f "${validation_log}" "${startup_log}"
-    return 0
+    return 1
 }
 
 main() {
@@ -302,13 +314,6 @@ main() {
     ensure_host_keys
     ensure_authorized_sftp_key || true
     if ! start_sshd; then
-        return 1
-    fi
-    # Confirm the port really is listening before advertising it to
-    # guacamole.sh. start_sshd can exit 0 yet still lose the race against
-    # another process that just bound the same port.
-    if ! port_is_listening; then
-        warn "sshd returned success but nothing is listening on ${SFTP_SSH_PORT}."
         return 1
     fi
     printf '%s\n' "${SFTP_SSH_PORT}" \
