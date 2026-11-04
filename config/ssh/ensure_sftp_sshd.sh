@@ -223,8 +223,12 @@ start_sshd() {
     fi
 
     ssh_config_to_use="${SSH_CONFIG}"
+    # OpenSSH re-execs with -E on every connection. Keep the log private and
+    # persistent, and bound its lifetime by truncating it on the next launch.
+    startup_log="${SSH_DIR}/sshd_${SFTP_SSH_PORT}.log"
+    (umask 077; : >"${startup_log}") || return 1
+    chmod 600 "${startup_log}" || return 1
     validation_log="$(mktemp /tmp/sshd-validate.XXXXXX)"
-    startup_log="$(mktemp /tmp/sshd-start.XXXXXX)"
 
     # ListenAddress is additive, including between -o and Include files. Check
     # the complete effective configuration before trusting a persisted config.
@@ -247,7 +251,7 @@ start_sshd() {
         if ! "${sshd_prefix[@]}" /usr/sbin/sshd -t -f "${ssh_config_to_use}" >"${validation_log}" 2>&1; then
             warn "Fallback sshd config validation failed for ${ssh_config_to_use}."
             emit_sshd_log_preview "${validation_log}"
-            rm -f "${validation_log}" "${startup_log}"
+            rm -f "${validation_log}"
             return 1
         fi
     fi
@@ -294,10 +298,10 @@ start_sshd() {
         warn "Failed to start sshd on port ${SFTP_SSH_PORT}."
         emit_sshd_log_preview "${startup_log}"
         if grep -qi 'address already in use' "${startup_log}"; then
-            rm -f "${validation_log}" "${startup_log}" "${SFTP_SSH_PID_FILE}"
+            rm -f "${validation_log}"
             return 75
         fi
-        rm -f "${validation_log}" "${startup_log}"
+        rm -f "${validation_log}"
         return 1
     fi
 
@@ -306,19 +310,19 @@ start_sshd() {
     local attempt
     for ((attempt = 0; attempt < 50; attempt++)); do
         if sshd_owns_listener; then
-            rm -f "${validation_log}" "${startup_log}"
+            rm -f "${validation_log}"
             return 0
         fi
         if grep -qi 'address already in use' "${startup_log}"; then
             emit_sshd_log_preview "${startup_log}"
-            rm -f "${validation_log}" "${startup_log}" "${SFTP_SSH_PID_FILE}"
+            rm -f "${validation_log}"
             return 75
         fi
         sleep 0.1
     done
     warn "sshd did not start listening on ${SFTP_SSH_PORT} within 5 seconds."
     emit_sshd_log_preview "${startup_log}"
-    rm -f "${validation_log}" "${startup_log}"
+    rm -f "${validation_log}"
     return 1
 }
 

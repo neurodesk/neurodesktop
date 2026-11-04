@@ -1,5 +1,6 @@
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -372,6 +373,24 @@ fi
             pid = int((ssh / f"sshd_{published}.pid").read_text())
             owners = subprocess.check_output([real_ss, "-lntpH", f"sport = :{published}"], text=True)
             assert f"pid={pid}," in owners
+            # Re-exec on a real connection must retain a private log path.
+            # The old /tmp log was deleted at readiness and recreated here.
+            log = ssh / f"sshd_{published}.log"
+            assert log.exists()
+            assert ssh.stat().st_mode & 0o777 == 0o700
+            assert log.stat().st_mode & 0o777 == 0o600
+            command = Path(f"/proc/{pid}/cmdline").read_bytes()
+            assert str(log).encode() in command
+            assert b"/tmp/sshd-start." not in command
+            inode = log.stat().st_ino
+            with socket.create_connection(("127.0.0.1", published), timeout=3) as client:
+                client.settimeout(3)
+                assert client.recv(255).startswith(b"SSH-")
+                client.sendall(b"invalid SSH handshake\r\n")
+                while client.recv(1024):
+                    pass
+            assert log.stat().st_ino == inode
+            assert log.stat().st_size > 0
     finally:
         for pid_file in [competitor, *ssh.glob("sshd_*.pid")]:
             if pid_file.exists():
