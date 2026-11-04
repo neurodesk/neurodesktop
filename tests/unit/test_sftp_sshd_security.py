@@ -250,7 +250,10 @@ def test_sftp_sshd_retries_when_selected_port_is_claimed_before_bind(tmp_path):
     assert "-p\n2223\n" in arguments.read_text()
 
 
-@pytest.mark.parametrize("startup", ["delayed", "duplicate-bind", "never", "failed"])
+@pytest.mark.parametrize(
+    "startup",
+    ["delayed", "hidden-owner", "foreign-owner", "duplicate-bind", "never", "failed"],
+)
 def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup):
     home = tmp_path / "home"
     ssh_dir = home / ".ssh"
@@ -274,7 +277,7 @@ def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup):
             f'for arg in "$@"; do [[ "$arg" == PidFile=* ]] && echo {os.getpid()} > "${{arg#PidFile=}}"; done\n'
             'case "$STARTUP" in\n'
             "  duplicate-bind) echo 'Bind to port 2222 on 127.0.0.1 failed: Address already in use.'; (sleep 0.3; touch \"$LISTENING\") >/dev/null 2>&1 & ;;\n"
-            '  delayed) (sleep 0.3; touch "$LISTENING") >/dev/null 2>&1 & ;;\n'
+            '  delayed|hidden-owner|foreign-owner) (sleep 0.3; touch "$LISTENING") >/dev/null 2>&1 & ;;\n'
             "  never) echo 'daemon could not bind' ;;\n"
             "  failed) echo 'daemon launch failed'; exit 1 ;;\n"
             "esac\n"
@@ -282,7 +285,17 @@ def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup):
         "ss": (
             "echo 'State Recv-Q Send-Q Local Address:Port Peer Address:Port'\n"
             'if [ -f "$LISTENING" ]; then\n'
-            f"  echo 'LISTEN 0 128 127.0.0.1:2222 0.0.0.0:* users:((\"sshd\",pid={os.getpid()},fd=3))'\n"
+            '  case "$STARTUP" in\n'
+            "    hidden-owner|foreign-owner) echo 'LISTEN 0 128 127.0.0.1:2222 0.0.0.0:* ino:4242 sk:9' ;;\n"
+            f"    *) echo 'LISTEN 0 128 127.0.0.1:2222 0.0.0.0:* users:((\"sshd\",pid={os.getpid()},fd=3))' ;;\n"
+            "  esac\n"
+            "fi\n"
+        ),
+        "find": (
+            'if [ "$STARTUP" = hidden-owner ]; then\n'
+            "  echo 'socket:[4242]'\n"
+            'elif [ "$STARTUP" = foreign-owner ]; then\n'
+            "  echo 'socket:[9999]'\n"
             "fi\n"
         ),
     }
@@ -304,14 +317,18 @@ def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup):
             "LISTENING": str(marker),
         },
     )
-    if startup in ("delayed", "duplicate-bind"):
+    if startup in ("delayed", "hidden-owner", "duplicate-bind"):
         assert result.returncode == 0, result.stdout + result.stderr
         assert marker.exists(), "Published the port before the daemon was listening"
         assert (runtime / "sftp_port").read_text() == "2222\n"
     else:
         assert result.returncode != 0
         assert not (runtime / "sftp_port").exists()
-        expected = "daemon could not bind" if startup == "never" else "daemon launch failed"
+        expected = {
+            "foreign-owner": "did not start listening",
+            "never": "daemon could not bind",
+            "failed": "daemon launch failed",
+        }[startup]
         assert expected in result.stdout
 
 
