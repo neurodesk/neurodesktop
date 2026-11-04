@@ -52,6 +52,10 @@ jobs:
             VCS_REF=${{ github.sha }}
             NEURODESKTOP_VERSION=pr-${{ github.event.pull_request.number || github.run_id }}
           cache-from: type=registry,ref=ghcr.io/neurodesk/neurodesktop:latest
+      - name: Release build cache before image export
+        run: |
+          docker buildx prune --all --force
+          df -h /
       - name: Install pinned Trivy from GitHub releases
         run: bash .github/scripts/install_trivy.sh
       - name: Scan local candidate
