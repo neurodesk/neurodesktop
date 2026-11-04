@@ -173,3 +173,14 @@ vulnerabilities:
       implementation. CVMFS requires it through uuid-dev and libc6-dev on
       Ubuntu 26.04. Containers use the host kernel, which needs separate
       security updates. This exception covers only the assessed header versions.
+  - id: CVE-2026-98432
+    purls:
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-42.42
+    expired_at: 2026-11-20
+    statement: >-
+      The affected IPv4 TCP implementation runs in the host kernel, not in
+      linux-libc-dev, which contains UAPI headers and documentation only.
+      CVMFS requires these headers through uuid-dev and libc6-dev. This
+      exception covers only the inspected Ubuntu header package version;
+      host kernel patching remains required. See
+      https://ubuntu.com/security/CVE-2026-98432.
