@@ -94,6 +94,7 @@ def test_init_is_repeatable_and_targets_project(prototype, monkeypatch, tmp_path
         elif argv[1] == "venv":
             (project / ".venv/bin").mkdir(parents=True)
             (project / ".venv/bin/python").symlink_to(sys.executable)
+            (project / ".venv/pyvenv.cfg").write_text("uv = 0.12.18\n")
         elif argv[1] == "add":
             with (project / "pyproject.toml").open("a") as stream:
                 stream.write('[dependency-groups]\ndev=["ipykernel==6.31.0"]\n')
@@ -112,3 +113,131 @@ def test_init_is_repeatable_and_targets_project(prototype, monkeypatch, tmp_path
     specs = list((tmp_path / "jupyter/kernels").glob("*/kernel.json"))
     assert len(specs) == 1
     assert json.loads(specs[0].read_text())["argv"][0] == sys.executable
+
+
+@pytest.fixture
+def uv_boundary(prototype, monkeypatch):
+    """Replace uv processes, retaining actual environment deletion and spec writes."""
+    calls = []
+    monkeypatch.setattr(prototype.shutil, "which", lambda _: "/usr/bin/uv")
+
+    def run(argv, **kwargs):
+        if argv[0] != "/usr/bin/uv":
+            return
+        calls.append(argv[1])
+        project = kwargs["cwd"]
+        if argv[1] == "venv":
+            (project / ".venv/bin").mkdir(parents=True)
+            (project / ".venv/bin/python").symlink_to(sys.executable)
+            (project / ".venv/pyvenv.cfg").write_text("uv = 0.12.18\n")
+        if argv[1] == "lock":
+            (project / "uv.lock").write_text("locked dependencies")
+        if argv[1] == "sync" and not (project / "uv.lock").is_file():
+            raise prototype.subprocess.CalledProcessError(2, argv)
+
+    monkeypatch.setattr(prototype.subprocess, "run", run)
+    return calls
+
+
+def project_manifest(project):
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        '[project]\nname="analysis"\nversion="0.1"\n'
+        '[dependency-groups]\ndev=["ipykernel==6.31.0"]\n')
+
+
+def test_init_existing_project_without_lock(prototype, uv_boundary, tmp_path):
+    project = tmp_path / "analysis"
+    project_manifest(project)
+    before = (project / "pyproject.toml").read_bytes()
+    prototype.prepare(project, "init", Path(sys.executable))
+    assert (project / "uv.lock").read_text() == "locked dependencies"
+    assert (project / "pyproject.toml").read_bytes() == before
+    assert uv_boundary.index("lock") < uv_boundary.index("sync")
+
+
+@pytest.mark.parametrize("record", ["project", "registration"])
+def test_rebuild_after_uv_replaces_environment(prototype, uv_boundary, tmp_path, record):
+    project = tmp_path / "analysis"
+    project_manifest(project)
+    (project / "uv.lock").write_text("original lock")
+    (project / ".venv/bin").mkdir(parents=True)
+    (project / ".venv/bin/python").symlink_to("/missing/base/python")
+    (project / ".venv/pyvenv.cfg").write_text("uv = 0.12.18\n")
+    (project / ".venv/old-file").write_text("replace me")
+    if record == "project":
+        prototype.atomic_json(project / f".{prototype.MARKER}.json", {"project": str(project)})
+    else:
+        spec_dir = tmp_path / "jupyter/kernels" / prototype.kernel_name(project)
+        spec_dir.mkdir(parents=True)
+        prototype.atomic_json(spec_dir / "kernel.json", {
+            "metadata": {prototype.MARKER: {"project": str(project)}}})
+    before = (project / "pyproject.toml").read_bytes()
+    prototype.prepare(project, "rebuild", Path(sys.executable))
+    assert (project / "pyproject.toml").read_bytes() == before
+    assert (project / "uv.lock").read_text() == "original lock"
+    assert not (project / ".venv/old-file").exists()
+    assert (project / ".venv/bin/python").is_file()
+    assert json.loads((project / f".{prototype.MARKER}.json").read_text()) == {
+        "project": str(project)}
+
+
+def test_remove_missing_registration_reports_failure(prototype, tmp_path, monkeypatch, capsys):
+    project = tmp_path / "typo"
+    monkeypatch.setattr(sys, "argv", ["uv-kernel", "remove", str(project)])
+    assert prototype.main() == 1
+    assert "No prototype registration" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_rebuild_moved_folder_preserves_analysis(prototype, uv_boundary, tmp_path, legacy):
+    project = tmp_path / "old analysis"
+    project_manifest(project)
+    (project / "uv.lock").write_text("original lock")
+    (project / "analysis.ipynb").write_text("notebook content")
+    (project / ".venv/bin").mkdir(parents=True)
+    (project / ".venv/bin/python").symlink_to(sys.executable)
+    (project / ".venv/pyvenv.cfg").write_text("uv = 0.12.18\n")
+    (project / ".venv/old-file").write_text("replace me")
+    record_dir = project / ".venv" if legacy else project
+    prototype.atomic_json(record_dir / f".{prototype.MARKER}.json", {"project": str(project)})
+    before = (project / "pyproject.toml").read_bytes()
+    moved = tmp_path / "new analysis ü"
+    project.rename(moved)
+    with pytest.raises(ValueError, match="moved"):
+        prototype.prepare(moved, "init", Path(sys.executable))
+    prototype.prepare(moved, "rebuild", Path(sys.executable))
+    assert (moved / "pyproject.toml").read_bytes() == before
+    assert (moved / "uv.lock").read_text() == "original lock"
+    assert (moved / "analysis.ipynb").read_text() == "notebook content"
+    assert not (moved / ".venv/old-file").exists()
+    assert prototype.read_marker(moved) == {"project": str(moved)}
+    assert (tmp_path / "jupyter/kernels" / prototype.kernel_name(moved) / "kernel.json").is_file()
+
+
+@pytest.mark.parametrize("symlink", [False, True])
+def test_owned_record_does_not_authorize_non_uv_or_linked_venv(
+        prototype, uv_boundary, tmp_path, symlink):
+    project = tmp_path / "analysis"
+    project_manifest(project)
+    (project / "uv.lock").write_text("original lock")
+    prototype.atomic_json(project / f".{prototype.MARKER}.json", {"project": str(project)})
+    environment = tmp_path / "external" if symlink else project / ".venv"
+    environment.mkdir()
+    (environment / "precious").write_text("keep")
+    if symlink:
+        (environment / "pyvenv.cfg").write_text("uv = 0.12.18\n")
+        (project / ".venv").symlink_to(environment)
+    with pytest.raises(ValueError, match="symlinked|unmanaged"):
+        prototype.prepare(project, "rebuild", Path(sys.executable))
+    assert (environment / "precious").read_text() == "keep"
+    assert uv_boundary == []
+
+
+def test_remove_incomplete_spec_is_actionable(prototype, tmp_path):
+    project = tmp_path / "analysis"
+    spec_dir = tmp_path / "jupyter/kernels" / prototype.kernel_name(project)
+    spec_dir.mkdir(parents=True)
+    with pytest.raises(ValueError, match="No prototype registration"):
+        prototype.prepare(project, "remove", Path(sys.executable))
+    assert spec_dir.is_dir()

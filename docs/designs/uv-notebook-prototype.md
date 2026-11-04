@@ -30,7 +30,8 @@ mkdir -p ~/analyses/demo
 ```
 
 Select **Python (uv prototype: demo)** in JupyterLab's kernel selector. A project
-gets `pyproject.toml`, `uv.lock`, `.venv`, and one user kernelspec. The default
+gets `pyproject.toml`, `uv.lock`, `.venv`, a project-level
+`.neurodesk_uv_prototype.json` ownership record, and one user kernelspec. The default
 kernel dependency is `ipykernel==6.31.0`, matching the image's compatibility
 choice. An existing explicit dev dependency on ipykernel is retained.
 
@@ -46,7 +47,13 @@ default; ad hoc installations are not captured in the lock. Widgets also need
 their Python packages in the project environment.
 
 Stop every kernel using the environment before rebuilding. Rebuild deletes
-only a `.venv` marked as owned by this prototype and uses `uv sync --locked`.
+only a uv-created `.venv` owned by this prototype and uses `uv sync --locked`.
+The ownership record lives outside `.venv` so ordinary uv operations cannot
+erase it when recreating the interpreter. Keep the record with the project
+when moving it; its absolute path is local state, not a portable dependency file.
+Older installations can recover through their matching user kernelspec even
+if uv has erased their original in-environment marker. Run `rebuild` with
+the updated helper at the original path before moving such an installation.
 For a moved folder, rebuild at the new path, select the new kernel, and remove
 the old registration using its old path:
 
@@ -55,7 +62,10 @@ the old registration using its old path:
 /opt/conda/bin/python config/jupyter/uv_kernel_prototype.py remove ~/analyses/demo
 ```
 
-Removal retains project files and the environment. Preserve the project folder
+Removal retains project files and the environment. A missing registration
+returns exit status 1 and names the requested path instead of reporting success.
+Initialization creates a missing lockfile even when the project already declares
+ipykernel, while preserving an existing lock during synchronization. Preserve the project folder
 and Jupyter's user data directory across container replacement. uv uses its
 normal cache and Python installation locations; keep those persistent for
 warm-cache rebuilding. The prototype uses copy mode for cache-to-venv installs
@@ -89,9 +99,12 @@ Run the boundary tests with:
 pytest tests/unit/test_uv_kernel_prototype.py
 ```
 
-Six tests cover environment cleanup, missing/moved environments, distinct names
-for identical folder basenames, refusal of unmanaged environments/workspaces,
+Regression tests cover environment cleanup, missing/moved environments, distinct
+names for identical folder basenames, refusal of unmanaged environments/workspaces,
 non-destructive removal, and repeat initialization with explicit uv targeting.
+The post-merge Opus review added coverage for uv replacing an environment, legacy
+registration recovery, initialization without a lock, moved-folder rebuilds,
+refusal to delete non-uv or symlinked environments, and missing registrations.
 
 A real uv 0.12.18 smoke run created an environment with ipykernel 6.31.0,
 registered it in an isolated Jupyter data directory, and launched it through
@@ -105,3 +118,10 @@ CVMFS, default/Conda kernel regression, and widget checks remain outstanding.
 The focused prototype and existing container-kernel suites passed together
 (27 tests). Repository-wide unit and quality results belong in the PR's
 validation record; the smoke result alone does not establish those gates.
+
+The recovery smoke test used real uv 0.12.18 with an existing manifest and no
+lock, broke the interpreter link, and invoked `uv add` to recreate the environment.
+Rebuild recovered both the new project-level record and an older installation
+whose registration was its remaining ownership evidence. A real Jupyter kernel
+confirmed interpreter isolation and wrapper initialization afterward. The same
+run rebuilt a moved folder offline while preserving the manifest and lock.

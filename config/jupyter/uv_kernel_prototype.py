@@ -41,14 +41,25 @@ def atomic_json(path: Path, data: dict) -> None:
         Path(temporary).unlink(missing_ok=True)
 
 
-def read_marker(venv: Path) -> dict:
-    marker = venv / f".{MARKER}.json"
-    return json.loads(marker.read_text()) if marker.is_file() else {}
+def read_marker(project: Path) -> dict:
+    for directory in (project, project / ".venv"):
+        marker = directory / f".{MARKER}.json"
+        if marker.is_file():
+            data = json.loads(marker.read_text())
+            if not isinstance(data, dict) or not isinstance(data.get("project"), str):
+                raise ValueError(f"Invalid prototype ownership record: {marker}")
+            return data
+    return {}
+
+
+def is_uv_environment(venv: Path) -> bool:
+    config = venv / "pyvenv.cfg"
+    return config.is_file() and bool(re.search(r"^uv\s*=", config.read_text(), re.MULTILINE))
 
 
 def launch(project: Path, arguments: list[str]) -> None:
     venv = project / ".venv"
-    if read_marker(venv).get("project") != str(project) or not (venv / "bin/python").is_file():
+    if read_marker(project).get("project") != str(project) or not (venv / "bin/python").is_file():
         raise ValueError(f"Environment missing or moved. Run: {sys.executable} "
                          f"{Path(__file__).resolve()} rebuild {str(project)!r}")
     env = clean_environment()
@@ -77,14 +88,19 @@ def prepare(project: Path, command: str, wrapper: Path) -> None:
         target = spec_dir / "kernel.json"
         if spec_dir.is_symlink():
             raise ValueError("Refusing a symlinked kernelspec directory.")
+        registered = False
+        if command == "remove" and not target.is_file():
+            raise ValueError(f"No prototype registration for {project}")
         if spec_dir.exists():
+            if not target.is_file():
+                raise ValueError(f"Incomplete kernel registration at {spec_dir}; leaving it untouched.")
             existing = json.loads(target.read_text())
             if existing.get("metadata", {}).get(MARKER) != {"project": str(project)}:
                 raise ValueError("Refusing to replace a kernel owned by another tool.")
+            registered = True
         if command == "remove":
-            if target.exists():
-                target.unlink()
-                spec_dir.rmdir()
+            target.unlink()
+            spec_dir.rmdir()
             print("Removed registration; project files and environment retained.")
             return
         if not wrapper.is_file() or not os.access(wrapper, os.X_OK):
@@ -102,8 +118,8 @@ def prepare(project: Path, command: str, wrapper: Path) -> None:
         venv = project / ".venv"
         if venv.is_symlink():
             raise ValueError("Refusing a symlinked .venv.")
-        marker = read_marker(venv)
-        if venv.exists() and not marker.get("project"):
+        marker = read_marker(project)
+        if venv.exists() and (not (marker or registered) or not is_uv_environment(venv)):
             raise ValueError("Existing .venv is unmanaged; use a fresh analysis folder.")
         if marker and marker.get("project") != str(project) and command != "rebuild":
             raise ValueError("Project moved; run rebuild after shutting down its kernels.")
@@ -127,17 +143,18 @@ def prepare(project: Path, command: str, wrapper: Path) -> None:
         if not manifest.exists():
             run("init", "--bare", "--no-workspace", "--no-pin-python", "--vcs", "none",
                 "--name", kernel_name(project))
-        # Mark only our own directory, including failed/partial installs so init can retry.
+        # uv may recreate .venv during add/sync, so ownership lives beside it.
         if not venv.exists():
             run("venv", str(venv))
-        atomic_json(venv / f".{MARKER}.json", {"project": str(project)})
+        atomic_json(project / f".{MARKER}.json", {"project": str(project)})
         if command == "init":
             deps = data.get("dependency-groups", {}).get("dev", [])
             if not any(isinstance(dep, str) and re.match(r"(?i)^ipykernel(?:$|[<>=!~;\[ @])", dep)
                        for dep in deps):
                 run("add", "--dev", "ipykernel==6.31.0", "--no-sync")
+            if not (project / "uv.lock").is_file():
+                run("lock")
         run("sync", "--locked", "--group", "dev")
-        atomic_json(venv / f".{MARKER}.json", {"project": str(project)})
         subprocess.run([str(venv / "bin/python"), "-I", "-c", "import ipykernel"],
                        env=env, check=True)
         spec_dir.mkdir(exist_ok=True)
