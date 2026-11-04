@@ -273,6 +273,8 @@ start_sshd() {
     # configs predate that boundary, so enforce it on the command line too:
     # internal-sftp denies shell/command execution, DisableForwarding covers
     # TCP, stream-local, agent and X11 forwarding, and no client needs a TTY.
+    # sshd -E appends to this log; it does not read it as an input file.
+    # shellcheck disable=SC2094
     if ! "${sshd_prefix[@]}" /usr/sbin/sshd \
         -E "${startup_log}" \
         -f "${ssh_config_to_use}" \
@@ -288,7 +290,7 @@ start_sshd() {
         -o "PermitTTY=no" \
         -o "KbdInteractiveAuthentication=no" \
         -o "PasswordAuthentication=no" \
-        -o "PubkeyAuthentication=yes" >"${startup_log}" 2>&1; then
+        -o "PubkeyAuthentication=yes" >>"${startup_log}" 2>&1; then
         warn "Failed to start sshd on port ${SFTP_SSH_PORT}."
         emit_sshd_log_preview "${startup_log}"
         if grep -qi 'address already in use' "${startup_log}"; then
