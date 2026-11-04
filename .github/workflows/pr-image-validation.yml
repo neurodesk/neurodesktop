@@ -52,7 +52,7 @@ jobs:
             VCS_REF=${{ github.sha }}
             NEURODESKTOP_VERSION=pr-${{ github.event.pull_request.number || github.run_id }}
           cache-from: type=registry,ref=ghcr.io/neurodesk/neurodesktop:latest
-      - name: Release build cache before image scan
+      - name: Release build cache before image export
         run: |
           docker buildx prune --all --force
           df -h /
