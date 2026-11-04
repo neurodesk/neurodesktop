@@ -202,7 +202,7 @@ def test_sftp_sshd_retries_when_selected_port_is_claimed_before_bind(tmp_path):
         'attempts=$(cat "$FAKE_STARTUP_ATTEMPTS" 2>/dev/null || printf 0)\n'
         'printf "%s\\n" "$((attempts + 1))" > "$FAKE_STARTUP_ATTEMPTS"\n'
         'if [ "$attempts" -eq 0 ]; then\n'
-        '  printf "Bind to port %s on 127.0.0.1 failed: Address already in use.\\n" "$port" >&2\n'
+        '  printf "Bind to port %s on 127.0.0.1 failed: Address already in use.\\nCannot bind any address.\\n" "$port" >&2\n'
         "  exit 98\n"
         "fi\n"
         'printf "%s\\n" "$@" > "$FAKE_SSHD_ARGUMENTS"\n'
@@ -250,7 +250,7 @@ def test_sftp_sshd_retries_when_selected_port_is_claimed_before_bind(tmp_path):
     assert "-p\n2223\n" in arguments.read_text()
 
 
-@pytest.mark.parametrize("startup", ["delayed", "never", "failed"])
+@pytest.mark.parametrize("startup", ["delayed", "duplicate-bind", "never", "failed"])
 def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup):
     home = tmp_path / "home"
     ssh_dir = home / ".ssh"
@@ -273,6 +273,7 @@ def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup):
             "fi\n"
             f'for arg in "$@"; do [[ "$arg" == PidFile=* ]] && echo {os.getpid()} > "${{arg#PidFile=}}"; done\n'
             'case "$STARTUP" in\n'
+            "  duplicate-bind) echo 'Bind to port 2222 on 127.0.0.1 failed: Address already in use.'; (sleep 0.3; touch \"$LISTENING\") >/dev/null 2>&1 & ;;\n"
             '  delayed) (sleep 0.3; touch "$LISTENING") >/dev/null 2>&1 & ;;\n'
             "  never) echo 'daemon could not bind' ;;\n"
             "  failed) echo 'daemon launch failed'; exit 1 ;;\n"
@@ -303,7 +304,7 @@ def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup):
             "LISTENING": str(marker),
         },
     )
-    if startup == "delayed":
+    if startup in ("delayed", "duplicate-bind"):
         assert result.returncode == 0, result.stdout + result.stderr
         assert marker.exists(), "Published the port before the daemon was listening"
         assert (runtime / "sftp_port").read_text() == "2222\n"

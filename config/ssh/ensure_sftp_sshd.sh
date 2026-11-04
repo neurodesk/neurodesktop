@@ -297,7 +297,7 @@ start_sshd() {
         -o "PubkeyAuthentication=yes" >>"${startup_log}" 2>&1; then
         warn "Failed to start sshd on port ${SFTP_SSH_PORT}."
         emit_sshd_log_preview "${startup_log}"
-        if grep -qi 'address already in use' "${startup_log}"; then
+        if grep -q 'Cannot bind any address' "${startup_log}"; then
             rm -f "${validation_log}"
             return 75
         fi
@@ -305,6 +305,8 @@ start_sshd() {
         return 1
     fi
 
+    # A duplicate ListenAddress can log a bind error even after a successful
+    # bind. Only the fatal 'Cannot bind any address' means no listener started.
     # sshd's parent exits before its daemon child binds. Keep the startup log
     # until readiness is known, and never advertise a merely successful fork.
     local attempt
@@ -313,7 +315,7 @@ start_sshd() {
             rm -f "${validation_log}"
             return 0
         fi
-        if grep -qi 'address already in use' "${startup_log}"; then
+        if grep -q 'Cannot bind any address' "${startup_log}"; then
             emit_sshd_log_preview "${startup_log}"
             rm -f "${validation_log}"
             return 75

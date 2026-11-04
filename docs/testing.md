@@ -804,8 +804,7 @@ homes without the XDG config parent, an absolute override, and an ignored
 relative override. The checkout SFTP startup test forces a competing listener
 to win the race between automatic port selection and sshd's bind, then requires
 startup to retry and publish the new listener. SSH-disabled cases start with
-stale SFTP port state,
-require the SFTP connection to be disabled without a new SSH daemon, and
+stale SFTP port state, require the SFTP connection to be disabled without a new SSH daemon, and
 receive desktop frames through the authenticated VNC tunnel. The combined-backend
 case exercises the template that enables SFTP by default. The installed
 SSH proxy tests load the shipped Jupyter configuration and verify that the
