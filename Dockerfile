@@ -653,7 +653,6 @@ RUN retry conda install --solver=libmamba -c conda-forge nb_conda_kernels \
 # ${NB_USER} via runuser so /opt/conda stays user-owned exactly as before;
 # `env PATH=` restores the conda-first PATH that runuser resets (the
 # jupyterlab-slurm source build needs jlpm and node on PATH).
-ARG BUST_CACHE_PIP=6
 ARG PIP_VERSION="26.2.2"
 ARG CERTIFI_VERSION="2026.10.23"
 ARG UV_VERSION="0.13.6"

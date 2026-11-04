@@ -18,6 +18,27 @@ def instruction_containing(text):
     return matches[0]
 
 
+def test_every_declared_build_argument_affects_an_instruction():
+    """Do not expose build knobs that cannot change the resulting image."""
+    declared = set(
+        re.findall(r"^ARG\s+([A-Za-z_][A-Za-z0-9_]*)", DOCKERFILE, re.MULTILINE)
+    )
+    instructions = "\n".join(
+        line
+        for line in DOCKERFILE.splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    expansions = {
+        braced or bare
+        for braced, bare in re.findall(
+            r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)[^}]*\}|([A-Za-z_][A-Za-z0-9_]*))",
+            instructions,
+        )
+    }
+
+    assert sorted(declared - expansions) == []
+
+
 def test_guacamole_archive_is_extracted_and_removed_in_its_download_layer():
     """Prevent the WAR archive from surviving in a lower image layer."""
     layer = instruction_containing("-o /tmp/guacamole-${GUACAMOLE_VERSION}.war")
