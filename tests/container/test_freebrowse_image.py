@@ -96,6 +96,9 @@ def test_document_viewers_open_and_render_local_volume(tmp_path, graphics_displa
             assert {tab["context"] for tab in contexts} == original_tabs, "Viewer opened an external browser tab"
             assert bidi.evaluate(context, "window.__opened.length") == 0
             if viewer == "FreeBrowse":
+                _wait_for_expression(bidi, context,
+                    f"new URL({frame}.src, location.href).searchParams.has('vol')",
+                    log_paths=logs)
                 viewer_url = bidi.evaluate(context, f"{frame}.src")
                 query = parse_qs(urlsplit(viewer_url).query)
                 assert query["vol"][0].startswith(f"blob:{origin}/")
