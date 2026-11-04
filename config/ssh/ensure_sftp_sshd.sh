@@ -203,6 +203,7 @@ sshd_owns_listener() {
     # Run it through a shell so the sudo path can perform the same liveness
     # check as unprivileged startup instead of waiting five seconds and
     # withholding a port that the root-owned daemon has already bound.
+    # shellcheck disable=SC2016 # $1 expands in the child shell.
     "${sshd_prefix[@]}" /bin/sh -c 'kill -0 "$1"' sh "${pid}" 2>/dev/null || return 1
     "${sshd_prefix[@]}" ss -lntpH "sport = :${SFTP_SSH_PORT}" 2>/dev/null | grep -Eq "pid=${pid},"
 }
