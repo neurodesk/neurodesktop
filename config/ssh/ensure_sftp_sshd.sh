@@ -46,9 +46,16 @@ find_free_tcp_port_for_sftp() {
 }
 
 # Pick a unique SFTP/SSH port on shared Apptainer HPC nodes. 2222 may be taken
-# by another user's sibling container, so probe from 2222 upwards.
+# by another user's sibling container, so probe from 2222 upwards. Remember
+# whether the caller selected an exact port: automatic selections may retry a
+# bind race, but an explicit request must either use that port or fail.
+SFTP_SSH_PORT_EXPLICIT=1
 if [ -z "${SFTP_SSH_PORT:-}" ]; then
-    SFTP_SSH_PORT="$(find_free_tcp_port_for_sftp 2222 20 || true)"
+    SFTP_SSH_PORT_EXPLICIT=0
+    if ! SFTP_SSH_PORT="$(find_free_tcp_port_for_sftp 2222 20)"; then
+        echo "[WARN] No free SSH/SFTP port found from 2222 through 2241."
+        exit 1
+    fi
 fi
 export NEURODESKTOP_SFTP_PORT="${SFTP_SSH_PORT}"
 
@@ -188,12 +195,21 @@ port_is_listening() {
     ss -lnt 2>/dev/null | awk 'NR>1 {print $4}' | grep -Eq "(^|:)${SFTP_SSH_PORT}$"
 }
 
+sshd_owns_listener() {
+    local pid
+    pid="$(cat "${SFTP_SSH_PID_FILE}" 2>/dev/null)" || return 1
+    [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
+    "${sshd_prefix[@]}" kill -0 "${pid}" 2>/dev/null || return 1
+    "${sshd_prefix[@]}" ss -lntpH "sport = :${SFTP_SSH_PORT}" 2>/dev/null | grep -Eq "pid=${pid},"
+}
+
 start_sshd() {
     local -a sshd_prefix=()
     local ssh_config_to_use validation_log startup_log fallback_config
 
     if port_is_listening; then
-        return 0
+        warn "Port ${SFTP_SSH_PORT} became unavailable before sshd startup."
+        return 75
     fi
 
     # A persisted PID can belong to another host or a previous container.
@@ -207,8 +223,12 @@ start_sshd() {
     fi
 
     ssh_config_to_use="${SSH_CONFIG}"
+    # OpenSSH re-execs with -E on every connection. Keep the log private and
+    # persistent, and bound its lifetime by truncating it on the next launch.
+    startup_log="${SSH_DIR}/sshd_${SFTP_SSH_PORT}.log"
+    (umask 077; : >"${startup_log}") || return 1
+    chmod 600 "${startup_log}" || return 1
     validation_log="$(mktemp /tmp/sshd-validate.XXXXXX)"
-    startup_log="$(mktemp /tmp/sshd-start.XXXXXX)"
 
     # ListenAddress is additive, including between -o and Include files. Check
     # the complete effective configuration before trusting a persisted config.
@@ -231,7 +251,7 @@ start_sshd() {
         if ! "${sshd_prefix[@]}" /usr/sbin/sshd -t -f "${ssh_config_to_use}" >"${validation_log}" 2>&1; then
             warn "Fallback sshd config validation failed for ${ssh_config_to_use}."
             emit_sshd_log_preview "${validation_log}"
-            rm -f "${validation_log}" "${startup_log}"
+            rm -f "${validation_log}"
             return 1
         fi
     fi
@@ -257,7 +277,10 @@ start_sshd() {
     # configs predate that boundary, so enforce it on the command line too:
     # internal-sftp denies shell/command execution, DisableForwarding covers
     # TCP, stream-local, agent and X11 forwarding, and no client needs a TTY.
+    # sshd -E appends to this log; it does not read it as an input file.
+    # shellcheck disable=SC2094
     if ! "${sshd_prefix[@]}" /usr/sbin/sshd \
+        -E "${startup_log}" \
         -f "${ssh_config_to_use}" \
         -p "${SFTP_SSH_PORT}" \
         -h "${SSH_HOST_ED25519_KEY}" \
@@ -271,26 +294,71 @@ start_sshd() {
         -o "PermitTTY=no" \
         -o "KbdInteractiveAuthentication=no" \
         -o "PasswordAuthentication=no" \
-        -o "PubkeyAuthentication=yes" >"${startup_log}" 2>&1; then
+        -o "PubkeyAuthentication=yes" >>"${startup_log}" 2>&1; then
         warn "Failed to start sshd on port ${SFTP_SSH_PORT}."
         emit_sshd_log_preview "${startup_log}"
-        rm -f "${validation_log}" "${startup_log}"
+        if grep -q 'Cannot bind any address' "${startup_log}"; then
+            rm -f "${validation_log}"
+            return 75
+        fi
+        rm -f "${validation_log}"
         return 1
     fi
 
+    # A duplicate ListenAddress can log a bind error even after a successful
+    # bind. Only the fatal 'Cannot bind any address' means no listener started.
     # sshd's parent exits before its daemon child binds. Keep the startup log
     # until readiness is known, and never advertise a merely successful fork.
     local attempt
     for ((attempt = 0; attempt < 50; attempt++)); do
-        if port_is_listening; then
-            rm -f "${validation_log}" "${startup_log}"
+        if sshd_owns_listener; then
+            rm -f "${validation_log}"
             return 0
+        fi
+        if grep -q 'Cannot bind any address' "${startup_log}"; then
+            emit_sshd_log_preview "${startup_log}"
+            rm -f "${validation_log}"
+            return 75
         fi
         sleep 0.1
     done
     warn "sshd did not start listening on ${SFTP_SSH_PORT} within 5 seconds."
     emit_sshd_log_preview "${startup_log}"
-    rm -f "${validation_log}" "${startup_log}"
+    rm -f "${validation_log}"
+    return 1
+}
+
+start_sshd_with_port_retry() {
+    local attempt=1
+    local max_attempts=20
+    local next_port remaining_attempts selected_port startup_status
+
+    while [ "${attempt}" -le "${max_attempts}" ]; do
+        start_sshd
+        startup_status=$?
+        if [ "${startup_status}" -eq 0 ]; then
+            return 0
+        fi
+
+        if [ "${startup_status}" -ne 75 ] || [ "${SFTP_SSH_PORT_EXPLICIT}" -eq 1 ]; then
+            return "${startup_status}"
+        fi
+
+        next_port=$((SFTP_SSH_PORT + 1))
+        remaining_attempts=$((max_attempts - attempt))
+        if [ "${remaining_attempts}" -le 0 ] \
+            || ! selected_port="$(find_free_tcp_port_for_sftp "${next_port}" "${remaining_attempts}")"; then
+            warn "Could not start sshd after ${attempt} automatic port attempts."
+            return 1
+        fi
+
+        warn "Retrying SSH/SFTP startup on port ${selected_port}."
+        SFTP_SSH_PORT="${selected_port}"
+        export NEURODESKTOP_SFTP_PORT="${SFTP_SSH_PORT}"
+        SFTP_SSH_PID_FILE="${SSH_DIR}/sshd_${SFTP_SSH_PORT}.pid"
+        attempt=$((attempt + 1))
+    done
+
     return 1
 }
 
@@ -313,7 +381,10 @@ main() {
     fi
     ensure_host_keys
     ensure_authorized_sftp_key || true
-    if ! start_sshd; then
+    # Port probes cannot reserve a socket. On a shared Apptainer network,
+    # another session can bind the selected port before sshd does. Retry an
+    # automatically selected port and publish only a confirmed listener.
+    if ! start_sshd_with_port_retry; then
         return 1
     fi
     printf '%s\n' "${SFTP_SSH_PORT}" \
