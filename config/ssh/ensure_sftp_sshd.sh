@@ -196,7 +196,7 @@ port_is_listening() {
 }
 
 sshd_owns_listener() {
-    local pid
+    local pid socket_details socket_inodes inode process_sockets
     pid="$(cat "${SFTP_SSH_PID_FILE}" 2>/dev/null)" || return 1
     [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
     # `kill` is a shell builtin in the image, not a standalone executable.
@@ -205,7 +205,34 @@ sshd_owns_listener() {
     # withholding a port that the root-owned daemon has already bound.
     # shellcheck disable=SC2016 # $1 expands in the child shell.
     "${sshd_prefix[@]}" /bin/sh -c 'kill -0 "$1"' sh "${pid}" 2>/dev/null || return 1
-    "${sshd_prefix[@]}" ss -lntpH "sport = :${SFTP_SSH_PORT}" 2>/dev/null | grep -Eq "pid=${pid},"
+
+    # Prefer ss's process annotation, but do not require it. Some container
+    # runtimes expose socket diagnostics while suppressing the users:(...)
+    # field, even for the process owner. Extended socket output still carries
+    # the kernel socket inode, which can be matched exactly against the private
+    # daemon PID's file descriptors without accepting an unrelated listener.
+    socket_details="$(
+        "${sshd_prefix[@]}" ss -lntpeH "sport = :${SFTP_SSH_PORT}" 2>/dev/null
+    )"
+    if printf '%s\n' "${socket_details}" | grep -Eq "pid=${pid}([,)])"; then
+        return 0
+    fi
+
+    socket_inodes="$(
+        printf '%s\n' "${socket_details}" \
+            | awk '{ for (field = 1; field <= NF; field++) if ($field ~ /^ino:[0-9]+$/) { sub(/^ino:/, "", $field); print $field } }'
+    )"
+    [ -n "${socket_inodes}" ] || return 1
+    process_sockets="$(
+        "${sshd_prefix[@]}" find "/proc/${pid}/fd" -maxdepth 1 -type l -printf '%l\n' 2>/dev/null
+    )"
+    [ -n "${process_sockets}" ] || return 1
+    while IFS= read -r inode; do
+        if printf '%s\n' "${process_sockets}" | grep -Fqx "socket:[${inode}]"; then
+            return 0
+        fi
+    done <<< "${socket_inodes}"
+    return 1
 }
 
 start_sshd() {
