@@ -37,9 +37,9 @@ def prepare(value):
             raise JobError("Incomplete preparation needs reconciliation; use a new run") from None
         if read(directory / "request.json") != value:
             raise JobError("Run ID already belongs to a different request") from None
-        return {"prepared": True}
-    atomic(directory / "request.json", value)
-    (directory / "attempts").mkdir()
+    else:
+        atomic(directory / "request.json", value)
+    (directory / "attempts").mkdir(exist_ok=True, mode=0o700)
     return {"prepared": True}
 
 
@@ -105,7 +105,8 @@ def scheduler(record):
         rows = run(["sacct", "--noheader", "--parsable2", "--allocations",
                     "--user", record["owner"], "--name", record["job_name"],
                     "--starttime", record["created"].split("T")[0],
-                    "--format=JobIDRaw,JobName%64,Comment%128,State,ExitCode,User%64"], timeout=30)
+                    "--format=JobIDRaw,JobName%64,Comment%128,State,ExitCode,User%64"],
+                   env=dict(os.environ, TZ="UTC"), timeout=30)
         for row in rows.splitlines():
             job, name, comment, state, exit_code, owner = row.strip().split("|")[:6]
             correlated = comment == record["comment"] or (

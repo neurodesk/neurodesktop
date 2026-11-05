@@ -120,6 +120,40 @@ def test_queue_evidence_overrides_stale_completed_accounting(scheduler, monkeypa
     assert remote.status(value)["scheduler"]["state"] == "PENDING"
 
 
+def test_accounting_recovers_utc_job_before_site_local_midnight(scheduler, monkeypatch):
+    value, _, core, remote = scheduler
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    record = remote.submit(value)
+    record["created"] = "2026-11-05T01:00:00"
+    directory = remote.run_directory(value["site"], value["run_id"])
+    core.atomic(directory / "submission.json", record)
+    row = f"1234|{record['job_name']}|{record['comment']}|COMPLETED|0:0|{record['owner']}"
+    executable = Path(os.environ["PATH"].split(":")[0]) / "sacct"
+    executable.write_text(f"""#!{sys.executable}
+import calendar, sys, time
+time.tzset()
+start = sys.argv[sys.argv.index('--starttime') + 1]
+boundary = time.mktime(time.strptime(start, '%Y-%m-%d'))
+completed = calendar.timegm((2026, 11, 5, 1, 15, 0))
+if boundary <= completed:
+    print({row!r})
+""")
+    observed = remote.status(value)
+    assert observed["scheduler"]["state"] == "COMPLETED"
+    assert observed["scheduler"]["job_id"] == "1234"
+
+
+def test_preparation_retry_repairs_missing_attempt_directory(scheduler):
+    value, accepted, core, remote = scheduler
+    directory = remote.run_directory(value["site"], value["run_id"])
+    (directory / "attempts").rmdir()
+    assert remote.prepare(value) == {"prepared": True}
+    assert core.read(directory / "request.json") == value
+    assert remote.status(value)["attempts"] == []
+    assert not accepted.exists()
+    assert (directory / "attempts").is_dir()
+
+
 @pytest.mark.parametrize("state,exit_code", [("UNKNOWN", "0:0"), ("FAILED", "1:0"),
                                             ("CANCELLED", "0:0"), ("TIMEOUT", "0:0"),
                                             ("OUT_OF_MEMORY", "0:0"), ("COMPLETED", "0:9")])

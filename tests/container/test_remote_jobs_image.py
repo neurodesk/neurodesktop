@@ -27,14 +27,14 @@ def test_ria_nested_snapshot_publication_and_offline_restore(tmp_path, monkeypat
     monkeypatch.setenv("GIT_COMMITTER_EMAIL", "job@test.invalid")
     source = tmp_path / "source"
     data.create(source)
-    core.run(["datalad", "create", "-d", source, source / "nested"])
-    (source / "nested" / "numbers.bin").write_bytes(b"1\n2\n3\n")
-    data.save(source / "nested", "Inputs")
-    (source / "analyze.sh").write_text("cat /inputs/nested/numbers.bin > /outputs/result.txt\n")
+    core.run(["datalad", "create", "-d", source, source / "a"])
+    (source / "a" / "numbers.bin").write_bytes(b"1\n2\n3\n")
+    data.save(source / "a", "Inputs")
+    (source / "analyze.sh").write_text("cat /inputs/a/numbers.bin > /outputs/result.txt\n")
     core.run(["datalad", "save", "-r", "-d", source, "-m", "Pinned input"])
     image = tmp_path / "image.sif"
     image.write_bytes(b"software artifact used only in this storage test")
-    spec = {"inputs": ["analyze.sh", "nested/numbers.bin"],
+    spec = {"inputs": ["analyze.sh", "a/numbers.bin"],
             "command": ["sh", "/inputs/analyze.sh"],
             "validate": ["test", "-s", "/outputs/result.txt"], "outputs": ["result.txt"]}
     capsule = tmp_path / "capsule"
@@ -88,6 +88,6 @@ def test_ria_nested_snapshot_publication_and_offline_restore(tmp_path, monkeypat
     shutil.rmtree(store)
     client.restore(archive_path, tmp_path / "restored")
     assert (tmp_path / "restored/output/result.bin").read_bytes() == bytes(range(256)) * 4
-    assert (tmp_path / "restored/input/data/nested/numbers.bin").read_text() == "1\n2\n3\n"
+    assert (tmp_path / "restored/input/data/a/numbers.bin").read_text() == "1\n2\n3\n"
     assert core.git(tmp_path / "restored/output", "rev-parse", "HEAD") == datasets[0][1]["commit"]
     assert "origin" not in core.git(tmp_path / "restored/output", "remote").splitlines()

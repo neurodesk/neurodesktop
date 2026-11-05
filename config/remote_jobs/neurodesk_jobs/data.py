@@ -112,7 +112,7 @@ def capsule(source, image, spec, destination):
         path = source / name
         owner = max((r for r in repositories
                      if r["path"] == "." or name.startswith(r["path"] + "/")),
-                    key=lambda r: len(r["path"]))
+                    key=lambda r: 0 if r["path"] == "." else len(r["path"]))
         repo = source / owner["path"]
         local = path.relative_to(repo).as_posix()
         mode = git(repo, "ls-tree", "HEAD", "--", local).split(" ", 1)[0]
