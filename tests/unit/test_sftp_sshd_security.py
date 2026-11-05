@@ -277,10 +277,16 @@ def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup, sudo_avai
             # external executable for sudo to invoke directly.
             'if [ "$1" = "kill" ]; then exit 127; fi\n'
             'if [ "$1" = "mkdir" ] || [ "$1" = "chmod" ]; then exit 0; fi\n'
+            'export FAKE_SUDO_ACTIVE=1\n'
             'exec "$@"\n'
         )
     programs = {
         "sudo": sudo_program,
+        "cat": (
+            'if [[ "$1" == *.pid ]] && [ "$FAKE_ROOT_PID" = 1 ] '
+            '&& [ "${FAKE_SUDO_ACTIVE:-0}" != 1 ]; then exit 1; fi\n'
+            'exec /bin/cat "$@"\n'
+        ),
         "sshd": (
             'if [[ " $* " == *" -T "* ]]; then\n'
             "  echo 'listenaddress 127.0.0.1:2222'; exit 0\n"
@@ -324,6 +330,7 @@ def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup, sudo_avai
             "NEURODESKTOP_RUNTIME_DIR": str(runtime),
             "NEURODESKTOP_DISABLE_SSH": "false",
             "SFTP_SSH_PORT": "2222",
+            "FAKE_ROOT_PID": "1" if sudo_available else "0",
             "STARTUP": startup,
             "LISTENING": str(marker),
         },
