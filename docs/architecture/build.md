@@ -57,6 +57,11 @@ the matching FreeRDP 3 client libraries. Its build selects GNU C17 because
 It accepts deprecated FreeRDP API declarations and requires the RDP plugin
 to exist after installation.
 
+The Guacamole source download tries Apache's current-release server first and
+falls back to its archive for releases removed from the current directory or
+when that server is unavailable. Each endpoint retains bounded retries; failure
+of both stops the build before extraction.
+
 The build backports [GUACAMOLE-2328](https://issues.apache.org/jira/browse/GUACAMOLE-2328)
 from upstream commit
 [`ab36756b596520ae2a94cd4d25e406e0b5aa820b`](https://github.com/apache/guacamole-server/commit/ab36756b596520ae2a94cd4d25e406e0b5aa820b).

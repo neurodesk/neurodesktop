@@ -143,9 +143,12 @@ RUN mkdir -p /opt/glass/bin \
 
 # Build Guacamole server
 RUN --mount=type=bind,source=config/guacamole/guacamole-1.6.0-GUACAMOLE-2328.patch,target=/tmp/guacamole/guacamole-1.6.0-GUACAMOLE-2328.patch,ro \
-    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
-    "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/source/guacamole-server-${GUACAMOLE_VERSION}.tar.gz" \
-    -o /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz \
+    (curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
+        "https://downloads.apache.org/guacamole/${GUACAMOLE_VERSION}/source/guacamole-server-${GUACAMOLE_VERSION}.tar.gz" \
+        -o /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz \
+    || curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
+        "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/source/guacamole-server-${GUACAMOLE_VERSION}.tar.gz" \
+        -o /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz) \
     && tar xvf /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz -C /tmp \
     && rm /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz \
     && cd /tmp/guacamole-server-${GUACAMOLE_VERSION} \
