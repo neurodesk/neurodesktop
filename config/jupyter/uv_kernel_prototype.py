@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
-"""Opt-in prototype for project-local uv kernels; not installed in the image."""
+#!/opt/conda/bin/python3 -I
+"""Manage opt-in project-local uv notebook kernels."""
 
 import argparse
 import fcntl

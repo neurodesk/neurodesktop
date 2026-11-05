@@ -241,3 +241,33 @@ def test_remove_incomplete_spec_is_actionable(prototype, tmp_path):
     with pytest.raises(ValueError, match="No prototype registration"):
         prototype.prepare(project, "remove", Path(sys.executable))
     assert spec_dir.is_dir()
+
+
+def test_image_packages_uv_helper_with_image_python():
+    dockerfile = repo_path("Dockerfile").read_text()
+    assert "install -m 0755 /tmp/jupyter/uv_kernel_prototype.py /usr/local/bin/neurodesk-uv" in dockerfile
+    assert repo_path("config/jupyter/uv_kernel_prototype.py").read_text().splitlines()[0] == (
+        "#!/opt/conda/bin/python3 -I")
+
+
+def test_init_migrates_downloaded_helper_registration(prototype, uv_boundary, tmp_path):
+    project = tmp_path / "analysis"
+    project_manifest(project)
+    (project / "uv.lock").write_text("original lock")
+    (project / ".venv/bin").mkdir(parents=True)
+    (project / ".venv/bin/python").symlink_to(sys.executable)
+    (project / ".venv/pyvenv.cfg").write_text("uv = 0.12.18\n")
+    prototype.atomic_json(project / f".{prototype.MARKER}.json", {"project": str(project)})
+    spec_dir = tmp_path / "jupyter/kernels" / prototype.kernel_name(project)
+    spec_dir.mkdir(parents=True)
+    prototype.atomic_json(spec_dir / "kernel.json", {
+        "argv": ["/downloaded/uv-kernel-prototype.py", "launch", str(project)],
+        "metadata": {prototype.MARKER: {"project": str(project)}}})
+    wrapper = tmp_path / "kernel-wrapper"
+    wrapper.write_text('#!/bin/bash\nexec "$@"\n')
+    wrapper.chmod(0o755)
+    prototype.prepare(project, "init", wrapper)
+    spec = json.loads((spec_dir / "kernel.json").read_text())
+    assert spec["argv"][:4] == [str(wrapper), sys.executable, "-I", str(Path(prototype.__file__).resolve())]
+    assert (project / "uv.lock").read_text() == "original lock"
+    assert len(list(spec_dir.parent.glob("*/kernel.json"))) == 1
