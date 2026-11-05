@@ -199,7 +199,12 @@ sshd_owns_listener() {
     local pid socket_details socket_inodes inode process_sockets
     pid="$(cat "${SFTP_SSH_PID_FILE}" 2>/dev/null)" || return 1
     [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
-    "${sshd_prefix[@]}" kill -0 "${pid}" 2>/dev/null || return 1
+    # `kill` is a shell builtin in the image, not a standalone executable.
+    # Run it through a shell so the sudo path can perform the same liveness
+    # check as unprivileged startup instead of waiting five seconds and
+    # withholding a port that the root-owned daemon has already bound.
+    # shellcheck disable=SC2016 # $1 expands in the child shell.
+    "${sshd_prefix[@]}" /bin/sh -c 'kill -0 "$1"' sh "${pid}" 2>/dev/null || return 1
 
     # Prefer ss's process annotation, but do not require it. Some container
     # runtimes expose socket diagnostics while suppressing the users:(...)

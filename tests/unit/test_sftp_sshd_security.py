@@ -250,11 +250,12 @@ def test_sftp_sshd_retries_when_selected_port_is_claimed_before_bind(tmp_path):
     assert "-p\n2223\n" in arguments.read_text()
 
 
+@pytest.mark.parametrize("sudo_available", [False, True], ids=["unprivileged", "sudo"])
 @pytest.mark.parametrize(
     "startup",
     ["delayed", "hidden-owner", "foreign-owner", "duplicate-bind", "never", "failed"],
 )
-def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup):
+def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup, sudo_available):
     home = tmp_path / "home"
     ssh_dir = home / ".ssh"
     keys = ssh_dir / "hostkeys"
@@ -268,8 +269,18 @@ def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     marker = tmp_path / "listening"
+    sudo_program = "exit 1\n"
+    if sudo_available:
+        sudo_program = (
+            'if [ "$1" = "-n" ] && [ "$2" = "true" ]; then exit 0; fi\n'
+            # `kill` is a shell builtin, and the image does not install an
+            # external executable for sudo to invoke directly.
+            'if [ "$1" = "kill" ]; then exit 127; fi\n'
+            'if [ "$1" = "mkdir" ] || [ "$1" = "chmod" ]; then exit 0; fi\n'
+            'exec "$@"\n'
+        )
     programs = {
-        "sudo": "exit 1\n",
+        "sudo": sudo_program,
         "sshd": (
             'if [[ " $* " == *" -T "* ]]; then\n'
             "  echo 'listenaddress 127.0.0.1:2222'; exit 0\n"
