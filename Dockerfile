@@ -1582,6 +1582,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     --mount=type=bind,source=config/guacamole,target=/tmp/guacamole,ro \
     --mount=type=bind,source=config/ssh,target=/tmp/ssh,ro \
     --mount=type=bind,source=config/slurm,target=/tmp/slurm,ro \
+    --mount=type=bind,source=config/remote_jobs,target=/tmp/remote_jobs,ro \
     --mount=type=bind,source=config/lxde,target=/tmp/lxde,ro \
     --mount=type=bind,source=config/lmod,target=/tmp/lmod,ro \
     --mount=type=bind,source=scripts/generate_jupyter_config.py,target=/tmp/generate_jupyter_config.py,ro \
@@ -1656,6 +1657,12 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/slurm/neurodesk-lc-materialize /usr/local/bin/neurodesk-lc-materialize \
     && install -m 0644 /tmp/slurm/lightcone_materialize.py /opt/neurodesktop/lightcone_materialize.py \
     && install -m 0644 /tmp/slurm/lightcone-compute.yaml /opt/neurodesktop/lightcone-compute.yaml \
+    && cp -a /tmp/remote_jobs /tmp/neurodesk-jobs-build \
+    && /opt/conda/bin/pip install --no-deps /tmp/neurodesk-jobs-build \
+    && install -m 0755 /tmp/remote_jobs/neurodesk-jobs /usr/local/bin/neurodesk-jobs \
+    && install -d -m 0755 /opt/neurodesktop/remote-jobs/profiles \
+    && install -m 0644 /tmp/remote_jobs/profiles/*.json /opt/neurodesktop/remote-jobs/profiles/ \
+    && rm -rf /tmp/neurodesk-jobs-build \
     # Only the container tier ships: tests/unit/ asserts on repository sources
     # and runs in CI on a checkout, so it has nothing to say inside the image.
     && cp -a /tmp/tests/container /opt/tests \

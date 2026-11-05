@@ -135,6 +135,37 @@ run there:
 - `tests/unit/test_astra_view_filebrowser.py` needs `jupyter-server` to drive
   the file-browser server extension.
 
+## Remote compute jobs
+
+Run `pytest tests/unit/test_remote_jobs.py` for submission races, lost responses,
+accounting uncertainty, cancellation and archive validation. These tests execute
+small scheduler command fixtures and do not require Slurm access.
+
+In the image, as the notebook user, run
+`pytest /opt/tests/test_remote_jobs_image.py`. It runs the installed CLI and
+real DataLad/Git/annex operations: nested source snapshots, filesystem RIA
+retrieval with SSH disabled, rejected input pushes, independent output datasets,
+and archive restoration after removing the fixture's scratch store. The test
+uses its own temporary datasets and does not contact an HPC.
+
+The [remote jobs site acceptance checklist](architecture/remote-jobs.md#site-acceptance-and-development)
+requires additional real SSH, Slurm, Apptainer, storage and MFA experiments on
+Bunya and Sherlock. Passing a local fixture does not establish site support.
+
+After `neurodesk-jobs connect`, run a synthetic end-to-end analysis with the
+installed CLI against an explicitly configured site:
+
+```bash
+python scripts/verify_remote_jobs.py --profile /project/site.json \
+  --image /project/busybox.sif --workspace /project/new-smoke-directory
+```
+
+The SIF must contain `sh` and `awk`. This creates a nested input dataset,
+submits a real Slurm job, checks repeated submission returns the same ID,
+retrieves the validated mean, archives it and restores with Git SSH disabled.
+It retains its run, workspaces and archive for inspection. It does not remove
+site stores or prove the separate cancellation, MFA or filesystem gates.
+
 ## Code quality checks
 
 The [code quality workflow](../.github/workflows/code-quality.yml) runs on every
