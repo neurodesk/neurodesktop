@@ -125,7 +125,8 @@ strict. Its PID file and per-port mode-0600 daemon log stay in the user's
 mode-0700 SSH directory, so another UID on a shared host cannot replace the
 daemon's state path between startup checks and the daemon opening it. The log
 persists because OpenSSH reopens it on each connection; it is truncated on the
-next launch for that port. Startup checks that the live daemon PID owns the
+next launch for that port. When sshd starts through sudo, readiness reads its root-owned mode-0600
+PID file through sudo too. Startup checks that the live daemon PID owns the
 local listener rather than trusting a saved PID, which can be reused after a
 container restart or belong to another host sharing the home directory. It
 uses the process annotation reported by `ss` when available, and otherwise
