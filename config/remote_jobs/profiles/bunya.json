@@ -1,0 +1,14 @@
+{
+  "name": "bunya",
+  "host": "bunya-command",
+  "transfer_host": "bunya-transfer",
+  "state_root": "/REPLACE/shared-persistent/neurodesk-jobs",
+  "store_root": "/REPLACE/scratch/neurodesk-ria",
+  "work_root": "/REPLACE/scratch/neurodesk-work",
+  "archive_root": "/REPLACE/client-mounted-persistent-archive",
+  "path": "/REPLACE/user-tools/bin:/usr/bin:/bin",
+  "python": "/REPLACE/user-tools/bin/python3",
+  "apptainer": "/REPLACE/apptainer/bin/apptainer",
+  "resources": {"account": "REPLACE", "partition": "REPLACE", "time": "00:15:00", "mem": "4G", "cpus-per-task": 1},
+  "scratch_retention_days": 0
+}
