@@ -114,7 +114,10 @@ the sockets remain mode `0660`. Leaving the group at `root` prevents xrdp from
 forwarding the desktop even after authentication succeeds.
 
 The SSH daemon used only for Guacamole's VNC SFTP side-channel listens on
-`127.0.0.1`. Startup checks every effective listener address, including
+`127.0.0.1`. It runs as the notebook session user even when that user has
+unrestricted sudo; broad package or administrative privileges do not change
+the ownership of this user-local service or its readiness state. Startup
+checks every effective listener address, including
 addresses from included files. A saved configuration that allows another
 address uses a minimal loopback-only fallback without replacing the saved
 file. This prevents persisted configurations from exposing the service on a

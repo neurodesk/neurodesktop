@@ -199,12 +199,8 @@ sshd_owns_listener() {
     local pid socket_details socket_inodes inode process_sockets
     pid="$(cat "${SFTP_SSH_PID_FILE}" 2>/dev/null)" || return 1
     [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
-    # `kill` is a shell builtin in the image, not a standalone executable.
-    # Run it through a shell so the sudo path can perform the same liveness
-    # check as unprivileged startup instead of waiting five seconds and
-    # withholding a port that the root-owned daemon has already bound.
     # shellcheck disable=SC2016 # $1 expands in the child shell.
-    "${sshd_prefix[@]}" /bin/sh -c 'kill -0 "$1"' sh "${pid}" 2>/dev/null || return 1
+    /bin/sh -c 'kill -0 "$1"' sh "${pid}" 2>/dev/null || return 1
 
     # Prefer ss's process annotation, but do not require it. Some container
     # runtimes expose socket diagnostics while suppressing the users:(...)
@@ -212,7 +208,7 @@ sshd_owns_listener() {
     # the kernel socket inode, which can be matched exactly against the private
     # daemon PID's file descriptors without accepting an unrelated listener.
     socket_details="$(
-        "${sshd_prefix[@]}" ss -lntpeH "sport = :${SFTP_SSH_PORT}" 2>/dev/null
+        ss -lntpeH "sport = :${SFTP_SSH_PORT}" 2>/dev/null
     )"
     if printf '%s\n' "${socket_details}" | grep -Eq "pid=${pid}([,)])"; then
         return 0
@@ -224,7 +220,7 @@ sshd_owns_listener() {
     )"
     [ -n "${socket_inodes}" ] || return 1
     process_sockets="$(
-        "${sshd_prefix[@]}" find "/proc/${pid}/fd" -maxdepth 1 -type l -printf '%l\n' 2>/dev/null
+        find "/proc/${pid}/fd" -maxdepth 1 -type l -printf '%l\n' 2>/dev/null
     )"
     [ -n "${process_sockets}" ] || return 1
     while IFS= read -r inode; do
@@ -236,7 +232,6 @@ sshd_owns_listener() {
 }
 
 start_sshd() {
-    local -a sshd_prefix=()
     local ssh_config_to_use validation_log startup_log fallback_config
 
     if port_is_listening; then
@@ -248,12 +243,6 @@ start_sshd() {
     # The listener check above and sshd's bind determine local availability.
     rm -f "${SFTP_SSH_PID_FILE}"
 
-    if sudo -n true 2>/dev/null; then
-        sshd_prefix=(sudo)
-        sudo mkdir -p /run/sshd
-        sudo chmod 755 /run/sshd
-    fi
-
     ssh_config_to_use="${SSH_CONFIG}"
     # OpenSSH re-execs with -E on every connection. Keep the log private and
     # persistent, and bound its lifetime by truncating it on the next launch.
@@ -264,7 +253,7 @@ start_sshd() {
 
     # ListenAddress is additive, including between -o and Include files. Check
     # the complete effective configuration before trusting a persisted config.
-    if ! "${sshd_prefix[@]}" /usr/sbin/sshd -T -f "${ssh_config_to_use}" \
+    if ! /usr/sbin/sshd -T -f "${ssh_config_to_use}" \
         -p "${SFTP_SSH_PORT}" -o "ListenAddress=127.0.0.1" >"${validation_log}" 2>&1 \
         || ! awk -v expected="127.0.0.1:${SFTP_SSH_PORT}" '
             $1 == "listenaddress" {
@@ -280,7 +269,7 @@ start_sshd() {
         write_fallback_sshd_config "${fallback_config}"
         ssh_config_to_use="${fallback_config}"
 
-        if ! "${sshd_prefix[@]}" /usr/sbin/sshd -t -f "${ssh_config_to_use}" >"${validation_log}" 2>&1; then
+        if ! /usr/sbin/sshd -t -f "${ssh_config_to_use}" >"${validation_log}" 2>&1; then
             warn "Fallback sshd config validation failed for ${ssh_config_to_use}."
             emit_sshd_log_preview "${validation_log}"
             rm -f "${validation_log}"
@@ -311,7 +300,7 @@ start_sshd() {
     # TCP, stream-local, agent and X11 forwarding, and no client needs a TTY.
     # sshd -E appends to this log; it does not read it as an input file.
     # shellcheck disable=SC2094
-    if ! "${sshd_prefix[@]}" /usr/sbin/sshd \
+    if ! /usr/sbin/sshd \
         -E "${startup_log}" \
         -f "${ssh_config_to_use}" \
         -p "${SFTP_SSH_PORT}" \

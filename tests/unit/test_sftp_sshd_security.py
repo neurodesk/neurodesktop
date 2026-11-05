@@ -269,14 +269,12 @@ def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup, sudo_avai
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     marker = tmp_path / "listening"
+    sudo_invocations = tmp_path / "sudo-invocations"
     sudo_program = "exit 1\n"
     if sudo_available:
         sudo_program = (
+            'printf "%s\\n" "$*" >> "$SUDO_INVOCATIONS"\n'
             'if [ "$1" = "-n" ] && [ "$2" = "true" ]; then exit 0; fi\n'
-            # `kill` is a shell builtin, and the image does not install an
-            # external executable for sudo to invoke directly.
-            'if [ "$1" = "kill" ]; then exit 127; fi\n'
-            'if [ "$1" = "mkdir" ] || [ "$1" = "chmod" ]; then exit 0; fi\n'
             'exec "$@"\n'
         )
     programs = {
@@ -326,7 +324,12 @@ def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup, sudo_avai
             "SFTP_SSH_PORT": "2222",
             "STARTUP": startup,
             "LISTENING": str(marker),
+            "SUDO_INVOCATIONS": str(sudo_invocations),
         },
+    )
+    assert not sudo_invocations.exists(), (
+        "The user-local SFTP daemon must not change identity merely because "
+        "unrestricted sudo is available"
     )
     if startup in ("delayed", "hidden-owner", "duplicate-bind"):
         assert result.returncode == 0, result.stdout + result.stderr
