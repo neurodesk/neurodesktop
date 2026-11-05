@@ -8,8 +8,11 @@ last-reviewed: "2026-11-04"
 
 # uv notebook environment prototype
 
-This checkout-only prototype tests whether an analysis folder can own a locked
-Python environment while Neurodesk continues to own JupyterLab. It is not
+This record describes the original checkout-only prototype. For the installed
+`neurodesk-uv` command, see [uv environments](../architecture/uv-environments.md).
+
+The original prototype tests whether an analysis folder can own a locked
+Python environment while Neurodesk continues to own JupyterLab. It was not
 installed by the Dockerfile and does not change the default kernel.
 
 Claude Opus 5.5 reviewed the conceptual proposal and recommended a CLI first,

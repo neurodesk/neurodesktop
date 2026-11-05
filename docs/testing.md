@@ -53,6 +53,13 @@ pytest tests/unit          # from a checkout, no container needed
 pytest /opt/tests/         # inside the built image
 ```
 
+The installed [uv environment helper](architecture/uv-environments.md) is covered
+by `pytest tests/unit/test_uv_kernel_prototype.py` and, as the notebook user,
+`pytest /opt/tests/test_uv_kernel_image.py`. The image test needs package-index
+access for initial setup, then rebuilds a moved project offline using its warm
+cache. It starts a real kernel and checks module initialization and environment
+isolation, as well as the installed command's interpreter and ownership.
+
 Running `tests/unit` needs GCC, X11 development headers, Xvfb, and `xrandr`
 for the Glass helpers,
 Python 3.15, Node.js 24, `pytest`, `httpx`,
