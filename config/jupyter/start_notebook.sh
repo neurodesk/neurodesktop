@@ -1,7 +1,7 @@
 #!/bin/bash
 # order: #### start_notebook.sh #### -> before_notebook.sh -> jupyterlab_startup.sh -> jupyter_notebook_config.py
 
-if [ -z "$RESTARTABLE" ]; then
+if [ -z "${RESTARTABLE:-}" ]; then
 export RESTARTABLE='yes'
 fi
 

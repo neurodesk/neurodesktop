@@ -1422,7 +1422,7 @@ checkout ownership, root refusal, and package-only sudo restrictions.
 Run the startup checks on a checkout:
 
 ```bash
-pytest tests/unit/test_startup_batching.py tests/unit/test_wait_for_jupyter.py tests/unit/test_nbi_opencode_sync.py tests/unit/test_startup_performance_fixes.py tests/unit/test_detect_resource_limits.py tests/unit/test_host_slurm_environment.py
+pytest tests/unit/test_start_notebook.py tests/unit/test_startup_batching.py tests/unit/test_wait_for_jupyter.py tests/unit/test_nbi_opencode_sync.py tests/unit/test_startup_performance_fixes.py tests/unit/test_detect_resource_limits.py tests/unit/test_host_slurm_environment.py
 ```
 
 These tests cover workspace quarantine in a single Python invocation, default
