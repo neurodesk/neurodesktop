@@ -449,7 +449,9 @@ def _open_guacamole_tunnel(port, token, data_source, connection_id, width=1280, 
     return tunnel
 
 
-def _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30, stable_seconds=3):
+def _collect_guacamole_desktop_frames(
+    tunnel, timeout_seconds=30, stable_seconds=3, parser=None
+):
     """Wait for real desktop pixels and reject any Guacamole error frames.
 
     Guacamole sends a .sync instruction as a handshake ack before the backend
@@ -467,7 +469,7 @@ def _collect_guacamole_desktop_frames(tunnel, timeout_seconds=30, stable_seconds
     deadline = time.time() + timeout_seconds
     frames = []
     saw_pixels = False
-    parser = GuacamoleInstructions()
+    parser = parser or GuacamoleInstructions()
     next_keepalive = 0.0
 
     while time.time() < deadline:
@@ -1462,7 +1464,7 @@ def test_guac_rdp_tunnel():
             auth_response["dataSource"],
             rdp_connection_id,
         )
-        _collect_guacamole_desktop_frames(tunnel)
+        _collect_guacamole_desktop_frames(tunnel, parser=keyboard_target.instructions)
         keyboard_target.wait(tunnel)
 
         def key(keysym, pressed):
