@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-10-27"
+last-reviewed: "2026-11-09"
 ---
 
 # Testing
@@ -964,6 +964,10 @@ successful session or the protocol's authentication-required response is
 accepted only after the expected CLI invocation is observed. Other errors,
 process exits, and timeouts fail the test. This check covers adapter upgrades
 that use an image CLI outside the adapter's declared dependency range.
+The image build also compares `codex --version` with the requested build
+argument, and the installed test compares the executable's report with its
+global npm package metadata so a stale platform binary cannot masquerade as the
+updated package.
 
 The installed T3 startup cases exercise fresh and legacy defaults. They wait
 for Claude's completed health probe, compare its version with the image CLI,

@@ -40,6 +40,20 @@ def test_coding_agent_wrapper_is_installed_and_on_path(command, installed_path):
     assert code == 0, f"{command} agent command missing from PATH: {output}"
 
 
+def test_codex_executable_reports_the_installed_package_version():
+    """Catch a stale or mismatched platform binary in the global npm package."""
+    code, npm_root = run_cmd("npm root -g")
+    assert code == 0, npm_root
+    package = json.loads(
+        (Path(npm_root) / "@openai/codex/package.json").read_text(encoding="utf-8")
+    )
+
+    code, output = run_cmd("/usr/bin/codex --version")
+
+    assert code == 0, output
+    assert output == f"codex-cli {package['version']}"
+
+
 @pytest.mark.parametrize("command,selector,image_cli,expected_argument", [
     (("codex-acp",), "CODEX_PATH", "/usr/bin/codex", "app-server"),
     (("claude-agent-acp",), "CLAUDE_CODE_EXECUTABLE",

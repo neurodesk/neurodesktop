@@ -4,7 +4,7 @@ description: Reference for runtime environment variables and Dockerfile build
   arguments supported by Neurodesktop
 parent: index.md
 status: current
-last-reviewed: "2026-10-23"
+last-reviewed: "2026-11-09"
 ---
 
 # Environment Variables
@@ -391,14 +391,14 @@ reviewed; the Dockerfile itself is authoritative.
   Collaboration pinned alongside it
 - `CODEX_ACP_VERSION`, `CLAUDE_AGENT_ACP_VERSION`: pinned
   ACP adapters that expose the Codex and Claude personas in Jupyter AI;
-  defaults to `2.5.0` and `0.99.1`. They install without their vendored agent
+  defaults to `2.6.0` and `0.99.1`. They install without their vendored agent
   binaries and drive the selected user or image CLIs through `CODEX_PATH` and
   `CLAUDE_CODE_EXECUTABLE` (runtime variables exported by
   `environment_variables.sh`)
 - `CODEX_CLI_VERSION`: the `@openai/codex` CLI release
-  installed globally; defaults to `0.166.0`. Upgrades must pass the real T3 and
+  installed globally; defaults to `0.167.0`. Upgrades must pass the real T3 and
   ACP initialization probes. This release exceeds the pinned ACP adapter's
-  declared `^0.165.0` dependency range. The image deliberately uses its
+  declared `^0.166.0` dependency range. The image deliberately uses its
   global CLI after removing the adapter's bundled executable; installed-image
   ACP and T3 initialization probes must validate this exception.
   A user can install a newer release with `codex update`
