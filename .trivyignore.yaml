@@ -107,6 +107,7 @@ vulnerabilities:
     purls:
       - pkg:deb/ubuntu/linux-libc-dev@7.0.0-38.38
       - pkg:deb/ubuntu/linux-libc-dev@7.0.0-42.42
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-43.43
     expired_at: 2026-11-20
     statement: >-
       linux-libc-dev contains UAPI headers, without the affected kernel
@@ -157,6 +158,7 @@ vulnerabilities:
     purls:
       - pkg:deb/ubuntu/linux-libc-dev@7.0.0-38.38
       - pkg:deb/ubuntu/linux-libc-dev@7.0.0-42.42
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-43.43
     expired_at: 2026-11-20
     statement: >-
       linux-libc-dev contains UAPI headers, without the affected kernel
@@ -167,6 +169,7 @@ vulnerabilities:
     purls:
       - pkg:deb/ubuntu/linux-libc-dev@7.0.0-38.38
       - pkg:deb/ubuntu/linux-libc-dev@7.0.0-42.42
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-43.43
     expired_at: 2026-11-20
     statement: >-
       linux-libc-dev contains UAPI headers, without the affected kernel
@@ -176,6 +179,7 @@ vulnerabilities:
   - id: CVE-2026-98432
     purls:
       - pkg:deb/ubuntu/linux-libc-dev@7.0.0-42.42
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-43.43
     expired_at: 2026-11-20
     statement: >-
       The affected IPv4 TCP implementation runs in the host kernel, not in

@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-24"
+last-reviewed: "2026-11-08"
 ---
 
 # Build-Time Behaviors
@@ -46,8 +46,27 @@ An additional exception covers
 [CVE-2026-98432](https://ubuntu.com/security/CVE-2026-98432), an IPv4 TCP
 use-after-free in the running kernel. Inspection of `linux-libc-dev` 7.0.0-42.42
 confirmed that its files are headers and documentation. Its exception matches
-only that version and expires on 2026-11-20; it does not exempt host kernels
-or other package versions.
+only inspected header versions and expires on 2026-11-20; it does not exempt
+host kernels or other packages.
+
+PR image acceptance runs
+[42509081627](https://github.com/neurodesk/neurodesktop/actions/runs/42509081627)
+and [42509094220](https://github.com/neurodesk/neurodesktop/actions/runs/42509094220)
+reported four of these CVEs against `linux-libc-dev` 7.0.0-43.43 on both
+architectures: CVE-2026-90162, CVE-2026-98432, CVE-2026-98725, and
+CVE-2026-98805. Inspection of Ubuntu's
+[amd64 package](https://archive.ubuntu.com/ubuntu/pool/main/l/linux/linux-libc-dev_7.0.0-43.43_amd64.deb)
+and [arm64 package](https://ports.ubuntu.com/pool/main/l/linux/linux-libc-dev_7.0.0-43.43_arm64.deb)
+found only UAPI headers and documentation. Their SHA-256 digests are
+`3a3adc14e3332fc017b1d0e4e39655298a2a977d51db6e80de533ac60137b07f`
+and `3d6313ac30170df8614618fd1aeb864606c378d90aa18e5d2012aad46861d753`,
+respectively. Only those four exceptions include 7.0.0-43.43, with the same
+2026-11-20 expiry. Ubuntu's advisories describe affected kernel code in
+[ksmbd](https://ubuntu.com/security/CVE-2026-90162),
+[IPv4 TCP](https://ubuntu.com/security/CVE-2026-98432),
+[NVMe target authentication](https://ubuntu.com/security/CVE-2026-98725), and
+[TIPC](https://ubuntu.com/security/CVE-2026-98805); host kernels still require
+their own updates.
 
 ## Base image dependencies
 

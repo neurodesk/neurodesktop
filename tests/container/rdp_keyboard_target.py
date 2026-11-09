@@ -11,6 +11,7 @@ import time
 import websocket
 
 from native_desktop_driver import _WindowAttributes
+from testlib import GuacamoleInstructions, guacamole_instruction
 
 
 def _xrdp_sessions(uid):
@@ -49,6 +50,7 @@ class RdpKeyboardTarget:
         self.uid = uid
         self.previous_sessions = _xrdp_sessions(uid)
         self.session = None
+        self.instructions = GuacamoleInstructions()
 
     def snapshot(self, timeout_seconds):
         sessions = _xrdp_sessions(self.uid)
@@ -90,9 +92,13 @@ class RdpKeyboardTarget:
                     raise AssertionError(f'Guacamole transport failed waiting for {expected}; {state}') from error
                 else:
                     assert frame, f'Guacamole tunnel closed waiting for {expected}; {state}'
-                    assert not isinstance(frame, str) or '.error,' not in frame, (
-                        f'Guacamole error waiting for {expected}: {frame!r}; {state}'
-                    )
+                    if isinstance(frame, str):
+                        instructions = self.instructions.feed(frame)
+                        error = next((item for item in instructions if item[0] == 'error'), None)
+                        assert error is None, f'Guacamole error waiting for {expected}: {error!r}; {state}'
+                        for instruction in instructions:
+                            if instruction[0] == 'sync':
+                                tunnel.send(guacamole_instruction(*instruction))
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break
