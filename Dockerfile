@@ -1018,7 +1018,8 @@ RUN echo "Installing neurocommand ref ${NEUROCOMMAND_REF}" \
 ARG CODEX_CLI_VERSION="0.167.0"
 ARG CLAUDE_CODE_VERSION="2.1.316"
 RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_CLI_VERSION}" \
-    && test "$(codex --version)" = "codex-cli ${CODEX_CLI_VERSION}" \
+    && codex_installed_version="$(codex --version)" \
+    && test "$codex_installed_version" = "codex-cli ${CODEX_CLI_VERSION}" \
     && find "$(npm root -g)/@openai" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
     && rm -rf /root/.npm /tmp/npm-root-cache /home/${NB_USER}/.npm \
     && su - "${NB_USER}" -c "retry bash -o pipefail -c 'curl -fsSL https://claude.ai/install.sh | bash -s -- ${CLAUDE_CODE_VERSION}'" \

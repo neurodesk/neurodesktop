@@ -964,8 +964,9 @@ successful session or the protocol's authentication-required response is
 accepted only after the expected CLI invocation is observed. Other errors,
 process exits, and timeouts fail the test. This check covers adapter upgrades
 that use an image CLI outside the adapter's declared dependency range.
-The image build also compares `codex --version` with the requested build
-argument, and the installed test compares the executable's report with its
+Both image builds require `codex --version` to succeed and match the requested
+pin. Checkout tests execute these guards against matching, stale, and failing
+CLIs. The installed test compares the executable's report with its
 global npm package metadata so a stale platform binary cannot masquerade as the
 updated package.
 

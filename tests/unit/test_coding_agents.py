@@ -59,16 +59,40 @@ def test_dockerfile_pins_the_native_claude_install():
     assert "bash -s -- stable" not in dockerfile
 
 
-def test_dockerfiles_verify_the_installed_codex_version():
-    """Both images fail their build if npm and the executable pin diverge."""
-    dockerfile = resolve_source("/opt/Dockerfile", "Dockerfile").read_text(
-        encoding="utf-8"
+@pytest.mark.parametrize("dockerfile_path", ["Dockerfile", "config/agentic/Dockerfile"])
+@pytest.mark.parametrize(
+    ("reported_version", "exit_code", "accepted"),
+    [(None, 0, True), ("0.0.0", 0, False), (None, 1, False)],
+)
+def test_dockerfiles_verify_the_installed_codex_version(
+    tmp_path, dockerfile_path, reported_version, exit_code, accepted
+):
+    """Execute each build guard against matching, stale, and failing CLIs."""
+    dockerfile = repo_path(dockerfile_path).read_text(encoding="utf-8")
+    if dockerfile_path == "Dockerfile":
+        version = re.search(r'ARG CODEX_CLI_VERSION="([^"]+)"', dockerfile).group(1)
+    else:
+        version = re.search(r"@openai/codex@(\d+\.\d+\.\d+)", dockerfile).group(1)
+    check = " && ".join(
+        line.strip().removeprefix("&& ").removesuffix(" \\")
+        for line in dockerfile.splitlines()
+        if "$(codex --version)" in line or 'test "$codex_installed_version"' in line
     )
-    assert 'test "$(codex --version)" = "codex-cli ${CODEX_CLI_VERSION}"' in dockerfile
+    binary = tmp_path / "codex"
+    binary.write_text(
+        f"#!/bin/sh\nprintf '%s\\n' 'codex-cli {reported_version or version}'\n"
+        f"exit {exit_code}\n"
+    )
+    binary.chmod(0o755)
 
-    worker = repo_path("config/agentic/Dockerfile").read_text(encoding="utf-8")
-    version = re.search(r"@openai/codex@(\d+\.\d+\.\d+)", worker).group(1)
-    assert f'test "$(codex --version)" = "codex-cli {version}"' in worker
+    result = subprocess.run(
+        ["/bin/sh", "-c", check],
+        env={"PATH": str(tmp_path), "CODEX_CLI_VERSION": version},
+        capture_output=True,
+        text=True,
+    )
+
+    assert (result.returncode == 0) is accepted, result.stderr
 
 
 def test_agent_slurm_template_uses_the_submission_directory():

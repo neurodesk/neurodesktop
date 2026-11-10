@@ -1,6 +1,7 @@
 FROM node:24.22.2-bookworm-slim AS node
 RUN npm install --global @openai/codex@0.167.0 \
-    && test "$(codex --version)" = "codex-cli 0.167.0" \
+    && codex_installed_version="$(codex --version)" \
+    && test "$codex_installed_version" = "codex-cli 0.167.0" \
     && npm cache clean --force
 
 FROM python:3.15.2-slim-bookworm
