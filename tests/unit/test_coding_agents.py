@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 import pytest
 
-from testlib import repo_path, resolve_source
+from testlib import repo_path, resolve_source, run_cmd_streams
 
 def run_cmd(cmd):
     """Utility to run a shell command and return its exit code and output."""
@@ -93,6 +93,22 @@ def test_dockerfiles_verify_the_installed_codex_version(
     )
 
     assert (result.returncode == 0) is accepted, result.stderr
+
+
+def test_codex_version_probe_keeps_stderr_diagnostics_separate(tmp_path):
+    binary = tmp_path / "codex"
+    binary.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' 'codex-cli 0.167.0'\n"
+        "printf '%s\\n' 'WARNING: stale arg0 cleanup failed' >&2\n"
+    )
+    binary.chmod(0o755)
+
+    code, version, diagnostics = run_cmd_streams(str(binary))
+
+    assert code == 0
+    assert version == "codex-cli 0.167.0"
+    assert diagnostics == "WARNING: stale arg0 cleanup failed"
 
 
 def test_agent_slurm_template_uses_the_submission_directory():

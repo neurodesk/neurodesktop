@@ -618,6 +618,9 @@ in, and is installed next to the container tier at `/opt/tests/testlib.py`
   resolved the same way.
 - `run_cmd(cmd, cwd=, env=, timeout=)` — shell out and return
   `(exit_code, combined_output)`. `env` overlays the caller's environment.
+- `run_cmd_streams(cmd, cwd=, env=, timeout=)` — shell out and return
+  `(exit_code, stdout, stderr)` when stdout is itself the value under test and
+  diagnostics must remain separate. `env` overlays the caller's environment.
 
 ## Focused tests by area
 

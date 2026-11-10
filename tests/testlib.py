@@ -130,6 +130,29 @@ def run_cmd(cmd, cwd=None, env=None, timeout=None):
     return process.returncode, process.stdout.strip()
 
 
+def run_cmd_streams(cmd, cwd=None, env=None, timeout=None):
+    """Run *cmd* and return ``(exit_code, stdout, stderr)`` separately.
+
+    Use this when a command's stdout is the value under test and stderr may
+    contain diagnostics that must not change that value.
+    """
+    merged_env = None
+    if env is not None:
+        merged_env = os.environ.copy()
+        merged_env.update(env)
+    process = subprocess.run(
+        cmd,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=cwd,
+        env=merged_env,
+        timeout=timeout,
+    )
+    return process.returncode, process.stdout.strip(), process.stderr.strip()
+
+
 @contextmanager
 def reserved_tcp_ports(count):
     """Hold distinct loopback ports until callers close them or the scope exits."""
