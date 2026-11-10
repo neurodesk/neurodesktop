@@ -44,20 +44,30 @@ def test_installed_voxl_binary_links_its_libraries():
     assert version.stdout.startswith("voxl ")
 
 
+def _segments_created_by(pid):
+    with open("/proc/sysvipc/shm", encoding="ascii") as table:
+        rows = [line.split() for line in table.readlines()[1:]]
+    return [
+        {"mode": int(row[2], 8) & 0o777, "nattch": int(row[6])}
+        for row in rows
+        if int(row[4]) == pid
+    ]
+
+
 def test_installed_launcher_streams_only_with_the_proxy_token(tmp_path):
-    if not os.path.isdir("/tmp/.X11-unix"):
-        pytest.fail("the image must provide /tmp/.X11-unix for TigerVNC")
     port = _free_port()
     home = tmp_path / "home"
     home.mkdir()
+    log_path = tmp_path / "launcher.log"
+    log = log_path.open("wb")
     proc = subprocess.Popen(
         [LAUNCHER, str(port)],
         env={**os.environ, "HOME": str(home), "VOXL_PASSWORD": TOKEN},
-        stdout=subprocess.PIPE,
+        stdout=log,
         stderr=subprocess.STDOUT,
         start_new_session=True,
     )
-    xvnc_pid = None
+    xvfb_pid = None
     try:
         deadline = time.monotonic() + 60
         status = None
@@ -70,40 +80,42 @@ def test_installed_launcher_streams_only_with_the_proxy_token(tmp_path):
                 pass
             time.sleep(0.5)
         if status != 200:
-            proc.kill()
-            pytest.fail(f"voxl never answered /healthz:\n{proc.communicate()[0].decode()}")
+            pytest.fail(f"voxl never answered /healthz:\n{log_path.read_text()}")
         assert body == b"ok"
 
         assert _status(port, "/", None)[0] == 401
         assert _status(port, "/", "wrong-token")[0] == 401
         assert _status(port, "/", TOKEN)[0] == 200
 
-        state_dir = home / ".neurodesk" / "runtime-voxl"
-        sockets = list(state_dir.glob("rfb-*.sock"))
-        assert len(sockets) == 1
-        assert oct(sockets[0].stat().st_mode & 0o777) == "0o600"
-        display = sockets[0].stem.removeprefix("rfb-")
-        xvnc_pid = int(
+        display = (home / ".neurodesk" / "runtime-voxl" / "xvfb.displayfd").read_text().strip()
+        xvfb_pid = int(
             subprocess.run(
-                ["pgrep", "-u", str(os.getuid()), "-f", f"^/usr/bin/Xtigervnc :{display} "],
+                ["pgrep", "-u", str(os.getuid()), "-x", "-f", f"Xvfb :{display} .*"],
                 capture_output=True,
                 text=True,
                 check=True,
             ).stdout.split()[0]
         )
-        # The X server opens no TCP RFB or X11 listener; voxl reads the display
-        # through its Unix socket.
-        assert _listeners(xvnc_pid) == []
+        # No TCP X11 listener; clients authenticate over the Unix socket.
+        assert _listeners(xvfb_pid) == []
+        # voxl reads the framebuffer in place, and only Xvfb and voxl hold it.
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and b"directly from the Xvfb framebuffer" not in log_path.read_bytes():
+            time.sleep(0.2)
+        assert b"directly from the Xvfb framebuffer" in log_path.read_bytes(), log_path.read_text()
+        assert _segments_created_by(xvfb_pid) == [{"mode": 0o600, "nattch": 2}]
 
         proc.send_signal(signal.SIGTERM)
         proc.wait(timeout=30)
         deadline = time.monotonic() + 15
-        while time.monotonic() < deadline and os.path.exists(f"/proc/{xvnc_pid}"):
+        while time.monotonic() < deadline and os.path.exists(f"/proc/{xvfb_pid}"):
             time.sleep(0.2)
-        assert not os.path.exists(f"/proc/{xvnc_pid}"), "the voxl X server outlived its launcher"
+        assert not os.path.exists(f"/proc/{xvfb_pid}"), "the voxl X server outlived its launcher"
+        assert _segments_created_by(xvfb_pid) == []
     finally:
         if proc.poll() is None:
             os.killpg(proc.pid, signal.SIGKILL)
             proc.wait()
-        if xvnc_pid and os.path.exists(f"/proc/{xvnc_pid}"):
-            os.kill(xvnc_pid, signal.SIGKILL)
+        if xvfb_pid and os.path.exists(f"/proc/{xvfb_pid}"):
+            os.kill(xvfb_pid, signal.SIGKILL)
+        log.close()

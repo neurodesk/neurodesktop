@@ -105,7 +105,7 @@ def _voxl_server():
         and os.access('/usr/local/bin/voxl', os.X_OK)
       ),
       'path_info': 'neurodesktop-voxl/',
-      'title': 'Neurodesktop voxl (preview)',
+      'title': 'Neurodesktop voxl',
       'icon_path': '/opt/neurodesk_brain_logo.svg',
       'category': 'Neurodesk'
     }

@@ -231,7 +231,7 @@ RUN curl -fsSL --retry 5 "https://download.schedmd.com/slurm/slurm-${SLURM_ENV_V
     && bash /tmp/slurm-env/build_env_compat.sh /tmp/slurm-source /opt/slurm-env \
     && rm -rf /tmp/slurm.tar.bz2 /tmp/slurm-source /tmp/slurm-env
 
-# voxl (prototype browser desktop streaming). Built against the runtime base so
+# voxl browser desktop streaming. Built against the runtime base so
 # the binary links the same distro x264, libyuv, Opus and PulseAudio sonames;
 # --locked holds every dependency to the crate's checksummed Cargo.lock.
 FROM quay.io/jupyter/base-notebook:${BASE_IMAGE_TAG} AS voxl-builder
@@ -254,6 +254,8 @@ RUN apt-install-retry \
     && CARGO_HOME=/tmp/cargo cargo install --locked --root /opt/voxl voxl-server --version "${VOXL_VERSION}" \
     && /opt/voxl/bin/voxl --version \
     && rm -rf /tmp/cargo /var/lib/apt/lists/*
+RUN --mount=type=bind,source=config/voxl/neurodesktop-shm-private.c,target=/tmp/neurodesktop-shm-private.c,ro \
+    clang -O2 -Wall -Wextra -Werror -o /opt/voxl/bin/neurodesktop-shm-private /tmp/neurodesktop-shm-private.c
 
 ###############################################################################
 # Stage 2: Final runtime image
@@ -1596,12 +1598,12 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
 # Switch to root user
 USER root
 
-# Install Glass dependencies, and libyuv0 for voxl, before runtime
+# Install Glass dependencies, and Xvfb and libyuv0 for voxl, before runtime
 # configuration replaces apt-get with the package-only wrapper, which rejects
 # build-time apt options.
 RUN apt-install-retry systemd systemd-sysv xauth xserver-xorg-core \
     xserver-xorg-input-evdev x11-xserver-utils libx11-6 fonts-dejavu-core \
-    libyuv0 \
+    xvfb libyuv0 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install local runtime configuration late. This layer intentionally sits after
@@ -1805,10 +1807,10 @@ RUN --mount=type=bind,source=config/jupyter/patch_jupyter_ai_acp_client.py,targe
     && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_ai_acp_client.py
 
 COPY --from=builder /opt/glass/bin/ /usr/local/bin/
-# voxl streams a dedicated LXDE desktop as H.264 over one WebSocket; see
-# docs/architecture/desktop.md#voxl-streaming-prototype. Its libyuv0 runtime
-# library is installed with the Glass packages above.
-COPY --from=voxl-builder /opt/voxl/bin/voxl /usr/local/bin/voxl
+# voxl streams a dedicated Xvfb LXDE desktop as H.264 over one WebSocket; see
+# docs/architecture/desktop.md#voxl-desktop-streaming. Xvfb and libyuv0 are
+# installed with the Glass packages above.
+COPY --from=voxl-builder /opt/voxl/bin/voxl /opt/voxl/bin/neurodesktop-shm-private /usr/local/bin/
 COPY --chmod=0755 config/voxl/voxl.sh /opt/neurodesktop/voxl.sh
 COPY --chmod=0755 config/glass/ /opt/neurodesktop/glass/
 RUN find /opt/neurodesktop/glass -type f -exec chmod 0644 {} + \

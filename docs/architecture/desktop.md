@@ -1,7 +1,7 @@
 ---
 title: Desktop environment
-description: LXDE desktop over VNC/RDP through Guacamole, the voxl streaming
-  prototype, clipboard sync, per-display Firefox profiles, and office file
+description: LXDE desktop over VNC/RDP through Guacamole, voxl desktop
+  streaming, clipboard sync, per-display Firefox profiles, and office file
   associations
 parent: ../architecture.md
 status: current
@@ -182,21 +182,33 @@ Each launch uses its own staging name and removes the published socket only if
 it is still the one that launch placed. An orphan from a launch that missed the
 proxy's timeout cannot remove the next launch's socket while it shuts down.
 
-## voxl streaming prototype
+## voxl desktop streaming
 
-The `Neurodesktop voxl (preview)` launcher streams an LXDE desktop with
+The `Neurodesktop voxl` launcher streams an LXDE desktop with
 [voxl](https://github.com/tembo/voxl). voxl encodes the X display as H.264
 with x264 and sends video, input, and clipboard over one WebSocket. The browser
-decodes the stream with WebCodecs. Guacamole is unchanged and remains the
-default desktop path.
+decodes the stream with WebCodecs. The Guacamole VNC and RDP launchers are
+unchanged.
 
-[`config/voxl/voxl.sh`](../../config/voxl/voxl.sh) starts its own TigerVNC X
-server on the first free display from `:60` to `:99`. Guacamole probes and
-kills displays `:1` to `:42`, so the two do not collide. This desktop is
-separate from the Guacamole VNC and RDP desktops. The X server has no TCP RFB
-listener. Its RFB endpoint is a mode-`0600` Unix socket under
-`~/.neurodesk/runtime-voxl/`, which is mode `0700`. voxl captures the display
-directly.
+[`config/voxl/voxl.sh`](../../config/voxl/voxl.sh) starts its own Xvfb on the
+first free display from `:60` to `:99`. Guacamole probes and kills displays
+`:1` to `:42`, so the two do not collide. This desktop is separate from the
+Guacamole desktops. Xvfb opens no TCP listener and admits X clients with a
+fresh cookie in `~/.Xauthority`. The launcher treats the display as ready only
+after Xvfb reports its number through `-displayfd`, so another server already
+answering on that display cannot pass for the new one.
+
+Xvfb runs with `-shmem`, so voxl reads the framebuffer in place instead of
+copying each frame through the X server. Xvfb creates that SysV segment with
+mode `0777`. Apptainer shares the host's IPC namespace, so on a shared HPC node
+any user could otherwise read or write the desktop.
+`neurodesktop-shm-private`, built from
+[`config/voxl/neurodesktop-shm-private.c`](../../config/voxl/neurodesktop-shm-private.c),
+sets the segments that Xvfb created to mode `0600`. It then requires Xvfb to
+be the only attachment. A process that attached before the mode change keeps
+its mapping, so the launcher stops and streams nothing if any other process is
+attached. RandR cannot grow an Xvfb screen past its starting size. The screen
+therefore starts at 3840x2160, and voxl reduces it to fit the viewer.
 
 voxl listens on `127.0.0.1` at the port Jupyter Server Proxy assigns. Each
 Jupyter configuration load creates a random token. The proxy passes it to the
@@ -207,17 +219,18 @@ never appears on a command line or in the logs. voxl's own login stays
 enabled. `--allowed-hosts '*'` accepts the browser's Jupyter host name,
 because the token, not the host name, admits a request. The launcher turns off
 desktop audio and voxl's file transfer panel. When Jupyter Server Proxy stops
-the launcher, the launcher stops voxl and then kills its X server.
+the launcher, the launcher stops voxl, then the desktop session, then Xvfb,
+and removes the display's cookie.
 
 The launcher is hidden in Glass and when `/usr/local/bin/voxl` is missing.
-Prototype limits:
+Limits:
 
 - WebCodecs requires HTTPS or `localhost`. A plain-HTTP remote address shows
-  no video; use Guacamole there.
-- Under TigerVNC, voxl captures through MIT-SHM `GetImage`. Its zero-copy path
-  needs an Xvfb started with `-shmem`.
+  no video; use a Guacamole launcher there.
 - Encoding is CPU-only. The image has no PulseAudio, so there is no desktop
   audio or microphone.
+- Ubuntu's Xvfb has no smooth-scroll XTEST axes, so scrolling moves in wheel
+  steps.
 - The stage builds `voxl-server` from crates.io with Ubuntu's Rust toolchain.
   The version is set by
   [`VOXL_VERSION`](../environment-variables.md#build-arguments). The x264 it

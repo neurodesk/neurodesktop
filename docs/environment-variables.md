@@ -445,7 +445,7 @@ reviewed; the Dockerfile itself is authoritative.
   The version defaults to `3.1.5`; update its verified checksums together with
   the version. GPU rendering remains an explicit application launch choice.
 - `VOXL_VERSION`: `voxl-server` crate release built for the
-  [voxl streaming prototype](architecture/desktop.md#voxl-streaming-prototype);
+  [voxl desktop streaming](architecture/desktop.md#voxl-desktop-streaming);
   defaults to `0.3.4`. The build stage compiles it with `--locked` against the
   base image's distro x264, libyuv, Opus and PulseAudio libraries
 - `CODE_SERVER_VERSION`: code-server release; defaults to `4.144.0`
