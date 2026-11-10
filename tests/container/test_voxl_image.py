@@ -90,7 +90,7 @@ def test_installed_launcher_streams_only_with_the_proxy_token(tmp_path):
         display = (home / ".neurodesk" / "runtime-voxl" / "xvfb.displayfd").read_text().strip()
         xvfb_pid = int(
             subprocess.run(
-                ["pgrep", "-u", str(os.getuid()), "-x", "-f", f"Xvfb :{display} .*"],
+                ["pgrep", "-u", str(os.getuid()), "-x", "-f", f"/usr/local/libexec/voxl/Xvfb :{display} .*"],
                 capture_output=True,
                 text=True,
                 check=True,
@@ -103,6 +103,8 @@ def test_installed_launcher_streams_only_with_the_proxy_token(tmp_path):
         while time.monotonic() < deadline and b"directly from the Xvfb framebuffer" not in log_path.read_bytes():
             time.sleep(0.2)
         assert b"directly from the Xvfb framebuffer" in log_path.read_bytes(), log_path.read_text()
+        # The patched Xvfb gives the XTEST pointer scroll axes for smooth scrolling.
+        assert b"smooth scrolling via XTEST device" in log_path.read_bytes(), log_path.read_text()
         assert _segments_created_by(xvfb_pid) == [{"mode": 0o600, "nattch": 2}]
 
         proc.send_signal(signal.SIGTERM)

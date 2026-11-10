@@ -882,6 +882,7 @@ and voxl. It requires:
 - HTTP 401 without the token;
 - no TCP listener on Xvfb;
 - direct framebuffer capture;
+- smooth scrolling through the patched Xvfb's XTEST scroll axes;
 - a mode-`0600` segment held only by Xvfb and voxl;
 - neither Xvfb nor its segment left after the launcher stops.
 

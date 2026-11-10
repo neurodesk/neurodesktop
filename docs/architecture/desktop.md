@@ -1,8 +1,8 @@
 ---
 title: Desktop environment
 description: LXDE desktop over VNC/RDP through Guacamole, voxl desktop
-  streaming, clipboard sync, per-display Firefox profiles, and office file
-  associations
+  streaming with a patched Xvfb, clipboard sync, per-display Firefox
+  profiles, and office file associations
 parent: ../architecture.md
 status: current
 last-reviewed: "2026-11-10"
@@ -210,6 +210,18 @@ its mapping, so the launcher stops and streams nothing if any other process is
 attached. RandR cannot grow an Xvfb screen past its starting size. The screen
 therefore starts at 3840x2160, and voxl reduces it to fit the viewer.
 
+The launcher runs `/usr/local/libexec/voxl/Xvfb`, not the distro's
+`/usr/bin/Xvfb`. The `voxl-builder` stage rebuilds Ubuntu's `xorg-server`
+source, at the version of the `xvfb` package that the runtime installs, with
+Debian's configure flags. It adds voxl's
+[XTEST scroll-axis patch](../../config/voxl/xorg-server-xtest-scroll.patch),
+which gives the XTEST pointer vertical and horizontal scroll axes. voxl then
+sends trackpad and high-resolution wheel input as pixel-precise scrolling
+instead of whole wheel steps. The runtime `xvfb` package still supplies the
+server's libraries and XKB tools, and Glass and `xvfb-run` keep the unpatched
+server. A distro security update to `xorg-server` reaches this Xvfb only when
+the image is rebuilt.
+
 voxl listens on `127.0.0.1` at the port Jupyter Server Proxy assigns. Each
 Jupyter configuration load creates a random token. The proxy passes it to the
 launcher as `VOXL_PASSWORD` and adds `Authorization: Bearer <token>` to every
@@ -229,8 +241,6 @@ Limits:
   no video; use a Guacamole launcher there.
 - Encoding is CPU-only. The image has no PulseAudio, so there is no desktop
   audio or microphone.
-- Ubuntu's Xvfb has no smooth-scroll XTEST axes, so scrolling moves in wheel
-  steps.
 - The stage builds `voxl-server` from crates.io with Ubuntu's Rust toolchain.
   The version is set by
   [`VOXL_VERSION`](../environment-variables.md#build-arguments). The x264 it
