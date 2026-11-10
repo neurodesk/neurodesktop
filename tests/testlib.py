@@ -130,6 +130,28 @@ def run_cmd(cmd, cwd=None, env=None, timeout=None):
     return process.returncode, process.stdout.strip()
 
 
+def run_cmd_streams(args, cwd=None, env=None, timeout=None):
+    """Run *args* while keeping stdout and stderr independently inspectable.
+
+    Most image probes want one combined diagnostic stream and use
+    :func:`run_cmd`. Machine-readable commands instead need to validate stdout
+    without treating an otherwise non-fatal stderr warning as protocol output.
+    """
+    merged_env = None
+    if env is not None:
+        merged_env = os.environ.copy()
+        merged_env.update(env)
+    return subprocess.run(
+        args,
+        cwd=cwd,
+        env=merged_env,
+        timeout=timeout,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
 @contextmanager
 def reserved_tcp_ports(count):
     """Hold distinct loopback ports until callers close them or the scope exits."""

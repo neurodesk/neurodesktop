@@ -993,9 +993,11 @@ process exits, and timeouts fail the test. This check covers adapter upgrades
 that use an image CLI outside the adapter's declared dependency range.
 Both image builds require `codex --version` to succeed and match the requested
 pin. Checkout tests execute these guards against matching, stale, and failing
-CLIs. The installed test compares the executable's report with its
-global npm package metadata so a stale platform binary cannot masquerade as the
-updated package.
+CLIs. The installed test compares the executable's stdout with its global npm
+package metadata so a stale platform binary cannot masquerade as the updated
+package. It retains stderr separately for failure diagnostics because Codex can
+report best-effort startup cleanup warnings there without changing the version
+command's successful result.
 
 The installed T3 startup cases exercise fresh and legacy defaults. They wait
 for Claude's completed health probe, compare its version with the image CLI,

@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 import pytest
 
-from testlib import repo_path, resolve_source
+from testlib import repo_path, resolve_source, run_cmd_streams
 
 def run_cmd(cmd):
     """Utility to run a shell command and return its exit code and output."""
@@ -93,6 +93,24 @@ def test_dockerfiles_verify_the_installed_codex_version(
     )
 
     assert (result.returncode == 0) is accepted, result.stderr
+
+
+def test_machine_readable_version_probe_keeps_stderr_separate(tmp_path):
+    """A best-effort Codex startup warning is not part of version stdout."""
+    binary = tmp_path / "codex"
+    binary.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' 'codex-cli 0.167.0'\n"
+        "printf '%s\\n' 'WARNING: failed to clean up stale arg0 temp dirs' >&2\n",
+        encoding="utf-8",
+    )
+    binary.chmod(0o755)
+
+    result = run_cmd_streams([str(binary), "--version"])
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "codex-cli 0.167.0"
+    assert result.stderr.startswith("WARNING:")
 
 
 def test_agent_slurm_template_uses_the_submission_directory():

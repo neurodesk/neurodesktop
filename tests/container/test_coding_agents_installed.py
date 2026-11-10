@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from testlib import run_cmd
+from testlib import run_cmd, run_cmd_streams
 
 
 WRAPPERS = {
@@ -48,10 +48,11 @@ def test_codex_executable_reports_the_installed_package_version():
         (Path(npm_root) / "@openai/codex/package.json").read_text(encoding="utf-8")
     )
 
-    code, output = run_cmd("/usr/bin/codex --version")
+    result = run_cmd_streams(["/usr/bin/codex", "--version"], timeout=30)
 
-    assert code == 0, output
-    assert output == f"codex-cli {package['version']}"
+    diagnostic = result.stdout + result.stderr
+    assert result.returncode == 0, diagnostic
+    assert result.stdout.strip() == f"codex-cli {package['version']}", diagnostic
 
 
 @pytest.mark.parametrize("command,selector,image_cli,expected_argument", [
