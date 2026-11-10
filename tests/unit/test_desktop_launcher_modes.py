@@ -549,3 +549,52 @@ def test_init_secrets_uses_vnc_only_template_for_vnc_backend():
     assert "NEURODESKTOP_DESKTOP_BACKEND" in script
     assert 'MAPPING_TEMPLATE="/etc/guacamole/user-mapping-vnc.xml"' in script
     assert 'MAPPING_TEMPLATE="/etc/guacamole/user-mapping-vnc-rdp.xml"' in script
+
+
+def _voxl_server(tmp_path, monkeypatch, *, runtime="container", voxl_installed=True):
+    config = _read_first(
+        "/opt/neurodesktop/jupyter_notebook_config.py.template",
+        "config/jupyter/jupyter_notebook_config.py.template",
+    )
+    monkeypatch.setenv("NEURODESKTOP_RUNTIME", runtime)
+    real_access = os.access
+
+    def access(path, mode):
+        if path == "/usr/local/bin/voxl":
+            return voxl_installed
+        return real_access(path, mode)
+
+    monkeypatch.setattr(os, "access", access)
+    return _execute_jupyter_config(config, tmp_path, monkeypatch)["neurodesktop-voxl"]
+
+
+def test_voxl_proxy_authenticates_with_its_launch_token(tmp_path, monkeypatch):
+    server = _voxl_server(tmp_path, monkeypatch)
+
+    token = server["environment"]["VOXL_PASSWORD"]
+    assert len(token) >= 32
+    assert server["request_headers_override"] == {"Authorization": f"Bearer {token}"}
+    # The token travels in the environment, never on a command line other
+    # users can read through ps.
+    assert server["command"] == ["/opt/neurodesktop/voxl.sh", "{port}"]
+    assert token not in " ".join(server["command"])
+    assert server["launcher_entry"]["enabled"] is True
+    # voxl's client resolves its socket and scripts relative to the page.
+    assert server["launcher_entry"]["path_info"].endswith("/")
+
+
+def test_voxl_token_differs_between_config_loads(tmp_path, monkeypatch):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    first = _voxl_server(tmp_path / "a", monkeypatch)
+    second = _voxl_server(tmp_path / "b", monkeypatch)
+    assert first["environment"]["VOXL_PASSWORD"] != second["environment"]["VOXL_PASSWORD"]
+
+
+@pytest.mark.parametrize(
+    ("runtime", "voxl_installed"),
+    [("glass", True), ("container", False)],
+)
+def test_voxl_launcher_hidden_without_a_desktop_or_binary(tmp_path, monkeypatch, runtime, voxl_installed):
+    server = _voxl_server(tmp_path, monkeypatch, runtime=runtime, voxl_installed=voxl_installed)
+    assert server["launcher_entry"]["enabled"] is False

@@ -859,6 +859,32 @@ Tests that need to start the global xrdp service are skipped unless
 GitHub Actions set this only for disposable test containers; do not set it in a
 live user desktop unless stopping or reconfiguring xrdp is acceptable.
 
+voxl desktop streaming has checkout and installed-image tests.
+[`pytest tests/unit/test_voxl_launcher.py`](../tests/unit/test_voxl_launcher.py)
+runs the launcher against fake Xvfb, session, and `voxl` executables. It checks:
+
+- loopback binding and the token in voxl's environment;
+- skipping a busy display;
+- readiness only through `-displayfd`;
+- making the framebuffer private before the session or voxl starts;
+- refusing a framebuffer that cannot be made private;
+- the missing-token refusal;
+- SIGTERM stopping voxl before Xvfb.
+
+[`pytest tests/unit/test_shm_private.py`](../tests/unit/test_shm_private.py)
+compiles the framebuffer helper and runs it on real mode-`0777` SysV segments.
+It requires mode `0600` afterwards and exit status 2 when another process is
+already attached. The voxl cases in `tests/unit/test_desktop_launcher_modes.py`
+check that the proxy's Bearer header matches the launcher token.
+`/opt/tests/test_voxl_image.py` starts the installed launcher with real Xvfb
+and voxl. It requires:
+
+- HTTP 401 without the token;
+- no TCP listener on Xvfb;
+- direct framebuffer capture;
+- a mode-`0600` segment held only by Xvfb and voxl;
+- neither Xvfb nor its segment left after the launcher stops.
+
 For focused Apptainer build checks:
 
 ```bash

@@ -21,7 +21,7 @@ under [`docs/architecture/`](architecture/). The wiki entry point is
 | [CVMFS and Neurocommand](architecture/cvmfs.md) | CVMFS server selection, mount configuration, the neuroimaging tool/module system, and container kernels |
 | [uv Python environments](architecture/uv-environments.md) | Installed `neurodesk-uv` CLI, project kernels, persistence, and migration |
 | [Remote compute jobs](architecture/remote-jobs.md) | Experimental DataLad/SSH/Slurm CLI, recovery, archives and site acceptance |
-| [Desktop environment](architecture/desktop.md) | LXDE over VNC/RDP through Guacamole, clipboard sync, Firefox profiles, office file associations |
+| [Desktop environment](architecture/desktop.md) | LXDE over VNC/RDP through Guacamole, voxl desktop streaming, clipboard sync, Firefox profiles, office file associations |
 | [Glass runtime](architecture/glass.md) | Experimental CC native desktop, initialization, security and acceptance |
 | [Kasm image](architecture/kasm.md) | Separate Kasm Workspaces image, build and run commands, desktop startup, and home persistence |
 | [Webapp system](architecture/webapps.md) | Container-backed and hosted webapp tiles, and the build-time Jupyter config generation |
