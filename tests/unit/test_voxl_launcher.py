@@ -65,6 +65,7 @@ def launcher(tmp_path):
         "PATH": f"{bin_dir}:/usr/bin:/bin",
         "HOME": str(home),
         "NEURODESKTOP_VOXL_BIN": str(voxl),
+        "NEURODESKTOP_XVFB_BIN": str(bin_dir / "Xvfb"),
         "VOXL_PASSWORD": TOKEN,
     }
     return env, log

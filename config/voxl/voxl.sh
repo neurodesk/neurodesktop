@@ -19,6 +19,8 @@ if [ -z "${VOXL_PASSWORD:-}" ]; then
 fi
 
 voxl_bin="${NEURODESKTOP_VOXL_BIN:-/usr/local/bin/voxl}"
+# Built with voxl's XTEST scroll-axis patch, so scrolling is smooth.
+xvfb_bin="${NEURODESKTOP_XVFB_BIN:-/usr/local/libexec/voxl/Xvfb}"
 state_dir="${HOME}/.neurodesk/runtime-voxl"
 install -d -m 0700 "${state_dir}"
 xauthority="${XAUTHORITY:-${HOME}/.Xauthority}"
@@ -70,7 +72,7 @@ start_xvfb() {
     local ready_file="${state_dir}/xvfb.displayfd"
     : >"${ready_file}"
     xauth add ":${candidate}" . "$(mcookie)"
-    Xvfb ":${candidate}" -displayfd 3 -shmem -screen 0 "${screen_size}x24" -nolisten tcp \
+    "${xvfb_bin}" ":${candidate}" -displayfd 3 -shmem -screen 0 "${screen_size}x24" -nolisten tcp \
         -auth "${xauthority}" 3>"${ready_file}" >"${state_dir}/xvfb.log" 2>&1 &
     xvfb_pid=$!
     display_num="${candidate}"

@@ -256,6 +256,28 @@ RUN apt-install-retry \
     && rm -rf /tmp/cargo /var/lib/apt/lists/*
 RUN --mount=type=bind,source=config/voxl/neurodesktop-shm-private.c,target=/tmp/neurodesktop-shm-private.c,ro \
     clang -O2 -Wall -Wextra -Werror -o /opt/voxl/bin/neurodesktop-shm-private /tmp/neurodesktop-shm-private.c
+# Rebuild the distro's own Xvfb with voxl's XTEST scroll-axis patch, so voxl
+# scrolls smoothly instead of in wheel clicks. The source version is the xvfb
+# package the runtime installs, and Debian's configure flags are kept; only the
+# Xorg, Xnest, Xephyr and Xwayland servers are left out.
+RUN --mount=type=bind,source=config/voxl/xorg-server-xtest-scroll.patch,target=/tmp/xorg-server-xtest-scroll.patch,ro \
+    sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get -o Acquire::Retries=5 update \
+    && xorg_version="$(apt-cache policy xvfb | awk '/Candidate:/ { print $2 }')" \
+    && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends dpkg-dev \
+    && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 build-dep -y --no-install-recommends "xorg-server=${xorg_version}" \
+    && mkdir /tmp/xorg && cd /tmp/xorg \
+    && apt-get -o Acquire::Retries=5 source "xorg-server=${xorg_version}" \
+    && cd xorg-server-*/ \
+    && cp /tmp/xorg-server-xtest-scroll.patch debian/patches/ \
+    && echo xorg-server-xtest-scroll.patch >> debian/patches/series \
+    && dh_quilt_patch \
+    && dh_autoreconf \
+    && DEB_BUILD_PROFILES=noudeb debian/rules override_dh_auto_configure \
+        vars="--disable-xorg --disable-xnest --disable-xephyr --disable-xwayland" \
+    && make -j"$(nproc)" -C debian/build/main \
+    && install -D -m 0755 debian/build/main/hw/vfb/Xvfb /opt/voxl/libexec/Xvfb \
+    && cd / && rm -rf /tmp/xorg /var/lib/apt/lists/*
 
 ###############################################################################
 # Stage 2: Final runtime image
@@ -1808,9 +1830,11 @@ RUN --mount=type=bind,source=config/jupyter/patch_jupyter_ai_acp_client.py,targe
 
 COPY --from=builder /opt/glass/bin/ /usr/local/bin/
 # voxl streams a dedicated Xvfb LXDE desktop as H.264 over one WebSocket; see
-# docs/architecture/desktop.md#voxl-desktop-streaming. Xvfb and libyuv0 are
-# installed with the Glass packages above.
+# docs/architecture/desktop.md#voxl-desktop-streaming. The xvfb package above
+# supplies the libraries and XKB tools for voxl's patched Xvfb, which stays off
+# PATH so Glass and xvfb-run keep the distro server.
 COPY --from=voxl-builder /opt/voxl/bin/voxl /opt/voxl/bin/neurodesktop-shm-private /usr/local/bin/
+COPY --from=voxl-builder /opt/voxl/libexec/Xvfb /usr/local/libexec/voxl/Xvfb
 COPY --chmod=0755 config/voxl/voxl.sh /opt/neurodesktop/voxl.sh
 COPY --chmod=0755 config/glass/ /opt/neurodesktop/glass/
 RUN find /opt/neurodesktop/glass -type f -exec chmod 0644 {} + \
