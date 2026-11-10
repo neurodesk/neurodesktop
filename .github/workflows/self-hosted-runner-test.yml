@@ -5,7 +5,8 @@ name: Self-hosted Runner Test
 #   ca-validation — multi-node Cluster Autoscaler soak. Run this after a cluster
 #                   rebuild, before trusting the pool with real builds.
 #
-# Neither mode builds or pushes anything. Manual dispatch only.
+# Neither mode builds or pushes anything. Manual dispatch only. Failures here
+# are cluster-side, so report-workflow-failure.yml does not watch this workflow.
 
 on:
   workflow_dispatch:
@@ -100,17 +101,17 @@ jobs:
           echo "runner=$RUNNER_NAME"
           echo "start=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-      # Parity checks. Recorded, NOT failed here — a CVMFS or MTU problem must
+      # Parity checks. Recorded, NOT failed here — a CVMFS or Docker problem must
       # not abort the job before the autoscaler measurement completes. The final
       # step fails the job if any of these were wrong.
       - name: Parity diagnostics (non-fatal here; asserted at the end)
         run: |
           : > /tmp/parity_fail
 
-          echo "::group::MTU (expect 1400 — Calico VXLAN overlay convention)"
-          MTU=$(cat /sys/class/net/eth0/mtu 2>/dev/null || echo unknown)
-          echo "eth0 mtu=$MTU"
-          [ "$MTU" = "1400" ] || echo "MTU expected 1400, got $MTU" >> /tmp/parity_fail
+          # Informational: the pod MTU differs between clusters (1400 on syd2,
+          # 1450 on syd3), so it is recorded for comparison, not asserted.
+          echo "::group::MTU (informational)"
+          echo "eth0 mtu=$(cat /sys/class/net/eth0/mtu 2>/dev/null || echo unknown)"
           echo "::endgroup::"
 
           echo "::group::Docker (expect Server 29.x — the docker:29-dind pin)"
