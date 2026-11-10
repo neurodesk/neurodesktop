@@ -1015,9 +1015,11 @@ RUN echo "Installing neurocommand ref ${NEUROCOMMAND_REF}" \
 # frontend assets. The adapter is installed without its bundled binary and
 # drives this install via CODEX_PATH. Validate CLI upgrades with the actual T3
 # and ACP initialization probes, especially outside the adapter dependency range.
-ARG CODEX_CLI_VERSION="0.166.0"
+ARG CODEX_CLI_VERSION="0.167.0"
 ARG CLAUDE_CODE_VERSION="2.1.316"
 RUN npm_config_cache=/tmp/npm-root-cache npm install -g "@openai/codex@${CODEX_CLI_VERSION}" \
+    && codex_installed_version="$(codex --version)" \
+    && test "$codex_installed_version" = "codex-cli ${CODEX_CLI_VERSION}" \
     && find "$(npm root -g)/@openai" -type f \( -name "*.js.map" -o -name "*.css.map" \) -delete \
     && rm -rf /root/.npm /tmp/npm-root-cache /home/${NB_USER}/.npm \
     && su - "${NB_USER}" -c "retry bash -o pipefail -c 'curl -fsSL https://claude.ai/install.sh | bash -s -- ${CLAUDE_CODE_VERSION}'" \
@@ -1134,7 +1136,7 @@ RUN --mount=type=bind,source=config/agents/t3-provider-bin,target=/tmp/t3-provid
 # CODEX_CLI_VERSION rather than its bundled dependency. The
 # size assertion fails the build if a future adapter release relocates its
 # vendored binary and reintroduces the duplicate.
-ARG CODEX_ACP_VERSION="2.5.0"
+ARG CODEX_ACP_VERSION="2.6.0"
 ARG CLAUDE_AGENT_ACP_VERSION="0.99.1"
 RUN npm_config_cache=/tmp/npm-acp-cache retry npm install -g \
     "@agentclientprotocol/codex-acp@${CODEX_ACP_VERSION}" \
