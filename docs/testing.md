@@ -859,6 +859,18 @@ Tests that need to start the global xrdp service are skipped unless
 GitHub Actions set this only for disposable test containers; do not set it in a
 live user desktop unless stopping or reconfiguring xrdp is acceptable.
 
+The voxl prototype has checkout and installed-image tests.
+[`pytest tests/unit/test_voxl_launcher.py`](../tests/unit/test_voxl_launcher.py)
+runs the launcher against fake `vncserver` and `voxl` executables. It checks
+loopback binding, delivery of the token through the environment, the private
+RFB socket, skipping a busy display, the missing-token refusal, and that
+SIGTERM stops voxl before killing the X server. The voxl cases in
+`tests/unit/test_desktop_launcher_modes.py` check that the proxy's Bearer
+header matches the launcher token.
+`/opt/tests/test_voxl_image.py` starts the installed launcher with real
+TigerVNC and voxl. It requires HTTP 401 without the token, no TCP listener on
+the X server, and no X server left running after its launcher stops.
+
 For focused Apptainer build checks:
 
 ```bash

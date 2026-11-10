@@ -1,10 +1,11 @@
 ---
 title: Desktop environment
-description: LXDE desktop over VNC/RDP through Guacamole, clipboard sync,
-  per-display Firefox profiles, and office file associations
+description: LXDE desktop over VNC/RDP through Guacamole, the voxl streaming
+  prototype, clipboard sync, per-display Firefox profiles, and office file
+  associations
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-10-27"
+last-reviewed: "2026-11-10"
 ---
 
 # Desktop Environment
@@ -180,6 +181,47 @@ parent-death signal, so the proxy's SIGKILL cannot leave code-server running.
 Each launch uses its own staging name and removes the published socket only if
 it is still the one that launch placed. An orphan from a launch that missed the
 proxy's timeout cannot remove the next launch's socket while it shuts down.
+
+## voxl streaming prototype
+
+The `Neurodesktop voxl (preview)` launcher streams an LXDE desktop with
+[voxl](https://github.com/tembo/voxl). voxl encodes the X display as H.264
+with x264 and sends video, input, and clipboard over one WebSocket. The browser
+decodes the stream with WebCodecs. Guacamole is unchanged and remains the
+default desktop path.
+
+[`config/voxl/voxl.sh`](../../config/voxl/voxl.sh) starts its own TigerVNC X
+server on the first free display from `:60` to `:99`. Guacamole probes and
+kills displays `:1` to `:42`, so the two do not collide. This desktop is
+separate from the Guacamole VNC and RDP desktops. The X server has no TCP RFB
+listener. Its RFB endpoint is a mode-`0600` Unix socket under
+`~/.neurodesk/runtime-voxl/`, which is mode `0700`. voxl captures the display
+directly.
+
+voxl listens on `127.0.0.1` at the port Jupyter Server Proxy assigns. Each
+Jupyter configuration load creates a random token. The proxy passes it to the
+launcher as `VOXL_PASSWORD` and adds `Authorization: Bearer <token>` to every
+proxied request, including the WebSocket upgrade. Other users on a shared host
+can reach the loopback port, but voxl answers them with HTTP 401. The token
+never appears on a command line or in the logs. voxl's own login stays
+enabled. `--allowed-hosts '*'` accepts the browser's Jupyter host name,
+because the token, not the host name, admits a request. The launcher turns off
+desktop audio and voxl's file transfer panel. When Jupyter Server Proxy stops
+the launcher, the launcher stops voxl and then kills its X server.
+
+The launcher is hidden in Glass and when `/usr/local/bin/voxl` is missing.
+Prototype limits:
+
+- WebCodecs requires HTTPS or `localhost`. A plain-HTTP remote address shows
+  no video; use Guacamole there.
+- Under TigerVNC, voxl captures through MIT-SHM `GetImage`. Its zero-copy path
+  needs an Xvfb started with `-shmem`.
+- Encoding is CPU-only. The image has no PulseAudio, so there is no desktop
+  audio or microphone.
+- The stage builds `voxl-server` from crates.io with Ubuntu's Rust toolchain.
+  The version is set by
+  [`VOXL_VERSION`](../environment-variables.md#build-arguments). The x264 it
+  links makes the binary GPL-2.0.
 
 ## Clipboard sync
 

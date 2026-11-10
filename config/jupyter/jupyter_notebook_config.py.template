@@ -1,5 +1,6 @@
 import base64
 import os
+import secrets
 import sys
 
 home_dir = os.environ.get('HOME', '/home/jovyan')
@@ -86,7 +87,33 @@ def _neurodesktop_server(backend, title, path_info, launcher_enabled=True):
   }
   return server
 
+def _voxl_server():
+  # A fresh token per config load: voxl.sh receives it in its environment
+  # (unreadable to other UIDs) and the proxy adds it to every request, so
+  # the loopback port alone does not admit other users on a shared host.
+  token = secrets.token_urlsafe(32)
+  return {
+    'command': ['/opt/neurodesktop/voxl.sh', '{port}'],
+    'environment': {'VOXL_PASSWORD': token},
+    'timeout': 60,
+    'request_headers_override': {
+        'Authorization': f'Bearer {token}',
+    },
+    'launcher_entry': {
+      'enabled': (
+        os.environ.get('NEURODESKTOP_RUNTIME', 'container') != 'glass'
+        and os.access('/usr/local/bin/voxl', os.X_OK)
+      ),
+      'path_info': 'neurodesktop-voxl/',
+      'title': 'Neurodesktop voxl (preview)',
+      'icon_path': '/opt/neurodesk_brain_logo.svg',
+      'category': 'Neurodesk'
+    }
+  }
+
+
 c.ServerProxy.servers = {
+  'neurodesktop-voxl': _voxl_server(),
   'neurodesktop-rdp': _neurodesktop_server('rdp', 'Neurodesktop RDP', 'neurodesktop-rdp', launcher_enabled=_rdp_launcher_enabled()),
   'neurodesktop-vnc': _neurodesktop_server('vnc', 'Neurodesktop VNC', 'neurodesktop-vnc', launcher_enabled=os.environ.get('NEURODESKTOP_RUNTIME', 'container') != 'glass'),
   # Preserve the historical /neurodesktop route for old links without adding a
