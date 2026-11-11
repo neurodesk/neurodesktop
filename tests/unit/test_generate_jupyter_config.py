@@ -3,7 +3,7 @@ import ast
 
 import pytest
 
-from testlib import load_source_module, resolve_source
+from testlib import load_source_module, repo_path, resolve_source
 
 
 def _load_generate_jupyter_config_module():
@@ -44,6 +44,62 @@ def test_startup_webapps_keep_local_launchers_and_one_catalog_link():
     assert catalog["launcher_entry"]["category"] == "Webapps"
     assert catalog["new_browser_tab"] is True
     assert entries["jamovi"]["timeout"] == 300
+
+
+def test_merged_catalog_downloads_only_retained_app_icons(tmp_path, monkeypatch):
+    generator = _load_generate_jupyter_config_module()
+    generator.ICONS_DIR = tmp_path / "icons"
+    downloaded = []
+
+    def download(url, destination):
+        downloaded.append((url, destination.name))
+        destination.write_text("downloaded icon")
+
+    monkeypatch.setattr(generator.urllib.request, "urlretrieve", download)
+    base = {
+        "webapps": {
+            name: {"icon": f"https://icons.example/{name}.svg"}
+            for name in (
+                "dicompare",
+                "ezbids",
+                "jamovi",
+                "openrefine",
+                "qsmbly",
+                "rstudio",
+            )
+        }
+    }
+    overlay = json.loads(resolve_source(
+        "/tmp/jupyter/webapp_links.json",
+        "config/jupyter/webapp_links.json",
+    ).read_text())
+
+    merged = generator.merge_webapp_configs(base, overlay)
+    entries = ast.literal_eval(
+        "{" + generator.generate_server_proxy_entries(merged["webapps"]) + "}"
+    )
+
+    assert downloaded == [
+        ("https://icons.example/ezbids.svg", "ezbids.svg"),
+        ("https://icons.example/jamovi.svg", "jamovi.svg"),
+        ("https://icons.example/openrefine.svg", "openrefine.svg"),
+        ("https://icons.example/rstudio.svg", "rstudio.svg"),
+    ]
+    for name in ("ezbids", "jamovi", "openrefine", "rstudio"):
+        assert entries[name]["launcher_entry"]["icon_path"] == str(
+            generator.ICONS_DIR / f"{name}.svg"
+        )
+    assert entries["more-webapps"]["launcher_entry"]["icon_path"] == (
+        "/opt/neurodesk_brain_icon.svg"
+    )
+    assert not {"dicompare", "qsmbly"} & entries.keys()
+
+
+def test_image_does_not_seed_retired_webapp_icons():
+    dockerfile = repo_path("Dockerfile").read_text(encoding="utf-8")
+
+    assert "webapp_icons" not in dockerfile
+    assert not repo_path("config/jupyter/webapp_icons").exists()
 
 
 def test_overlay_removal_handles_missing_apps_without_mutating_source():
