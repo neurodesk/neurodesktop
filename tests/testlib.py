@@ -143,8 +143,7 @@ def run_cmd_streams(cmd, cwd=None, env=None, timeout=None):
     process = subprocess.run(
         cmd,
         shell=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
         cwd=cwd,
         env=merged_env,
