@@ -50,6 +50,22 @@ class UnixSocketHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamS
         return request, ("", 0)
 
 
+def create_http_server(socket_path):
+    """Bind the wrapper socket for access by the notebook user only."""
+    previous_umask = os.umask(0o177)
+    try:
+        server = UnixSocketHTTPServer(socket_path, WebappHandler)
+    finally:
+        os.umask(previous_umask)
+    try:
+        os.chmod(socket_path, 0o600)
+    except OSError:
+        server.server_close()
+        Path(socket_path).unlink(missing_ok=True)
+        raise
+    return server
+
+
 class WebappConfig:
     """Load and provide access to webapp configuration."""
 
@@ -1476,9 +1492,8 @@ def main():
         os.unlink(socket_path)
 
     # Create and bind to socket
-    httpd = UnixSocketHTTPServer(socket_path, WebappHandler)
+    httpd = create_http_server(socket_path)
     httpd_server = httpd
-    os.chmod(socket_path, 0o666)
     log(f"Bound to Unix socket: {socket_path}")
     last_client_activity = time.time()
 

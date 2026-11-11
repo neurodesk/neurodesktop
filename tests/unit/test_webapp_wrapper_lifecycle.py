@@ -1,8 +1,11 @@
 import os
 from pathlib import Path
 import socket
+import stat
 import threading
 from types import SimpleNamespace
+
+import pytest
 
 from testlib import load_source_module
 
@@ -29,6 +32,56 @@ class DummyStatusHandler:
 
     def end_headers(self):
         self.ended = True
+
+
+def test_wrapper_socket_is_private_to_notebook_user(tmp_path, monkeypatch):
+    wrapper = _load_webapp_wrapper_module()
+    socket_path = tmp_path / "webapp.sock"
+    mode_when_bound = []
+
+    class BoundServer:
+        def __init__(self, path, _handler):
+            Path(path).touch(mode=0o666)
+            mode_when_bound.append(stat.S_IMODE(Path(path).stat().st_mode))
+
+        def server_close(self):
+            pass
+
+    monkeypatch.setattr(wrapper, "UnixSocketHTTPServer", BoundServer)
+
+    httpd = wrapper.create_http_server(str(socket_path))
+    try:
+        assert mode_when_bound == [0o600]
+        assert stat.S_IMODE(socket_path.stat().st_mode) == 0o600
+    finally:
+        httpd.server_close()
+        socket_path.unlink(missing_ok=True)
+
+
+def test_wrapper_removes_socket_when_private_mode_cannot_be_set(tmp_path, monkeypatch):
+    wrapper = _load_webapp_wrapper_module()
+    socket_path = tmp_path / "webapp.sock"
+    closed = []
+
+    class BoundServer:
+        def __init__(self, path, _handler):
+            Path(path).touch(mode=0o666)
+
+        def server_close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(wrapper, "UnixSocketHTTPServer", BoundServer)
+    monkeypatch.setattr(
+        wrapper.os,
+        "chmod",
+        lambda _path, _mode: (_ for _ in ()).throw(PermissionError("denied")),
+    )
+
+    with pytest.raises(PermissionError, match="denied"):
+        wrapper.create_http_server(str(socket_path))
+
+    assert closed == [True]
+    assert not socket_path.exists()
 
 
 def test_close_beacon_does_not_schedule_immediate_backend_stop(monkeypatch):
@@ -185,7 +238,8 @@ def test_websocket_upgrade_requests_are_tunneled_to_backend(tmp_path):
 
     socket_path = Path("/tmp") / f"ndwrap-{os.getpid()}-{backend_port}.sock"
     socket_path.unlink(missing_ok=True)
-    httpd = wrapper.UnixSocketHTTPServer(str(socket_path), wrapper.WebappHandler)
+    httpd = wrapper.create_http_server(str(socket_path))
+    assert stat.S_IMODE(socket_path.stat().st_mode) == 0o600
     server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     server_thread.start()
 
