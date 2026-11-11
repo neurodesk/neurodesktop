@@ -1652,11 +1652,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     install -D -m 0644 /tmp/jupyter/neurodesk_brain_logo.svg /opt/neurodesk_brain_logo.svg \
     && install -D -m 0644 /tmp/jupyter/neurodesk_brain_icon.svg /opt/neurodesk_brain_icon.svg \
     && install -D -m 0644 /tmp/jupyter/vscode_logo.svg /opt/vscode_logo.svg \
-    && install -d -m 0755 /opt/neurodesk/icons \
-    && cp -a /tmp/jupyter/webapp_icons/. /opt/neurodesk/icons/ \
     && install -D -m 0644 /tmp/jupyter/webapp_links.json /opt/config/jupyter/webapp_links.json \
-    && install -d -m 0755 /opt/config/jupyter/webapp_icons \
-    && cp -a /tmp/jupyter/webapp_icons/. /opt/config/jupyter/webapp_icons/ \
     && install -D -m 0644 /tmp/lxde/background.png /usr/share/lxde/wallpapers/desktop_wallpaper.png \
     && install -m 0755 /tmp/lxde/neurodesktop-gpu-check /usr/local/bin/neurodesktop-gpu-check \
     && ln -sf /opt/VirtualGL/bin/eglinfo /usr/local/bin/vgl-eglinfo \

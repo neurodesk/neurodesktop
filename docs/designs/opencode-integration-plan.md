@@ -190,7 +190,8 @@ reads the Guacamole credentials, so the proxy injects auth and the user never
 sees a Basic-auth prompt. The neurodesk-launcher extension picks the tile up
 automatically from `/server-proxy/servers-info` - no frontend change needed for
 the tile itself. Add an `opencode.svg` icon under
-[config/jupyter/webapp_icons/](../../config/jupyter/webapp_icons/).
+`config/jupyter/webapp_icons/` (that retired asset directory has since been
+removed).
 
 ### Phase 3 - solve the path-prefix problem (the actual "nice web interface")
 

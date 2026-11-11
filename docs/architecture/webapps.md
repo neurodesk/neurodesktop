@@ -4,7 +4,7 @@ description: Container-backed and hosted webapps, launcher tiles and icons,
   and the build-time Jupyter config generation that wires them up
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-11-01"
+last-reviewed: "2026-11-11"
 ---
 
 # Webapp System
@@ -36,11 +36,9 @@ conflicts. The wrapper creates each socket mode `0600`; only the notebook user
 and its Jupyter Server Proxy can connect, so another user on a shared host
 cannot bypass Jupyter authentication through the local proxy. Entries with
 `direct_url` open the hosted application directly from the Neurodesk launcher.
-Launcher tile icons for those entries are checked-in
-SVG or PNG files in
-[`config/jupyter/webapp_icons/`](../../config/jupyter/webapp_icons/) referenced from
-`webapp_links.json` with `/opt/neurodesk/icons/*` paths; the Dockerfile copies
-them into the image before Jupyter config generation. The custom Neurodesk
+Launcher tile icons for retained container-backed entries are downloaded from
+the URLs in neurocommand's catalog during Jupyter config generation. The local
+catalog entry uses the installed Neurodesk brain icon. The custom Neurodesk
 launcher reads icons through the server-proxy icon endpoint and wraps raster
 images as SVGs for JupyterLab `LabIcon` support.
 The Webapps section heading uses the same icon as the More webapps tile.
