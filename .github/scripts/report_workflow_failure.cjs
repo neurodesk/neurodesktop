@@ -7,6 +7,8 @@ const OPERATIONAL_WORKFLOWS = new Set([
   "Agentic runner readiness",
 ]);
 
+// Self-hosted Runner Test is deliberately absent: it probes the cluster's runner
+// pool, so its failures belong to the cluster team, not to a repository repair.
 const WORKFLOWS = new Set([
   "Build neurodesktop",
   "Build and publish Kasm image",
@@ -19,7 +21,6 @@ const WORKFLOWS = new Set([
   "Codespell",
   "Test Objectstorage",
   "Test cvmfs",
-  "Self-hosted Runner Test",
   "JupyterHub API Testing (All instances)",
   "JupyterHub Notebook Testing (All instances)",
   ...OPERATIONAL_WORKFLOWS,

@@ -444,6 +444,13 @@ reviewed; the Dockerfile itself is authoritative.
   VirtualGL release and architecture-specific Debian package checksums.
   The version defaults to `3.1.5`; update its verified checksums together with
   the version. GPU rendering remains an explicit application launch choice.
+- `VOXL_VERSION`: `voxl-server` crate release built for the
+  [voxl desktop streaming](architecture/desktop.md#voxl-desktop-streaming);
+  defaults to `0.3.4`. The build stage compiles it with `--locked` against the
+  base image's distro x264, libyuv, Opus and PulseAudio libraries. The same
+  stage rebuilds the distro Xvfb with voxl's scroll-axis patch; update
+  `config/voxl/xorg-server-xtest-scroll.patch` from the new release's
+  `patches/` directory with the version
 - `CODE_SERVER_VERSION`: code-server release; defaults to `4.144.0`
 - `SHELL_QUOTE_VERSION`: shell-quote release for VS Code's nested package;
   defaults to `1.12.0`

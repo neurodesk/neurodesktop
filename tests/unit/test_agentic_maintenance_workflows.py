@@ -131,7 +131,12 @@ def test_review_runs_only_for_coderabbit_on_owned_agent_prs():
 
 def test_reporter_catalog_covers_each_top_level_test_deployment_and_agent_workflow():
     reporter = source('report-workflow-failure.yml')
-    excluded = {'agentic-worker.yml', 'report-workflow-failure.yml', 'on-opening-issue.yml'}
+    # self-hosted-runner-test.yml probes the cluster's runner pool; its failures
+    # belong to the cluster team, not to a repository repair.
+    excluded = {
+        'agentic-worker.yml', 'report-workflow-failure.yml', 'on-opening-issue.yml',
+        'self-hosted-runner-test.yml',
+    }
     for path in WORKFLOWS.glob('*.yml'):
         if path.name in excluded:
             continue

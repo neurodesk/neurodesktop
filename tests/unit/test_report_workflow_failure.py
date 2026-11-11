@@ -317,7 +317,7 @@ def test_agent_failures_report_operational_issue_without_recursive_dispatch(name
 @pytest.mark.parametrize("override", [
     {"status": "in_progress"},
     {"conclusion": "cancelled"}, {"name": "Report workflow failure"},
-    {"name": "Unrecognized workflow"},
+    {"name": "Unrecognized workflow"}, {"name": "Self-hosted Runner Test"},
 ])
 def test_non_failures_and_unlisted_workflows_do_nothing(override):
     output = run_reporter(runs=[override])

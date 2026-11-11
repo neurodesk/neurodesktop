@@ -231,6 +231,54 @@ RUN curl -fsSL --retry 5 "https://download.schedmd.com/slurm/slurm-${SLURM_ENV_V
     && bash /tmp/slurm-env/build_env_compat.sh /tmp/slurm-source /opt/slurm-env \
     && rm -rf /tmp/slurm.tar.bz2 /tmp/slurm-source /tmp/slurm-env
 
+# voxl browser desktop streaming. Built against the runtime base so
+# the binary links the same distro x264, libyuv, Opus and PulseAudio sonames;
+# --locked holds every dependency to the crate's checksummed Cargo.lock.
+FROM quay.io/jupyter/base-notebook:${BASE_IMAGE_TAG} AS voxl-builder
+USER root
+ARG VOXL_VERSION="0.3.4"
+COPY --chmod=0755 scripts/apt_install_retry.sh /usr/local/bin/apt-install-retry
+RUN apt-install-retry \
+    cargo \
+    rustc \
+    esbuild \
+    pkg-config \
+    clang \
+    libclang-dev \
+    libx264-dev \
+    libyuv-dev \
+    libopus-dev \
+    libpulse-dev \
+    libxcb1-dev \
+    ca-certificates \
+    && CARGO_HOME=/tmp/cargo cargo install --locked --root /opt/voxl voxl-server --version "${VOXL_VERSION}" \
+    && /opt/voxl/bin/voxl --version \
+    && rm -rf /tmp/cargo /var/lib/apt/lists/*
+RUN --mount=type=bind,source=config/voxl/neurodesktop-shm-private.c,target=/tmp/neurodesktop-shm-private.c,ro \
+    clang -O2 -Wall -Wextra -Werror -o /opt/voxl/bin/neurodesktop-shm-private /tmp/neurodesktop-shm-private.c
+# Rebuild the distro's own Xvfb with voxl's XTEST scroll-axis patch, so voxl
+# scrolls smoothly instead of in wheel clicks. The source version is the xvfb
+# package the runtime installs, and Debian's configure flags are kept; only the
+# Xorg, Xnest, Xephyr and Xwayland servers are left out.
+RUN --mount=type=bind,source=config/voxl/xorg-server-xtest-scroll.patch,target=/tmp/xorg-server-xtest-scroll.patch,ro \
+    sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get -o Acquire::Retries=5 update \
+    && xorg_version="$(apt-cache policy xvfb | awk '/Candidate:/ { print $2 }')" \
+    && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends dpkg-dev \
+    && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 build-dep -y --no-install-recommends "xorg-server=${xorg_version}" \
+    && mkdir /tmp/xorg && cd /tmp/xorg \
+    && apt-get -o Acquire::Retries=5 source "xorg-server=${xorg_version}" \
+    && cd xorg-server-*/ \
+    && cp /tmp/xorg-server-xtest-scroll.patch debian/patches/ \
+    && echo xorg-server-xtest-scroll.patch >> debian/patches/series \
+    && dh_quilt_patch \
+    && dh_autoreconf \
+    && DEB_BUILD_PROFILES=noudeb debian/rules override_dh_auto_configure \
+        vars="--disable-xorg --disable-xnest --disable-xephyr --disable-xwayland" \
+    && make -j"$(nproc)" -C debian/build/main \
+    && install -D -m 0755 debian/build/main/hw/vfb/Xvfb /opt/voxl/libexec/Xvfb \
+    && cd / && rm -rf /tmp/xorg /var/lib/apt/lists/*
+
 ###############################################################################
 # Stage 2: Final runtime image
 ###############################################################################
@@ -1572,10 +1620,12 @@ RUN --mount=type=bind,source=config/jupyter/restore_home_defaults.sh,target=/tmp
 # Switch to root user
 USER root
 
-# Install Glass dependencies before runtime configuration replaces apt-get
-# with the package-only wrapper, which rejects build-time apt options.
+# Install Glass dependencies, and Xvfb and libyuv0 for voxl, before runtime
+# configuration replaces apt-get with the package-only wrapper, which rejects
+# build-time apt options.
 RUN apt-install-retry systemd systemd-sysv xauth xserver-xorg-core \
     xserver-xorg-input-evdev x11-xserver-utils libx11-6 fonts-dejavu-core \
+    xvfb libyuv0 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install local runtime configuration late. This layer intentionally sits after
@@ -1779,6 +1829,13 @@ RUN --mount=type=bind,source=config/jupyter/patch_jupyter_ai_acp_client.py,targe
     && /opt/conda/bin/python /opt/neurodesktop/patch_jupyter_ai_acp_client.py
 
 COPY --from=builder /opt/glass/bin/ /usr/local/bin/
+# voxl streams a dedicated Xvfb LXDE desktop as H.264 over one WebSocket; see
+# docs/architecture/desktop.md#voxl-desktop-streaming. The xvfb package above
+# supplies the libraries and XKB tools for voxl's patched Xvfb, which stays off
+# PATH so Glass and xvfb-run keep the distro server.
+COPY --from=voxl-builder /opt/voxl/bin/voxl /opt/voxl/bin/neurodesktop-shm-private /usr/local/bin/
+COPY --from=voxl-builder /opt/voxl/libexec/Xvfb /usr/local/libexec/voxl/Xvfb
+COPY --chmod=0755 config/voxl/voxl.sh /opt/neurodesktop/voxl.sh
 COPY --chmod=0755 config/glass/ /opt/neurodesktop/glass/
 RUN find /opt/neurodesktop/glass -type f -exec chmod 0644 {} + \
     && install -m 0644 /opt/neurodesktop/glass/neurodesktop-glass.service /etc/systemd/system/ \

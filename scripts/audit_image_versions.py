@@ -61,6 +61,10 @@ CATALOG = (
         "arg:SLURM_ENV_VERSION", "manual:slurm-env", "manual",
         why="Must match Ubuntu's installed Slurm and the reviewed env.c source; source and runtime guards reject unreviewed upgrades.",
     ),
+    CatalogEntry(
+        "arg:VOXL_VERSION", "manual:voxl-server", "manual",
+        why="Prototype streamer published only on crates.io (voxl-server); check its changelog and rebuild against the base image's x264/libyuv sonames.",
+    ),
     CatalogEntry("arg:TOMCAT_VERSION", "apache:tomcat/tomcat-11", "apache-dist", "<12"),
     CatalogEntry("arg:TOMCAT_MIGRATION_VERSION", "github:apache/tomcat-jakartaee-migration", "github-tags"),
     CatalogEntry("arg:PIP_VERSION", "pypi:pip", "pypi"),

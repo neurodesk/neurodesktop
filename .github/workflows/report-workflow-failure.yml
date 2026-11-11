@@ -14,7 +14,6 @@ on:
       - Codespell
       - Test Objectstorage
       - Test cvmfs
-      - Self-hosted Runner Test
       - JupyterHub API Testing (All instances)
       - JupyterHub Notebook Testing (All instances)
       - Agentic issue repair
