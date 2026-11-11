@@ -618,6 +618,9 @@ in, and is installed next to the container tier at `/opt/tests/testlib.py`
   resolved the same way.
 - `run_cmd(cmd, cwd=, env=, timeout=)` — shell out and return
   `(exit_code, combined_output)`. `env` overlays the caller's environment.
+- `run_cmd_streams(cmd, cwd=, env=, timeout=)` — shell out and return
+  `(exit_code, stdout, stderr)` when stdout is itself the value under test and
+  diagnostics must remain separate. `env` overlays the caller's environment.
 
 ## Focused tests by area
 
@@ -993,9 +996,10 @@ process exits, and timeouts fail the test. This check covers adapter upgrades
 that use an image CLI outside the adapter's declared dependency range.
 Both image builds require `codex --version` to succeed and match the requested
 pin. Checkout tests execute these guards against matching, stale, and failing
-CLIs. The installed test compares the executable's report with its
-global npm package metadata so a stale platform binary cannot masquerade as the
-updated package.
+CLIs. The installed test compares the executable's stdout with its global npm
+package metadata so a stale platform binary cannot masquerade as the updated
+package. Stderr is kept apart for failure diagnostics because Codex reports
+best-effort startup cleanup warnings there without failing the command.
 
 The installed T3 startup cases exercise fresh and legacy defaults. They wait
 for Claude's completed health probe, compare its version with the image CLI,
