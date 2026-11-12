@@ -12,6 +12,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import tarfile
 import threading
 import time
@@ -816,7 +817,12 @@ def validate_checkout_canary(workspace, control, output):
             snapshot_validation_baseline(checkout, revision, baseline)
             validation = validate_candidate_patch(checkout, control, output, baseline)
     except (RuntimeError, subprocess.TimeoutExpired) as failure:
-        (output / "canary-validation.txt").write_text(validation_failure_report(failure))
+        report = validation_failure_report(failure)
+        (output / "canary-validation.txt").write_text(report)
+        # The canary container has no credentials or network access. Surface the
+        # same bounded report in the failed step so the incident reporter can
+        # preserve the failing test instead of only seeing ``docker run exited``.
+        print(report, file=sys.stderr)
         raise
     (output / "canary-validation.txt").write_text(validation[-30000:])
     return validation

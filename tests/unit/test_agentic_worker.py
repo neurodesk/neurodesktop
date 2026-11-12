@@ -1140,7 +1140,9 @@ def test_candidate_outer_timeout_reports_incomplete_validation(worker, candidate
     subprocess.TimeoutExpired("docker", 1800, output="canary partial output"),
     subprocess.CalledProcessError(1, "unused"),
 ])
-def test_canary_persists_validator_failure_without_candidate_artifacts(worker, candidate, failure):
+def test_canary_persists_and_reports_validator_failure_without_candidate_artifacts(
+    worker, candidate, failure, capsys,
+):
     state, repo, control, output, _, _ = candidate
     if isinstance(failure, subprocess.CalledProcessError):
         failure = worker.CommandFailure(["docker", "run"], subprocess.CompletedProcess([], 1, "canary suite failed", ""))
@@ -1150,9 +1152,11 @@ def test_canary_persists_validator_failure_without_candidate_artifacts(worker, c
         worker.validate_checkout_canary(repo, control, output)
 
     evidence = (output / "canary-validation.txt").read_text()
+    stderr = capsys.readouterr().err
     assert evidence.startswith("FAILED:")
     assert "canary" in evidence
     assert "frozen_baseline" in evidence and "candidate" in evidence
+    assert stderr.strip() == evidence.strip()
     assert not (output / "result.json").exists()
     assert not any(path.is_dir() for path in output.iterdir())
 
