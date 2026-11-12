@@ -26,6 +26,7 @@ this wiki documents the repository itself for contributors and agents.
 
 Under [`docs/architecture/`](architecture/), one page per subsystem:
 [CVMFS and Neurocommand](architecture/cvmfs.md) ·
+[Tool citations](architecture/citations.md) ·
 [uv Python environments](architecture/uv-environments.md) ·
 [Remote compute jobs](architecture/remote-jobs.md) ·
 [Desktop environment](architecture/desktop.md) ·

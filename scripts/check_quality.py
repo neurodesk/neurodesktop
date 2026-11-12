@@ -16,6 +16,7 @@ PYTHON_FORMAT_SCOPE = (
     "config/agents/nbi_mirror_opencode.py",
     "config/agents/opencode_update_config.py",
     "config/agents/provider_security.py",
+    "config/jupyter/neurodesk_cite.py",
     "extensions/t3-code-server/neurodesk_t3_code/__init__.py",
     "extensions/t3-code-server/neurodesk_t3_code/naming.py",
     "extensions/t3-code-server/neurodesk_t3_code/serverext.py",
