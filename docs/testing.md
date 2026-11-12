@@ -122,7 +122,7 @@ Use `testlib.repo_path()` to locate repository sources in unit tests. The frozen
 baseline redirects that helper to the candidate checkout; source roots derived
 from the test file's `__file__` instead point into the tests-only snapshot.
 
-Two modules need heavier optional dependencies and skip cleanly when they are
+Three modules need heavier optional dependencies and skip cleanly when they are
 absent rather than failing a plain checkout; CI installs them, so they always
 run there:
 
@@ -134,6 +134,9 @@ run there:
   further packages.
 - `tests/unit/test_astra_view_filebrowser.py` needs `jupyter-server` to drive
   the file-browser server extension.
+- `tests/unit/test_module_usage_hook.py` needs Ubuntu's `lmod` package to load
+  modules through the real Lmod with the
+  [citation site package](architecture/citations.md).
 
 ## Remote compute jobs
 
@@ -226,7 +229,7 @@ in `mypy.ini`. Expand these scopes in reviewed changes rather than reformatting
 unrelated files to fix a correctness finding.
 
 The strict scope covers the provider credential policy, the OpenCode
-`opencode.json` update helper, and the T3 package's process side: the supervisor, its environment naming, the Jupyter lifecycle
+`opencode.json` update helper, the `neurodesk-cite` command, and the T3 package's process side: the supervisor, its environment naming, the Jupyter lifecycle
 adapter and the extension entry point. The same modules are in the Ruff
 formatter scope. mypy skips unlisted modules, so a checked module's callers
 are listed with it. The lifecycle adapter's `ExtensionApp` base is typed by

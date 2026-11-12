@@ -1,0 +1,35 @@
+{
+  "list": [
+    {
+      "application": "fsl_6.0.7.16_20250131",
+      "categories": ["functional imaging", "structural imaging"],
+      "description": "FSL",
+      "citation": "Please reference the FSL overview papers:\n\n1. Woolrich MW et al. Bayesian analysis of neuroimaging data in FSL. NeuroImage, 45:S173-86, 2009\n\n2. Jenkinson M et al. FSL. NeuroImage, 62:782-90, 2012",
+      "doi": "10.5281/zenodo.18932192"
+    },
+    {
+      "application": "fsl_6.0.7.23_20250901",
+      "categories": ["functional imaging", "structural imaging"],
+      "citation": "Please reference the FSL overview papers:\n\n1. Woolrich MW et al. Bayesian analysis of neuroimaging data in FSL. NeuroImage, 45:S173-86, 2009\n\n2. Jenkinson M et al. FSL. NeuroImage, 62:782-90, 2012"
+    },
+    {
+      "application": "fsl_6.0.7.23_20261013",
+      "categories": ["functional imaging", "structural imaging"],
+      "citation": "Please reference the FSL overview papers:\n\n1. Woolrich MW et al. Bayesian analysis of neuroimaging data in FSL. NeuroImage, 45:S173-86, 2009\n\n2. Jenkinson M et al. FSL. NeuroImage, 62:782-90, 2012"
+    },
+    {
+      "application": "ants_2.6.5_20261012",
+      "categories": ["image registration"],
+      "citation": "Avants BB et al. A reproducible evaluation of ANTs similarity metric performance in brain image registration. Neuroimage. 2011;54(3):2033-44. doi: 10.1016/j.neuroimage.2010.09.025"
+    },
+    {
+      "application": "mne_arm64_1.13.2_20261108",
+      "categories": ["electrophysiology"]
+    },
+    {
+      "application": "bidscoin_4.6.2_20250602",
+      "categories": ["data organisation"],
+      "citation": "   "
+    }
+  ]
+}
