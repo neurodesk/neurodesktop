@@ -1424,6 +1424,9 @@ EOF
 
 ENV DONT_PROMPT_WSL_INSTALL=1
 ENV LMOD_CMD=/usr/share/lmod/lmod/libexec/lmod
+# Lmod loads SitePackage.lua from here; it records Neurodesk module loads for
+# neurodesk-cite.
+ENV LMOD_PACKAGE_PATH=/opt/neurodesktop/lmod
 # jupyter_server_mcp embeds FastMCP, whose startup banner (an ASCII box with a
 # hosting ad) would otherwise land in the Jupyter server log on every boot.
 ENV FASTMCP_SHOW_SERVER_BANNER=0
@@ -1665,6 +1668,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -D -m 0644 /tmp/lxde/pcmanfm.conf /etc/xdg/pcmanfm/LXDE/pcmanfm.conf \
     && install -D -m 0644 /tmp/lxde/lxterminal.conf /usr/share/lxterminal/lxterminal.conf \
     && install -D -m 0644 /tmp/lmod/module.sh /usr/share/module.sh \
+    && install -D -m 0644 /tmp/lmod/SitePackage.lua /opt/neurodesktop/lmod/SitePackage.lua \
     && install -D -m 0644 /tmp/lxde/rc.xml /etc/xdg/openbox/rc.xml \
     && sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf \
     && rm -f /usr/bin/lxpolkit \
@@ -1697,6 +1701,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/jupyter/environment_variables.sh /opt/neurodesktop/environment_variables.sh \
     && install -m 0755 /tmp/jupyter/kernel_wrapper.sh /opt/neurodesktop/kernel_wrapper.sh \
     && install -m 0755 /tmp/jupyter/neurodesk_kernel.py /usr/local/bin/neurodesk-kernel \
+    && install -m 0755 /tmp/jupyter/neurodesk_cite.py /usr/local/bin/neurodesk-cite \
     && install -m 0755 /tmp/jupyter/uv_kernel_prototype.py /usr/local/bin/neurodesk-uv \
     && install -m 0755 /tmp/jupyter/jupyterlmod_modulepath.py /opt/neurodesktop/jupyterlmod_modulepath.py \
     && install -m 0644 /tmp/jupyter/jupyter_ai_workspace.py /opt/neurodesktop/jupyter_ai_workspace.py \

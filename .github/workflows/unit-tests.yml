@@ -51,9 +51,10 @@ jobs:
           # the single source for the exact ASTRA/anywidget dependency pins.
           python -m pip install pytest httpx traitlets \
             jupyter-server jupyterhub==6.1.0 requests ipykernel websocket-client nibabel numpy ./extensions/t3-code-server ./extensions/astra-viewer
-          # ssh-keygen and ACLs for SSH permission tests, jq for terminal tests
+          # ssh-keygen and ACLs for SSH permission tests, jq for terminal tests,
+          # lmod for the module-usage hook (test_module_usage_hook.py skips without it)
           sudo apt-get update -qq
-          sudo apt-get install -y -qq openssh-client acl jq gcc libx11-dev xvfb x11-xserver-utils
+          sudo apt-get install -y -qq openssh-client acl jq gcc libx11-dev xvfb x11-xserver-utils lmod
 
       - name: Run unit tests
         env:

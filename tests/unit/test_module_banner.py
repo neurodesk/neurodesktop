@@ -66,6 +66,10 @@ def test_banner_advertises_module_command(banner, command):
     assert command in banner()
 
 
+def test_banner_advertises_the_citation_command(banner):
+    assert 'run "neurodesk-cite" to write CITATIONS.md' in banner()
+
+
 def test_banner_survives_its_own_quoting(banner):
     assert "If you don't know where a certain binary is available" in banner()
 
