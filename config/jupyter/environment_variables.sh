@@ -76,6 +76,7 @@ if [ -z "$NEURODESKTOP_MSG_SHOWN" ] && [ -f '/usr/share/module.sh' ]; then
                 fi
 
                 echo 'Neuroimaging tools are accessible via the Neurodesktop Applications menu and running them through the menu will provide help and setup instructions. If you are familiar with the tools and you want to combine multiple tools in one script, you can run "ml av" to see which tools are available and then use "ml <tool>/<version>" to load them. You can use "ml help <tool>" to get a detailed description of the module. If you don'"'"'t know where a certain binary is available, you can use "ml keyword <binary>" to find which module contains it. '
+                echo 'To cite the tools you loaded, run "neurodesk-cite" to write CITATIONS.md with methods text and references.'
 
                 # check if $CVMFS_DISABLE is set to true
                 if [[ "$CVMFS_DISABLE" == "true" ]]; then
