@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-11-09"
+last-reviewed: "2026-11-12"
 ---
 
 # Testing
@@ -860,6 +860,11 @@ SSH proxy tests load the shipped Jupyter configuration and verify that the
 `NEURODESKTOP_DISABLE_SSH=true`.
 The VNC tunnel cases require saved settings to survive TigerVNC's migration
 and actual desktop frames to arrive over the authenticated tunnel.
+The RDP tunnel case sends Alt+F2 through Guacamole and executes a command in
+LXDE's Run dialog. Its X11 observer runs out of process so a dead display cannot
+terminate pytest; a single observation timeout is retried within the existing
+readiness deadline, while repeated timeouts remain a failure with the last
+successful X11 state in the report.
 Tests that need to start the global xrdp service are skipped unless
 `NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1` is set. The build scripts and
 GitHub Actions set this only for disposable test containers; do not set it in a
