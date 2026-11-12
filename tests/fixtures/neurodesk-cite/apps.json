@@ -1,0 +1,41 @@
+{
+  "fsl": {
+    "apps": {
+      "fsl 6.0.7.16": {"version": "20250131", "exec": "", "image": "fsl_6.0.7.16", "doi": "https://doi.org/10.5281/zenodo.18932192", "license": ["fsl license"]},
+      "fsleyesGUI-fsl 6.0.7.16": {"version": "20250131", "exec": "fsleyes", "image": "fsl_6.0.7.16", "doi": "https://doi.org/10.5281/zenodo.18932192", "license": ["fsl license"]},
+      "fsl 6.0.7.23": {"version": "20250901", "exec": "", "image": "fsl_6.0.7.23", "license": ["fsl license"]},
+      "fsleyesGUI-fsl 6.0.7.23": {"version": "20261013", "exec": "fsleyes", "image": "fsl_6.0.7.23", "license": ["fsl license"]}
+    },
+    "categories": ["functional imaging", "structural imaging"],
+    "citation": "Please reference the FSL overview papers:\n\n1. Woolrich MW et al. Bayesian analysis of neuroimaging data in FSL. NeuroImage, 45:S173-86, 2009\n\n2. Jenkinson M et al. FSL. NeuroImage, 62:782-90, 2012",
+    "description": "FSL is a comprehensive library of analysis tools for FMRI, MRI and DTI brain imaging data."
+  },
+  "ants": {
+    "apps": {
+      "ants 2.6.5": {"version": "20261012", "exec": "", "image": "ants_2.6.5", "license": ["Apache-2.0"]}
+    },
+    "categories": ["image registration"],
+    "citation": "Avants BB et al. A reproducible evaluation of ANTs similarity metric performance in brain image registration. Neuroimage. 2011;54(3):2033-44. doi: 10.1016/j.neuroimage.2010.09.025"
+  },
+  "ants_arm64": {
+    "apps": {
+      "ants_arm64 2.6.5": {"version": "20261014", "exec": "", "apptainer_args": [], "image": "ants_arm64_2.6.5", "license": ["Apache-2.0"]}
+    },
+    "categories": ["image registration"],
+    "citation": "Avants BB et al. A reproducible evaluation of ANTs similarity metric performance in brain image registration. Neuroimage. 2011;54(3):2033-44. doi: 10.1016/j.neuroimage.2010.09.025"
+  },
+  "mne_arm64": {
+    "apps": {
+      "mne_arm64 1.13.2": {"version": "20261108", "exec": "", "image": "mne_arm64_1.13.2", "license": ["BSD-3-Clause"]},
+      "code-mne_arm64 1.13.2": {"version": "20261108", "exec": "code", "image": "mne_arm64_1.13.2", "license": ["BSD-3-Clause"]}
+    },
+    "categories": ["electrophysiology"]
+  },
+  "bidscoin": {
+    "apps": {
+      "bidscoin 4.6.2": {"version": "20250602", "exec": "", "image": "bidscoin_4.6.2", "license": ["GPL-3.0"]},
+      "bidscoin 4.6.2 arm64": {"version": "20260512", "exec": "", "image": "bidscoin_4.6.2_arm64", "architecture": "aarch64", "license": ["GPL-3.0"]}
+    },
+    "categories": ["data organisation"]
+  }
+}

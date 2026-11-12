@@ -56,21 +56,34 @@ can contain repeated lines. `neurodesk-cite` deduplicates them.
 
 [`config/jupyter/neurodesk_cite.py`](../../config/jupyter/neurodesk_cite.py) is
 installed as `/usr/local/bin/neurodesk-cite` and uses only the standard
-library. It fetches the website catalogue at
-`https://neurodesk.org/data/applist.json` and caches it in
-`$XDG_CACHE_HOME/neurodesk/applist.json`. When the fetch fails, it uses the
+library. It fetches the neurocontainers catalogue at
+`https://apps-json.scigetorg.workers.dev/neuroimaging/apps.json` and caches it
+in `$XDG_CACHE_HOME/neurodesk/apps.json`. It sends its own `User-Agent`,
+because the catalogue host rejects urllib's default one. When the fetch fails, it uses the
 cache and reports the cache date. Without a cache it still writes the file,
-without build dates, and reports that.
+without build dates, and reports that. A cache named `applist.json`, left by
+an image that read the retired website catalogue, is ignored.
 
-A module `name/version` matches the catalogue entry whose `application` is
-`name_version_YYYYMMDD`. When several builds match, the newest build date is
-used. The entry supplies the build date, the `citation` text, which comes from
-the neurocontainers recipes, and the `electrophysiology` category, which adds
-the AEDAPT note. A tool without a citation, or a module missing from the
-catalogue, gets a pointer to the
+The catalogue maps each tool to its menu entries. Every entry names an `image`
+of the form `name_version` and the build date as its `version`. CVMFS
+publishes that image as the Lmod module `name/version`, splitting at the last
+underscore, so a module matches every entry with that image:
+
+| Module              | Catalogue tool | `image`             |
+| ------------------- | -------------- | ------------------- |
+| `ants/2.6.5`        | `ants`         | `ants_2.6.5`        |
+| `ants_arm64/2.6.5`  | `ants_arm64`   | `ants_arm64_2.6.5`  |
+| `amico_2.1.0/arm64` | `amico`        | `amico_2.1.0_arm64` |
+
+Several menu entries can share one image, such as `afni` and `sumaGUI-afni`.
+When matching entries disagree, the newest build date is used. The tool
+supplies the optional `citation` text, which comes from the neurocontainers
+recipe, and the `electrophysiology` category, which adds the AEDAPT note.
+arm64 and variant tools carry their base recipe's citation. A tool without a
+citation, or a module missing from the catalogue, gets a pointer to the
 [citation guide](https://neurodesk.org/overview/how-to-cite-us/) and its
-neurocontainers recipe. The methods sentence names the image's
-`NEURODESKTOP_VERSION`.
+neurocontainers recipe, named after the catalogue tool without an `_arm64`
+suffix. The methods sentence names the image's `NEURODESKTOP_VERSION`.
 
 The default output is `CITATIONS.md` in `~/neurodesktop-storage`, then
 `/neurodesktop-storage`, the first that is a writable directory, otherwise in

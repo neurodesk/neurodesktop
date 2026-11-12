@@ -3,7 +3,7 @@
 
 The Lmod site package (config/lmod/SitePackage.lua) appends one line per
 loaded Neurodesk module to the usage log. This command resolves those modules
-against the website's application catalogue and writes CITATIONS.md with
+against the neurocontainers apps.json catalogue and writes CITATIONS.md with
 methods sentences and a deduplicated reference list.
 """
 
@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-CATALOGUE_URL = "https://neurodesk.org/data/applist.json"
+CATALOGUE_URL = "https://apps-json.scigetorg.workers.dev/neuroimaging/apps.json"
 CITATION_GUIDE_URL = "https://neurodesk.org/overview/how-to-cite-us/"
 RECIPES_URL = "https://github.com/neurodesk/neurocontainers/tree/main/recipes"
 NEURODESK_REFERENCE = (
@@ -36,6 +36,8 @@ AEDAPT_NOTE = (
 )
 TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 FETCH_TIMEOUT_SECONDS = 15
+USER_AGENT = "neurodesk-cite"
+"""The catalogue host's bot filter rejects urllib's default ``Python-urllib`` agent."""
 
 
 @dataclass(frozen=True)
@@ -49,13 +51,16 @@ class ModuleUse:
 
 @dataclass(frozen=True)
 class CatalogueEntry:
+    tool: str
     build_date: date
     citation: str | None
     electrophysiology: bool
 
 
-Catalogue = Mapping[str, CatalogueEntry]
-"""Catalogue entries keyed by ``{name}_{version}``, the module's image prefix."""
+ModuleKey = tuple[str, str]
+"""An Lmod module's ``(name, version)``, as recorded in the usage log."""
+
+Catalogue = Mapping[ModuleKey, CatalogueEntry]
 
 
 @dataclass(frozen=True)
@@ -68,7 +73,8 @@ class ToolCitation:
 
     @property
     def recipe_url(self) -> str:
-        return f"{RECIPES_URL}/{self.name.removesuffix('_arm64')}"
+        tool = self.entry.tool if self.entry is not None else self.name
+        return f"{RECIPES_URL}/{tool.removesuffix('_arm64')}"
 
     @property
     def reference(self) -> str:
@@ -102,29 +108,42 @@ def parse_usage_log(text: str) -> list[ModuleUse]:
     return uses
 
 
-def parse_catalogue(document: object) -> dict[str, CatalogueEntry]:
-    """Index applist.json entries by ``{name}_{version}``, keeping the newest build."""
-    catalogue: dict[str, CatalogueEntry] = {}
-    items = document.get("list") if isinstance(document, dict) else None
-    for item in items if isinstance(items, list) else []:
-        if not isinstance(item, dict) or not isinstance(item.get("application"), str):
+def parse_catalogue(document: object) -> dict[ModuleKey, CatalogueEntry]:
+    """Index apps.json apps by the Lmod module of their image, keeping the newest build.
+
+    An app's ``image`` is ``{name}_{version}``, and CVMFS publishes it as the
+    module ``name/version``, splitting at the last underscore. Menu entries
+    that share an image repeat its build date. Citation and categories belong
+    to the tool.
+    """
+    catalogue: dict[ModuleKey, CatalogueEntry] = {}
+    tools = document.items() if isinstance(document, dict) else []
+    for tool_key, tool in tools:
+        if not isinstance(tool, dict) or not isinstance(tool.get("apps"), dict):
             continue
-        prefix, _, stamp = item["application"].rpartition("_")
-        try:
-            build_date = datetime.strptime(stamp, "%Y%m%d").date()
-        except ValueError:
-            continue
-        citation = item.get("citation")
-        categories = item.get("categories")
-        entry = CatalogueEntry(
-            build_date=build_date,
-            citation=(citation.strip() or None) if isinstance(citation, str) else None,
-            electrophysiology=isinstance(categories, list)
-            and "electrophysiology" in categories,
+        text = tool.get("citation")
+        citation = (text.strip() or None) if isinstance(text, str) else None
+        categories = tool.get("categories")
+        electrophysiology = (
+            isinstance(categories, list) and "electrophysiology" in categories
         )
-        known = catalogue.get(prefix)
-        if known is None or known.build_date < entry.build_date:
-            catalogue[prefix] = entry
+        for app in tool["apps"].values():
+            if not isinstance(app, dict):
+                continue
+            image, stamp = app.get("image"), app.get("version")
+            if not isinstance(image, str) or not isinstance(stamp, str):
+                continue
+            name, _, version = image.rpartition("_")
+            if not name:
+                continue
+            try:
+                build_date = datetime.strptime(stamp, "%Y%m%d").date()
+            except ValueError:
+                continue
+            entry = CatalogueEntry(tool_key, build_date, citation, electrophysiology)
+            known = catalogue.get((name, version))
+            if known is None or known.build_date < entry.build_date:
+                catalogue[(name, version)] = entry
     return catalogue
 
 
@@ -134,9 +153,7 @@ def resolve(uses: Iterable[ModuleUse], catalogue: Catalogue) -> list[ToolCitatio
     for use in uses:
         key = (use.name, use.version)
         if key not in tools:
-            tools[key] = ToolCitation(
-                use.name, use.version, catalogue.get(f"{use.name}_{use.version}")
-            )
+            tools[key] = ToolCitation(use.name, use.version, catalogue.get(key))
     return list(tools.values())
 
 
@@ -194,10 +211,11 @@ def write_atomically(path: Path, text: str) -> None:
     os.replace(temporary, path)
 
 
-def load_catalogue(url: str, cache: Path) -> dict[str, CatalogueEntry]:
+def load_catalogue(url: str, cache: Path) -> dict[ModuleKey, CatalogueEntry]:
     """Fetch the catalogue, refreshing the cache, or fall back to the cache."""
     try:
-        with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_SECONDS) as response:
+        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(request, timeout=FETCH_TIMEOUT_SECONDS) as response:
             raw = response.read().decode("utf-8")
         catalogue = parse_catalogue(json.loads(raw))
     except (OSError, ValueError) as error:
@@ -271,7 +289,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
     url = os.environ.get("NEURODESKTOP_CITE_CATALOGUE_URL") or CATALOGUE_URL
-    tools = resolve(uses, load_catalogue(url, cache_dir() / "applist.json"))
+    tools = resolve(uses, load_catalogue(url, cache_dir() / "apps.json"))
     version = os.environ.get("NEURODESKTOP_VERSION") or "unknown"
     output = args.output or default_output()
     try:

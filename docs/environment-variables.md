@@ -41,8 +41,9 @@ The session home is `/home/kasm-user`; persist that path instead of overriding
   Replacing it disables that recording. See
   [Tool citations](architecture/citations.md).
 - `NEURODESKTOP_CITE_CATALOGUE_URL`: application catalogue that
-  `neurodesk-cite` fetches; defaults to `https://neurodesk.org/data/applist.json`
-  (mainly for testing)
+  `neurodesk-cite` fetches, in the neurocontainers `apps.json` format; defaults
+  to `https://apps-json.scigetorg.workers.dev/neuroimaging/apps.json` (mainly
+  for testing)
 - `NEURODESKTOP_LMOD_CACHE_WARMUP`: defaults to `1`, building the notebook
   user's Lmod module cache in the background after CVMFS mounts so the first
   `ml av` does not fetch every modulefile. Set to `0` to skip it, for example
