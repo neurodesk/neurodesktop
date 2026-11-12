@@ -40,6 +40,29 @@ def test_jupyter_launcher_selects_its_local_server(monkeypatch):
     ]
 
 
+def test_jupyter_launcher_reports_when_its_local_server_is_not_ready(monkeypatch):
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout='{"url":"http://localhost:9999/","port":9999,"token":"other"}\n',
+        )
+
+    monkeypatch.setattr(launcher.subprocess, "run", run)
+    launcher.main()
+    assert calls == [
+        ["jupyter", "server", "list", "--json"],
+        [
+            "notify-send",
+            "JupyterLab",
+            "JupyterLab is still starting. Try again shortly.",
+        ],
+    ]
+
+
 def test_image_refuses_an_unset_session_password():
     env = {key: value for key, value in os.environ.items() if key != "VNC_PW"}
     result = subprocess.run(
