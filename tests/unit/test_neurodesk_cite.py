@@ -3,6 +3,8 @@
 import os
 import subprocess
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -10,7 +12,7 @@ import pytest
 from testlib import repo_path
 
 CLI = repo_path("config/jupyter/neurodesk_cite.py")
-CATALOGUE = repo_path("tests/fixtures/neurodesk-cite/applist.json")
+CATALOGUE = repo_path("tests/fixtures/neurodesk-cite/apps.json")
 FSL_REFERENCE = "1. Woolrich MW et al. Bayesian analysis of neuroimaging data in FSL."
 RENTON = "Renton, A.I., Dao, T.T., Johnstone, T., Civier, O., Sullivan, R. P., White, D. J., ..."
 
@@ -20,7 +22,7 @@ class Cite:
         self.home = home
         self.log = home / ".local/state/neurodesk/module-usage.tsv"
         self.output = home / "out/CITATIONS.md"
-        self.cache = home / ".cache/neurodesk/applist.json"
+        self.cache = home / ".cache/neurodesk/apps.json"
         self.catalogue_url = CATALOGUE.as_uri()
 
     def record(self, *lines: str) -> None:
@@ -91,6 +93,26 @@ def test_tools_without_a_citation_point_to_the_guide_and_recipe(cite):
     assert any(line.endswith(recipe + "bidscoin") for line in text.splitlines())
 
 
+def test_arm64_modules_resolve_by_their_image_name(cite):
+    cite.record(
+        "ants\t2.6.5\t2026-11-01T09:00:00Z",
+        "ants_arm64\t2.6.5\t2026-11-01T10:00:00Z",
+        "bidscoin_4.6.2\tarm64\t2026-11-01T11:00:00Z",
+    )
+
+    result = cite.run()
+
+    assert result.returncode == 0, result.stderr
+    text = cite.text()
+    assert "ants (v2.6.5, built 2026-10-12) was run in Neurodesk" in text
+    assert "ants_arm64 (v2.6.5, built 2026-10-14) was run in Neurodesk" in text
+    assert "bidscoin_4.6.2 (varm64, built 2026-05-12) was run in Neurodesk" in text
+    pointer = next(line for line in text.splitlines() if line.startswith("bidscoin_4.6.2:"))
+    assert pointer.endswith("/recipes/bidscoin")
+    assert text.split("## References\n\n")[1].count("Avants BB et al.") == 1
+    assert "not in the Neurodesk catalogue" not in result.stderr
+
+
 def test_electrophysiology_tools_add_the_aedapt_note(cite):
     cite.record("mne_arm64\t1.13.2\t2026-11-01T09:00:00Z")
 
@@ -107,6 +129,39 @@ def test_modules_missing_from_the_catalogue_are_cited_without_a_build_date(cite)
     assert "mytool (v1.0) was run in Neurodesk (v2026-09-23, Renton et al., 2024)." in cite.text()
     assert "recipes/mytool" in cite.text()
     assert "mytool/1.0 is not in the Neurodesk catalogue" in result.stderr
+
+
+class BotFilteredCatalogue(BaseHTTPRequestHandler):
+    """Serves the fixture like the catalogue host, which rejects urllib's default agent."""
+
+    def do_GET(self):
+        if self.headers.get("User-Agent", "").startswith("Python-urllib"):
+            self.send_error(403)
+            return
+        body = CATALOGUE.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+def test_fetches_over_http_past_a_bot_filter(cite):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), BotFilteredCatalogue)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    cite.catalogue_url = f"http://127.0.0.1:{server.server_port}/neuroimaging/apps.json"
+    cite.record("ants\t2.6.5\t2026-11-01T09:00:00Z")
+    try:
+        result = cite.run()
+    finally:
+        server.shutdown()
+
+    assert result.returncode == 0, result.stderr
+    assert "Could not fetch" not in result.stderr
+    assert "ants (v2.6.5, built 2026-10-12)" in cite.text()
+    assert cite.cache.is_file()
 
 
 def test_offline_run_uses_the_cached_catalogue_and_says_so(cite):
@@ -135,6 +190,20 @@ def test_offline_run_without_a_cache_still_writes_pointers(cite):
     assert "ants (v2.6.5) was run in Neurodesk" in cite.text()
     assert "recipes/ants" in cite.text()
     assert not cite.cache.exists()
+
+
+def test_offline_run_ignores_a_cached_applist(cite):
+    cite.record("ants\t2.6.5\t2026-11-01T09:00:00Z")
+    legacy = cite.cache.with_name("applist.json")
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text('{"list": [{"application": "ants_2.6.5_20261012", "citation": "Avants BB"}]}')
+    cite.catalogue_url = (cite.home / "missing.json").as_uri()
+
+    result = cite.run()
+
+    assert result.returncode == 0, result.stderr
+    assert "no cached catalogue exists" in result.stderr
+    assert "ants (v2.6.5) was run in Neurodesk" in cite.text()
 
 
 def test_since_limits_the_loads_that_are_cited(cite):

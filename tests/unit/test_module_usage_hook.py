@@ -18,7 +18,7 @@ from testlib import repo_path
 LMOD = Path("/usr/share/lmod/lmod/libexec/lmod")
 SITE_PACKAGE_DIR = repo_path("config/lmod")
 CLI = repo_path("config/jupyter/neurodesk_cite.py")
-CATALOGUE = repo_path("tests/fixtures/neurodesk-cite/applist.json")
+CATALOGUE = repo_path("tests/fixtures/neurodesk-cite/apps.json")
 
 pytestmark = pytest.mark.skipif(not LMOD.exists(), reason="Lmod is not installed")
 

@@ -12,12 +12,12 @@ def test_installed_hook_and_command_cite_a_loaded_module(tmp_path):
     modulefile = store / "modules" / "citetool" / "1.2.lua"
     modulefile.parent.mkdir(parents=True)
     modulefile.write_text('setenv("CITETOOL_LOADED", "yes")\n')
-    catalogue = tmp_path / "applist.json"
-    catalogue.write_text(json.dumps({"list": [{
-        "application": "citetool_1.2_20260101",
+    catalogue = tmp_path / "apps.json"
+    catalogue.write_text(json.dumps({"citetool": {
+        "apps": {"citetool 1.2": {"version": "20260101", "exec": "", "image": "citetool_1.2"}},
         "categories": ["electrophysiology"],
         "citation": "Doe J. Citetool. J Tests (2026).",
-    }]}))
+    }}))
     assert os.environ["LMOD_PACKAGE_PATH"] == "/opt/neurodesktop/lmod"
     env = {
         **os.environ,
