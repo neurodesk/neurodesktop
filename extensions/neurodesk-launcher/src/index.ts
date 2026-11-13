@@ -37,8 +37,10 @@ interface IServersInfoResponse {
   server_processes: IServerProcess[];
 }
 
-const GETTING_STARTED_URL =
-  'https://neurodesk.org/edu/tutorials/about-neurodesk/accessing-neurodesk-tools';
+const GETTING_STARTED_NOTEBOOK_URL =
+  'https://raw.githubusercontent.com/neurodesk/neurodeskedu/main/books/tutorials/about_neurodesk/accessing_neurodesk_tools.ipynb';
+const GETTING_STARTED_DIRECTORY = 'neurodesk-getting-started';
+const GETTING_STARTED_PATH = `${GETTING_STARTED_DIRECTORY}/accessing_neurodesk_tools.ipynb`;
 
 const DONATION_URL = 'https://neurodesk.org/overview/donate/';
 const DONATION_MESSAGE =
@@ -64,6 +66,13 @@ function donationNotificationSuppressedFromPageConfig(): boolean {
   );
 }
 
+function isNotFound(error: unknown): boolean {
+  return (
+    error instanceof ServerConnection.ResponseError &&
+    error.response.status === 404
+  );
+}
+
 async function supporterMarkerExists(
   app: JupyterFrontEnd
 ): Promise<boolean> {
@@ -73,10 +82,7 @@ async function supporterMarkerExists(
     });
     return model.type === 'file';
   } catch (error) {
-    if (
-      error instanceof ServerConnection.ResponseError &&
-      error.response.status === 404
-    ) {
+    if (isNotFound(error)) {
       return false;
     }
 
@@ -86,6 +92,44 @@ async function supporterMarkerExists(
     );
     return false;
   }
+}
+
+async function contentsExist(
+  app: JupyterFrontEnd,
+  path: string
+): Promise<boolean> {
+  try {
+    await app.serviceManager.contents.get(path, { content: false });
+    return true;
+  } catch (error) {
+    if (isNotFound(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+// An existing copy holds the user's progress, so it is opened, never replaced.
+async function openGettingStarted(app: JupyterFrontEnd): Promise<void> {
+  const { contents } = app.serviceManager;
+  if (!(await contentsExist(app, GETTING_STARTED_PATH))) {
+    const response = await fetch(GETTING_STARTED_NOTEBOOK_URL);
+    if (!response.ok) {
+      throw new Error(
+        `Downloading the tutorial failed with HTTP ${response.status}`
+      );
+    }
+    const notebook = await response.json();
+    if (!(await contentsExist(app, GETTING_STARTED_DIRECTORY))) {
+      await contents.save(GETTING_STARTED_DIRECTORY, { type: 'directory' });
+    }
+    await contents.save(GETTING_STARTED_PATH, {
+      type: 'notebook',
+      format: 'json',
+      content: notebook
+    });
+  }
+  await app.commands.execute('docmanager:open', { path: GETTING_STARTED_PATH });
 }
 
 async function showDonationNotificationOnStartup(
@@ -471,10 +515,17 @@ const plugin: JupyterFrontEndPlugin<void> = {
     // Registered before servers-info so onboarding survives a proxy failure.
     app.commands.addCommand('neurodesk-launcher:getting-started', {
       label: 'Getting started',
-      caption: 'Open the Neurodesk getting started tutorial',
+      caption: 'Open the Neurodesk getting started tutorial notebook',
       icon: notebookIcon,
-      execute: () => {
-        window.open(GETTING_STARTED_URL, '_blank', 'noopener');
+      execute: async () => {
+        try {
+          await openGettingStarted(app);
+        } catch (error) {
+          console.error('neurodesk-launcher: getting started failed', error);
+          Notification.error(
+            `Could not open the getting started notebook: ${String(error)}`
+          );
+        }
       }
     });
     launcher.add({

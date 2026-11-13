@@ -1702,6 +1702,7 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && install -m 0755 /tmp/jupyter/kernel_wrapper.sh /opt/neurodesktop/kernel_wrapper.sh \
     && install -m 0755 /tmp/jupyter/neurodesk_kernel.py /usr/local/bin/neurodesk-kernel \
     && install -m 0755 /tmp/jupyter/neurodesk_cite.py /usr/local/bin/neurodesk-cite \
+    && install -m 0755 /tmp/jupyter/neurodesk_cli.py /usr/local/bin/neurodesk \
     && install -m 0755 /tmp/jupyter/uv_kernel_prototype.py /usr/local/bin/neurodesk-uv \
     && install -m 0755 /tmp/jupyter/jupyterlmod_modulepath.py /opt/neurodesktop/jupyterlmod_modulepath.py \
     && install -m 0644 /tmp/jupyter/jupyter_ai_workspace.py /opt/neurodesktop/jupyter_ai_workspace.py \

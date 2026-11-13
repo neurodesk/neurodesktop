@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-11-12"
+last-reviewed: "2026-11-13"
 ---
 
 # Testing
@@ -51,6 +51,7 @@ tier and the installed ASTRA example to be world-readable so tests run as
 ```bash
 pytest tests/unit          # from a checkout, no container needed
 pytest /opt/tests/         # inside the built image
+neurodesk test             # the same, from any Neurodesktop terminal
 ```
 
 The installed [uv environment helper](architecture/uv-environments.md) is covered
@@ -155,7 +156,7 @@ The [remote jobs site acceptance checklist](architecture/remote-jobs.md#site-acc
 requires additional real SSH, Slurm, Apptainer, storage and MFA experiments on
 Bunya and Sherlock. Passing a local fixture does not establish site support.
 
-After `neurodesk-jobs connect`, run a synthetic end-to-end analysis with the
+After `neurodesk jobs connect`, run a synthetic end-to-end analysis with the
 installed CLI against an explicitly configured site:
 
 ```bash
@@ -229,7 +230,7 @@ in `mypy.ini`. Expand these scopes in reviewed changes rather than reformatting
 unrelated files to fix a correctness finding.
 
 The strict scope covers the provider credential policy, the OpenCode
-`opencode.json` update helper, the `neurodesk-cite` command, and the T3 package's process side: the supervisor, its environment naming, the Jupyter lifecycle
+`opencode.json` update helper, the `neurodesk cite` command, and the T3 package's process side: the supervisor, its environment naming, the Jupyter lifecycle
 adapter and the extension entry point. The same modules are in the Ruff
 formatter scope. mypy skips unlisted modules, so a checked module's callers
 are listed with it. The lifecycle adapter's `ExtensionApp` base is typed by
@@ -634,6 +635,7 @@ non-obvious tiers protect.
 
 | Area | On a checkout | In the built image |
 | --- | --- | --- |
+| `neurodesk` command and helper help text | `pytest tests/unit/test_neurodesk_cli.py tests/unit/test_neurodesk_update.py tests/unit/test_remote_jobs.py tests/unit/test_uv_kernel_prototype.py` | `pytest /opt/tests/test_neurodesk_cli_image.py`; `neurodesk test` runs the whole tier |
 | Jupyter isolated build dependencies | `pytest tests/unit/test_jupyter_build_constraints.py tests/unit/test_jupyterlab_slurm_build.py` | Fresh isolated wheel builds for Slurm and launcher |
 | Image packaging layers | `pytest tests/unit/test_image_packaging_layers.py tests/unit/test_myst_build_workaround.py` | `pytest /opt/tests/test_image_size_hygiene.py /opt/tests/test_additional_components.py` and image layer inventory |
 | PyJWT asymmetric/HMAC key confusion | `pytest tests/unit/test_pyjwt_security.py tests/unit/test_audit_image_versions.py` | `pytest /opt/tests/test_pyjwt_security.py` |
@@ -699,9 +701,9 @@ reuses a real daemon through the installed wizard and checks that it has its
 own session. A separate image test mints a link through the installed `t3`
 CLI, so a pinned-version bump that changes those flags or their JSON fails in
 CI rather than during a manual desktop pairing.
-For manual acceptance, run `t3_neurodesk_setup` in a JupyterLab terminal,
+For manual acceptance, run `neurodesk t3` in a JupyterLab terminal,
 follow its desktop connectivity check, complete pairing in T3, and verify
-the remote providers. Then rerun `t3_neurodesk_setup --check`.
+the remote providers. Then rerun `neurodesk t3 --check`.
 
 ### T3 Code server
 

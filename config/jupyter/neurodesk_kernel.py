@@ -351,7 +351,7 @@ def command_remove(args: argparse.Namespace) -> int:
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="neurodesk-kernel",
+        prog="neurodesk kernel",
         description="Run Jupyter notebooks inside a Neurodesk tool container.")
     commands = parser.add_subparsers(dest="command", required=True)
 

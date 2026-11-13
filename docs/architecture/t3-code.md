@@ -126,7 +126,7 @@ for this setup. In a JupyterLab terminal,
 run the guided setup as the notebook user:
 
 ```bash
-t3_neurodesk_setup
+neurodesk t3
 ```
 
 The [setup script](../../scripts/t3_neurodesk_setup.py) checks T3, starts a
@@ -169,7 +169,7 @@ the tailnet, run
 For a local check without login prompts, configuration changes, or tokens:
 
 ```bash
-t3_neurodesk_setup --check
+neurodesk t3 --check
 ```
 
 This checks local configuration, not reachability from the desktop. The

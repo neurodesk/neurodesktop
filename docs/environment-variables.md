@@ -37,11 +37,11 @@ The session home is `/home/kasm-user`; persist that path instead of overriding
   from `ml av` and `module avail`. Set to `yes` to show it again. Module
   loading and `module spider` searches are unchanged.
 - `LMOD_PACKAGE_PATH`: set by the image to `/opt/neurodesktop/lmod`, whose
-  `SitePackage.lua` records Neurodesk module loads for `neurodesk-cite`.
+  `SitePackage.lua` records Neurodesk module loads for `neurodesk cite`.
   Replacing it disables that recording. See
   [Tool citations](architecture/citations.md).
 - `NEURODESKTOP_CITE_CATALOGUE_URL`: application catalogue that
-  `neurodesk-cite` fetches, in the neurocontainers `apps.json` format; defaults
+  `neurodesk cite` fetches, in the neurocontainers `apps.json` format; defaults
   to `https://apps-json.scigetorg.workers.dev/neuroimaging/apps.json` (mainly
   for testing)
 - `NEURODESKTOP_LMOD_CACHE_WARMUP`: defaults to `1`, building the notebook

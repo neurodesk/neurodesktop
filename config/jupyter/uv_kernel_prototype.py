@@ -168,11 +168,14 @@ def prepare(project: Path, command: str, wrapper: Path) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["init", "rebuild", "remove", "launch"])
-    parser.add_argument("directory", type=Path)
+    parser = argparse.ArgumentParser(prog="neurodesk uv", description=__doc__)
+    # `launch` is the kernelspec's entry point, not a user command.
+    parser.add_argument("command", choices=["init", "rebuild", "remove", "launch"],
+                        metavar="{init,rebuild,remove}",
+                        help="create, rebuild after a move or Python change, or unregister")
+    parser.add_argument("directory", type=Path, help="the uv project directory")
     parser.add_argument("--kernel-wrapper", type=Path, default=Path(WRAPPER),
-                        help="environment initialization wrapper (checkout testing only)")
+                        help=argparse.SUPPRESS)
     args, rest = parser.parse_known_args()
     try:
         project = args.directory.expanduser().resolve()

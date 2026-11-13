@@ -5,6 +5,11 @@ set -eo pipefail
 # shellcheck source=/dev/null
 source /opt/neurodesktop/agent_bash_env.sh
 
+if [ "$#" -gt 0 ]; then
+    printf 'usage: neurodesk agent preflight\n\nShow the installed agent guidance, Lmod and configured Slurm limits before an analysis.\n'
+    case "$1" in -h|--help) exit 0 ;; *) exit 2 ;; esac
+fi
+
 guidance=/opt/AGENTS.md
 printf 'Installed guidance: %s\n' "$guidance"
 sed -n '/^Environment guidance revision:/p' "$guidance"

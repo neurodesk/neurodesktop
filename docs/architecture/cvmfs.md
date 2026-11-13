@@ -216,15 +216,15 @@ Slurm use eager mode.
 
 ## Container kernels
 
-`neurodesk-kernel` registers the Python inside a tool container as a Jupyter
+`neurodesk kernel` registers the Python inside a tool container as a Jupyter
 kernel, so a notebook can run with that container's libraries. The command is
 installed from
 [`config/jupyter/neurodesk_kernel.py`](../../config/jupyter/neurodesk_kernel.py):
 
 ```bash
-neurodesk-kernel add fsl/6.0.7.16    # or a bare tool name for its default version
-neurodesk-kernel list
-neurodesk-kernel remove fsl/6.0.7.16
+neurodesk kernel add fsl/6.0.7.16    # or a bare tool name for its default version
+neurodesk kernel list
+neurodesk kernel remove fsl/6.0.7.16
 ```
 
 `add` loads the module in a subshell to resolve its full name, so a bare tool

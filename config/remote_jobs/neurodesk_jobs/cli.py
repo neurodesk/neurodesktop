@@ -13,28 +13,39 @@ from .remote import OPERATIONS, worker
 
 def main():
     os.umask(0o077)
-    parser = argparse.ArgumentParser(description="Neurodesk SSH/Slurm jobs (site validation required)")
-    parser.add_argument("--profile", type=Path)
+    parser = argparse.ArgumentParser(
+        prog="neurodesk jobs", description="Neurodesk SSH/Slurm jobs (site validation required)")
+    parser.add_argument("--profile", type=Path, help="site profile JSON (required except for restore)")
     parser.add_argument("--state", type=Path,
-                        default=Path.home() / ".local/state/neurodesk-jobs")
-    commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("connect", "doctor"):
-        commands.add_parser(name)
+                        default=Path.home() / ".local/state/neurodesk-jobs",
+                        help="local job state directory (default: %(default)s)")
+    # A metavar keeps the private _rpc and _worker entry points out of usage;
+    # subparsers added without help stay out of the command list.
+    commands = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
+    commands.add_parser("connect", help="Open authenticated SSH connections to the site")
+    commands.add_parser("doctor", help="Check the site's login and transfer tools")
     prepare = commands.add_parser("prepare", help="Freeze a saved DataLad dataset and Apptainer SIF")
     prepare.add_argument("--dataset", required=True, type=Path)
     prepare.add_argument("--image", required=True, type=Path)
     prepare.add_argument("--request", required=True, type=Path)
-    for name in ("stage", "submit", "status", "cancel", "collect", "archive"):
-        commands.add_parser(name).add_argument("run_id")
+    for name, summary in (
+        ("stage", "Transfer a prepared run's inputs to the site store"),
+        ("submit", "Submit a staged run to Slurm"),
+        ("status", "Show a run's Slurm and result state"),
+        ("cancel", "Cancel a submitted run"),
+        ("collect", "Copy a finished run's results back"),
+        ("archive", "Write a verified, self-contained archive of a collected run"),
+    ):
+        commands.add_parser(name, help=summary).add_argument("run_id")
     logs = commands.add_parser("logs", help="Last 64 KiB per Slurm or attempt log")
     logs.add_argument("run_id")
     logs.add_argument("--attempt")
-    recover = commands.add_parser("restore")
+    recover = commands.add_parser("restore", help="Restore an archived run without the cluster")
     recover.add_argument("archive", type=Path)
     recover.add_argument("destination", type=Path)
-    rpc = commands.add_parser("_rpc", help=argparse.SUPPRESS)
+    rpc = commands.add_parser("_rpc")
     rpc.add_argument("operation", choices=OPERATIONS)
-    batch = commands.add_parser("_worker", help=argparse.SUPPRESS)
+    batch = commands.add_parser("_worker")
     batch.add_argument("directory", type=Path)
     args = parser.parse_args()
     try:

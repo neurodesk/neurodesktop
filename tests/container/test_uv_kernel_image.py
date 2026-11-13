@@ -26,7 +26,7 @@ def test_installed_uv_helper_uses_image_python(tmp_path):
     result = subprocess.run([str(HELPER), "--help"], env=environment, capture_output=True,
                             text=True, timeout=30)
     assert result.returncode == 0, result.stderr
-    assert "init,rebuild,remove,launch" in result.stdout
+    assert result.stdout.startswith("usage: neurodesk uv [-h] {init,rebuild,remove} directory\n")
 
 
 def test_installed_uv_project_kernel_and_rebuild(tmp_path, monkeypatch):
