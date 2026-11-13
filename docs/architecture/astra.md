@@ -93,7 +93,7 @@ with `module load` pinning each tool. It produces no manifest, so the viewer
 reads `spec-only` — see [the trust ladder](#astra-provenance-viewer) — and that
 is the honest reading, not a defect.
 
-`neurodesk-lc-materialize` is the optional Lightcone 0.5 module path. Run it
+`neurodesk lightcone materialize` is the optional Lightcone 0.5 module path. Run it
 from the project root, outside an existing allocation. It uses native
 `lc compute launch`, waits for readiness, runs `lc materialize`, and releases
 only the full cluster ID allocated by this invocation. It does not retry an
@@ -116,7 +116,7 @@ modules = ["fsl/6.0.7.22"]
 ```
 
 ```bash
-neurodesk-lc-materialize --cpus 2 --memory 8 --time 2h baseline/bet_brain
+neurodesk lightcone materialize --cpus 2 --memory 8 --time 2h baseline/bet_brain
 ```
 
 The installed `/opt/neurodesktop/lightcone-compute.yaml` offers one native Slurm

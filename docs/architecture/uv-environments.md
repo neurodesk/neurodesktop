@@ -20,13 +20,13 @@ initial review and checkout-only implementation.
 
 ## Try it
 
-Run as the notebook user inside a Neurodesktop image containing `neurodesk-uv`.
+Run as the notebook user inside a Neurodesktop image containing `neurodesk uv`.
 Older images need updating; updating this repository does not change an existing
 container. Initial setup needs access to the package index.
 
 ```bash
 mkdir -p ~/analyses/demo
-neurodesk-uv init ~/analyses/demo
+neurodesk uv init ~/analyses/demo
 ```
 
 Select **Python (uv prototype: demo)** in JupyterLab's kernel selector. A project
@@ -58,8 +58,8 @@ For a moved folder, rebuild at the new path, select the new kernel, and remove
 the old registration using its old path:
 
 ```bash
-neurodesk-uv rebuild ~/analyses/new-location
-neurodesk-uv remove ~/analyses/demo
+neurodesk uv rebuild ~/analyses/new-location
+neurodesk uv remove ~/analyses/demo
 ```
 
 Removal retains project files and the environment. A missing registration
@@ -91,10 +91,10 @@ so cache and project may be on separate filesystems.
 
 ## Migrate downloaded helpers
 
-Stop affected kernels and run `neurodesk-uv init PROJECT` on each existing
+Stop affected kernels and run `neurodesk uv init PROJECT` on each existing
 project. This preserves its identity and updates its registration to the installed
 launcher. Keep the downloaded helper until every registration using it has been
-updated. For an environment needing recovery, use `neurodesk-uv rebuild PROJECT`
+updated. For an environment needing recovery, use `neurodesk uv rebuild PROJECT`
 at its original location before moving it.
 
 ## Validation

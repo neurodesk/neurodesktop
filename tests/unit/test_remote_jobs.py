@@ -245,3 +245,16 @@ def test_image_packages_cli_and_site_templates():
     assert "pip install --no-deps /tmp/neurodesk-jobs-build" in dockerfile
     assert "/usr/local/bin/neurodesk-jobs" in dockerfile
     assert "/opt/neurodesktop/remote-jobs/profiles/" in dockerfile
+
+
+def test_help_describes_public_commands_and_hides_private_entry_points():
+    result = subprocess.run([sys.executable, "-m", "neurodesk_jobs.cli", "--help"],
+                            cwd=repo_path("config/remote_jobs"), capture_output=True,
+                            text=True, check=True)
+    assert result.stdout.startswith("usage: neurodesk jobs ")
+    assert "_rpc" not in result.stdout and "_worker" not in result.stdout
+    assert "SUPPRESS" not in result.stdout
+    for name in ("connect", "doctor", "prepare", "stage", "submit", "status",
+                 "cancel", "collect", "archive", "logs", "restore"):
+        line = next(line for line in result.stdout.splitlines() if line.split()[:1] == [name])
+        assert len(line.split()) > 1, f"{name} has no description"

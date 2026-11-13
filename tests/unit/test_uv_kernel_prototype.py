@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -271,3 +272,11 @@ def test_init_migrates_downloaded_helper_registration(prototype, uv_boundary, tm
     assert spec["argv"][:4] == [str(wrapper), sys.executable, "-I", str(Path(prototype.__file__).resolve())]
     assert (project / "uv.lock").read_text() == "original lock"
     assert len(list(spec_dir.parent.glob("*/kernel.json"))) == 1
+
+
+def test_help_hides_kernel_launch_and_test_wrapper():
+    result = subprocess.run([sys.executable, str(repo_path("config/jupyter/uv_kernel_prototype.py")),
+                             "--help"], capture_output=True, text=True, check=True)
+    assert result.stdout.startswith("usage: neurodesk uv ")
+    assert "{init,rebuild,remove}" in result.stdout
+    assert "launch" not in result.stdout and "--kernel-wrapper" not in result.stdout
