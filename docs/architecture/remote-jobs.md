@@ -8,7 +8,7 @@ last-reviewed: "2026-11-05"
 
 # Remote compute jobs
 
-`neurodesk-jobs` submits one containerized analysis to a user's Slurm account
+`neurodesk jobs` submits one containerized analysis to a user's Slurm account
 through SSH. DataLad/git-annex transports the inputs and results through a RIA
 directory store. Jobs execute and publish independently of Neurodesktop.
 Collection and archiving require the client to reconnect. No Globus service,
@@ -53,8 +53,8 @@ site authentication, including MFA. The CLI does not install authorized keys
 or alter site authentication policy.
 
 ```bash
-neurodesk-jobs --profile /project/bunya.json --state /project/job-state connect
-neurodesk-jobs --profile /project/bunya.json --state /project/job-state doctor
+neurodesk jobs --profile /project/bunya.json --state /project/job-state connect
+neurodesk jobs --profile /project/bunya.json --state /project/job-state doctor
 ```
 
 `connect` opens authenticated OpenSSH masters with private sockets under
@@ -101,15 +101,15 @@ Output names `execution.json`, `outcome.json`, `worker.log`, `.gitattributes`
 and `.gitmodules` are reserved. Validation mounts the output dataset read-only.
 
 ```bash
-neurodesk-jobs --profile /project/bunya.json --state /project/job-state prepare \
+neurodesk jobs --profile /project/bunya.json --state /project/job-state prepare \
   --dataset /project/dataset --image /project/tool.sif --request /project/request.json
 # Use the returned run_id in each following command.
-neurodesk-jobs --profile /project/bunya.json --state /project/job-state stage RUN_ID
-neurodesk-jobs --profile /project/bunya.json --state /project/job-state submit RUN_ID
-neurodesk-jobs --profile /project/bunya.json --state /project/job-state status RUN_ID
-neurodesk-jobs --profile /project/bunya.json --state /project/job-state logs RUN_ID
-neurodesk-jobs --profile /project/bunya.json --state /project/job-state logs RUN_ID --attempt ATTEMPT_ID
-neurodesk-jobs --profile /project/bunya.json --state /project/job-state cancel RUN_ID
+neurodesk jobs --profile /project/bunya.json --state /project/job-state stage RUN_ID
+neurodesk jobs --profile /project/bunya.json --state /project/job-state submit RUN_ID
+neurodesk jobs --profile /project/bunya.json --state /project/job-state status RUN_ID
+neurodesk jobs --profile /project/bunya.json --state /project/job-state logs RUN_ID
+neurodesk jobs --profile /project/bunya.json --state /project/job-state logs RUN_ID --attempt ATTEMPT_ID
+neurodesk jobs --profile /project/bunya.json --state /project/job-state cancel RUN_ID
 ```
 
 Preparation creates a new DataLad execution dataset containing selected input
@@ -183,9 +183,9 @@ attempt as the canonical result; it reports other attempts without merging them.
 ## Collect, archive and restore
 
 ```bash
-neurodesk-jobs --profile /project/bunya.json --state /project/job-state collect RUN_ID
-neurodesk-jobs --profile /project/bunya.json --state /project/job-state archive RUN_ID
-neurodesk-jobs restore /archive/neurodesk-RUN-ATTEMPT.tar.gz /project/restored
+neurodesk jobs --profile /project/bunya.json --state /project/job-state collect RUN_ID
+neurodesk jobs --profile /project/bunya.json --state /project/job-state archive RUN_ID
+neurodesk jobs restore /archive/neurodesk-RUN-ATTEMPT.tar.gz /project/restored
 ```
 
 Collection clones metadata before retrieving bytes and verifies both the

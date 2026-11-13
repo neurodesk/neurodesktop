@@ -118,7 +118,7 @@ def main() -> int:
 
     signal.signal(signal.SIGTERM, interrupted)
 
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(prog="neurodesk lightcone materialize", description=__doc__)
     parser.add_argument("targets", nargs="+", help="universe/output or universe")
     parser.add_argument("--project", default=".")
     parser.add_argument("--cpus", type=int, default=2)

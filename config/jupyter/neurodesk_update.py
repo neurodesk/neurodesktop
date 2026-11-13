@@ -41,9 +41,19 @@ def update_neurocommand() -> int:
         install_update_launcher()
 
 
+USAGE = """usage: neurodesk update
+
+Update the Neurodesk application menu to the latest published tool list.
+Run it as the notebook user; it updates the menu checkout in /neurocommand.
+"""
+
+
 def main():
+    if sys.argv[1:] in (["-h"], ["--help"]):
+        print(USAGE, end="")
+        return 0
     if len(sys.argv) != 1:
-        print("Usage: neurodesk-update", file=sys.stderr)
+        print(USAGE, end="", file=sys.stderr)
         return 2
     try:
         return update_neurocommand()

@@ -106,7 +106,15 @@ def test_cli_rejects_arguments_without_running_build(updater, monkeypatch, capsy
     module, _, checkout = updater
     monkeypatch.setattr(module.sys, "argv", ["neurodesk-update", "--checkout=/tmp/other"])
     assert module.main() == 2
-    assert capsys.readouterr().err == "Usage: neurodesk-update\n"
+    assert capsys.readouterr().err.startswith("usage: neurodesk update\n")
+    assert not (checkout / "build-ran").exists()
+
+
+def test_cli_help_describes_command_without_running_build(updater, monkeypatch, capsys):
+    module, _, checkout = updater
+    monkeypatch.setattr(module.sys, "argv", ["neurodesk-update", "--help"])
+    assert module.main() == 0
+    assert capsys.readouterr().out.startswith("usage: neurodesk update\n")
     assert not (checkout / "build-ran").exists()
 
 

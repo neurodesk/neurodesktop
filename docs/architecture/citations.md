@@ -1,6 +1,6 @@
 ---
 title: Tool citations
-description: Lmod usage recording and the neurodesk-cite command that writes
+description: Lmod usage recording and the neurodesk cite command that writes
   CITATIONS.md for the Neurodesk tools a user loaded
 parent: ../architecture.md
 status: current
@@ -12,17 +12,17 @@ last-reviewed: "2026-11-12"
 Part of [Architecture](../architecture.md). Related environment variables are
 listed in [Environment variables](../environment-variables.md#cvmfs-and-modules).
 
-Users run `neurodesk-cite` to get a `CITATIONS.md` file for the Neurodesk tools
+Users run `neurodesk cite` to get a `CITATIONS.md` file for the Neurodesk tools
 they loaded. The file has one methods sentence per tool version, in the format
 of the website's **Copy methods text** button, and a deduplicated reference
 list that ends with the Neurodesk paper. The interactive terminal banner
 mentions the command.
 
 ```bash
-neurodesk-cite                         # writes CITATIONS.md in neurodesktop-storage
-neurodesk-cite --since 2026-11-01      # only loads on or after this date
-neurodesk-cite --output paper/CITATIONS.md
-neurodesk-cite --clear                 # empty the usage log
+neurodesk cite                         # writes CITATIONS.md in neurodesktop-storage
+neurodesk cite --since 2026-11-01      # only loads on or after this date
+neurodesk cite --output paper/CITATIONS.md
+neurodesk cite --clear                 # empty the usage log
 ```
 
 ## Recording loads
@@ -50,7 +50,7 @@ Lmod runs the hook for each load path:
   which runs `module load`.
 
 Lmod also runs the hook when it reloads an already loaded module, so the log
-can contain repeated lines. `neurodesk-cite` deduplicates them.
+can contain repeated lines. `neurodesk cite` deduplicates them.
 
 ## Writing CITATIONS.md
 

@@ -349,7 +349,7 @@ def check(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        prog="neurodesk-astra-provenance", description=__doc__.splitlines()[0]
+        prog="neurodesk astra", description=__doc__.splitlines()[0]
     )
     subcommands = parser.add_subparsers(dest="subcommand", required=True)
 

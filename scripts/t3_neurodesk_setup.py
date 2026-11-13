@@ -245,14 +245,14 @@ def setup(args):
     ts = [binaries["tailscale"], f"--socket={args.socket}"]
     if args.check:
         if not args.socket.exists():
-            raise SetupError("No Tailscale socket found. Run t3_neurodesk_setup interactively to start it.")
+            raise SetupError("No Tailscale socket found. Run neurodesk t3 interactively to start it.")
         host = device_host(command_json([*ts, "status", "--json"]))
         host, stale = configured_serve_host(
             command_json([*ts, "serve", "status", "--json"]), host, f"http://127.0.0.1:{args.port}"
         )
         if host is None:
             raise SetupError(
-                describe_stale(stale) + " Rerun t3_neurodesk_setup to configure the current name."
+                describe_stale(stale) + " Rerun neurodesk t3 to configure the current name."
                 if stale else
                 "Tailscale is connected but the T3 HTTPS proxy is not configured."
             )
@@ -317,7 +317,7 @@ def setup(args):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(prog="neurodesk t3", description=__doc__)
     parser.add_argument("--check", action="store_true", help="Check local T3 and Tailscale configuration without changing it or generating tokens")
     parser.add_argument("--port", type=int, default=os.environ.get("NEURODESKTOP_T3_CODE_PORT", "3773"), help="T3 port, default NEURODESKTOP_T3_CODE_PORT or 3773")
     parser.add_argument("--base-dir", type=Path, default=Path(os.environ.get("NEURODESKTOP_T3_CODE_HOME", str(Path.home() / ".t3"))), help="T3 state directory, matching the Jupyter-managed server")
