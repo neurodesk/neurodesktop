@@ -14,17 +14,22 @@ const ts = require(process.env.NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES + '/types
 const { JSDOM } = require(process.env.NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES + '/jsdom');
 const dom = new JSDOM('');
 const opened = [];
+const notifications = [];
 dom.window.open = (...args) => { opened.push(args); return null; };
 const modules = {
   './workspaceLinks': {}, './astraViewer': {}, './t3Code': {},
   './webappsAppearance': {},
-  '@jupyterlab/apputils': {}, '@jupyterlab/launcher': { ILauncher: {} },
+  '@jupyterlab/apputils': { Notification: { error: message => notifications.push(message) } },
+  '@jupyterlab/launcher': { ILauncher: {} },
   '@jupyterlab/ui-components': { notebookIcon: { name: 'ui-components:notebook' } },
   '@jupyterlab/coreutils': {
     PageConfig: { getOption: () => 'true' },
     URLExt: { join: (...parts) => parts.join('/') }
   },
   '@jupyterlab/services': { ServerConnection: {
+    ResponseError: class extends Error {
+      constructor(response) { super(`HTTP ${response.status}`); this.response = response; }
+    },
     makeSettings: () => ({ baseUrl: '/user/test/' }),
     makeRequest: async () => ({ ok: true, json: async () => ({ server_processes: [] }) })
   } }
@@ -39,7 +44,35 @@ new Function('exports', 'require', 'window', 'document', 'MutationObserver',
     return modules[name];
   }, dom.window, dom.window.document, dom.window.MutationObserver, () => 1);
 const commands = new Map();
-const app = { commands: { addCommand: (id, options) => commands.set(id, options) } };
+const executed = [];
+const files = new Map();
+const contents = {
+  get: async path => {
+    if (!files.has(path)) {
+      throw new modules['@jupyterlab/services'].ServerConnection.ResponseError({ status: 404 });
+    }
+    return files.get(path);
+  },
+  save: async (path, model) => { files.set(path, model); return model; }
+};
+const app = {
+  commands: {
+    addCommand: (id, options) => commands.set(id, options),
+    execute: async (id, args) => { executed.push([id, args]); }
+  },
+  serviceManager: { contents }
+};
+const NOTEBOOK_URL = 'https://raw.githubusercontent.com/neurodesk/neurodeskedu/main/'
+  + 'books/tutorials/about_neurodesk/accessing_neurodesk_tools.ipynb';
+const NOTEBOOK_PATH = 'neurodesk-getting-started/accessing_neurodesk_tools.ipynb';
+const fetched = [];
+function serveNotebook(response) {
+  globalThis.fetch = async url => { fetched.push(url); return response; };
+}
+function gettingStartedCommand(entries) {
+  const tile = entries.find(entry => commands.get(entry.command)?.label === 'Getting started');
+  return commands.get(tile.command);
+}
 async function activateLauncher() {
   const entries = [];
   await exported.default.find(p => p.id === 'neurodesk-launcher:plugin')
@@ -79,8 +112,10 @@ def test_slurm_tile_uses_the_upstream_command():
 ''')
 
 
-def test_getting_started_tile_opens_the_tutorial_in_a_new_tab():
+def test_getting_started_tile_copies_the_tutorial_notebook_into_the_workspace():
     run_main_plugin_case(r'''
+  const notebook = { cells: [], metadata: {}, nbformat: 4, nbformat_minor: 5 };
+  serveNotebook({ ok: true, status: 200, json: async () => notebook });
   const entries = await activateLauncher();
   const neurodesk = entries.filter(entry => entry.category === 'Neurodesk');
   const tile = neurodesk.find(entry => commands.get(entry.command)?.label === 'Getting started');
@@ -89,12 +124,40 @@ def test_getting_started_tile_opens_the_tutorial_in_a_new_tab():
     'Getting started must precede the built-in Neurodesk tools');
   const command = commands.get(tile.command);
   assert.equal(command.icon.name, 'ui-components:notebook');
-  assert.equal(opened.length, 0, 'activation must not open a tab');
-  command.execute();
-  assert.deepEqual(opened, [[
-    'https://neurodesk.org/edu/tutorials/about-neurodesk/accessing-neurodesk-tools',
-    '_blank', 'noopener'
-  ]]);
+  assert.equal(fetched.length, 0, 'activation must not download the tutorial');
+  await command.execute();
+  assert.deepEqual(fetched, [NOTEBOOK_URL]);
+  assert.deepEqual(files.get('neurodesk-getting-started'), { type: 'directory' });
+  assert.deepEqual(files.get(NOTEBOOK_PATH),
+    { type: 'notebook', format: 'json', content: notebook });
+  assert.deepEqual(executed, [['docmanager:open', { path: NOTEBOOK_PATH }]]);
+  assert.equal(opened.length, 0, 'the tutorial must open inside JupyterLab, not a browser tab');
+''')
+
+
+def test_getting_started_tile_reopens_an_existing_copy_without_overwriting_it():
+    run_main_plugin_case(r'''
+  const progress = { type: 'notebook', content: 'user edits' };
+  files.set(NOTEBOOK_PATH, progress);
+  serveNotebook({ ok: true, status: 200, json: async () => ({}) });
+  await gettingStartedCommand(await activateLauncher()).execute();
+  assert.equal(fetched.length, 0, 'an existing copy must not be downloaded again');
+  assert.equal(files.get(NOTEBOOK_PATH), progress);
+  assert.deepEqual(executed, [['docmanager:open', { path: NOTEBOOK_PATH }]]);
+''')
+
+
+def test_getting_started_tile_reports_a_failed_download():
+    run_main_plugin_case(r'''
+  serveNotebook({ ok: false, status: 503, json: async () => ({}) });
+  const originalError = console.error;
+  console.error = () => {};
+  const command = gettingStartedCommand(await activateLauncher());
+  await command.execute().finally(() => { console.error = originalError; });
+  assert.equal(files.size, 0, 'a failed download must not create files');
+  assert.equal(executed.length, 0);
+  assert.equal(notifications.length, 1);
+  assert.match(notifications[0], /getting started notebook.*503/);
 ''')
 
 

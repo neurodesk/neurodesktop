@@ -48,7 +48,12 @@ rank and a final CSS order so it stays after local apps when tiles refresh.
 
 The Neurodesk section includes a **Getting started** tile that opens the
 [Accessing Tools in Neurodesk](https://neurodesk.org/edu/tutorials/about-neurodesk/accessing-neurodesk-tools)
-tutorial in a new browser tab. It follows the server-proxy tiles and precedes
+tutorial as a notebook inside JupyterLab. On first use it downloads
+`accessing_neurodesk_tools.ipynb` from the `main` branch of
+[neurodesk/neurodeskedu](https://github.com/neurodesk/neurodeskedu) into
+`neurodesk-getting-started/` under the Jupyter server root. Later clicks open
+that copy without downloading again, so the user's edits and outputs are kept.
+If the download fails, a notification reports the error. It follows the server-proxy tiles and precedes
 the terminal. The launcher registers it before requesting server-proxy metadata,
 so it remains available if that request fails.
 
