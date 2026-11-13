@@ -32,7 +32,6 @@ http://s1bnl-cvmfs.openhtc.io
 http://s1fnal-cvmfs.openhtc.io:8080
 http://s1sampa-cvmfs.openhtc.io:8080
 http://s1ral-cvmfs.openhtc.io
-http://s1ihep-cvmfs.openhtc.io
 "
 HOST_POOL="${NEURODESKTOP_CVMFS_HOST_POOL:-${DEFAULT_HOST_POOL}}"
 

@@ -1,5 +1,8 @@
 """Regression tests for CVMFS endpoints and health-check orchestration."""
 
+import os
+import subprocess
+
 import yaml
 
 from testlib import repo_path, resolve_source
@@ -7,23 +10,53 @@ from testlib import repo_path, resolve_source
 
 IHEP_HOST = "cvmfs-stratum-one.ihep.ac.cn"
 IHEP_ENDPOINT = f"{IHEP_HOST}:8000"
+RETIRED_IHEP_ALIAS = "s1ihep-cvmfs.openhtc.io"
 ORIGIN = "stratum0.neurodesk.cloud.edu.au"
 WORKFLOW_PATH = repo_path(".github/workflows/test-cvmfs.yml")
 
 
-def test_ihep_stratum_one_uses_its_published_service_port_everywhere():
-    """Clients and monitoring must not silently probe IHEP on HTTP port 80."""
+def _default_host_pool(tmp_path):
     selector = resolve_source(
         "/opt/neurodesktop/cvmfs_server_select.sh",
         "config/jupyter/cvmfs_server_select.sh",
-    ).read_text(encoding="utf-8")
-    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "python3"
+    stub.write_text('#!/bin/sh\nprintf "%s\\0" "$@" > "$ARGS_FILE"\n')
+    stub.chmod(0o755)
+    arguments_file = tmp_path / "arguments"
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key != "NEURODESKTOP_CVMFS_HOST_POOL"
+    }
+    env.update(
+        PATH=f"{bin_dir}:{env['PATH']}",
+        ARGS_FILE=str(arguments_file),
+        NEURODESKTOP_CVMFS_TARGET_CONFIG=str(tmp_path / "repository.conf"),
+        NEURODESKTOP_CVMFS_CACHE_FILE=str(tmp_path / "selection.env"),
+    )
+    subprocess.run(["bash", selector], env=env, check=True, timeout=30)
+    arguments = arguments_file.read_text().split("\0")
+    return set(arguments[arguments.index("--host-pool") + 1].split())
 
-    assert f"http://{IHEP_ENDPOINT}" in selector
-    assert f'"{IHEP_ENDPOINT}"' in workflow
 
-    assert f"http://{IHEP_HOST}\n" not in selector
-    assert f'"{IHEP_HOST}"' not in workflow
+def test_ihep_stratum_one_uses_only_its_published_direct_endpoint(tmp_path):
+    """Clients must avoid the stale CDN alias and use IHEP's direct service."""
+    host_pool = _default_host_pool(tmp_path)
+    workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+    replicas = set(
+        workflow["jobs"]["test_cvmfs"]["strategy"]["matrix"]["cvmfs-servers"]
+    )
+
+    assert f"http://{IHEP_ENDPOINT}" in host_pool
+    assert IHEP_ENDPOINT in replicas
+
+    assert f"http://{IHEP_HOST}" not in host_pool
+    assert IHEP_HOST not in replicas
+    assert f"http://{RETIRED_IHEP_ALIAS}" not in host_pool
+    assert RETIRED_IHEP_ALIAS not in replicas
 
 
 def test_replica_checks_wait_for_a_complete_authoritative_repository():

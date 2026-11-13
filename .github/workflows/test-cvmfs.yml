@@ -65,8 +65,7 @@ jobs:
                         "cvmfs-s1bnl.opensciencegrid.org:8000",
                         "cvmfs-s1fnal.opensciencegrid.org:8000",
                         "cvmfs-s1goc.opensciencegrid.org:8000",
-                        "sampacs01.if.usp.br:8000",
-                        "s1ihep-cvmfs.openhtc.io"]
+                        "sampacs01.if.usp.br:8000"]
                         # not yet active:
                           # "cvmfs-s1.hpc.swin.edu.au",
     steps:

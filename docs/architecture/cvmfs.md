@@ -63,6 +63,12 @@ measured workload estimate is lowest. It also appears in the image's static
 GeoAPI fallback and the daily CVMFS health-check matrix. Adding it to the pool
 invalidates cached rankings from earlier images at the next startup.
 
+The IHEP candidate uses its direct published endpoint on port 8000. The
+`s1ihep-cvmfs.openhtc.io` alias is excluded because it continued serving a stale
+repository snapshot after synchronous catalog refreshes while the direct IHEP
+endpoint had the complete snapshot. This prevents a benchmark from selecting an
+incomplete alias; the direct service remains in the health-check matrix.
+
 Each request has a unique query string to avoid reusing a CDN edge response.
 This does not flush origin caches. CDN endpoints are therefore scored on their
 cold path. The client's local CVMFS cache already serves the user's own repeat
