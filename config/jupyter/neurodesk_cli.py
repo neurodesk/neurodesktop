@@ -105,13 +105,23 @@ class Result:
 
 
 def run(argv: Sequence[str], timeout: float) -> subprocess.CompletedProcess[str] | None:
+    """Run argv; return None, without waiting for it to exit, after timeout."""
     try:
-        return subprocess.run(list(argv), capture_output=True, text=True, timeout=timeout,
-                              stdin=subprocess.DEVNULL, check=False)
-    except subprocess.TimeoutExpired:
-        return None
+        process = subprocess.Popen(list(argv), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, text=True, start_new_session=True)
     except OSError as error:
         return subprocess.CompletedProcess(list(argv), 127, "", str(error))
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # A process in uninterruptible CVMFS I/O cannot exit, and a descendant
+        # can hold its pipes open, so signal the group and abandon it.
+        try:
+            os.killpg(process.pid, 9)
+        except OSError:
+            pass
+        return None
+    return subprocess.CompletedProcess(list(argv), process.returncode, stdout, stderr)
 
 
 def first_line(text: str) -> str:
@@ -155,23 +165,31 @@ def check_cvmfs() -> Result:
     return Result("PASS", f"{count} module categories{server}")
 
 
-def check_gpu() -> Result:
-    gpu_check = BIN_DIR / "neurodesktop-gpu-check"
-    if os.environ.get("DISPLAY") and gpu_check.exists():
-        result = run([str(gpu_check)], 120)
-        if result is None:
-            return Result("FAIL", "the desktop rendering probe timed out")
-        if result.returncode == 0:
-            return Result("PASS", "NVIDIA OpenGL rendering works in this desktop")
-        return Result("FAIL", first_line(result.stderr or result.stdout))
+def nvidia_devices() -> list[str]:
     if shutil.which("nvidia-smi") is None:
-        return Result("SKIP", "no NVIDIA driver visible in this container")
+        return []
     result = run(["nvidia-smi", "-L"], 30)
     if result is None or result.returncode != 0:
-        return Result("FAIL", "nvidia-smi could not list devices")
-    devices = [line for line in result.stdout.splitlines() if line.startswith("GPU ")]
-    return Result("PASS", f"{len(devices)} NVIDIA device(s); run from a desktop "
-                          "terminal to also check rendering")
+        return []
+    return [line for line in result.stdout.splitlines() if line.startswith("GPU ")]
+
+
+def check_gpu() -> Result:
+    # The rendering probe needs NVIDIA EGL, so a CPU-only desktop must skip
+    # before reaching it rather than fail.
+    devices = nvidia_devices()
+    if not devices:
+        return Result("SKIP", "no NVIDIA GPU visible in this container")
+    gpu_check = BIN_DIR / "neurodesktop-gpu-check"
+    if not (os.environ.get("DISPLAY") and gpu_check.exists()):
+        return Result("PASS", f"{len(devices)} NVIDIA device(s); run from a desktop "
+                              "terminal to also check rendering")
+    result = run([str(gpu_check)], 120)
+    if result is None:
+        return Result("FAIL", "the desktop rendering probe timed out")
+    if result.returncode == 0:
+        return Result("PASS", f"{len(devices)} NVIDIA device(s); OpenGL rendering works in this desktop")
+    return Result("FAIL", first_line(result.stderr or result.stdout))
 
 
 def check_slurm() -> Result:
@@ -308,9 +326,7 @@ def command_info(args: Sequence[str]) -> int:
         usage_ = shutil.disk_usage(storage)
         rows.append(("Storage", f"{storage}: {usage_.free / 2**30:.1f} GiB free "
                                 f"of {usage_.total / 2**30:.1f} GiB"))
-    gpu = run(["nvidia-smi", "-L"], 30) if shutil.which("nvidia-smi") else None
-    devices = [line for line in gpu.stdout.splitlines() if line.startswith("GPU ")] if gpu else []
-    rows.append(("GPU", "; ".join(devices) or "none visible"))
+    rows.append(("GPU", "; ".join(nvidia_devices()) or "none visible"))
     if os.environ.get("CVMFS_DISABLE", "").lower() in {"true", "1"}:
         rows.append(("CVMFS", "disabled"))
     else:

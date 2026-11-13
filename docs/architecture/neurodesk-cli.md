@@ -66,8 +66,8 @@ status 1 when any check fails; a skipped check does not fail.
   attribute of `/cvmfs/neurodesk.ardc.edu.au` in a child process with a
   timeout, because a hung FUSE mount would otherwise block the caller. It
   skips when `CVMFS_DISABLE` is `true`.
-- `gpu` runs `neurodesktop-gpu-check` when `DISPLAY` is set. Otherwise it
-  lists devices with `nvidia-smi`, and skips when no NVIDIA driver is visible.
+- `gpu` skips when `nvidia-smi` lists no NVIDIA device. With a device and
+  `DISPLAY` set, it also runs `neurodesktop-gpu-check` to test rendering.
 - `slurm` lists partitions with `sinfo` and skips when Slurm is not installed.
 - `t3` runs `t3_neurodesk_setup --check`. It skips when the user's Tailscale
   socket does not exist, which means remote access was never set up.

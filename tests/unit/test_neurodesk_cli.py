@@ -219,3 +219,19 @@ def test_info_reports_version_and_cvmfs_state(neurodesk):
 def test_installed_dispatcher_uses_the_isolated_system_python():
     assert CLI.read_text().startswith("#!/usr/bin/python3 -I\n")
     assert os.access(CLI, os.X_OK)
+
+
+def test_gpu_check_skips_a_cpu_only_desktop(neurodesk):
+    neurodesk.executable(neurodesk.bin, "neurodesktop-gpu-check", "echo 'no NVIDIA vendor' >&2; exit 1")
+    result = neurodesk.run("check", "gpu", DISPLAY=":1")
+    assert result.returncode == 0
+    assert result.stdout.startswith("[SKIP] gpu ")
+
+
+def test_gpu_check_runs_the_rendering_probe_when_a_gpu_is_visible(neurodesk):
+    neurodesk.executable(neurodesk.path, "nvidia-smi", 'echo "GPU 0: Test GPU (UUID: GPU-1)"')
+    neurodesk.executable(neurodesk.bin, "neurodesktop-gpu-check", "echo 'no NVIDIA vendor' >&2; exit 1")
+    result = neurodesk.run("check", "gpu", DISPLAY=":1")
+    assert result.returncode == 1
+    assert result.stdout == "[FAIL] gpu    no NVIDIA vendor\n"
+
