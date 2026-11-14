@@ -3,7 +3,7 @@ title: Agentic CI workflows
 description: Failure reporting, issue repair, scheduled maintenance, and subscription-authenticated Codex execution through conventional Actions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-11-09"
+last-reviewed: "2026-11-14"
 ---
 
 # Agentic CI workflows
@@ -75,6 +75,32 @@ The issue workflow delegates investigation, implementation, and validation to
 no separate manual handoff between diagnosis and fixing. A confirmed defect
 with a feasible fix leads to a draft PR. A task with no justified code change
 reports its evidence or blocker.
+
+### Incident repair scope
+
+Many workflow incidents report the state of an external service rather than
+of this repository. The [CVMFS health workflow](cvmfs.md#cvmfs) checks every
+selectable mirror, so a mirror that falls behind replication or is briefly
+unreachable fails its job until it recovers. Such a failure is not by itself
+evidence of a repository defect. The worker prompt therefore directs the agent
+to return `no_change` with its evidence for remote unreachability, lag, stale
+revisions, or incomplete inventories. A repository change requires a
+demonstrated defect, such as a wrong hostname, port, path, checker, or selector,
+or an explicit maintainer decision to decommission the endpoint. A pass of the
+same check from another endpoint, runner, or attempt is evidence about the
+cause, not proof that the failing endpoint's configuration is correct.
+
+A repair must not make the original check pass by removing the endpoint,
+skipping or disabling the check, or loosening its thresholds, retries, or
+grace periods. Removing a temporarily lagging mirror also removes a fallback
+that users could select after it recovers. Proven repository defects remain
+eligible for an ordinary fix.
+
+Reporter dispatch and recovery are unchanged. Every default-branch failure
+still dispatches the worker, and the incident stays open until the original
+checks pass. The worker does not infer an external cause from the share of
+failed matrix jobs. A single lagging mirror and a defect affecting one
+hostname can both fail exactly one job.
 
 [`agentic-maintenance.yml`](../../.github/workflows/agentic-maintenance.yml)
 uses the same worker for five weekly categories: updates, security, dead code,
