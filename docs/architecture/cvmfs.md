@@ -4,7 +4,7 @@ description: CVMFS server selection and mount configuration, and the
   neurocommand CLI/module system for neuroimaging tools
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-11-01"
+last-reviewed: "2026-11-14"
 ---
 
 # CVMFS and Neurocommand
@@ -178,6 +178,14 @@ Each refresh has a 45-second timeout and a five-second kill grace period, uses
 noninteractive sudo when needed, and records catalog status before and after.
 A refresh failure or timeout still checks the inventory. After the final
 comparison, the checker reports every remaining omission and exits with code 2.
+
+A failing replica job reports that mirror's state on that run. It does not show
+that the mirror should leave the selector pool or the matrix: a lagging or
+briefly unreachable Stratum 1 or CDN alias normally recovers, and the incident
+closes when the original job passes again. Remove an endpoint only after a
+maintainer decides to decommission it, and keep the pool and matrix identical
+when doing so. See
+[incident repair scope](agentic-workflows.md#incident-repair-scope).
 
 The scheduled [object-storage health workflow](../../.github/workflows/test-objectstorage.yml)
 checks a validated snapshot of the same Neurocommand inventory. Each object's

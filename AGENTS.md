@@ -61,6 +61,14 @@
   `docs/environment-variables.md` are referenced by path from tests and the
   agent workflows; do not move or rename them.
 
+- An external endpoint that is unreachable, lagging, or incomplete is not by
+  itself a repository defect. Do not remove a CVMFS mirror or other endpoint,
+  skip its check, or loosen thresholds, retries, or grace periods to make an
+  incident check pass. Change the repository only for a demonstrated defect,
+  such as a wrong hostname, port, checker, or selector, or for a maintainer's
+  explicit decommission decision; otherwise report the evidence. See
+  [incident repair scope](docs/architecture/agentic-workflows.md#incident-repair-scope).
+
 - Image workflows must test and scan run-specific candidates before promoting
   architecture, date, or latest tags. Preserve native arm64 runtime coverage,
   pin all checkouts to the run SHA, and install test cleanup before startup.

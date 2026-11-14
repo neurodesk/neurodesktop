@@ -32,6 +32,17 @@ pending_validation. Do not claim recovery from a passing checkout suite or
 use issue-closing keywords for the workflow incident. The reporter verifies
 recovery from the original checks and closes the incident.
 
+A failing check against an external service, such as a CVMFS mirror, registry,
+or download site, is not by itself a repository defect. Unreachability, lag,
+stale revisions, or an incomplete inventory reported by a remote endpoint
+default to no_change with that evidence. Change the repository only when you
+demonstrate a repository defect, such as a wrong hostname, port, path, checker,
+or selector logic, or when a maintainer has explicitly decided to decommission
+the endpoint. Another endpoint, runner, or attempt passing the same check is
+evidence about the cause, not proof that the configuration is correct.
+Never make an incident check pass by removing the endpoint, skipping or
+disabling the check, or loosening its thresholds, retries, or grace periods.
+
 For a review task, verify all current actionable feedback against the supplied
 PR head, fix only valid findings within the original PR's scope, and explain
 rejected findings. Do not make a competing PR or request another review yourself.
