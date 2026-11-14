@@ -63,7 +63,7 @@ measured workload estimate is lowest. It also appears in the image's static
 GeoAPI fallback and the daily CVMFS health-check matrix. Adding it to the pool
 invalidates cached rankings from earlier images at the next startup.
 
-Each request has a unique query string to avoid reusing a CDN edge response.
+Each performance request has a unique query string to avoid reusing a CDN edge response.
 This does not flush origin caches. CDN endpoints are therefore scored on their
 cold path. The client's local CVMFS cache already serves the user's own repeat
 reads. Edge hits depend on other Neurodesk users behind the same CDN location,
@@ -88,7 +88,63 @@ The four verified destinations with the lowest workload estimates become
 `CVMFS_SERVER_URL`. If the
 shortlist is entirely CDN endpoints, also test the fastest screened direct
 endpoint and retain it as a fallback if its data checks succeed. With
-`CVMFS_USE_GEOAPI=no`, the client walks this order. Runtime failover settings
+`CVMFS_USE_GEOAPI=no`, the client walks this order.
+
+A fast mirror that stops replicating keeps passing every performance and
+hash check, because it still serves its own older, self-consistent snapshot.
+Stage 1 therefore also reads each reachable destination's `.cvmfspublished`
+once at the plain URL the CVMFS client requests, without the query string. The
+cache-busted probes reach the origin, so only the plain read shows a CDN edge
+that still serves an old manifest. These reads have a three-second timeout.
+
+The reference is the newest revision that at least two distinct direct origins
+serve with the same root catalog hash. Destinations are distinct under the
+deduplication rules above. CDN endpoints are compared with the reference but
+never corroborate it. Their hostnames forward to origins the selector cannot
+identify, so an `openhtc.io` alias and its own Stratum 1 would otherwise count
+as two witnesses. One endpoint advertising a higher revision therefore cannot
+set the reference. If two direct origins disagree on the hash of the newest
+revision, there is no reference.
+
+Being behind the reference is normal while a new revision replicates, so it
+alone never changes the ranking. A destination is stale when it serves an older
+revision than the reference and either condition holds:
+
+- The reference manifest's publication time, its `T` field, is at least eight
+  hours old.
+- The destination's own `.cvmfs_last_snapshot` is at least eight hours old.
+  This cache-busted read happens only for destinations that are behind, and
+  only when the publication time does not already establish staleness.
+
+Eight hours is the age of a replica's last successful snapshot at which the
+upstream [cvmfs-servermon](https://github.com/cvmfs-contrib/cvmfs-servermon)
+`updated` test reports WARNING. CVMFS writes `.cvmfs_last_snapshot` as
+`date --utc` text after each successful snapshot. A missing, malformed, or
+future time proves nothing and leaves the destination's rank unchanged.
+
+Stale destinations still get every data check. They sort after current
+destinations at the Stage 3 shortlist, replacement, final order, and
+direct-origin fallback. A verified stale mirror therefore remains a fallback
+and is chosen first only when no current destination passes. Revision numbers
+never exclude a mirror.
+
+The check cannot detect every stale mirror:
+
+- When fewer than two direct origins are reachable, or they disagree, there is
+  no reference.
+- A mirror that lags by less than eight hours and keeps snapshotting keeps its
+  speed rank.
+- A plain read can reach a different CDN edge from the one the client later
+  uses.
+- Ages use the client's clock. A clock running behind makes references look
+  newer and reduces demotions; one running ahead can demote a lagging mirror
+  before eight hours have passed.
+- The selector does not verify manifest signatures, so two direct origins
+  serving the same forged manifest would still corroborate it. The CVMFS client
+  verifies signatures at mount time and fails over to the next listed server.
+
+The check does not guarantee detection of the lag that removed the IHEP CDN
+alias in issue #1312, whose timing is not recorded. Runtime failover settings
 (`CVMFS_LOW_SPEED_LIMIT`, `CVMFS_TIMEOUT`, `CVMFS_MAX_RETRIES`,
 `CVMFS_HOST_RESET_AFTER`) remain in
 [`config/cvmfs/default.local`](../../config/cvmfs/default.local).
@@ -106,7 +162,13 @@ At startup, the primary must complete both hash-verified samples and the
 latency requests within twice its recorded workload estimate. The first fallback
 must also complete them; a failed transfer or a fallback with an estimate more
 than 20% lower triggers a full re-ranking. The primary must also serve a
-valid manifest. Old cache formats, changed candidate pools, expired caches, and
+valid manifest. Plain manifest reads from the cached destinations run in
+parallel. A stale primary under the freshness rule above also triggers a full
+re-ranking. This check sees only the cached destinations. It needs two of them
+to be direct origins that corroborate a newer revision, so a cache of mostly
+CDN endpoints cannot detect a stale primary until the next full selection.
+A mirror that recovers is restored at the next full selection: after the
+one-day cache expires, after a failed cache check, or with `--force-probe`. Old cache formats, changed candidate pools, expired caches, and
 failed checks trigger a new benchmark. Cache contents are parsed as data, never
 executed as shell commands. Config and cache writes are atomic. Eager startup
 restores notebook ownership of the home cache path after root writes it.

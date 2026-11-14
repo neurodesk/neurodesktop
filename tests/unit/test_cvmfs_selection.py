@@ -332,9 +332,10 @@ def test_force_probe_ignores_cache(tmp_path, fast_server, transfer_times):
 
 
 def test_probes_are_cache_busted(tmp_path, mock_repo):
-    """Every manifest and catalog probe must carry a unique cache-busting
-    query string so CDN edge caches cannot inflate the measured speed —
-    most users hit repository objects cold."""
+    """Every performance probe must carry a unique cache-busting query string
+    so CDN edge caches cannot inflate the measured speed — most users hit
+    repository objects cold. The one exception is a single freshness read of
+    the manifest at the URL the CVMFS client itself requests."""
 
     class _RecordingHandler(_QuietHandler):
         requests = []
@@ -351,6 +352,9 @@ def test_probes_are_cache_busted(tmp_path, mock_repo):
         server.shutdown()
 
     requests = _RecordingHandler.requests
+    plain = [p for p in requests if "?" not in p]
+    assert plain == [f"/cvmfs/{REPO}/.cvmfspublished"], requests
+    requests = [p for p in requests if "?" in p]
     catalog_probes = [p for p in requests if "/data/" in p]
     manifest_probes = [p for p in requests if ".cvmfspublished" in p]
 
@@ -879,7 +883,7 @@ def test_finalists_get_repeated_cache_busted_latency_samples(tmp_path, mock_repo
         server.shutdown()
         server.server_close()
     selector = _selector("cvmfs_latency_samples")
-    manifests = [path for path in seen if ".cvmfspublished" in path]
+    manifests = [path for path in seen if ".cvmfspublished" in path and "?" in path]
     # Two Stage 1 probes, then repeated Stage 3 latency samples.
     assert len(manifests) == 2 + selector.LATENCY_PROBES
     assert all("cvmfsselect=" in path for path in manifests)
@@ -940,3 +944,302 @@ def test_static_fallback_lists_distinct_hosts_in_sync_with_the_image_default():
     # Geo-DNS aliases resolve to whichever host DNS picks, which can be
     # another entry in this list; failover would then retry the same server.
     assert not {"cvmfs.neurodesk.org", "cvmfs-geoproximity.neurodesk.org"} & set(hosts)
+
+
+# Freshness ranking. Each server below shares the mock repository's objects but
+# serves its own manifest and optional `.cvmfs_last_snapshot`, so revisions and
+# times can differ between mirrors while every data check still succeeds.
+
+HOUR = 3600
+
+
+def _catalog_digest(mock_repo):
+    return (mock_repo / "cvmfs" / REPO / ".cvmfspublished").read_text().split()[0][1:]
+
+
+def _snapshot_text(seconds_ago):
+    stamp = time.gmtime(time.time() - seconds_ago)
+    return time.strftime("%a %b %e %H:%M:%S UTC %Y", stamp).encode() + b"\n"
+
+
+class _Mirror:
+    """A local mirror whose manifest, snapshot date and chunks are adjustable.
+
+    ``plain`` overrides the manifest served at the URL without a query string,
+    which is what the CVMFS client requests through a CDN edge.
+    """
+
+    def __init__(self, mock_repo, revision, published=None, *, snapshot=None):
+        self.digest = _catalog_digest(mock_repo)
+        self.requests = []
+        self.fail_chunks = False
+        self.stall_snapshot = 0
+        self.plain = None
+        self.set(revision, published, snapshot=snapshot)
+        mirror = self
+
+        class Handler(_QuietHandler):
+            def do_GET(self):
+                url = urlparse(self.path)
+                name = url.path.rsplit("/", 1)[-1]
+                mirror.requests.append(self.path)
+                if name == ".cvmfspublished":
+                    body = mirror.manifest if url.query or mirror.plain is None else mirror.plain
+                elif name == ".cvmfs_last_snapshot":
+                    time.sleep(mirror.stall_snapshot)
+                    body = mirror.snapshot
+                elif mirror.fail_chunks and url.path.endswith("P"):
+                    body = None
+                else:
+                    return super().do_GET()
+                if body is None:
+                    self.send_error(404 if name.startswith(".") else 503)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.server, self.base = _start_server(mock_repo, Handler)
+
+    def manifest_text(self, revision, published):
+        if isinstance(published, (int, float)):
+            published = f"T{int(time.time() - published)}\n"
+        return f"C{self.digest}\nS{revision}\n{published or ''}".encode()
+
+    def set(self, revision, published=None, *, snapshot=None):
+        """``published`` is seconds ago or a literal T line; ``snapshot`` likewise."""
+        self.manifest = self.manifest_text(revision, published)
+        self.snapshot = (_snapshot_text(snapshot) if isinstance(snapshot, (int, float))
+                         else snapshot)
+
+    def url(self):
+        return f"{self.base}/cvmfs/@fqrn@"
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture
+def mirrors(mock_repo):
+    started = []
+
+    def start(*args, **kwargs):
+        mirror = _Mirror(mock_repo, *args, **kwargs)
+        started.append(mirror)
+        return mirror
+
+    yield start
+    for mirror in started:
+        mirror.close()
+
+
+def _speeds(transfer_times, *ranked):
+    """Make the mirrors' measured speed follow the given order, fastest first."""
+    transfer_times({m.base: (0.01, 0.05 * (index + 1)) for index, m in enumerate(ranked)})
+
+
+@pytest.mark.parametrize(("reference_age", "lagging_snapshot"), [
+    pytest.param(9 * HOUR, None, id="reference-published-beyond-grace"),
+    pytest.param(1 * HOUR, 9 * HOUR, id="lagging-snapshot-beyond-grace"),
+])
+def test_fast_stale_mirror_ranks_after_corroborated_current_mirrors(
+    tmp_path, mirrors, transfer_times, reference_age, lagging_snapshot,
+):
+    stale = mirrors(42, reference_age + HOUR, snapshot=lagging_snapshot)
+    current = [mirrors(43, reference_age) for _ in range(2)]
+    _speeds(transfer_times, stale, *current)
+    proc, config = run_select(tmp_path, " ".join(m.base for m in [stale, *current]))
+    assert proc.returncode == 0, proc.stdout
+    # Demoted, not excluded: the verified stale mirror stays a last fallback.
+    assert _configured_server_urls(config) == [m.url() for m in [*current, stale]], proc.stdout
+    assert f"{stale.base}: serves an older revision" in proc.stdout
+
+
+@pytest.mark.parametrize(("published", "snapshot"), [
+    pytest.param(1 * HOUR, 10 * 60, id="recent-publication-and-snapshot"),
+    pytest.param(None, None, id="missing-times"),
+    pytest.param("Tsoon\n", b"yesterday\n", id="malformed-times"),
+    pytest.param("T99999999999999\n", b"Mon Feb 30 10:00:00 UTC 2026\n",
+                 id="out-of-range-times"),
+    pytest.param(-9 * HOUR, -9 * HOUR, id="future-times"),
+])
+def test_unproven_lag_keeps_the_fastest_mirror_first(
+    tmp_path, mirrors, transfer_times, published, snapshot,
+):
+    lagging = mirrors(42, published, snapshot=snapshot)
+    current = [mirrors(43, published) for _ in range(2)]
+    _speeds(transfer_times, lagging, *current)
+    proc, config = run_select(tmp_path, " ".join(m.base for m in [lagging, *current]))
+    assert proc.returncode == 0, proc.stdout
+    assert _configured_server_urls(config) == [m.url() for m in [lagging, *current]], proc.stdout
+    assert "older revision" not in proc.stdout
+    # The snapshot date is read only from the mirror that is behind, and only
+    # when the reference publication itself does not already prove the lag.
+    snapshot_reads = [[p for p in m.requests if ".cvmfs_last_snapshot" in p]
+                      for m in [lagging, *current]]
+    assert [len(reads) for reads in snapshot_reads] == [1, 0, 0]
+    assert "cvmfsselect=" in snapshot_reads[0][0]
+
+
+def test_current_pool_makes_one_plain_read_per_mirror_and_no_snapshot_reads(
+    tmp_path, mirrors, transfer_times,
+):
+    pool = [mirrors(43, 9 * HOUR) for _ in range(3)]
+    _speeds(transfer_times, *pool)
+    proc, config = run_select(tmp_path, " ".join(m.base for m in pool))
+    assert proc.returncode == 0, proc.stdout
+    assert _configured_server_urls(config) == [m.url() for m in pool]
+    for mirror in pool:
+        assert [p for p in mirror.requests if "?" not in p] == [f"/cvmfs/{REPO}/.cvmfspublished"]
+        assert not [p for p in mirror.requests if ".cvmfs_last_snapshot" in p]
+
+
+def test_single_high_revision_claim_cannot_reorder_healthy_mirrors(
+    tmp_path, mirrors, transfer_times,
+):
+    healthy = [mirrors(42, 20 * HOUR) for _ in range(2)]
+    forged = mirrors(999999, 9 * HOUR)
+    _speeds(transfer_times, *healthy, forged)
+    proc, config = run_select(tmp_path, " ".join(m.base for m in [forged, *healthy]))
+    assert proc.returncode == 0, proc.stdout
+    assert _configured_server_urls(config) == [m.url() for m in [*healthy, forged]], proc.stdout
+    assert "older revision" not in proc.stdout
+
+
+def test_incoherent_newest_revision_sets_no_reference(tmp_path, mirrors, transfer_times):
+    lagging = mirrors(42, 20 * HOUR)
+    current = [mirrors(43, 9 * HOUR) for _ in range(2)]
+    conflicting = mirrors(43, 9 * HOUR)
+    conflicting.manifest = conflicting.manifest.replace(conflicting.digest.encode(), b"0" * 40)
+    _speeds(transfer_times, lagging, *current, conflicting)
+    proc, config = run_select(
+        tmp_path, " ".join(m.base for m in [lagging, *current, conflicting]))
+    assert proc.returncode == 0, proc.stdout
+    assert _configured_server_urls(config)[0] == lagging.url(), proc.stdout
+    assert "older revision" not in proc.stdout
+
+
+def test_direct_alias_cannot_corroborate_its_own_destination(
+    tmp_path, mirrors, transfer_times,
+):
+    lagging = mirrors(42, 20 * HOUR)
+    current = mirrors(43, 9 * HOUR)
+    alias = current.base.replace("127.0.0.1", "localhost")
+    transfer_times({lagging.base: (0.01, 0.05), current.base: (0.01, 0.1),
+                    alias: (0.01, 0.1)})
+    proc, config = run_select(tmp_path, f"{lagging.base} {current.base} {alias}")
+    assert proc.returncode == 0, proc.stdout
+    assert "duplicate destination" in proc.stdout
+    assert _configured_server_urls(config) == [lagging.url(), current.url()], proc.stdout
+
+
+@pytest.mark.parametrize("independent_peer", [False, True])
+def test_cdn_alias_cannot_corroborate_its_origin(
+    mirrors, transfer_times, monkeypatch, independent_peer,
+):
+    """A CDN hostname and the origin behind it are one witness, not two.
+
+    Without an independent direct origin there is no reference, so the fast
+    lagging mirror keeps its place. Adding one proves the demotion works.
+    """
+    lagging = mirrors(42, 20 * HOUR)
+    origin = mirrors(43, 9 * HOUR)
+    peer = mirrors(43, 9 * HOUR)
+    cdn = "http://s1origin-cvmfs.openhtc.io"
+    _speeds(transfer_times, lagging, origin, peer)
+    selector = _selector(f"cvmfs_cdn_corroboration_{independent_peer}")
+    fetch = selector.Benchmark.fetch
+
+    def routed_fetch(self, base, path, **kwargs):
+        return fetch(self, origin.base if base == cdn else base, path, **kwargs)
+
+    monkeypatch.setattr(selector.Benchmark, "fetch", routed_fetch)
+    monkeypatch.setattr(selector, "is_canonical", lambda base, timeout: True)
+    hosts = [lagging.base, origin.base, cdn] + ([peer.base] if independent_peer else [])
+    selected = selector.select(selector.Benchmark(), hosts)
+    assert (selected["bases"][0] == lagging.base) is not independent_peer, selected
+    assert lagging.base in selected["bases"]
+
+
+def test_stale_mirror_fills_fallback_when_current_transfers_fail(
+    tmp_path, mirrors, transfer_times,
+):
+    stale = mirrors(42, 20 * HOUR)
+    current = [mirrors(43, 9 * HOUR) for _ in range(2)]
+    for mirror in current:
+        mirror.fail_chunks = True
+    _speeds(transfer_times, stale, *current)
+    proc, config = run_select(tmp_path, " ".join(m.base for m in [stale, *current]))
+    assert proc.returncode == 0, proc.stdout
+    assert f"{stale.base}: serves an older revision" in proc.stdout
+    assert _configured_server_urls(config) == [stale.url()], proc.stdout
+
+
+def test_client_visible_stale_manifest_is_demoted_despite_a_current_origin(
+    tmp_path, mirrors, transfer_times,
+):
+    """A cache-busted probe reaches the origin; the client reads the edge copy."""
+    edge = mirrors(43, 9 * HOUR)
+    edge.plain = edge.manifest_text(42, 20 * HOUR)
+    current = [mirrors(43, 9 * HOUR) for _ in range(2)]
+    _speeds(transfer_times, edge, *current)
+    proc, config = run_select(tmp_path, " ".join(m.base for m in [edge, *current]))
+    assert proc.returncode == 0, proc.stdout
+    assert _configured_server_urls(config) == [m.url() for m in [*current, edge]], proc.stdout
+
+
+def test_cached_stale_primary_triggers_reranking(tmp_path, mirrors, transfer_times):
+    primary = mirrors(43, 1 * HOUR)
+    others = [mirrors(43, 1 * HOUR) for _ in range(2)]
+    _speeds(transfer_times, primary, *others)
+    pool = " ".join(m.base for m in [primary, *others])
+    proc, config = run_select(tmp_path, pool)
+    assert proc.returncode == 0, proc.stdout
+    assert _configured_server_urls(config)[0] == primary.url()
+    for mirror in others:
+        mirror.set(44, 9 * HOUR)
+    proc, config = run_select(tmp_path, pool)
+    assert proc.returncode == 0, proc.stdout
+    assert "Cached primary serves an outdated repository revision" in proc.stdout
+    assert "Stage 1" in proc.stdout
+    assert _configured_server_urls(config) == [m.url() for m in [*others, primary]], proc.stdout
+
+
+def test_recovered_mirror_wins_again_after_a_forced_probe(tmp_path, mirrors, transfer_times):
+    recovering = mirrors(42, 20 * HOUR)
+    current = [mirrors(43, 9 * HOUR) for _ in range(2)]
+    _speeds(transfer_times, recovering, *current)
+    pool = " ".join(m.base for m in [recovering, *current])
+    proc, config = run_select(tmp_path, pool)
+    assert proc.returncode == 0, proc.stdout
+    assert _configured_server_urls(config)[-1] == recovering.url()
+    recovering.set(43, 9 * HOUR)
+    # Recovery waits for the next full selection rather than re-entering at once.
+    proc, config = run_select(tmp_path, pool)
+    assert "Using cached server selection" in proc.stdout
+    assert _configured_server_urls(config)[-1] == recovering.url()
+    proc, config = run_select(tmp_path, pool, args=("--force-probe",))
+    assert proc.returncode == 0, proc.stdout
+    assert _configured_server_urls(config)[0] == recovering.url(), proc.stdout
+
+
+def test_freshness_reads_stay_within_request_timeout_and_deadline(mirrors, transfer_times):
+    lagging = mirrors(42, 2 * HOUR, snapshot=9 * HOUR)
+    current = [mirrors(43, 1 * HOUR) for _ in range(2)]
+    lagging.stall_snapshot = 8
+    _speeds(transfer_times, lagging, *current)
+    selector = _selector("cvmfs_freshness_deadline")
+    benchmark = selector.Benchmark()
+    views = [benchmark.view(m.base) for m in [lagging, *current]]
+    assert all(views)
+    started = time.monotonic()
+    assert selector.stale_bases(benchmark, views) == set()
+    assert time.monotonic() - started < 6, "a stalled snapshot read must time out"
+    benchmark.deadline = time.monotonic() - 1
+    lagging.stall_snapshot = 0
+    started = time.monotonic()
+    assert benchmark.view(lagging.base) is None
+    assert selector.stale_bases(benchmark, views) == set()
+    assert time.monotonic() - started < 1
