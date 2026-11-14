@@ -154,6 +154,43 @@ def test_wait_observes_delayed_keyboard_target(waiting, monkeypatch):
     assert tunnel.timeout == 2
 
 
+def test_wait_retries_a_transient_x11_observation_timeout(waiting, monkeypatch):
+    target, tunnel, clock = waiting
+    observations = 0
+
+    def snapshot(timeout):
+        nonlocal observations
+        observations += 1
+        if observations == 1:
+            clock.now += timeout
+            raise subprocess.TimeoutExpired(['x11-observation'], timeout)
+        return {'run_focused': True}
+
+    monkeypatch.setattr(target, 'snapshot', snapshot)
+
+    assert target.wait(tunnel, run_dialog=True, timeout_seconds=5)['run_focused']
+    assert observations == 2
+    assert tunnel.timeout == 2
+
+
+def test_wait_bounds_repeated_x11_observation_timeouts_by_deadline(waiting, monkeypatch):
+    target, tunnel, clock = waiting
+    observations = []
+
+    def snapshot(timeout):
+        observations.append(timeout)
+        clock.now += timeout
+        raise subprocess.TimeoutExpired(['x11-observation'], timeout)
+
+    monkeypatch.setattr(target, 'snapshot', snapshot)
+
+    with pytest.raises(AssertionError, match=r'2 X11 observation\(s\) timed out, last after'):
+        target.wait(tunnel, timeout_seconds=3)
+    assert clock.now == pytest.approx(3)
+    assert observations == pytest.approx([2, 0.8])
+    assert tunnel.timeout == 2
+
+
 def test_wait_acknowledges_guacamole_sync_before_returning_ready(waiting, monkeypatch):
     target, tunnel, _ = waiting
     tunnel.failure = '4.sync,3.768;'

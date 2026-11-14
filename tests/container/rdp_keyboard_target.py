@@ -80,6 +80,7 @@ class RdpKeyboardTarget:
         field = 'run_focused' if run_dialog else 'hotkey_ready'
         deadline = time.monotonic() + timeout_seconds
         state = {'waiting': 'first X11 observation'}
+        observation_timeouts = []
         previous_timeout = tunnel.gettimeout()
         try:
             while (remaining := deadline - time.monotonic()) > 0:
@@ -105,12 +106,23 @@ class RdpKeyboardTarget:
                 try:
                     state = self.snapshot(min(2, remaining))
                 except subprocess.TimeoutExpired as error:
-                    raise AssertionError(f'X11 observation timed out waiting for {expected}; {state}') from error
+                    # A probe is only one readiness sample. Keep the tunnel
+                    # alive and let the caller's overall deadline decide.
+                    observation_timeouts.append(error.timeout)
+                    continue
                 if state.get(field) and time.monotonic() < deadline:
                     return state
         finally:
             tunnel.settimeout(previous_timeout)
-        raise AssertionError(f'No {expected} within {timeout_seconds}s; last X11 state: {state}')
+        timeout_note = ''
+        if observation_timeouts:
+            timeout_note = (
+                f'; {len(observation_timeouts)} X11 observation(s) timed out, '
+                f'last after {observation_timeouts[-1]}s'
+            )
+        raise AssertionError(
+            f'No {expected} within {timeout_seconds}s; last X11 state: {state}{timeout_note}'
+        )
 
 
 def _snapshot(display):
