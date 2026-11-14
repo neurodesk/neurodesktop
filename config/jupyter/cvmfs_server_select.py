@@ -9,6 +9,7 @@ the CVMFS client remains responsible for repository signature verification.
 import argparse
 from collections import Counter
 import concurrent.futures
+import datetime
 import hashlib
 import json
 import math
@@ -44,7 +45,15 @@ BUDGET_SECONDS = 180
 WORKLOAD_REQUESTS = 1000
 WORKLOAD_BYTES = 256 * 1024 * 1024
 LATENCY_PROBES = 3
+# A replica whose last successful snapshot is at least this old is a WARNING in
+# the upstream cvmfs-servermon "updated" test. Use the same age before ranking a
+# replica that has fallen behind its corroborated peers below current ones.
+STALE_AFTER_SECONDS = 8 * 3600
 HASH = re.compile(r"[0-9a-f]{40}")
+SNAPSHOT_DATE = re.compile(
+    r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) "
+    r"{1,2}(\d{1,2}) (\d\d):(\d\d):(\d\d) UTC (\d{4})\n?")
+MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
 
 
 def log(message):
@@ -123,6 +132,32 @@ def describe(measurement):
             f"{rate:.0f} KiB/s, workload estimate {estimate(measurement):.0f} s")
 
 
+def parse_manifest(data):
+    """Return the root catalog hash, revision and optional publication time."""
+    manifest = data.split(b"\n--\n", 1)[0].decode("ascii", errors="replace")
+    digest = re.search(r"^C([0-9a-f]{40})$", manifest, re.MULTILINE)
+    revision = re.search(r"^S(\d{1,20})$", manifest, re.MULTILINE)
+    if not digest or not revision:
+        return None
+    published = re.search(r"^T(\d{1,12})$", manifest, re.MULTILINE)
+    return {"hash": digest[1], "revision": int(revision[1]),
+            "published": int(published[1]) if published else None}
+
+
+def parse_snapshot_date(data):
+    """Parse the `date --utc` text a Stratum 1 writes after each snapshot."""
+    match = SNAPSHOT_DATE.fullmatch(data.decode("ascii", errors="replace"))
+    if not match:
+        return None
+    month, *fields = match.groups()
+    day, hour, minute, second, year = map(int, fields)
+    try:
+        return datetime.datetime(year, MONTHS.index(month) + 1, day, hour, minute, second,
+                                 tzinfo=datetime.UTC).timestamp()
+    except ValueError:
+        return None
+
+
 def object_path(digest, suffix):
     if not HASH.fullmatch(digest) or suffix not in {"C", "P", ""}:
         raise ValueError("invalid repository object")
@@ -133,12 +168,14 @@ class Benchmark:
     def __init__(self):
         self.deadline = time.monotonic() + BUDGET_SECONDS
 
-    def fetch(self, base, path, *, digest=None, timeout=10):
+    def fetch(self, base, path, *, digest=None, timeout=10, bust=True):
         remaining = self.deadline - time.monotonic()
         if remaining <= 0:
             return None
         limit = min(timeout, remaining)
-        url = f"{base}/cvmfs/{REPO}/{path}?cvmfsselect={uuid.uuid4().hex}"
+        url = f"{base}/cvmfs/{REPO}/{path}"
+        if bust:
+            url += f"?cvmfsselect={uuid.uuid4().hex}"
         with tempfile.TemporaryDirectory(prefix="cvmfs-probe-") as directory:
             body = Path(directory) / "body"
             try:
@@ -175,13 +212,10 @@ class Benchmark:
         replies = []
         for _ in range(2):
             result = self.fetch(base, ".cvmfspublished", timeout=5)
-            if not result:
-                continue
-            manifest = result["data"].split(b"\n--\n", 1)[0].decode("ascii", errors="replace")
-            digest = re.search(r"^C([0-9a-f]{40})$", manifest, re.MULTILINE)
-            revision = re.search(r"^S(\d{1,20})$", manifest, re.MULTILINE)
-            if digest and revision:
-                replies.append({"base": base, "hash": digest[1], "revision": int(revision[1]),
+            manifest = parse_manifest(result["data"]) if result else None
+            if manifest:
+                replies.append({"base": base, "hash": manifest["hash"],
+                                "revision": manifest["revision"],
                                 "latency": result["seconds"], "request": result["latency"],
                                 "ip": result["ip"]})
         if not replies:
@@ -190,6 +224,21 @@ class Benchmark:
         timeout = min(3, self.deadline - time.monotonic())
         return {**min(replies, key=lambda r: r["latency"]),
                 "canonical": is_canonical(base, timeout)}
+
+    def view(self, base):
+        """Read the manifest at the URL the CVMFS client requests.
+
+        Performance probes add a unique query string, which bypasses CDN edge
+        caches. The plain URL shows the revision a client would actually mount.
+        """
+        result = self.fetch(base, ".cvmfspublished", timeout=3, bust=False)
+        manifest = parse_manifest(result["data"]) if result else None
+        return {**manifest, "base": base, "ip": result["ip"]} if manifest else None
+
+    def last_snapshot(self, base):
+        """The origin's last successful snapshot time, bypassing edge caches."""
+        result = self.fetch(base, ".cvmfs_last_snapshot", timeout=3)
+        return parse_snapshot_date(result["data"]) if result and result["bytes"] <= 64 else None
 
     def sample(self, base, obj):
         return self.fetch(base, object_path(obj["hash"], obj["suffix"]), digest=obj["hash"])
@@ -211,6 +260,57 @@ class Benchmark:
         return {"latencies": [r["latency"] for r in results],
                 "bytes": sum(r["bytes"] for r in bulk),
                 "transfer": sum(r["transfer"] for r in bulk)}
+
+
+def reference_view(views):
+    """Newest revision that two independent direct origins serve identically.
+
+    CDN hostnames forward to origins the selector cannot identify, so a CDN
+    alias and its own origin would otherwise corroborate each other. Direct
+    origins are already one row per destination. One endpoint advertising a
+    high revision, or disagreement about the newest revision, sets no reference.
+    """
+    support = Counter((v["revision"], v["hash"]) for v in views if not is_cdn(v["base"]))
+    corroborated = [key for key, count in support.items() if count >= 2]
+    if not corroborated:
+        return None
+    revision, digest = max(corroborated)
+    if any(other == revision and claim != digest for other, claim in support):
+        return None
+    published = [v["published"] for v in views
+                 if (v["revision"], v["hash"]) == (revision, digest) and v["published"] is not None]
+    # Supporters of one signed manifest share its timestamp; if they do not,
+    # use the newest claim so the publication looks no older than it might be.
+    return {"revision": revision, "published": max(published) if published else None}
+
+
+def stale_bases(benchmark, views):
+    """Endpoints that serve an old revision long after a corroborated newer one.
+
+    Falling behind is normal while a new revision replicates, so it alone never
+    demotes a mirror. The reference must have been published at least
+    STALE_AFTER_SECONDS ago, or the mirror's own last successful snapshot must
+    be that old. Missing, malformed or future times prove nothing. Demotion
+    only changes order: a stale mirror remains a verified fallback.
+    """
+    reference = reference_view(views)
+    if not reference:
+        return set()
+    now = time.time()
+    published = reference["published"]
+    old_reference = published is not None and now - published >= STALE_AFTER_SECONDS
+    behind = [v["base"] for v in views if v["revision"] < reference["revision"]]
+    if old_reference or not behind:
+        stale = set(behind)
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(behind))) as pool:
+            snapshots = dict(zip(behind, pool.map(benchmark.last_snapshot, behind), strict=True))
+        stale = {base for base, snapshot in snapshots.items()
+                 if snapshot is not None and now - snapshot >= STALE_AFTER_SECONDS}
+    for base in sorted(stale):
+        log(f"  {base}: serves an older revision than corroborated peers "
+            f"(revision {reference['revision']}); ranking it after current mirrors")
+    return stale
 
 
 def catalog_samples(data):
@@ -393,14 +493,40 @@ def reuse_cache(benchmark, meta):
             log("Cached fallback is over 20% faster than the primary; re-ranking.")
             return False
     # A cached historical object alone does not establish repository health.
-    return benchmark.probe(meta["bases"][0]) is not None
+    if benchmark.probe(meta["bases"][0]) is None:
+        return False
+    # Only the cached destinations are read, so a stale primary is detected
+    # only when two of them are direct origins that corroborate a newer revision.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(meta["bases"])) as pool:
+        views = [view for view in pool.map(benchmark.view, meta["bases"]) if view]
+    if meta["bases"][0] in stale_bases(benchmark, distinct_views(views)):
+        log("Cached primary serves an outdated repository revision; re-ranking.")
+        return False
+    return True
+
+
+def distinct_views(views):
+    """One manifest view per destination, using the same identity as ranking."""
+    unique, seen = [], set()
+    for view in views:
+        key = destination(view)
+        if key not in seen:
+            seen.add(key)
+            unique.append(view)
+    return unique
 
 
 def select(benchmark, hosts):
     log("Stage 1: probing candidate hosts in parallel...")
+
+    def probe(base):
+        row = benchmark.probe(base)
+        return {**row, "view": benchmark.view(base)} if row else None
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(20, len(hosts))) as pool:
-        reachable = [row for row in pool.map(benchmark.probe, hosts) if row]
+        reachable = [row for row in pool.map(probe, hosts) if row]
     unique = distinct_destinations(reachable)
+    stale = stale_bases(benchmark, [row["view"] for row in unique if row["view"]])
     # Prefer a corroborated snapshot, never an unauthenticated revision claim.
     # A mirror that cannot serve this snapshot still gets tested against its own
     # catalog; one lying or lagging endpoint must not exclude healthy replicas.
@@ -438,7 +564,7 @@ def select(benchmark, hosts):
             log(f"  {row['base']}: catalog {describe(measurement)}")
         else:
             log(f"  {row['base']}: incomplete, corrupt or unavailable catalog")
-    screened.sort(key=lambda item: (item[0], item[1]["base"]))
+    screened.sort(key=lambda item: (item[1]["base"] in stale, item[0], item[1]["base"]))
     # Keep a direct-origin candidate in the finals even if CDN edges dominate.
     finalists = screened[:FINALISTS]
     if finalists and all(is_cdn(row["base"]) for _, row in finalists):
@@ -456,19 +582,19 @@ def select(benchmark, hosts):
             log(f"  {base}: verified {describe(measured[base])}")
         else:
             log(f"  {base}: data transfer failed; excluded")
-    ranked = [(estimate(m), base) for base, m in measured.items() if m]
+    ranked = [(base in stale, estimate(m), base) for base, m in measured.items() if m]
     # A catalog can be healthy while its data backend is unavailable. Fill
     # missing fallback slots from the rest of the measured pool, and keep
     # looking for a working direct origin if CDN finalists are all that survived.
     for _, row in screened:
-        if len(ranked) >= 4 and any(not is_cdn(base) for _, base in ranked):
+        if len(ranked) >= 4 and any(not is_cdn(base) for *_, base in ranked):
             break
         base = row["base"]
         if base in measured or (len(ranked) >= 4 and is_cdn(base)):
             continue
         measurement = benchmark.measure(base, plans[base])
         if measurement:
-            ranked.append((estimate(measurement), base))
+            ranked.append((base in stale, estimate(measurement), base))
             log(f"  {base}: replacement verified {describe(measurement)}")
         else:
             log(f"  {base}: replacement data transfer failed; excluded")
@@ -476,13 +602,13 @@ def select(benchmark, hosts):
     if not ranked:
         return None
     chosen = ranked[:4]
-    if all(is_cdn(base) for _, base in chosen):
-        direct = next((item for item in ranked if not is_cdn(item[1])), None)
+    if all(is_cdn(base) for *_, base in chosen):
+        direct = next((item for item in ranked if not is_cdn(item[2])), None)
         if direct:
             chosen.append(direct)
     return {"version": CACHE_VERSION, "pool": hosts,
-            "bases": [base for _, base in chosen], "samples": plans[chosen[0][1]],
-            "baseline": chosen[0][0], "complete": time.monotonic() < benchmark.deadline}
+            "bases": [base for *_, base in chosen], "samples": plans[chosen[0][2]],
+            "baseline": chosen[0][1], "complete": time.monotonic() < benchmark.deadline}
 
 
 def main():
