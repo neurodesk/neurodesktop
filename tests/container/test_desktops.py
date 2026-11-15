@@ -1471,11 +1471,15 @@ def test_guac_rdp_tunnel():
             value = str(keysym)
             tunnel.send(f"3.key,{len(value)}.{value},1.{int(pressed)};")
 
-        key(65513, True)
-        key(65471, True)
-        key(65471, False)
-        key(65513, False)
-        keyboard_target.wait(tunnel, run_dialog=True, timeout_seconds=10)
+        def open_run_dialog():
+            key(65513, True)
+            key(65471, True)
+            key(65471, False)
+            key(65513, False)
+
+        keyboard_target.wait(
+            tunnel, run_dialog=True, timeout_seconds=10, trigger=open_run_dialog,
+        )
         output = Path(home_dir) / "rdp-command.txt"
         assert not output.exists(), "RDP command output must be new for this session"
         command = "sh -c " + shlex.quote(

@@ -75,15 +75,20 @@ class RdpKeyboardTarget:
         assert probe.returncode == 0, f'X11 observation failed on {display}: {probe.stderr}'
         return {'display': display, 'pid': pid, **json.loads(probe.stdout)}
 
-    def wait(self, tunnel, *, run_dialog=False, timeout_seconds=30):
+    def wait(self, tunnel, *, run_dialog=False, timeout_seconds=30, trigger=None):
         expected = 'focused Run dialog' if run_dialog else 'desktop hotkey target'
         field = 'run_focused' if run_dialog else 'hotkey_ready'
         deadline = time.monotonic() + timeout_seconds
+        next_trigger = time.monotonic()
         state = {'waiting': 'first X11 observation'}
         observation_timeouts = []
         previous_timeout = tunnel.gettimeout()
         try:
             while (remaining := deadline - time.monotonic()) > 0:
+                now = time.monotonic()
+                if trigger is not None and now >= next_trigger:
+                    trigger()
+                    next_trigger = now + 1
                 tunnel.settimeout(min(0.1, remaining))
                 try:
                     frame = tunnel.recv()

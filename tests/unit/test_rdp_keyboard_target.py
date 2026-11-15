@@ -154,6 +154,24 @@ def test_wait_observes_delayed_keyboard_target(waiting, monkeypatch):
     assert tunnel.timeout == 2
 
 
+def test_wait_retries_trigger_until_delayed_keyboard_path_responds(waiting, monkeypatch):
+    target, tunnel, clock = waiting
+    triggers = []
+
+    def trigger():
+        triggers.append(clock.now)
+
+    monkeypatch.setattr(target, 'snapshot', lambda timeout: {'run_focused': len(triggers) >= 2})
+
+    assert target.wait(
+        tunnel, run_dialog=True, timeout_seconds=3, trigger=trigger,
+    )['run_focused']
+    assert len(triggers) == 2
+    assert triggers[0] == 0
+    assert 1 <= triggers[1] < 1.2
+    assert tunnel.timeout == 2
+
+
 def test_wait_retries_a_transient_x11_observation_timeout(waiting, monkeypatch):
     target, tunnel, clock = waiting
     observations = 0
