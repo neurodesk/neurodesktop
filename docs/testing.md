@@ -417,10 +417,12 @@ notebook user without unrestricted sudo and requires pixels over Guacamole.
 A read-only X11 probe identifies the new notebook-user XRDP process and its
 display and authority file. Before Alt+F2, it waits for WM registration and a
 mapped LXDE panel. Before typing, it requires a mapped, active Run dialog with
-one of its children holding keyboard focus. These bounded waits also read the
-Guacamole tunnel, acknowledge its sync flow-control messages, and fail on
-disconnects or protocol errors. The test launches a command entirely through
-Guacamole keyboard input and checks its output file.
+one of its children holding keyboard focus. A mapped panel does not prove the
+end-to-end RDP keyboard path is ready on a slow session, so the same bounded
+wait replays Alt+F2 once per second until the dialog responds. These bounded
+waits also read the Guacamole tunnel, acknowledge its sync flow-control
+messages, and fail on disconnects or protocol errors. The test launches a
+command entirely through Guacamole keyboard input and checks its output file.
 The marker lives in a fresh, session-owned temporary directory, so root-run tests
 remain writable by the desktop user and cannot accept a prior result. A login
 screen alone does not satisfy this check. Enable it only in disposable test
@@ -865,7 +867,8 @@ The RDP tunnel case sends Alt+F2 through Guacamole and executes a command in
 LXDE's Run dialog. Its X11 observer runs out of process so a dead display cannot
 terminate pytest; a single observation timeout is retried within the existing
 readiness deadline, while repeated timeouts remain a failure with the last
-successful X11 state in the report.
+successful X11 state in the report. Alt+F2 is also retried within that deadline
+because the panel can map before the end-to-end RDP keyboard path is ready.
 Tests that need to start the global xrdp service are skipped unless
 `NEURODESKTOP_TEST_ALLOW_GLOBAL_DESKTOP_SERVICES=1` is set. The build scripts and
 GitHub Actions set this only for disposable test containers; do not set it in a
