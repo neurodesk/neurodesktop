@@ -11,6 +11,7 @@ from jupyter_client.kernelspec import KernelSpecManager
 
 
 HELPER = Path("/usr/local/bin/neurodesk-uv")
+UV = Path("/opt/conda/bin/uv")
 
 
 def test_installed_uv_helper_uses_image_python(tmp_path):
@@ -27,6 +28,40 @@ def test_installed_uv_helper_uses_image_python(tmp_path):
                             text=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert result.stdout.startswith("usage: neurodesk uv [-h] {init,rebuild,remove} directory\n")
+
+
+def test_installed_uv_keeps_plaintext_credentials_owner_only(tmp_path):
+    data_dir = tmp_path / "data"
+    environment = dict(os.environ, XDG_DATA_HOME=str(data_dir))
+    result = subprocess.run(
+        [
+            "sh",
+            "-c",
+            'umask 000; exec "$@"',
+            "uv-auth-test",
+            str(UV),
+            "auth",
+            "login",
+            "example.invalid",
+            "--token",
+            "-",
+        ],
+        input="not-a-real-token\n",
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+
+    credentials = data_dir / "uv" / "credentials"
+    expected_modes = {
+        credentials: 0o700,
+        credentials / "credentials.toml": 0o600,
+        credentials / "credentials.toml.lock": 0o600,
+    }
+    for path, expected_mode in expected_modes.items():
+        assert path.stat().st_mode & 0o777 == expected_mode, path
 
 
 def test_installed_uv_project_kernel_and_rebuild(tmp_path, monkeypatch):

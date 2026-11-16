@@ -59,7 +59,9 @@ by `pytest tests/unit/test_uv_kernel_prototype.py` and, as the notebook user,
 `pytest /opt/tests/test_uv_kernel_image.py`. The image test needs package-index
 access for initial setup, then rebuilds a moved project offline using its warm
 cache. It starts a real kernel and checks module initialization and environment
-isolation, as well as the installed command's interpreter and ownership.
+isolation, as well as the installed command's interpreter and ownership. It
+also writes an isolated uv authentication entry under a permissive umask and
+requires owner-only modes on the plaintext credential store.
 
 Running `tests/unit` needs GCC, X11 development headers, Xvfb, and `xrandr`
 for the Glass helpers,
