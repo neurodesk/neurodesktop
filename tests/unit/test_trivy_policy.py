@@ -1,58 +1,51 @@
-"""Packaging contracts for the header-only kernel CVE exceptions."""
+"""Packaging contract for image-scan exceptions."""
 
-from datetime import date
+from datetime import date, timedelta
 
 import yaml
 
 from testlib import repo_path
 
-
-HEADER_FINDINGS = (
-    "CVE-2026-89530",
-    "CVE-2026-89652",
-    "CVE-2026-89659",
-    "CVE-2026-89708",
-    "CVE-2026-90037",
-    "CVE-2026-90162",
-    "CVE-2026-93221",
-    "CVE-2026-98365",
-    "CVE-2026-98571",
-    "CVE-2026-98621",
-    "CVE-2026-98725",
-    "CVE-2026-98805",
-)
+# Longest interval an exception may run before it must be reassessed.
+MAX_EXCEPTION_DAYS = 90
 
 
-def test_kernel_exceptions_apply_only_to_the_assessed_ubuntu_headers():
-    policy = yaml.safe_load(repo_path(".trivyignore.yaml").read_text())
-    findings = policy["vulnerabilities"]
-    assert len({finding["id"] for finding in findings}) == len(findings)
-    by_id = {finding["id"]: finding for finding in findings}
-    for cve in HEADER_FINDINGS:
-        finding = by_id[cve]
-        expected = [
-            "pkg:deb/ubuntu/linux-libc-dev@7.0.0-38.38",
-            "pkg:deb/ubuntu/linux-libc-dev@7.0.0-42.42",
-        ]
-        if cve in (
-            "CVE-2026-90162", "CVE-2026-98725", "CVE-2026-98805",
-        ):
-            expected.append("pkg:deb/ubuntu/linux-libc-dev@7.0.0-43.43")
-        assert finding["purls"] == expected
-        assert isinstance(finding["expired_at"], date)
-        assert finding["expired_at"] <= date(2026, 11, 20)
-        assert "host kernel" in finding["statement"]
+def load_policy():
+    return yaml.safe_load(repo_path(".trivyignore.yaml").read_text(encoding="utf-8"))
+
+
+def test_policy_is_a_parseable_trivy_ignore_file():
+    policy = load_policy()
+
+    assert isinstance(policy["vulnerabilities"], list)
     assert not policy.get("secrets")
+    assert not policy.get("misconfigurations")
+    assert not policy.get("licenses")
 
 
-def test_ipv4_tcp_exception_is_limited_to_inspected_header_version():
-    policy = yaml.safe_load(repo_path(".trivyignore.yaml").read_text())
-    finding = next(item for item in policy["vulnerabilities"]
-                   if item["id"] == "CVE-2026-98432")
-    assert finding["purls"] == [
-        "pkg:deb/ubuntu/linux-libc-dev@7.0.0-42.42",
-        "pkg:deb/ubuntu/linux-libc-dev@7.0.0-43.43",
-    ]
-    assert finding["expired_at"] == date(2026, 11, 20)
-    assert "host kernel" in finding["statement"]
-    assert "https://ubuntu.com/security/CVE-2026-98432" in finding["statement"]
+def test_every_exception_is_scoped_to_packages_and_expires():
+    findings = load_policy()["vulnerabilities"]
+
+    assert len({finding["id"] for finding in findings}) == len(findings)
+    latest_expiry = date.today() + timedelta(days=MAX_EXCEPTION_DAYS)
+    for finding in findings:
+        assert finding["purls"], finding["id"]
+        assert all("@" in purl for purl in finding["purls"]), finding["id"]
+        assert isinstance(finding["expired_at"], date), finding["id"]
+        assert finding["expired_at"] <= latest_expiry, finding["id"]
+        assert finding["statement"].strip(), finding["id"]
+
+
+def test_resolved_kernel_header_exceptions_are_not_reintroduced():
+    """Ubuntu fixed these in linux-libc-dev 7.0.0-43.43 or earlier."""
+    excepted = {finding["id"] for finding in load_policy()["vulnerabilities"]}
+    resolved = {
+        f"CVE-2026-{number}"
+        for number in (
+            53215, 53398, 63940, 64535, 64564, 74394, 89530, 89652, 89659,
+            89708, 90037, 90162, 93221, 98365, 98432, 98571, 98621, 98725,
+            98805,
+        )
+    }
+
+    assert not excepted & resolved

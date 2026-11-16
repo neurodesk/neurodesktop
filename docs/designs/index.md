@@ -4,7 +4,7 @@ description: Assessments, implementation plans, and audits kept as the record
   of why the tree is shaped the way it is
 parent: ../index.md
 status: current
-last-reviewed: "2026-10-31"
+last-reviewed: "2026-11-16"
 ---
 
 # Design records
@@ -17,6 +17,7 @@ current behavior see [Architecture](../architecture.md),
 
 | Record | Status | What it decided |
 | --- | --- | --- |
+| [Trivy exception reassessment, 16 November 2026](trivy-exception-reassessment-2026-11-16.md) | implemented | Remove all twenty image-scan exceptions because the release scans clean without them, and require scope and expiry for new ones |
 | [uv notebook environment prototype](uv-notebook-prototype.md) | implemented | Try opt-in folder environments with locked dependencies and explicit kernel registration |
 | [OpenCode 2 migration, 31 October 2026](opencode-2-migration-2026-10-31.md) | implemented | Install OpenCode 2.2.5, port the Ollama and Lightcone plugins to the OpenCode 2 plugin API, and give each wrapper command a private server |
 | [Container package upgrade, 31 October 2026](container-upgrade-2026-10-31.md) | implemented | Apply the pending Renovate backlog early, adapt the Notebook Intelligence 6.3 patch, and hold OpenCode 2 and persona manager 0.3 |

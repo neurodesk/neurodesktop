@@ -4,7 +4,7 @@ description: Two-tier test suite, per-area focused test commands, container
   build/run modes, and the negative-test convention
 parent: index.md
 status: current
-last-reviewed: "2026-11-13"
+last-reviewed: "2026-11-16"
 ---
 
 # Testing
@@ -509,13 +509,12 @@ run-specific candidate tag, so a transient upstream registry failure can recover
 without changing the artifact that later test and scan jobs consume. A failed
 second attempt still fails the build job and prevents promotion.
 
-`pytest tests/unit/test_trivy_policy.py` checks the packaging contract for the
-twelve kernel CVE exceptions added after issues #1142 and #1152. Each
-exception requires
-the exact assessed Ubuntu `linux-libc-dev` package version and an expiry no
-later than 2026-11-20. The image scans apply these rules through Trivy's shared
-ignore file. The [build reference](architecture/build.md#publication)
-records why the headers remain installed and how the exceptions are bounded.
+`pytest tests/unit/test_trivy_policy.py` checks the packaging contract for
+image-scan exceptions. Every exception must name exact package URLs, expire
+within 90 days, and carry a statement; the kernel-header exceptions that Ubuntu
+has since fixed must not return. The image scans apply the policy through
+Trivy's shared ignore file. The [build reference](architecture/build.md#publication)
+records why the headers remain installed and how exceptions are bounded.
 
 `pytest tests/unit/test_conda_rattler_security.py` protects the temporary
 removal of the vulnerable optional Rattler solver without adding a Trivy

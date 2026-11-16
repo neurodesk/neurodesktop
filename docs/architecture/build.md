@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-11-09"
+last-reviewed: "2026-11-16"
 ---
 
 # Build-Time Behaviors
@@ -30,43 +30,21 @@ checksum before installing. Scan and SBOM actions reuse that binary rather
 than downloading it through `get.trivy.dev`.
 
 The shared [Trivy policy](../../.trivyignore.yaml) records individual scan
-exceptions. [Issues #1142](https://github.com/neurodesk/neurodesktop/issues/1142)
-and [#1152](https://github.com/neurodesk/neurodesktop/issues/1152) identified
-twelve kernel CVEs reported against Ubuntu 26.04's
-`linux-libc-dev` 7.0.0-38.38; Ubuntu's 7.0.0-42.42 update still reports the
-same twelve with no fixed version. That package contains UAPI headers without the
-affected kernel implementation. CVMFS requires it through `uuid-dev` and
-`libc6-dev`; removing the headers breaks that dependency chain. Containers use
-the host kernel, whose security updates remain the host administrator's responsibility.
-These twelve exceptions match only the assessed Ubuntu package and versions,
-on either architecture, and expire on 2026-11-20 for reassessment. Other
-package versions, kernel packages, and CVEs remain subject to the scan gate.
+exceptions and is currently empty. An exception must name the exact affected
+packages as package URLs, carry an `expired_at` date at most 90 days ahead, and
+state why the finding is not exploitable in this image. Other package versions
+and CVEs remain subject to the scan gate.
 
-An additional exception covers
-[CVE-2026-98432](https://ubuntu.com/security/CVE-2026-98432), an IPv4 TCP
-use-after-free in the running kernel. Inspection of `linux-libc-dev` 7.0.0-42.42
-confirmed that its files are headers and documentation. Its exception matches
-only inspected header versions and expires on 2026-11-20; it does not exempt
-host kernels or other packages.
-
-PR image acceptance runs
-[42509081627](https://github.com/neurodesk/neurodesktop/actions/runs/42509081627)
-and [42509094220](https://github.com/neurodesk/neurodesktop/actions/runs/42509094220)
-reported four of these CVEs against `linux-libc-dev` 7.0.0-43.43 on both
-architectures: CVE-2026-90162, CVE-2026-98432, CVE-2026-98725, and
-CVE-2026-98805. Inspection of Ubuntu's
-[amd64 package](https://archive.ubuntu.com/ubuntu/pool/main/l/linux/linux-libc-dev_7.0.0-43.43_amd64.deb)
-and [arm64 package](https://ports.ubuntu.com/pool/main/l/linux/linux-libc-dev_7.0.0-43.43_arm64.deb)
-found only UAPI headers and documentation. Their SHA-256 digests are
-`3a3adc14e3332fc017b1d0e4e39655298a2a977d51db6e80de533ac60137b07f`
-and `3d6313ac30170df8614618fd1aeb864606c378d90aa18e5d2012aad46861d753`,
-respectively. Only those four exceptions include 7.0.0-43.43, with the same
-2026-11-20 expiry. Ubuntu's advisories describe affected kernel code in
-[ksmbd](https://ubuntu.com/security/CVE-2026-90162),
-[IPv4 TCP](https://ubuntu.com/security/CVE-2026-98432),
-[NVMe target authentication](https://ubuntu.com/security/CVE-2026-98725), and
-[TIPC](https://ubuntu.com/security/CVE-2026-98805); host kernels still require
-their own updates.
+`linux-libc-dev` stays installed because the CVMFS package depends on
+`uuid-dev`, which pulls in `libc6-dev` and the kernel UAPI headers. Trivy
+reports kernel CVEs against that header package until Ubuntu publishes a
+header version built from the fixed kernel source, although containers run the
+host kernel. If a new CRITICAL kernel finding appears against it, check the
+[Ubuntu CVE tracker](https://ubuntu.com/security/cves) for the fixed `linux`
+version before adding a time-bounded exception; a rebuild picks up the fixed
+headers once they reach `resolute-security`. The removed exceptions are
+recorded in the
+[2026-11-16 reassessment](../designs/trivy-exception-reassessment-2026-11-16.md).
 
 ## Base image dependencies
 
