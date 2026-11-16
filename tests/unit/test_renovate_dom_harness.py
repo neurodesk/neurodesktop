@@ -1,4 +1,4 @@
-"""Packaging contracts for Renovate's shared DOM harness pins."""
+"""Packaging contracts for Renovate's shared test dependency pins."""
 
 import json
 import subprocess
@@ -59,6 +59,18 @@ def test_renovate_extracts_all_dom_pins_at_the_same_versions(path):
     assert {name for name, _ in reference} == PACKAGES
     assert len(actual) == len(PACKAGES), "Each DOM pin must be extracted exactly once"
     assert sorted(actual) == sorted(reference), f"DOM harness dependency drift: {path}"
+
+
+def test_renovate_extracts_worker_codex_install_and_version_guard():
+    config = json.loads(repo_path("renovate.json").read_text())
+    path = "config/agentic/Dockerfile"
+    content = repo_path(path).read_text()
+
+    pins = extract(config, path, content)
+    codex_pins = [pin for pin in pins if pin[0] == "@openai/codex"]
+
+    assert len(codex_pins) == 2, "Renovate must update both the install and its version guard"
+    assert codex_pins[0] == codex_pins[1]
 
 
 @pytest.mark.parametrize("path", SURFACES)
