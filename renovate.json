@@ -1164,6 +1164,7 @@
       ],
       "matchStrings": [
         "@openai/codex@(?<currentValue>\\d+\\.\\d+\\.\\d+)",
+        "codex-cli (?<currentValue>\\d+\\.\\d+\\.\\d+)",
         "neurodesktop-agentic:codex-(?<currentValue>\\d+\\.\\d+\\.\\d+)",
         "pins Codex CLI `(?<currentValue>\\d+\\.\\d+\\.\\d+)`"
       ],
