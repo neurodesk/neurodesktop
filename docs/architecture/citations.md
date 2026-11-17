@@ -4,7 +4,7 @@ description: Lmod usage recording and the neurodesk cite command that writes
   CITATIONS.md for the Neurodesk tools a user loaded
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-11-12"
+last-reviewed: "2026-11-17"
 ---
 
 # Tool citations
@@ -14,8 +14,11 @@ listed in [Environment variables](../environment-variables.md#cvmfs-and-modules)
 
 Users run `neurodesk cite` to get a `CITATIONS.md` file for the Neurodesk tools
 they loaded. The file has one methods sentence per tool version, in the format
-of the website's **Copy methods text** button, and a deduplicated reference
-list that ends with the Neurodesk paper. The interactive terminal banner
+of the website's **Copy methods text** button, and references grouped under
+alphabetically ordered tool headings. Each group deduplicates references across
+versions and arm64 variants. A final **Neurodesk** section contains the Neurodesk
+paper. The success message ends with the output path without trailing punctuation
+so it can be copied directly. The interactive terminal banner
 mentions the command.
 
 ```bash
