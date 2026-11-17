@@ -882,6 +882,8 @@ runs the launcher against fake Xvfb, session, and `voxl` executables. It checks:
 - skipping a busy display;
 - readiness only through `-displayfd`;
 - making the framebuffer private before the session or voxl starts;
+- the default and configured resize scale and maximum screen size, and
+  refusing invalid values before anything starts;
 - refusing a framebuffer that cannot be made private;
 - the missing-token refusal;
 - SIGTERM stopping voxl before Xvfb.

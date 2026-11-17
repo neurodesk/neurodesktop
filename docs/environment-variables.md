@@ -208,6 +208,15 @@ for RDP initialization and VS Code isolation.
   `NEURODESKTOP_VNC_PORT`, `NEURODESKTOP_SFTP_PORT`:
   port overrides for the desktop stack; by default each is allocated
   automatically starting from its conventional port
+- `NEURODESKTOP_VOXL_RESIZE_SCALE`: desktop pixels per CSS pixel of the
+  viewer's window in the
+  [voxl desktop](architecture/desktop.md#voxl-desktop-streaming); defaults to
+  `1`. Use `2` for HiDPI displays. A viewer can override it for one page with
+  `?scale=` in the URL. The launcher refuses values that are not positive numbers
+- `NEURODESKTOP_VOXL_SCREEN_SIZE`: largest voxl desktop, as `WIDTHxHEIGHT`;
+  defaults to `3840x2160`. Xvfb starts at this size and voxl shrinks the
+  screen to fit the viewer, never beyond it. Larger sizes enlarge the shared
+  framebuffer and the encoder's work
 - `NEURODESKTOP_RUNTIME_DIR`: base directory for per-backend Guacamole,
   Tomcat, and runtime state; defaults under `~/.neurodesk`
 - `NEURODESKTOP_GUACAMOLE_USER`, `NEURODESKTOP_GUACAMOLE_PASSWORD`,
