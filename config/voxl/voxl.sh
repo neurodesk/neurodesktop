@@ -18,6 +18,23 @@ if [ -z "${VOXL_PASSWORD:-}" ]; then
     exit 1
 fi
 
+# Desktop pixels per CSS pixel of the viewer's window. voxl's own default of 1.5
+# assumes a session drawn at 144 DPI; the LXDE session draws at 96 DPI, so 1
+# shows applications at the browser's size. A viewer can override it with
+# ?scale= in the page URL.
+resize_scale="${NEURODESKTOP_VOXL_RESIZE_SCALE:-1}"
+if ! [[ "${resize_scale}" =~ ^[0-9]*\.?[0-9]+$ && "${resize_scale}" =~ [1-9] ]]; then
+    echo "[ERROR] NEURODESKTOP_VOXL_RESIZE_SCALE must be a positive number such as 1 or 2, not '${resize_scale}'." >&2
+    exit 1
+fi
+# voxl lowers the resolution to fit the viewer; RandR cannot grow an Xvfb
+# screen beyond the size it started with.
+screen_size="${NEURODESKTOP_VOXL_SCREEN_SIZE:-3840x2160}"
+if ! [[ "${screen_size}" =~ ^[1-9][0-9]*x[1-9][0-9]*$ ]]; then
+    echo "[ERROR] NEURODESKTOP_VOXL_SCREEN_SIZE must be WIDTHxHEIGHT such as 3840x2160, not '${screen_size}'." >&2
+    exit 1
+fi
+
 voxl_bin="${NEURODESKTOP_VOXL_BIN:-/usr/local/bin/voxl}"
 # Built with voxl's XTEST scroll-axis patch, so scrolling is smooth.
 xvfb_bin="${NEURODESKTOP_XVFB_BIN:-/usr/local/libexec/voxl/Xvfb}"
@@ -25,9 +42,6 @@ state_dir="${HOME}/.neurodesk/runtime-voxl"
 install -d -m 0700 "${state_dir}"
 xauthority="${XAUTHORITY:-${HOME}/.Xauthority}"
 export XAUTHORITY="${xauthority}"
-# voxl lowers the resolution to fit the viewer; RandR cannot grow an Xvfb
-# screen beyond the size it started with.
-screen_size="3840x2160"
 
 xstartup="${HOME}/.vnc/xstartup"
 if [ ! -x "${xstartup}" ]; then
@@ -130,6 +144,7 @@ session_pid=$!
     --title "Neurodesktop" \
     --allowed-hosts '*' \
     --enable-resize \
+    --resize-scale "${resize_scale}" \
     --audio-enabled=false \
     --file-transfers none &
 voxl_pid=$!

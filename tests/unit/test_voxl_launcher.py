@@ -123,6 +123,10 @@ def test_streams_a_private_xvfb_through_an_authenticated_loopback_voxl(launcher)
         assert args[args.index("--port") + 1] == "45123"
         assert args[args.index("--file-transfers") + 1] == "none"
         assert not any(arg.startswith("--enable-basic-auth") for arg in args)
+        # The 96 DPI session is shown at the browser's size, on a 4K maximum.
+        assert "--enable-resize" in args
+        assert args[args.index("--resize-scale") + 1] == "1"
+        assert xvfb_args[xvfb_args.index("-screen") + 2] == "3840x2160x24"
 
         proc.send_signal(signal.SIGTERM)
         assert proc.wait(timeout=10) != 0
@@ -136,6 +140,47 @@ def test_streams_a_private_xvfb_through_an_authenticated_loopback_voxl(launcher)
         if proc.poll() is None:
             proc.kill()
             proc.wait()
+
+
+def test_resolution_settings_reach_xvfb_and_voxl(launcher):
+    env, log = launcher
+    env["NEURODESKTOP_VOXL_RESIZE_SCALE"] = "2"
+    env["NEURODESKTOP_VOXL_SCREEN_SIZE"] = "5120x2880"
+    proc = _start(env)
+    try:
+        calls = _wait_for(log, "voxl DISPLAY=")
+        xvfb_args = _line(calls, "xvfb ").split()
+        assert xvfb_args[xvfb_args.index("-screen") + 2] == "5120x2880x24"
+        args = _line(calls, "voxl ").split()
+        assert args[args.index("--resize-scale") + 1] == "2"
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("NEURODESKTOP_VOXL_RESIZE_SCALE", "0"),
+        ("NEURODESKTOP_VOXL_RESIZE_SCALE", "0.0"),
+        ("NEURODESKTOP_VOXL_RESIZE_SCALE", "-1"),
+        ("NEURODESKTOP_VOXL_RESIZE_SCALE", "large"),
+        ("NEURODESKTOP_VOXL_RESIZE_SCALE", "1 --read-only"),
+        ("NEURODESKTOP_VOXL_SCREEN_SIZE", "1920x"),
+        ("NEURODESKTOP_VOXL_SCREEN_SIZE", "0x1080"),
+        ("NEURODESKTOP_VOXL_SCREEN_SIZE", "1920x1080x24"),
+        ("NEURODESKTOP_VOXL_SCREEN_SIZE", "4k"),
+    ],
+)
+def test_refuses_an_invalid_resolution_setting_before_starting_anything(launcher, name, value):
+    env, log = launcher
+    env[name] = value
+    proc = _start(env)
+    _out, err = proc.communicate(timeout=10)
+    assert proc.returncode == 1
+    assert f"{name} must be" in err
+    assert f"'{value}'" in err
+    assert not log.exists()
 
 
 def test_refuses_a_framebuffer_it_cannot_make_private(launcher):
