@@ -207,8 +207,18 @@ any user could otherwise read or write the desktop.
 sets the segments that Xvfb created to mode `0600`. It then requires Xvfb to
 be the only attachment. A process that attached before the mode change keeps
 its mapping, so the launcher stops and streams nothing if any other process is
-attached. RandR cannot grow an Xvfb screen past its starting size. The screen
-therefore starts at 3840x2160, and voxl reduces it to fit the viewer.
+attached.
+
+The desktop follows the viewer's window. On connect and after each window
+resize, voxl's client asks for the window's CSS size times a scale, and voxl
+resizes the X screen with RandR. The launcher passes `--resize-scale 1`. voxl's
+own default of 1.5 assumes a session drawn at 144 DPI, and the LXDE session
+draws at 96 DPI, so 1 shows applications at the browser's size. Adding
+`?scale=2` to the launcher's page URL gives a sharp desktop on a HiDPI display
+for that viewer. RandR cannot grow an Xvfb screen past its starting size, so
+Xvfb starts at the largest allowed size, 3840x2160 by default, and voxl clamps
+each request to it. Administrators set both values with
+[`NEURODESKTOP_VOXL_RESIZE_SCALE` and `NEURODESKTOP_VOXL_SCREEN_SIZE`](../environment-variables.md#desktop-vncrdp-guacamole-firefox).
 
 The launcher runs `/usr/local/libexec/voxl/Xvfb`, not the distro's
 `/usr/bin/Xvfb`. The `voxl-builder` stage rebuilds Ubuntu's `xorg-server`

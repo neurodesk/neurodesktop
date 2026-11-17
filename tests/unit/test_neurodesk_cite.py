@@ -72,6 +72,12 @@ def test_writes_methods_sentences_and_deduplicated_references(cite):
         "fsl (v6.0.7.23, built 2026-10-13) was run in Neurodesk (v2026-09-23, Renton et al., 2024).",
     ]
     references = text.split("## References\n\n")[1]
+    groups = references.split("### ")[1:]
+    assert [group.splitlines()[0] for group in groups] == ["ants", "fsl", "Neurodesk"]
+    assert "Avants BB et al." in groups[0]
+    assert "Woolrich MW et al." in groups[1]
+    assert "Jenkinson M et al." in groups[1]
+    assert RENTON in groups[2]
     assert references.count(FSL_REFERENCE) == 1
     assert "Avants BB et al." in references
     assert references.index("Avants BB") < references.index(RENTON)
@@ -110,6 +116,9 @@ def test_arm64_modules_resolve_by_their_image_name(cite):
     pointer = next(line for line in text.splitlines() if line.startswith("bidscoin_4.6.2:"))
     assert pointer.endswith("/recipes/bidscoin")
     assert text.split("## References\n\n")[1].count("Avants BB et al.") == 1
+    assert "### ants\n" in text
+    assert "### ants_arm64\n" not in text
+    assert "### bidscoin\n" in text
     assert "not in the Neurodesk catalogue" not in result.stderr
 
 
@@ -129,6 +138,7 @@ def test_modules_missing_from_the_catalogue_are_cited_without_a_build_date(cite)
     assert "mytool (v1.0) was run in Neurodesk (v2026-09-23, Renton et al., 2024)." in cite.text()
     assert "recipes/mytool" in cite.text()
     assert "mytool/1.0 is not in the Neurodesk catalogue" in result.stderr
+    assert "### mytool\n\nmytool:" in cite.text()
 
 
 class BotFilteredCatalogue(BaseHTTPRequestHandler):
@@ -249,7 +259,7 @@ def test_default_output_is_the_storage_folder(cite):
 
     assert result.returncode == 0, result.stderr
     assert "ants (v2.6.5" in (storage / "CITATIONS.md").read_text()
-    assert str(storage / "CITATIONS.md") in result.stdout
+    assert result.stdout == f"Wrote citations for 1 tool versions to {storage / 'CITATIONS.md'}\n"
 
 
 def test_output_follows_the_umask_like_other_user_files(cite):
