@@ -115,9 +115,12 @@ change or the literal appears in executable code. SDK request construction,
 user credentials, and scanner rules remain unchanged.
 
 The main Python environment pins `pip` 26.2.2, `certifi` 2026.10.23, and
-`uv` 0.13.7. Their fixed releases remove the compromised emSign G3 trust
-paths. Updating the main `certifi` distribution does not update pip's vendored
-copy, so pip is upgraded before installing the other Python packages.
+`uv` 0.13.8. Their fixed releases remove the compromised emSign G3 trust
+paths. uv 0.13.8 also creates its default plaintext credential directory,
+credential file, and lock with owner-only permissions instead of inheriting a
+permissive process umask. Updating the main `certifi` distribution does not
+update pip's vendored copy, so pip is upgraded before installing the other
+Python packages.
 The installed-image test inspects both certifi bundles. The environment also
 pins Brotli 1.2.1 so malformed compressed input cannot reach the decoder
 out-of-bounds write in 1.2.0 (CVE-2026-111497). The build reads these
