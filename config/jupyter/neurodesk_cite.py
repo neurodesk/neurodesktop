@@ -4,7 +4,7 @@
 The Lmod site package (config/lmod/SitePackage.lua) appends one line per
 loaded Neurodesk module to the usage log. This command resolves those modules
 against the neurocontainers apps.json catalogue and writes CITATIONS.md with
-methods sentences and a deduplicated reference list.
+methods sentences and references grouped by tool.
 """
 
 from __future__ import annotations
@@ -175,10 +175,17 @@ def render(
     lines += [tool.methods_sentence(neurodesktop_version) for tool in tools]
     if any(tool.entry is not None and tool.entry.electrophysiology for tool in tools):
         lines += ["", AEDAPT_NOTE]
-    references = list(dict.fromkeys(tool.reference for tool in tools))
+    references: dict[str, dict[str, None]] = {}
+    for tool in tools:
+        name = tool.entry.tool if tool.entry is not None else tool.name
+        name = name.removesuffix("_arm64")
+        references.setdefault(name, {})[tool.reference] = None
     lines += ["", "## References", ""]
-    for reference in [*references, NEURODESK_REFERENCE]:
-        lines += [reference, ""]
+    for name in sorted(references, key=str.casefold):
+        lines += [f"### {name}", ""]
+        for reference in references[name]:
+            lines += [reference, ""]
+    lines += ["### Neurodesk", "", NEURODESK_REFERENCE, ""]
     return "\n".join(lines)
 
 
@@ -303,7 +310,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"{tool.name}/{tool.version} is not in the Neurodesk catalogue.",
                 file=sys.stderr,
             )
-    print(f"Wrote citations for {len(tools)} tool versions to {output}.")
+    print(f"Wrote citations for {len(tools)} tool versions to {output}")
     return 0
 
 
