@@ -324,6 +324,11 @@ def test_validation_errors_name_the_field_and_the_fix(jobs, site):
         core.host("user@bunya")
     with pytest.raises(core.JobError, match="slurm may only set"):
         core.request(dict(ANALYSIS, slurm={"exclusive": "yes"}))
+    for key, name in (("outputs", "sub/.gitattributes"), ("inputs", "code/.gitignore")):
+        with pytest.raises(core.JobError, match="Git metadata"):
+            core.request(dict(ANALYSIS, **{key: [name]}))
+    with pytest.raises(core.JobError, match="reserved"):
+        core.request(dict(ANALYSIS, outputs=["worker.log"]))
 
 
 def test_commands_before_connect_explain_how_to_start(tmp_path):
@@ -357,9 +362,9 @@ def test_rejected_slurm_options_submit_nothing_and_say_what_to_fix(jobs, cluster
     request = dict(ANALYSIS, slurm={"partition": "nope"})
     cli, run_id = prepared_run(client, core, site, tmp_path / "client", request=request)
     monkeypatch.setenv("REJECT_OPTIONS", "1")
-    with pytest.raises(core.JobError, match=r"(?s)invalid partition.*slurm section.*prepare") as error:
+    with pytest.raises(core.JobError, match=r"(?s)invalid partition.*slurm section.*submit again") as error:
         cli.submit(run_id)
-    assert str(error.value).startswith("Slurm rejected this job's options")
+    assert str(error.value).startswith("Slurm's pre-check failed")
     assert not (remote.run_directory(site, run_id) / "submit.claim").exists()
     assert not (tmp_path / "sbatch.argv").exists()
 

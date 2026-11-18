@@ -14,6 +14,8 @@ def create(path):
     run(["datalad", "create", "-c", "text2git", path])
     git(path, "config", "user.name", "Neurodesk jobs")
     git(path, "config", "user.email", "neurodesk-jobs@localhost")
+    # A personal global gitignore must not drop inputs or results.
+    git(path, "config", "core.excludesFile", "/dev/null")
     git(path, "annex", "untrust", "here")
 
 
@@ -96,6 +98,10 @@ def capsule(source, image, spec, destination):
                     *[r["bundle"] for r in repositories]])}
     atomic(destination / "manifest.json", manifest)
     save(destination, "Freeze execution inputs, software and source revisions")
+    uncommitted = {*manifest["files"], "manifest.json"} - set(payload_files(destination))
+    if uncommitted:
+        raise JobError("DataLad did not commit these snapshot files: "
+                       + ", ".join(sorted(uncommitted)))
     return manifest
 
 

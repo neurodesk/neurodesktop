@@ -193,8 +193,8 @@ class Client:
                 raise JobError("Canonical result is no longer eligible; reconcile explicitly")
             verify(directory / "output", receipt["files"])
             return existing
-        # The target is never overwritten. Interrupted collection is kept for
-        # inspection; a user can move it away before repeating collection.
+        # The target is never overwritten. Only an interrupted final rename can
+        # leave it behind; a user can move it away before repeating collection.
         if (directory / "output").exists():
             raise JobError("Unjournaled output directory exists; inspect and move it before retrying")
         with tempfile.TemporaryDirectory(prefix="collect-", dir=directory) as temp:
@@ -250,8 +250,9 @@ class Client:
                         "observed": read(directory / "observed.json"), "datasets": {}}
             for name in ("input", "output"):
                 metadata["datasets"][name] = data.archive_payload(directory / name, root / name)
-            if set(collection["files"]) - set(metadata["datasets"]["output"]["files"]):
-                raise JobError("Collected results are missing from the archive payload")
+            if (set(collection["files"]) - set(metadata["datasets"]["output"]["files"])
+                    or set(record["manifest"]["files"]) - set(metadata["datasets"]["input"]["files"])):
+                raise JobError("Collected results or snapshot inputs are missing from the archive")
             atomic(root / "archive.json", metadata)
             fd, pending = tempfile.mkstemp(prefix=".neurodesk-", dir=destination)
             os.close(fd)

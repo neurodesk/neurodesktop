@@ -102,6 +102,10 @@ def test_snapshot_job_collection_and_offline_restore(cluster, monkeypatch):
                "validate": ["test", "-s", "/outputs/result.txt"], "outputs": ["result.txt"]}
     site = {"host": "fixture", "python": sys.executable, "path": os.environ["PATH"],
             "state_root": str(tmp_path / "journal"), "data_root": str(tmp_path / "scratch")}
+    # A personal global gitignore must not drop snapshot inputs or results.
+    (tmp_path / "global-ignore").write_text("*.bin\nresult.txt\n")
+    (tmp_path / "gitconfig").write_text(f"[core]\n\texcludesFile = {tmp_path / 'global-ignore'}\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
     state = tmp_path / "client"
     cli = client.Client(site, state)
     run_id = cli.prepare(source, image, request)["run_id"]

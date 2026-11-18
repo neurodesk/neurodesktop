@@ -101,6 +101,10 @@ SITE_FIELDS = ("host", "python", "path", "state_root", "data_root")
 DEFAULT_RESOURCES = {"time": "01:00:00", "mem": "4G", "cpus-per-task": 1}
 SLURM_OPTIONS = {"account", "partition", "time", "mem", "cpus-per-task", "gres", "qos"}
 CONNECT_HINT = "run: neurodesk jobs connect HOST (an alias from ~/.ssh/config)"
+# Written by the worker into every result.
+RESERVED_OUTPUTS = {"execution.json", "outcome.json", "worker.log"}
+# Would change what DataLad commits in the snapshot or the result dataset.
+GIT_METADATA = {".gitattributes", ".gitignore", ".gitmodules"}
 
 
 def host(value):
@@ -162,8 +166,12 @@ def request(value):
         if (not isinstance(value[key], list) or not value[key]
                 or any(not isinstance(x, str) or "\0" in x for x in value[key])):
             raise JobError(f"{key} must be a nonempty argument vector")
-    if set(value["outputs"]) & {"execution.json", "outcome.json", "worker.log", ".gitattributes", ".gitmodules"}:
-        raise JobError("Output name is reserved for job provenance")
+    if set(value["outputs"]) & RESERVED_OUTPUTS:
+        raise JobError("Output names " + ", ".join(sorted(RESERVED_OUTPUTS))
+                       + " are reserved for job provenance")
+    for item in value["inputs"] + value["outputs"]:
+        if PurePosixPath(item).name in GIT_METADATA:
+            raise JobError(f"Git metadata files cannot be job inputs or outputs: {item}")
     return value
 
 

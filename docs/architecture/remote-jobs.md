@@ -84,8 +84,10 @@ Slurm defaults are 1 hour, 4 GB and 1 CPU. `slurm` may also set `account`,
 `partition`, `qos` and `gres`. When those are omitted, Slurm's own defaults
 apply. Directories, globs and ordinary symlinks are not inputs; annexed files
 are. Commands are argument vectors, not shell snippets. The output names
-`execution.json`, `outcome.json`, `worker.log`, `.gitattributes` and
-`.gitmodules` are reserved.
+`execution.json`, `outcome.json` and `worker.log` are reserved, and no input or
+output may be a `.gitattributes`, `.gitignore` or `.gitmodules` file. Snapshot
+and result datasets ignore the user's global gitignore, and both `prepare` and
+`collect` check that DataLad committed every file.
 
 ```bash
 neurodesk jobs prepare --dataset DATASET --image tool.sif --request request.json
@@ -144,8 +146,9 @@ the analysis has no hidden dependency.
 
 Before claiming a run, the helper calls `sbatch --test-only` with the same
 options. Slurm rejects an invalid partition, account or resource request at
-this point, before anything is submitted. The error tells the user to fix the
-request's `slurm` section and prepare a new run. The helper then atomically
+this point, before anything is submitted. Nothing is claimed, so after a
+transient scheduler error `submit` can simply be repeated. An invalid option
+needs a fixed `slurm` section and a new run. The helper then atomically
 claims the run and flushes the submission intent, and calls
 `sbatch --parsable --no-requeue` once. A permanent claim prevents a
 second submission, including after a helper failure. If the response is

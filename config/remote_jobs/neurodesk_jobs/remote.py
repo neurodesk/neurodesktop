@@ -18,11 +18,9 @@ import sys
 import tempfile
 import uuid
 
-from .core import (JobError, atomic, canonical, digest, identifier, inventory,
+from .core import (GIT_METADATA, RESERVED_OUTPUTS, JobError, atomic, canonical, digest, identifier, inventory,
                    read, relative, resources, run, site as checked_site, timestamp, verify)
 
-RESERVED = {"execution.json", "outcome.json", "worker.log", ".gitattributes", ".gitmodules"}
-GIT_METADATA = {".gitattributes", ".gitignore", ".gitmodules"}
 
 
 def run_directory(site, run_id):
@@ -140,9 +138,9 @@ def submit(value):
         # section fails here instead of leaving an unrecoverable claim.
         run(["sbatch", "--test-only", *flags], input=script.encode(), timeout=60)
     except JobError as exc:
-        raise JobError(f"Slurm rejected this job's options, so nothing was submitted: {exc}\n"
-                       "Fix the slurm section of the request, then run prepare and submit "
-                       "again.") from None
+        raise JobError(f"Slurm's pre-check failed, so nothing was submitted: {exc}\n"
+                       "If Slurm reports an invalid option, fix the slurm section of the "
+                       "request, then prepare a new run. Otherwise, run submit again.") from None
     try:
         (directory / "submit.claim").mkdir()
     except FileExistsError:
@@ -380,7 +378,7 @@ def worker(directory):
             if validation.returncode:
                 raise JobError("Scientific validation failed; see worker.log")
         produced = published_files(output)
-        if set(produced) & RESERVED:
+        if set(produced) & RESERVED_OUTPUTS:
             raise JobError("The analysis wrote a file name reserved for job provenance")
         state["state"] = "publishing"
         atomic(journal / "state.json", state)
