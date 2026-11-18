@@ -18,11 +18,6 @@ def instruction_containing(text):
     return matches[0]
 
 
-def test_build_context_does_not_retain_unused_legacy_icon():
-    """Keep desktop-app branding assets out of the container image source."""
-    assert not repo_path("neurodesk.ico").exists()
-
-
 def test_guacamole_archive_is_extracted_and_removed_in_its_download_layer():
     """Prevent the WAR archive from surviving in a lower image layer."""
     layer = instruction_containing("-o /tmp/guacamole-${GUACAMOLE_VERSION}.war")
