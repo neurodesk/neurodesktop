@@ -218,3 +218,42 @@ def test_nudge_never_raises_into_connect():
     outcome = asyncio.run(nudge_module.nudge(connection, poller=FakePoller()))
 
     assert outcome == "error"
+
+
+def test_nudge_waits_for_delayed_kernel_using_server_timeout(monkeypatch):
+    module = load_nudge_module()
+    clock = types.SimpleNamespace(now=0.0)
+    loop = types.SimpleNamespace(time=lambda: clock.now)
+    client = FakeClient(FakeSession())
+    connection = FakeConnection(client)
+    connection.kernel_info_timeout = 180.0
+
+    class DelayedPoller(FakePoller):
+        async def poll(self, timeout_ms):
+            clock.now += timeout_ms / 1000
+            if clock.now >= 45:
+                client.shell.deliver([b"kernel_info_reply"])
+                client.iopub_channel.socket.deliver(IOPUB_RAW)
+                return [(client.shell, zmq.POLLIN),
+                        (client.iopub_channel.socket, zmq.POLLIN)]
+            return []
+
+    async def run():
+        monkeypatch.setattr(module.asyncio, "get_running_loop", lambda: loop)
+        return await module.nudge(connection, poller=DelayedPoller())
+
+    assert asyncio.run(run()) == "ready"
+    assert clock.now >= 45
+    assert connection.websocket_handler.written == [(IOPUB_FORWARDED, True)]
+    assert client.shell.closed and client.control.closed
+
+
+def test_nudge_explicit_timeout_overrides_server_timeout():
+    module = load_nudge_module()
+    client = FakeClient(FakeSession())
+    connection = FakeConnection(client)
+    connection.kernel_info_timeout = 180.0
+    assert asyncio.run(module.nudge(
+        connection, timeout=0, poller=FakePoller()
+    )) == "timeout"
+    assert client.session.sent == []

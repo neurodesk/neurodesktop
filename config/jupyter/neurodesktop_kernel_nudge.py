@@ -34,7 +34,7 @@ from jupyter_server.services.kernels.connection.base import (
 from tornado.websocket import WebSocketClosedError
 
 
-NUDGE_TIMEOUT_SECONDS = 10.0
+NUDGE_TIMEOUT_SECONDS = 60.0
 NUDGE_RESEND_SECONDS = 0.5
 
 
@@ -54,7 +54,7 @@ def forward_iopub_message(connection, msg_list) -> None:
 async def nudge(
     connection,
     *,
-    timeout: float = NUDGE_TIMEOUT_SECONDS,
+    timeout: float | None = None,
     resend_interval: float = NUDGE_RESEND_SECONDS,
     poller=None,
 ) -> str:
@@ -72,6 +72,8 @@ async def nudge(
     shell_socket = None
     control_socket = None
     try:
+        if timeout is None:
+            timeout = getattr(connection, "kernel_info_timeout", NUDGE_TIMEOUT_SECONDS)
         shell_socket = client.connect_shell()
         control_socket = client.connect_control()
         iopub_socket = client.iopub_channel.socket

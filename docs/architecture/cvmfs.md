@@ -395,3 +395,11 @@ Root startup repairs checkout ownership when the notebook UID or GID changes.
 It does not execute checkout code or traverse symbolic links, and skips files
 with multiple hard links. Read-only or foreign-owned HPC checkouts refuse the
 update with a permission error. The helper also refuses root execution.
+
+Container kernel readiness has a 180-second default budget, configured by
+`MappingKernelManager.kernel_info_timeout` in the image's Jupyter Server config.
+The patched documents WebSocket bridge uses the same budget, allowing cold
+CVMFS imports to finish before its readiness probe gives up. Operators can
+override the trait in server configuration or single-user server arguments.
+This bounds the initial handshake; it does not repair an already-stuck session
+or guarantee recovery when startup exceeds the budget.
