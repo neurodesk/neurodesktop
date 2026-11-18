@@ -351,6 +351,15 @@ def test_expired_connection_says_to_reconnect(jobs, site, tmp_path, short_home, 
         transport.SSH("fixture").command(["true"])
 
 
+def test_nul_delimited_listings_keep_leading_spaces(jobs, tmp_path):
+    _, core, _, _ = jobs
+    core.git(tmp_path, "init", "-q")
+    (tmp_path / " result.txt").write_text("x")
+    core.git(tmp_path, "add", " result.txt")
+    listing = core.git(tmp_path, "ls-files", "-z", strip=False)
+    assert listing.split("\0")[0] == " result.txt"
+
+
 def test_cluster_helper_parses_as_python_39():
     # Bunya's system Python is 3.9; the helper runs there as a zipapp.
     for path in (PACKAGE / "neurodesk_jobs").glob("*.py"):

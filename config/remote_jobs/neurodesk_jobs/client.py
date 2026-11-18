@@ -239,7 +239,7 @@ class Client:
             if destination and Path(destination).expanduser().resolve() != Path(receipt["path"]).parent.resolve():
                 raise JobError(f"Run is already archived at {receipt['path']}")
             return receipt
-        destination = Path(destination or self.state / "archives").expanduser()
+        destination = Path(destination or self.state / "archives").expanduser().resolve()
         destination.mkdir(parents=True, exist_ok=True, mode=0o700)
         target = destination / f"neurodesk-{run_id}-{collection['attempt_id']}.tar.gz"
         if target.exists():

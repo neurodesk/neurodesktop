@@ -33,7 +33,7 @@ def tracked_repositories(root):
         commit = git(path, "rev-parse", "HEAD")
         entry = {"path": prefix, "id": identity(path), "commit": commit}
         found.append(entry)
-        tree = git(path, "ls-tree", "-rz", "HEAD")
+        tree = git(path, "ls-tree", "-rz", "HEAD", strip=False)
         for item in tree.split("\0"):
             if not item:
                 continue
@@ -106,7 +106,7 @@ def capsule(source, image, spec, destination):
 
 
 def payload_files(dataset):
-    return [p for p in git(dataset, "ls-files", "-z").split("\0")
+    return [p for p in git(dataset, "ls-files", "-z", strip=False).split("\0")
             if p and not p.startswith(".datalad/") and p != ".gitattributes"]
 
 

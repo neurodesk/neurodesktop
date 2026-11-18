@@ -119,7 +119,11 @@ def test_snapshot_job_collection_and_offline_restore(cluster, monkeypatch):
     execution = json.loads((output / "execution.json").read_text())
     assert execution["manifest"] == manifest
     assert cli.collect(run_id) == collection
-    archive = cli.archive(run_id)
+    monkeypatch.chdir(tmp_path)
+    archive = cli.archive(run_id, Path("archives"))
+    assert Path(archive["path"]).is_absolute()
+    monkeypatch.chdir(source)
+    assert cli.archive(run_id) == archive
     # The cluster copy is not needed to restore the archive.
     for path in (tmp_path / "scratch").rglob("*"):
         if not path.is_symlink():

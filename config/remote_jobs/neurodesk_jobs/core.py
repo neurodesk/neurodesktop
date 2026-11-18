@@ -54,7 +54,7 @@ def atomic(path, value):
         Path(name).unlink(missing_ok=True)
 
 
-def run(argv, cwd=None, env=None, timeout=300, input=None):
+def run(argv, cwd=None, env=None, timeout=300, input=None, strip=True):
     env = dict(os.environ if env is None else env)
     # Load the optional next extension before core RIA imports. Late discovery
     # mixes old and patched IO classes in DataLad 1.8 when next is discovered late.
@@ -73,7 +73,9 @@ def run(argv, cwd=None, env=None, timeout=300, input=None):
     if result.returncode:
         raise JobError(f"{argv[0]} failed ({result.returncode}): "
                        + (result.stderr + result.stdout).decode(errors="replace")[-3000:])
-    return result.stdout.decode().strip()
+    output = result.stdout.decode()
+    # NUL-delimited listings keep names exactly, including leading spaces.
+    return output.strip() if strip else output
 
 
 def git(path, *args, **kwargs):
