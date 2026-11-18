@@ -1717,8 +1717,6 @@ RUN --mount=type=bind,source=config/jupyter,target=/tmp/jupyter,ro \
     && cp -a /tmp/remote_jobs /tmp/neurodesk-jobs-build \
     && /opt/conda/bin/pip install --no-deps /tmp/neurodesk-jobs-build \
     && install -m 0755 /tmp/remote_jobs/neurodesk-jobs /usr/local/bin/neurodesk-jobs \
-    && install -d -m 0755 /opt/neurodesktop/remote-jobs/profiles \
-    && install -m 0644 /tmp/remote_jobs/profiles/*.json /opt/neurodesktop/remote-jobs/profiles/ \
     && rm -rf /tmp/neurodesk-jobs-build \
     # Only the container tier ships: tests/unit/ asserts on repository sources
     # and runs in CI on a checkout, so it has nothing to say inside the image.

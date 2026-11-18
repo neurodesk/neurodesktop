@@ -5,8 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "neurodesk-jobs"
 version = "0.1.0"
-description = "Session-driven DataLad and SSH/Slurm job pilot"
-requires-python = ">=3.10"
+description = "Run DataLad-prepared Apptainer jobs on Slurm clusters over SSH"
+requires-python = ">=3.9"
 
 [tool.setuptools]
 packages = ["neurodesk_jobs"]
