@@ -61,8 +61,8 @@ async def nudge(
     """Nudge *connection*'s kernel bridge; return the outcome for logging.
 
     Outcomes: ``"ready"`` (a shell or control reply and one IOPub message
-    proved the bridge), ``"busy-skipped"``, ``"timeout"``, or ``"error"``.
-    The connection is usable after every outcome; only ``"ready"`` proves it.
+    proved the bridge), ``"busy-skipped"``, ``"timeout"``, ``"kernel-changed"``,
+    or ``"error"``. Only ``"ready"`` proves the bridge.
     """
     if getattr(connection.kernel_manager, "execution_state", None) == "busy":
         # Shell kernel-info requests queue behind the running execution and
@@ -74,6 +74,7 @@ async def nudge(
     try:
         if timeout is None:
             timeout = getattr(connection, "kernel_info_timeout", NUDGE_TIMEOUT_SECONDS)
+        ports = list(connection.kernel_manager.ports)
         shell_socket = client.connect_shell()
         control_socket = client.connect_control()
         iopub_socket = client.iopub_channel.socket
@@ -87,6 +88,14 @@ async def nudge(
         reply_seen = False
         iopub_seen = False
         while not (reply_seen and iopub_seen):
+            # Shutdown and startup restarts can invalidate the sockets while
+            # CVMFS is still loading. Do not spend the full readiness budget
+            # probing a removed kernel or peers on its previous ports.
+            if (
+                connection.kernel_id not in connection.multi_kernel_manager
+                or list(connection.kernel_manager.ports) != ports
+            ):
+                return "kernel-changed"
             now = loop.time()
             if now >= deadline:
                 connection.log.warning(

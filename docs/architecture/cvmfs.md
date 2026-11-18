@@ -403,3 +403,5 @@ CVMFS imports to finish before its readiness probe gives up. Operators can
 override the trait in server configuration or single-user server arguments.
 This bounds the initial handshake; it does not repair an already-stuck session
 or guarantee recovery when startup exceeds the budget.
+The budget also applies to upstream kernel startup and restart checks, so a
+failed restart can take up to 180 seconds to report.

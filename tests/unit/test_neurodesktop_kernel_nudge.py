@@ -12,6 +12,7 @@ import asyncio
 import logging
 import types
 
+import pytest
 import zmq
 from jupyter_server.services.kernels.connection.base import (
     serialize_msg_to_ws_v1,
@@ -110,11 +111,12 @@ class FakeConnection:
     def __init__(self, client, execution_state="idle"):
         self._client = client
         self.kernel_manager = types.SimpleNamespace(
-            execution_state=execution_state
+            execution_state=execution_state, ports=[41001, 41002]
         )
         self.websocket_handler = FakeWebsocketHandler()
         self.log = logging.getLogger("neurodesktop-kernel-nudge-test")
         self.kernel_id = "kernel-under-test"
+        self.multi_kernel_manager = {self.kernel_id: self.kernel_manager}
 
 
 def test_nudge_proves_reply_and_forwards_the_iopub_message():
@@ -257,3 +259,31 @@ def test_nudge_explicit_timeout_overrides_server_timeout():
         connection, timeout=0, poller=FakePoller()
     )) == "timeout"
     assert client.session.sent == []
+
+
+@pytest.mark.parametrize("change", ["shutdown", "restart"])
+def test_nudge_stops_when_kernel_disappears_or_changes_ports(monkeypatch, change):
+    module = load_nudge_module()
+    clock = types.SimpleNamespace(now=0.0)
+    loop = types.SimpleNamespace(time=lambda: clock.now)
+    client = FakeClient(FakeSession())
+    connection = FakeConnection(client)
+    connection.kernel_info_timeout = 180.0
+
+    class ChangedKernelPoller(FakePoller):
+        async def poll(self, timeout_ms):
+            clock.now += timeout_ms / 1000
+            if change == "shutdown":
+                connection.multi_kernel_manager.clear()
+            else:
+                connection.kernel_manager.ports[:] = [42001, 42002]
+            return []
+
+    async def run():
+        monkeypatch.setattr(module.asyncio, "get_running_loop", lambda: loop)
+        return await module.nudge(connection, poller=ChangedKernelPoller())
+
+    assert asyncio.run(run()) == "kernel-changed"
+    assert clock.now <= 0.501
+    assert len(client.session.sent) == 2
+    assert client.shell.closed and client.control.closed
