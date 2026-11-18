@@ -143,34 +143,48 @@ run there:
 
 ## Remote compute jobs
 
-Run `pytest tests/unit/test_remote_jobs.py` for submission races, lost responses,
-accounting uncertainty, cancellation and archive validation. These tests execute
-small scheduler command fixtures and do not require Slurm access.
+Run `pytest tests/unit/test_remote_jobs.py`. It drives the client and the
+cluster helper through local `ssh`, Slurm and Apptainer stand-ins. It covers:
+
+- site discovery and the errors users see, including rejected Slurm options;
+- checksummed staging and upload deduplication;
+- worker failures before analysis, failed validation and uncollectable outputs;
+- verified result downloads;
+- submission races, lost responses and accounting uncertainty;
+- cancellation and unsafe archives;
+- Python 3.9 syntax for the helper; standard-library APIs newer than 3.9
+  are not detected.
+
+It needs neither DataLad nor Slurm.
 
 In the image, as the notebook user, run
-`pytest /opt/tests/test_remote_jobs_image.py`. It runs the installed CLI and
-real DataLad/Git/annex operations: nested source snapshots, filesystem RIA
-retrieval with SSH disabled, rejected input pushes, independent output datasets,
-and archive restoration after removing the fixture's scratch store. The test
-uses its own temporary datasets and does not contact an HPC.
+`pytest /opt/tests/test_remote_jobs_image.py`. It uses real DataLad for
+nested source snapshots, collection into a result dataset, and archive
+restoration after the fixture's scratch store has been removed. The test
+does not contact an HPC.
 
-The [remote jobs site acceptance checklist](architecture/remote-jobs.md#site-acceptance-and-development)
-requires additional real SSH, Slurm, Apptainer, storage and MFA experiments on
-Bunya and Sherlock. Passing a local fixture does not establish site support.
-
-After `neurodesk jobs connect`, run a synthetic end-to-end analysis with the
-installed CLI against an explicitly configured site:
+Against a real site, run `neurodesk jobs connect HOST`, then run a synthetic
+end-to-end analysis with the installed CLI:
 
 ```bash
-python scripts/verify_remote_jobs.py --profile /project/site.json \
-  --image /project/busybox.sif --workspace /project/new-smoke-directory
+python scripts/verify_remote_jobs.py --image /project/busybox.sif \
+  --workspace /project/new-smoke-directory
 ```
 
-The SIF must contain `sh` and `awk`. This creates a nested input dataset,
-submits a real Slurm job, checks repeated submission returns the same ID,
-retrieves the validated mean, archives it and restores with Git SSH disabled.
-It retains its run, workspaces and archive for inspection. It does not remove
-site stores or prove the separate cancellation, MFA or filesystem gates.
+Add `--state DIR` if `connect` used one. The SIF must contain `sh` and `awk`.
+The script:
+
+- creates a nested input dataset;
+- submits a real Slurm job;
+- checks that repeated submission returns the same ID;
+- retrieves the validated mean;
+- archives it and restores the archive with Git SSH disabled.
+
+It keeps its run, workspaces and archive for inspection. Passing a local
+fixture does not establish site support. The
+[site acceptance checklist](architecture/remote-jobs.md#site-acceptance)
+lists the further SSH, Slurm, storage and MFA experiments. The script does not
+remove site stores or prove the separate cancellation, MFA or filesystem gates.
 
 ## Code quality checks
 

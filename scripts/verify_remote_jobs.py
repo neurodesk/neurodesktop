@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Run a synthetic job through the installed CLI against an explicitly chosen site.
+"""Run a synthetic job through the installed CLI against the connected site.
 
-Requires an authenticated SSH master, a configured profile, and an Apptainer
-SIF containing /bin/sh and awk (for example, BusyBox). Never deletes site data.
+Run `neurodesk jobs connect HOST` first. Requires an Apptainer SIF containing
+/bin/sh and awk (for example, BusyBox). Never deletes site data.
 """
 
 import argparse
@@ -15,7 +15,9 @@ import time
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", required=True, type=Path)
+    parser.add_argument("--state", type=Path,
+                        default=Path.home() / ".local/state/neurodesk-jobs",
+                        help="the --state directory used with connect")
     parser.add_argument("--image", required=True, type=Path)
     parser.add_argument("--workspace", required=True, type=Path)
     parser.add_argument("--timeout", type=int, default=600)
@@ -35,8 +37,8 @@ def main():
         return result.stdout
 
     def cli(action, *arguments):
-        reply = json.loads(execute(["neurodesk-jobs", "--profile", args.profile.resolve(),
-                                    "--state", root / "client", action, *arguments]))
+        reply = json.loads(execute(["neurodesk-jobs", "--state", args.state.resolve(),
+                                    action, *arguments]))
         print(json.dumps({"action": action, "result": reply}), flush=True)
         return reply
 
@@ -55,7 +57,8 @@ def main():
     execute(["datalad", "save", "-r", "-d", source, "-m", "Synthetic inputs"])
     specification = {"inputs": ["nested/numbers.txt", "nested/binary.bin", "analyze.sh", "validate.sh"],
                      "command": ["/inputs/analyze.sh", "argument with spaces", '{"key":1}'],
-                     "validate": ["sh", "/inputs/validate.sh"], "outputs": ["mean.txt"]}
+                     "validate": ["sh", "/inputs/validate.sh"], "outputs": ["mean.txt"],
+                     "slurm": {"time": "00:10:00", "mem": "1G"}}
     request = root / "request.json"
     request.write_text(json.dumps(specification))
     prepared = cli("prepare", "--dataset", source, "--image", args.image.resolve(), "--request", request)
@@ -76,7 +79,7 @@ def main():
     else:
         raise RuntimeError(f"Timed out observing {run_id}; the job was not automatically cancelled")
     collection = cli("collect", run_id)
-    assert (Path(collection["path"]) / "output/mean.txt").read_text() == "2.000000\n"
+    assert (Path(collection["path"]) / "mean.txt").read_text() == "2.000000\n"
     archive = cli("archive", run_id)
     offline = dict(env, GIT_SSH_COMMAND="/bin/false", GIT_ALLOW_PROTOCOL="file")
     execute(["neurodesk-jobs", "restore", archive["path"], root / "restored"], environment=offline)

@@ -1,241 +1,233 @@
 ---
 title: Remote compute jobs
-description: Experimental CLI for DataLad snapshots, SSH/Slurm jobs, and verified archives
+description: Experimental CLI that runs a DataLad-prepared Apptainer job on a Slurm cluster over SSH
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-11-05"
+last-reviewed: "2026-11-18"
 ---
 
 # Remote compute jobs
 
-`neurodesk jobs` submits one containerized analysis to a user's Slurm account
-through SSH. DataLad/git-annex transports the inputs and results through a RIA
-directory store. Jobs execute and publish independently of Neurodesktop.
-Collection and archiving require the client to reconnect. No Globus service,
-Forgejo runner, resident agent, or web UI is involved.
+`neurodesk jobs` runs one containerized analysis on a user's Slurm account
+through SSH. DataLad stays on the desktop. The cluster needs only:
 
-This is a pilot. **Bunya and Sherlock profiles are templates, not validated
-site integrations.** Configure the actual allocation, paths and tools, and
-complete the site acceptance checks below before using research data.
-The existing local Neurodesktop Slurm service and remote desktop connection
-scripts are separate features.
+- an SSH login;
+- Python 3.9 or newer on the login PATH;
+- Slurm with `sacct` accounting;
+- Apptainer or Singularity on the compute nodes;
+- shared home and scratch storage.
 
-## Configure a site
+It does not need DataLad, git-annex, modules, CVMFS, Globus, or a resident
+agent. Jobs run and publish while Neurodesktop is closed. Collection and
+archiving happen when the desktop reconnects. The
+[design record](../designs/remote-jobs-simplification.md) explains why it
+works this way. This is a pilot; see [site acceptance](#site-acceptance).
 
-Copy `/opt/neurodesktop/remote-jobs/profiles/bunya.json` or `sherlock.json`
-to persistent project storage. In a source checkout these files are under
-[`config/remote_jobs/profiles`](../../config/remote_jobs/profiles/).
-Replace all placeholders. The CLI rejects incomplete templates.
-
-| Field | Meaning |
-| --- | --- |
-| `host`, `transfer_host` | OpenSSH aliases configured by the user; they may be identical |
-| `state_root` | Private, **shared persistent** cluster directory for submission journals, helpers, logs and receipts; never node-local `/tmp` or purgeable scratch |
-| `store_root` | Private cluster RIA store, accessible at the same absolute path from command host, transfer host and compute nodes |
-| `work_root` | Private cluster workspaces, accessible to compute nodes; separate from the store and journal |
-| `archive_root` | Explicitly nominated persistent directory **mounted on the client**, with sufficient capacity for inputs, software and results |
-| `path`, `python`, `apptainer` | Cluster tool locations, including Python ≥3.10, DataLad, git-annex, Git, Slurm and Apptainer; no assumption of modules or CVMFS |
-| `resources` | `time`, `mem`, `cpus-per-task`; optional `account`, `partition`, `qos`, `gres` |
-| `scratch_retention_days` | Confirm the applicable retention window with the site; this is a warning, not a retention guarantee |
-
-Use a filesystem whose atomic directory creation and replacement work across
-login nodes for `state_root`. The user must confirm its storage policy; a
-directory existing does not establish persistence or backup. Keep the client
-`--state` directory on a persistent project mount too. One desktop process at a
-time owns changes to that directory; sharing it among independent desktops is
-outside this pilot.
-
-Set up the SSH aliases using the site's current connection instructions:
-[Sherlock connection guidance](https://www.sherlock.stanford.edu/docs/advanced-topics/connection/)
-and [UQ RCC documentation](https://docs.hpc.rcc.uq.edu.au/).
-Do not copy a private key or password into the profile. SSH handles interactive
-site authentication, including MFA. The CLI does not install authorized keys
-or alter site authentication policy.
+## Connect
 
 ```bash
-neurodesk jobs --profile /project/bunya.json --state /project/job-state connect
-neurodesk jobs --profile /project/bunya.json --state /project/job-state doctor
+neurodesk jobs connect bunya
 ```
 
-`connect` opens authenticated OpenSSH masters with private sockets under
-`~/.ssh/neurodesk-jobs`. Git, DataLad, annex and ORA reuse those connections
-through private SSH/SCP wrappers. Subsequent operations use `BatchMode=yes`,
-connection timeouts and keepalive limits. An expired connection causes an
-error; run `connect` again in a terminal. No SSH agent is forwarded to jobs.
-Job subprocesses request early loading of the optional `next` extension. When
-installed, loading it before core RIA imports avoids mixing old and patched
-transport classes. DataLad without that extension remains usable. This does
-not change the user's DataLad configuration for other work.
+The host is an alias from the user's `~/.ssh/config`. `connect` opens one
+OpenSSH master connection. That login is the only one that may prompt,
+including for site MFA such as Bunya's Okta push. The master's private socket
+is under `~/.ssh/neurodesk-jobs`, and it persists for 4 hours. Every later
+command reuses it with `BatchMode=yes`, connection timeouts and keepalive
+limits. An expired connection fails with an instruction to run `connect`
+again. No SSH agent is forwarded, and the tool never stores passwords or keys.
 
-`doctor` checks login tools and noninteractive transfer-host Git/annex commands.
-The transfer host must permit Git/ORA remote commands, not just SFTP. In
-particular, its noninteractive login PATH must find Git and git-annex; the
-profile's `path` is used by the helper and worker. Staging also checks that the
-command and transfer hosts see the same store. These checks do not establish
-compute-node access, scheduler accounting, MFA reuse or storage durability.
+On first use, `connect` discovers these values with one SSH command and saves
+them to `STATE/site.json`:
 
-## Prepare and run
+| Field | Discovered value |
+| --- | --- |
+| `python` | First `python3` (or `python3.X`, 3.9 or newer) on the login PATH |
+| `path` | The login PATH, used for the job script, which runs with `--export=NONE` |
+| `state_root` | `$HOME/.neurodesk-jobs`: persistent journals, helpers, logs and receipts |
+| `data_root` | `neurodesk-jobs` under the first writable `$SCRATCH`, `/scratch/user/$USER`, `/scratch/users/$USER` or `/scratch/$USER` |
 
-Start with a saved, clean DataLad dataset, including its installed subdatasets.
-Provide an Apptainer SIF image compatible with the selected cluster. The
-request lists exact files, command arguments, validation arguments and required
-nonempty output files. Directories and glob patterns are not supported.
-Include every script, template, licence file and other dependency the commands
-need. Ordinary symlinks are rejected; annexed files are supported.
+`--data-root PATH` overrides scratch detection. If no scratch directory is
+found, the error names that option. Running `connect` again with no host
+reuses the saved site. Naming a different host rediscovers and replaces the
+saved site, but runs keep the site they were prepared with. `connect` then
+installs the helper and reports the login checks. `doctor` repeats those
+checks, which cover Python, `sbatch`, `squeue`, `sacct` and writable roots.
+They do not require Apptainer on login nodes.
 
-For example, `request.json` for an image containing Python/nibabel:
+`STATE` defaults to `~/.local/state/neurodesk-jobs`; `--state` changes it.
+Keep it on persistent storage. Only one desktop process at a time changes a
+state directory.
+
+## Prepare and submit
+
+Start with a saved, clean DataLad dataset, including its installed
+subdatasets, and an Apptainer SIF compatible with the cluster. The request
+lists:
+
+- the exact input files;
+- the command and validation argument vectors;
+- the required nonempty outputs;
+- optional Slurm options.
 
 ```json
 {
   "inputs": ["subject/anat.nii.gz", "analyze.py", "validate.py"],
   "command": ["python", "/inputs/analyze.py", "/inputs/subject/anat.nii.gz", "/outputs/summary.json"],
   "validate": ["python", "/inputs/validate.py", "/outputs/summary.json"],
-  "outputs": ["summary.json"]
+  "outputs": ["summary.json"],
+  "slurm": {"time": "02:00:00", "mem": "16G", "cpus-per-task": 4}
 }
 ```
 
-The validation command must check scientific expectations appropriate to the
-analysis, not merely whether a file exists. Commands are argument vectors, not
-shell snippets. To run a shell pipeline, include a script in the input dataset.
-Output names `execution.json`, `outcome.json`, `worker.log`, `.gitattributes`
-and `.gitmodules` are reserved. Validation mounts the output dataset read-only.
+Slurm defaults are 1 hour, 4 GB and 1 CPU. `slurm` may also set `account`,
+`partition`, `qos` and `gres`. When those are omitted, Slurm's own defaults
+apply. Directories, globs and ordinary symlinks are not inputs; annexed files
+are. Commands are argument vectors, not shell snippets. The output names
+`execution.json`, `outcome.json` and `worker.log` are reserved, and no input or
+output may be a `.gitattributes`, `.gitignore` or `.gitmodules` file. Snapshot
+and result datasets ignore the user's global gitignore, and both `prepare` and
+`collect` check that DataLad committed every file.
 
 ```bash
-neurodesk jobs --profile /project/bunya.json --state /project/job-state prepare \
-  --dataset /project/dataset --image /project/tool.sif --request /project/request.json
-# Use the returned run_id in each following command.
-neurodesk jobs --profile /project/bunya.json --state /project/job-state stage RUN_ID
-neurodesk jobs --profile /project/bunya.json --state /project/job-state submit RUN_ID
-neurodesk jobs --profile /project/bunya.json --state /project/job-state status RUN_ID
-neurodesk jobs --profile /project/bunya.json --state /project/job-state logs RUN_ID
-neurodesk jobs --profile /project/bunya.json --state /project/job-state logs RUN_ID --attempt ATTEMPT_ID
-neurodesk jobs --profile /project/bunya.json --state /project/job-state cancel RUN_ID
+neurodesk jobs prepare --dataset DATASET --image tool.sif --request request.json
+neurodesk jobs submit RUN_ID      # uploads the run first if needed
+neurodesk jobs status RUN_ID
+neurodesk jobs logs RUN_ID [--attempt ATTEMPT_ID]
+neurodesk jobs cancel RUN_ID
 ```
 
-Preparation creates a new DataLad execution dataset containing selected input
-bytes in their original relative layout, a Git bundle for each source dataset,
-the SIF, and a checksummed manifest of dataset IDs, commits, commands and files.
-This materialized snapshot deliberately avoids runtime subdataset cloning:
-workers never follow `.gitmodules` or upstream content URLs. Source bundles
-preserve the pinned repository history; only selected content is included.
-Each run has its own snapshot, so the pilot trades deduplication and disk space
-for simple publication ownership. It does not copy or mutate the source dataset's
-working tree, aside from retrieving its requested annex content.
+`prepare` builds a local DataLad snapshot under `STATE/runs/RUN_ID/input`. It
+holds the selected input bytes in their relative layout, a Git bundle for each
+source dataset, the SIF, and a manifest. The manifest records dataset IDs,
+commits, commands and SHA-256 checksums. Workers never follow `.gitmodules` or
+upstream URLs. Each run is its own snapshot.
 
-Staging sends this snapshot over SSH to RIA. A successful transfer is labelled
-`staged`, with worker verification pending. Before analysis, the worker clones
-Git metadata from the filesystem RIA URL, creates a fresh ORA reader with
-explicit read and push URLs, retrieves only from that sibling and hashes every
-required file. Inherited special-remote configurations are never enabled.
-Missing or corrupt input is `inputs-missing` and prevents analysis.
-Staging records the tools' versions; workers must report the same versions
-before execution. Git transports other than local files are disabled in workers.
-Git push URLs are disabled, and the input annex sibling is marked read-only
-and ignored after retrieval. Inputs are mounted `/inputs:ro`; outputs are
-mounted `/outputs:rw`. These protect against accidental writes by the same
-Unix user. Annexed input files are unlocked into ordinary files before mounting
-`data/`, so their links cannot break at the container boundary. This is
-not a defence against hostile code. `--containall --cleanenv --no-home` isolates the
-analysis environment. This does not promise a network sandbox; the site's
-offline-worker test must establish that the analysis has no hidden dependency.
+`stage`, which `submit` runs automatically, uploads only the SIF and the
+selected inputs. They go into a content-addressed store at
+`data_root/objects/<sha[:2]>/<sha256>`. The helper checks each object's size
+and SHA-256 before publishing it read-only, and skips objects that are already
+present. A reused image therefore uploads once. Source bundles stay on the
+desktop.
 
-The submitted script references an immutable, version-addressed helper zipapp
-on shared storage. It launches no persistent process outside the allocation.
-Every actual worker start, including a forced restart, creates an exclusive
-attempt directory and a **new output dataset ID**, Git repository and annex
-storage path. Workers never publish into another attempt or an input repository.
-No shared result branches, RIA aliases or result index need a global push lock.
+## Worker
+
+The job script runs an immutable, version-addressed helper zipapp from
+`state_root/helpers`. Each worker start, including a forced restart, creates
+an exclusive attempt journal and a workspace under `data_root/work/ATTEMPT`.
+The worker:
+
+1. finds `apptainer`, or else `singularity`, on the compute node's PATH;
+2. copies inputs out of the store and verifies every checksum, including the
+   image's; missing or corrupt content is `inputs-missing`, and the analysis
+   does not start;
+3. runs `exec --containall --cleanenv --no-home` with `/inputs` read-only and
+   `/outputs` read-write, after removing the `APPTAINER_BIND*` and
+   `SINGULARITY_BIND*` variables, so binds set through the environment, such
+   as Bunya's `/scratch`, are not added; binds in the site's `apptainer.conf`
+   still apply;
+4. requires the listed outputs to be nonempty, then runs validation with
+   `/outputs` read-only;
+5. requires every output to be a regular file with a safe relative path and
+   no Git metadata, so that `collect` can commit it;
+6. writes `execution.json` (manifest, compute host, tool versions and command),
+   `outcome.json` and `worker.log`, makes the outputs read-only, and records a
+   receipt of every output's SHA-256.
+
+The job script uses the login PATH saved by `connect`. On a site that
+provides Apptainer only through `module load`, the worker reports that no
+runtime was found. Add the module's `bin` directory to `path` in
+`STATE/site.json`, then prepare a new run, which keeps a copy of the site.
+
+The container is not a network sandbox. A site's offline test must show that
+the analysis has no hidden dependency.
 
 ## Recovery and result states
 
-The remote helper atomically claims a run, writes and flushes submission intent,
-then calls `sbatch --parsable --no-requeue` once. A permanent claim prevents a
-second submission, including after helper failure. The request digest and site
-configuration cannot change for an existing run.
+Before claiming a run, the helper calls `sbatch --test-only` with the same
+options. Slurm rejects an invalid partition, account or resource request at
+this point, before anything is submitted. Nothing is claimed, so after a
+transient scheduler error `submit` can simply be repeated. An invalid option
+needs a fixed `slurm` section and a new run. The helper then atomically
+claims the run and flushes the submission intent, and calls
+`sbatch --parsable --no-requeue` once. A permanent claim prevents a
+second submission, including after a helper failure. If the response is
+lost, the state stays `submission-unknown`, and `submit` exits with an error
+that says so. Repeating `submit` returns the existing record and does not call
+`sbatch` again.
 
-If the response is lost, the state remains `submission-unknown`. Repeating
-`submit` returns the existing record; it does not call `sbatch` again. `status`
-correlates owner, run name and scheduler comment in `squeue`/`sacct`. Accounting
-must retain job comments to recover a lost job ID. For a recorded job ID, an
-empty accounting comment is accepted only with the matching owner/name/ID.
-No matches, unavailable accounting, conflicting matches or a missing journal
-remain uncertain. Resolve those cases with the site's scheduler evidence; a
-new `prepare` explicitly creates a distinct run and may duplicate work if the
-old submission was accepted. There is no “force retry” of an uncertain run.
+`status` correlates the owner, run name and scheduler comment in `squeue` and
+`sacct`. Accounting must keep job comments to recover a lost job ID. No
+matches, unavailable accounting, conflicting matches and a missing journal
+all remain uncertain. Resolve those cases with scheduler evidence. A new
+`prepare` creates a distinct run and may duplicate accepted work.
 
 | Evidence | Meaning |
 | --- | --- |
 | Accepted job ID | Slurm accepted the request; computation has not necessarily started |
+| Attempt `inputs-missing` | Staged content was missing or corrupt; analysis did not start |
+| Attempt `failed` | The runtime was missing, or analysis, validation or publication failed; see `error` and `logs` |
 | Attempt `running` | Inputs verified; analysis started |
-| Attempt `publishing`, zero analysis/validation exit codes | Computation and validation passed; publication still pending |
-| Attempt `site-results-available` and receipt | Output metadata and bytes were copied back from RIA and verified |
+| Attempt `site-results-available` and receipt | Analysis and validation passed; outputs are checksummed on scratch |
 | Slurm `COMPLETED`, exit `0:0`, valid receipt | Eligible for collection |
-| `collection.json` | Client retrieved and verified one canonical result and its inputs |
+| `collection.json` | The client downloaded, verified and committed one canonical result |
 | `archive.json` | A self-contained archive was independently restored and verified |
 
-`datalad run` records the actual computation. A separate attempt journal records
-failures even when no DataLad commit is produced. Cancellation is a request
-until Slurm confirms termination. Timeout, OOM, cancellation, a killed worker
-or an unknown scheduler state cannot be overridden by a receipt. Workspaces
-are retained after failures. The client chooses the first eligible, verified
-attempt as the canonical result; it reports other attempts without merging them.
+Timeout, OOM, cancellation, a killed worker or an unknown scheduler state
+cannot be overridden by a receipt. Workspaces are kept after failures.
 
 ## Collect, archive and restore
 
 ```bash
-neurodesk jobs --profile /project/bunya.json --state /project/job-state collect RUN_ID
-neurodesk jobs --profile /project/bunya.json --state /project/job-state archive RUN_ID
-neurodesk jobs restore /archive/neurodesk-RUN-ATTEMPT.tar.gz /project/restored
+neurodesk jobs collect RUN_ID
+neurodesk jobs archive RUN_ID [--to DIRECTORY]
+neurodesk jobs restore ARCHIVE.tar.gz DESTINATION
 ```
 
-Collection clones metadata before retrieving bytes and verifies both the
-successful result and its execution inputs. The archive contains Git bundles,
-all selected input and output content, the SIF, analysis code, manifests and
-execution evidence. Archive publication refuses to overwrite an existing file.
-Verification restores its datasets into a new directory and checks commits,
-identities and hashes. `restore` needs DataLad/Git/annex but no cluster, source
-repositories, credentials or scratch store. It rejects archive links and path
-traversal. Previously collected data can be archived after accounting expires.
+`collect` downloads every receipt file through the helper and checks each
+against its SHA-256. It then saves the files as a new local DataLad dataset
+at `STATE/runs/RUN_ID/output`. If several attempts qualify, it chooses the
+first eligible verified attempt and reports the others without merging them.
 
-`archive_root` must be a user-confirmed persistent filesystem. For Bunya RDM,
-use a permitted mounted archive destination for these bundles, according to
-the applicable project policy. This version does not implement a remote-only
-RDM uploader. Never put the active RIA store or Git working directories on
-QRISdata. A downloaded bundle copied elsewhere outside the tool needs its own
-verified receipt and restore check before that destination counts as preserved.
+`archive` writes a tarball under `STATE/archives`, or under `--to`. The
+tarball holds Git bundles and the plain bytes of the input snapshot and the
+output dataset, together with the run, collection and status records. The
+command restores the tarball into a new directory and checks commits,
+identities and hashes before issuing a receipt. It refuses to overwrite an
+existing archive.
 
-All temporary datasets and scratch siblings are untrusted in annex copy
-accounting. The tool never drops data or cleans up old attempts automatically.
-Plan byte and inode capacity for snapshot copies, working clones, failed attempts
-and verification clones. While the desktop is off, accepted jobs can finish and
-publish, but results remain exposed to scratch purging until collection and
-archiving occur. A saved receipt is evidence of a past verification, not ongoing
-monitoring of the archive's availability or backup policy.
+`restore` needs DataLad, Git and git-annex, but no cluster, credentials or
+scratch store. It rejects links and path traversal. Choose an archive
+destination whose retention and backup policy suits the project. Never put
+active DataLad work on QRISdata.
 
-## Site acceptance and development
+Scratch copies are not preservation copies. The tool never drops data or
+cleans up attempts automatically. Collect results before the site purges
+scratch.
 
-On **each** site, using synthetic/public data, record:
+## Site acceptance
 
-1. One interactive authentication carrying a full push/get cycle on actual
-   command/transfer aliases; disconnect, bounded failure and reauthentication.
-2. Atomic claim/journal visibility and concurrent claims from two login nodes.
-3. A nested source dataset and staged SIF executing and publishing without
-   external worker transfers or credentials; accidental input pushes fail.
-4. Interrupted transfer, simultaneous submission retries, lost `sbatch` response
-   and delayed/unavailable accounting, with no automatic duplicate submission.
-5. Concurrent jobs and repeated worker starts with distinct output dataset IDs.
-6. Queued/running cancellation, timeout, OOM, full storage and publication
-   failure, with no false success.
-7. Desktop shutdown after submission, reconnect/collection, and missing inputs
-   failing before analysis. Verify scratch stores cannot justify a last-copy drop.
-8. Archive restoration after the scratch store is unavailable. Confirm storage
-   permissions, retention, RDM policy and an independent retained input copy.
-9. The same analysis at both sites, using predetermined scientific tolerances.
+Bunya passed the DataLad example and `scripts/verify_remote_jobs.py` on
+18 November 2026 (see the design record). Before research use on any site,
+run these checks with synthetic or public data:
 
-Implementation lives in [`config/remote_jobs`](../../config/remote_jobs/).
-The CLI can run from a checkout with `PYTHONPATH=config/remote_jobs python -m
-neurodesk_jobs.cli ...`. Unit tests execute scheduler failure scenarios with
-small command fixtures. Installed-image tests exercise actual DataLad/RIA and
-offline archive restoration; see [testing](../testing.md#remote-compute-jobs).
-`datalad-slurm` is not used: the pilot needs the explicit remote submission
-journal and independent attempt datasets regardless of scheduling adapter.
+1. One interactive login reused through submit and collect; expiry and
+   reconnection.
+2. Concurrent submissions from two login nodes, with no duplicate jobs.
+3. A lost `sbatch` response and delayed accounting.
+4. Queued and running cancellation, timeout, OOM, a full disk and a failed
+   validation, with no false success.
+5. Desktop shutdown after submission, then collection.
+6. Archive restoration after scratch is unavailable, with confirmed storage
+   permissions, retention and RDM policy.
+7. The same analysis on a second site, within predetermined scientific
+   tolerances.
+
+## Development
+
+The implementation is in [`config/remote_jobs`](../../config/remote_jobs/).
+Run it from a checkout with
+`PYTHONPATH=config/remote_jobs python -m neurodesk_jobs.cli ...`. The cluster
+helper must remain standard-library Python 3.9. `remote.py` is the cluster
+side, and DataLad is used only in `data.py` and `client.py` on the desktop.
+See [testing](../testing.md#remote-compute-jobs).

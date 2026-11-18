@@ -1,10 +1,17 @@
-"""Real DataLad RIA and archive round trips using the installed job package."""
+"""Real DataLad snapshots, collection and archive round trips using the installed job package.
 
+`ssh`, Slurm and Apptainer are local stand-ins: the cluster side is the same
+standard-library helper that runs on a real site.
+"""
+
+import getpass
+import json
+import os
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
 import shutil
 import subprocess
-import tarfile
+import sys
+import tempfile
 
 import pytest
 
@@ -18,76 +25,115 @@ def test_installed_remote_jobs_cli():
     assert "collect" in result.stdout and "archive" in result.stdout
 
 
-def test_ria_nested_snapshot_publication_and_offline_restore(tmp_path, monkeypatch):
+def executable(path, text):
+    path.write_text(text)
+    path.chmod(0o755)
+
+
+@pytest.fixture
+def cluster(tmp_path, monkeypatch):
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    executable(binaries / "ssh", f"""#!{sys.executable}
+import os, sys
+args = sys.argv[1:]
+while args and args[0] in ("-o", "-O"):
+    if args[0] == "-O":
+        sys.exit(0)
+    args = args[2:]
+os.execvp("sh", ["sh", "-c", args[1]])
+""")
+    executable(binaries / "sbatch", f"""#!{sys.executable}
+import os, pathlib, subprocess, sys
+if sys.argv[1:] == ["--version"]:
+    print("slurm fixture"); sys.exit(0)
+if "--test-only" in sys.argv:
+    sys.exit(0)
+options = dict(arg[2:].split("=", 1) for arg in sys.argv[1:] if "=" in arg)
+code = subprocess.run(["sh", "-c", sys.stdin.read()],
+                      env=dict(os.environ, SLURM_JOB_ID="77", SLURM_RESTART_COUNT="0")).returncode
+pathlib.Path({str(tmp_path / 'sacct.rows')!r}).write_text("|".join([
+    "77", options["job-name"], options["comment"], "COMPLETED" if code == 0 else "FAILED",
+    f"{{code}}:0", {getpass.getuser()!r}]) + "\\n")
+print("77")
+""")
+    executable(binaries / "sacct", f"#!/bin/sh\ncat {tmp_path / 'sacct.rows'} 2>/dev/null || true\n")
+    executable(binaries / "squeue", "#!/bin/sh\n")
+    executable(binaries / "apptainer", f"""#!{sys.executable}
+import subprocess, sys
+args = sys.argv[1:]
+if args == ["--version"]:
+    print("apptainer version fixture"); sys.exit(0)
+binds, index = {{}}, 1
+while args[index].startswith("--"):
+    if args[index] == "--bind":
+        source, target, _ = args[index + 1].split(":")
+        binds[target] = source
+    index += 2 if args[index] in ("--bind", "--pwd") else 1
+command = [binds["/inputs"] + a[7:] if a.startswith("/inputs") else
+           binds["/outputs"] + a[8:] if a.startswith("/outputs") else a
+           for a in args[index + 1:]]
+sys.exit(subprocess.run(command, cwd=binds["/outputs"]).returncode)
+""")
+    monkeypatch.setenv("PATH", str(binaries) + ":" + os.environ["PATH"])
+    with tempfile.TemporaryDirectory(prefix="nj-home-", dir="/tmp") as home:
+        monkeypatch.setattr(Path, "home", lambda: Path(home))
+        yield tmp_path
+
+
+def test_snapshot_job_collection_and_offline_restore(cluster, monkeypatch):
     from neurodesk_jobs import client, core, data
 
-    monkeypatch.setenv("GIT_AUTHOR_NAME", "Job test")
-    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "job@test.invalid")
-    monkeypatch.setenv("GIT_COMMITTER_NAME", "Job test")
-    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "job@test.invalid")
+    for role in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{role}_NAME", "Job test")
+        monkeypatch.setenv(f"GIT_{role}_EMAIL", "job@test.invalid")
+    tmp_path = cluster
     source = tmp_path / "source"
     data.create(source)
     core.run(["datalad", "create", "-d", source, source / "a"])
     (source / "a" / "numbers.bin").write_bytes(b"1\n2\n3\n")
     data.save(source / "a", "Inputs")
-    (source / "analyze.sh").write_text("cat /inputs/a/numbers.bin > /outputs/result.txt\n")
+    (source / "analyze.sh").write_text("cat \"$1\" > \"$2\"\n")
     core.run(["datalad", "save", "-r", "-d", source, "-m", "Pinned input"])
     image = tmp_path / "image.sif"
     image.write_bytes(b"software artifact used only in this storage test")
-    spec = {"inputs": ["analyze.sh", "a/numbers.bin"],
-            "command": ["sh", "/inputs/analyze.sh"],
-            "validate": ["test", "-s", "/outputs/result.txt"], "outputs": ["result.txt"]}
-    capsule = tmp_path / "capsule"
-    manifest = data.capsule(source, image, spec, capsule)
+    request = {"inputs": ["analyze.sh", "a/numbers.bin"],
+               "command": ["sh", "/inputs/analyze.sh", "/inputs/a/numbers.bin", "/outputs/result.txt"],
+               "validate": ["test", "-s", "/outputs/result.txt"], "outputs": ["result.txt"]}
+    site = {"host": "fixture", "python": sys.executable, "path": os.environ["PATH"],
+            "state_root": str(tmp_path / "journal"), "data_root": str(tmp_path / "scratch")}
+    # A personal global gitignore must not drop snapshot inputs or results.
+    (tmp_path / "global-ignore").write_text("*.bin\nresult.txt\n")
+    (tmp_path / "gitconfig").write_text(f"[core]\n\texcludesFile = {tmp_path / 'global-ignore'}\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    state = tmp_path / "client"
+    cli = client.Client(site, state)
+    run_id = cli.prepare(source, image, request)["run_id"]
+    manifest = cli.record(run_id)["manifest"]
     assert len(manifest["sources"]) == 2
-    store = tmp_path / "store"
-    data.publish(capsule, data.store_url(store))
-    core.git(capsule, "remote", "remove", "site")
-    data.publish(capsule, data.store_url(store))
-    # Force every Git SSH/HTTP fallback to fail. RIA content uses local files.
-    monkeypatch.setenv("GIT_SSH_COMMAND", "/bin/false")
-    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file")
-    clone = data.checkout(data.store_url(store), data.identity(capsule),
-                          core.git(capsule, "rev-parse", "HEAD"), tmp_path / "clone")
-    core.verify(clone, manifest["files"])
-    with pytest.raises(core.JobError):
-        core.git(clone, "push", "origin", "HEAD:refs/heads/accidental")
-    (clone / "accidental.bin").write_bytes(bytes(range(256)))
-    core.git(clone, "annex", "add", "--force-large", "accidental.bin")
-    with pytest.raises(core.JobError):
-        core.git(clone, "annex", "copy", "--to", "read-store", "--", "accidental.bin")
-    core.git(clone, "reset", "--hard", "HEAD")
-    # Every result is a new dataset, not a branch or a clone of a previous run.
-    def result_dataset(index):
-        output = tmp_path / f"output-{index}"
-        data.create(output)
-        (output / "result.bin").write_bytes(bytes(range(256)) * 4)
-        data.save(output, "Result")
-        receipt = data.verified_publication(output, store, {"attempt": index})
-        return output, receipt
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        datasets = list(pool.map(result_dataset, range(2)))
-    assert datasets[0][1]["dataset_id"] != datasets[1][1]["dataset_id"]
-    with pytest.raises(core.JobError):
-        core.git(datasets[0][0], "annex", "drop", "--numcopies=1", "result.bin")
-    assert (datasets[0][0] / "result.bin").is_file()
-    exported = tmp_path / "exported"
-    exported.mkdir()
-    metadata = {"run": {"run_id": "a" * 32}, "datasets": {}}
-    for name, dataset in (("input", clone), ("output", datasets[0][0])):
-        metadata["datasets"][name] = data.archive_payload(dataset, exported / name)
-    core.atomic(exported / "archive.json", metadata)
-    archive_path = tmp_path / "archive.tar.gz"
-    with tarfile.open(archive_path, "w:gz") as archive:
-        for item in exported.iterdir():
-            archive.add(item, arcname=item.name)
-    # Remove the site store before restoring, including read-only annex objects.
-    for path in store.rglob("*"):
+    assert cli.submit(run_id)["state"] == "accepted"
+    collection = cli.collect(run_id)
+    output = Path(collection["path"])
+    assert (output / "result.txt").read_bytes() == b"1\n2\n3\n"
+    assert core.git(output, "rev-parse", "HEAD") == collection["commit"]
+    execution = json.loads((output / "execution.json").read_text())
+    assert execution["manifest"] == manifest
+    assert cli.collect(run_id) == collection
+    monkeypatch.chdir(tmp_path)
+    archive = cli.archive(run_id, Path("archives"))
+    assert Path(archive["path"]).is_absolute()
+    monkeypatch.chdir(source)
+    assert cli.archive(run_id) == archive
+    # The cluster copy is not needed to restore the archive.
+    for path in (tmp_path / "scratch").rglob("*"):
         if not path.is_symlink():
             path.chmod(0o700 if path.is_dir() else 0o600)
-    shutil.rmtree(store)
-    client.restore(archive_path, tmp_path / "restored")
-    assert (tmp_path / "restored/output/result.bin").read_bytes() == bytes(range(256)) * 4
-    assert (tmp_path / "restored/input/data/a/numbers.bin").read_text() == "1\n2\n3\n"
-    assert core.git(tmp_path / "restored/output", "rev-parse", "HEAD") == datasets[0][1]["commit"]
-    assert "origin" not in core.git(tmp_path / "restored/output", "remote").splitlines()
+    shutil.rmtree(tmp_path / "scratch")
+    offline = dict(GIT_SSH_COMMAND="/bin/false", GIT_ALLOW_PROTOCOL="file")
+    for key, value in offline.items():
+        monkeypatch.setenv(key, value)
+    restored = client.restore(archive["path"], tmp_path / "restored")
+    assert restored["run_id"] == run_id
+    assert (tmp_path / "restored/output/result.txt").read_bytes() == b"1\n2\n3\n"
+    assert (tmp_path / "restored/input/data/a/numbers.bin").read_bytes() == b"1\n2\n3\n"
+    assert core.git(tmp_path / "restored/output", "rev-parse", "HEAD") == collection["commit"]

@@ -54,7 +54,7 @@ def atomic(path, value):
         Path(name).unlink(missing_ok=True)
 
 
-def run(argv, cwd=None, env=None, timeout=300, input=None):
+def run(argv, cwd=None, env=None, timeout=300, input=None, strip=True):
     env = dict(os.environ if env is None else env)
     # Load the optional next extension before core RIA imports. Late discovery
     # mixes old and patched IO classes in DataLad 1.8 when next is discovered late.
@@ -73,7 +73,9 @@ def run(argv, cwd=None, env=None, timeout=300, input=None):
     if result.returncode:
         raise JobError(f"{argv[0]} failed ({result.returncode}): "
                        + (result.stderr + result.stdout).decode(errors="replace")[-3000:])
-    return result.stdout.decode().strip()
+    output = result.stdout.decode()
+    # NUL-delimited listings keep names exactly, including leading spaces.
+    return output.strip() if strip else output
 
 
 def git(path, *args, **kwargs):
@@ -97,44 +99,64 @@ def identifier(value):
     return value
 
 
-def profile(value):
-    required = {"name", "host", "transfer_host", "state_root", "store_root",
-                "work_root", "archive_root", "path", "python", "apptainer",
-                "resources", "scratch_retention_days"}
-    if not isinstance(value, dict) or set(value) != required:
-        raise JobError(f"Profile fields must be: {', '.join(sorted(required))}")
-    for key in ("name", "host", "transfer_host"):
-        if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", value[key]):
-            raise JobError(f"{key} must be a name/SSH alias, with no user or options")
-    for key in ("state_root", "store_root", "work_root", "archive_root",
-                "python", "apptainer"):
-        if (not isinstance(value[key], str) or not value[key].startswith("/")
-                or ".." in Path(value[key]).parts or "REPLACE" in value[key]
-                or any(c in value[key] for c in "\n\r\0:,")):
-            raise JobError(f"Configure an absolute {key}; templates are not site support")
-    roots = [Path(value[k]) for k in ("state_root", "store_root", "work_root")]
-    if any(a == b or a in b.parents or b in a.parents
-           for i, a in enumerate(roots) for b in roots[i + 1:]):
-        raise JobError("Site state, store, and work roots must be separate directories")
-    if not isinstance(value["path"], str) or not all(
-            part.startswith("/") and "REPLACE" not in part
-            for part in value["path"].split(":")):
-        raise JobError("path must explicitly locate the cluster tools")
-    allowed = {"account", "partition", "time", "mem", "cpus-per-task", "gres", "qos"}
-    if (not value["resources"] or set(value["resources"]) - allowed
-            or not {"time", "mem", "cpus-per-task"} <= set(value["resources"])):
-        raise JobError("Specify time, mem, cpus-per-task and only supported resource flags")
-    for option in value["resources"].values():
-        if not re.fullmatch(r"[a-zA-Z0-9_:.,+-]+", str(option)):
-            raise JobError("Invalid Slurm resource value")
-    if type(value["scratch_retention_days"]) is not int or value["scratch_retention_days"] < 1:
-        raise JobError("Set the site's actual scratch retention window")
+SITE_FIELDS = ("host", "python", "path", "state_root", "data_root")
+DEFAULT_RESOURCES = {"time": "01:00:00", "mem": "4G", "cpus-per-task": 1}
+SLURM_OPTIONS = {"account", "partition", "time", "mem", "cpus-per-task", "gres", "qos"}
+CONNECT_HINT = "run: neurodesk jobs connect HOST (an alias from ~/.ssh/config)"
+# Written by the worker into every result.
+RESERVED_OUTPUTS = {"execution.json", "outcome.json", "worker.log"}
+# Would change what DataLad commits in the snapshot or the result dataset.
+GIT_METADATA = {".gitattributes", ".gitignore", ".gitmodules"}
+
+
+def host(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", value):
+        raise JobError(f"SSH host {value!r} must be an alias from ~/.ssh/config "
+                       "(letters, digits, '.', '_' or '-'; no user@ or options), "
+                       "for example: neurodesk jobs connect bunya")
     return value
 
 
+def site(value, source="site configuration"):
+    """Validate the site record that `connect` discovers and saves."""
+    if not isinstance(value, dict):
+        raise JobError(f"{source} is not a JSON object; {CONNECT_HINT}")
+    problems = [f"missing {key!r}" for key in SITE_FIELDS if key not in value]
+    problems += [f"unknown field {key!r}" for key in sorted(set(value) - set(SITE_FIELDS))]
+    if problems:
+        raise JobError(f"{source}: {'; '.join(problems)}. Re-run connect to rediscover the "
+                       f"site: neurodesk jobs connect {value.get('host', 'HOST')}")
+    host(value["host"])
+    for key in ("python", "state_root", "data_root"):
+        path = value[key]
+        if (not isinstance(path, str) or not path.startswith("/") or ".." in Path(path).parts
+                or any(c in path for c in "\n\r\0:")):
+            raise JobError(f"{source}: {key}={path!r} must be an absolute cluster path")
+    if Path(value["state_root"]) == Path(value["data_root"]):
+        raise JobError(f"{source}: state_root and data_root must be different directories")
+    if not isinstance(value["path"], str) or "\0" in value["path"]:
+        raise JobError(f"{source}: path must be the cluster's PATH string")
+    return value
+
+
+def resources(value):
+    """Merge a request's optional Slurm options with the defaults."""
+    merged = dict(DEFAULT_RESOURCES)
+    merged.update(value or {})
+    return merged
+
+
 def request(value):
-    if not isinstance(value, dict) or set(value) != {"inputs", "command", "validate", "outputs"}:
-        raise JobError("Request needs inputs, command, validate, and outputs")
+    required = {"inputs", "command", "validate", "outputs"}
+    if not isinstance(value, dict) or not required <= set(value) or set(value) - required - {"slurm"}:
+        raise JobError("Request needs inputs, command, validate and outputs, "
+                       "plus an optional slurm section")
+    slurm = value.get("slurm", {})
+    if not isinstance(slurm, dict) or set(slurm) - SLURM_OPTIONS:
+        raise JobError("slurm may only set: " + ", ".join(sorted(SLURM_OPTIONS)))
+    for option, setting in slurm.items():
+        if not re.fullmatch(r"[a-zA-Z0-9_:.,+-]+", str(setting)):
+            raise JobError(f"Invalid slurm {option} value: {setting!r}")
     for key in ("inputs", "outputs"):
         if not isinstance(value[key], list) or not value[key]:
             raise JobError(f"{key} must list exact required files")
@@ -146,8 +168,12 @@ def request(value):
         if (not isinstance(value[key], list) or not value[key]
                 or any(not isinstance(x, str) or "\0" in x for x in value[key])):
             raise JobError(f"{key} must be a nonempty argument vector")
-    if set(value["outputs"]) & {"execution.json", "outcome.json", "worker.log", ".gitattributes", ".gitmodules"}:
-        raise JobError("Output name is reserved for job provenance")
+    if set(value["outputs"]) & RESERVED_OUTPUTS:
+        raise JobError("Output names " + ", ".join(sorted(RESERVED_OUTPUTS))
+                       + " are reserved for job provenance")
+    for item in value["inputs"] + value["outputs"]:
+        if PurePosixPath(item).name in GIT_METADATA:
+            raise JobError(f"Git metadata files cannot be job inputs or outputs: {item}")
     return value
 
 

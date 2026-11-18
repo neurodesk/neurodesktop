@@ -22,7 +22,7 @@ under [`docs/architecture/`](architecture/). The wiki entry point is
 | [Neurodesk command](architecture/neurodesk-cli.md) | The `neurodesk` dispatcher for the helper commands, and its `check`, `test` and `info` commands |
 | [Tool citations](architecture/citations.md) | Lmod usage recording and the `neurodesk cite` command that writes `CITATIONS.md` |
 | [uv Python environments](architecture/uv-environments.md) | Installed `neurodesk uv` CLI, project kernels, persistence, and migration |
-| [Remote compute jobs](architecture/remote-jobs.md) | Experimental DataLad/SSH/Slurm CLI, recovery, archives and site acceptance |
+| [Remote compute jobs](architecture/remote-jobs.md) | Experimental CLI that runs DataLad-prepared Apptainer jobs on Slurm over SSH, with recovery and archives |
 | [Desktop environment](architecture/desktop.md) | LXDE over VNC/RDP through Guacamole, voxl desktop streaming, clipboard sync, Firefox profiles, office file associations |
 | [Glass runtime](architecture/glass.md) | Experimental CC native desktop, initialization, security and acceptance |
 | [Kasm image](architecture/kasm.md) | Separate Kasm Workspaces image, build and run commands, desktop startup, and home persistence |

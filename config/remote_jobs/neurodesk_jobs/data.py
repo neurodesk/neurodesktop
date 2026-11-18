@@ -1,10 +1,7 @@
-"""Immutable execution capsules and independent RIA result datasets."""
+"""Desktop-side DataLad: execution snapshots, result datasets and archives."""
 
 from pathlib import Path
-import re
 import shutil
-import tempfile
-from urllib.parse import quote
 
 from .core import JobError, atomic, checksum, git, inventory, run, verify
 
@@ -17,56 +14,13 @@ def create(path):
     run(["datalad", "create", "-c", "text2git", path])
     git(path, "config", "user.name", "Neurodesk jobs")
     git(path, "config", "user.email", "neurodesk-jobs@localhost")
+    # A personal global gitignore must not drop inputs or results.
+    git(path, "config", "core.excludesFile", "/dev/null")
     git(path, "annex", "untrust", "here")
 
 
 def save(path, message):
     run(["datalad", "save", "-d", path, "-m", message], timeout=3600)
-
-
-def store_url(root, host=None):
-    return "ria+" + (f"ssh://{host}" if host else "file://") + quote(str(root))
-
-
-def publish(path, url, env=None):
-    # Repair partial sibling configuration after an interrupted first stage.
-    run(["datalad", "create-sibling-ria", "-d", path, "-s", "site",
-         "--new-store-ok", "--existing", "reconfigure", "--trust-level", "untrust", url], env=env)
-    run(["datalad", "push", "-d", path, "--to", "site", "--data", "anything"],
-        env=env, timeout=86400)
-
-
-def checkout(url, dataset_id, commit, destination, env=None):
-    """Use exactly one content source. No subdataset or URL fallback."""
-    if (not re.fullmatch(r"[a-f0-9-]{36}", dataset_id)
-            or not re.fullmatch(r"[a-f0-9]{40,64}", commit)):
-        raise JobError("Invalid dataset identity or Git commit in receipt")
-    destination = Path(destination)
-    # Git cloning avoids DataLad's auto-enable of the original SSH special remote.
-    # RIA Git repositories occupy <id[:3]>/<id[3:]>.
-    base = url.removeprefix("ria+").rstrip("/")
-    source = base + "/" + dataset_id[:3] + "/" + dataset_id[3:]
-    run(["git", "clone", "--no-local", source, destination], env=env, timeout=86400)
-    git(destination, "checkout", "--detach", commit, env=env)
-    if identity(destination) != dataset_id:
-        raise JobError("RIA dataset identity mismatch")
-    git(destination, "annex", "init", "--no-autoenable", env=env)
-    git(destination, "annex", "untrust", "here", env=env)
-    # Define the reader here, rather than enabling inherited remote.log
-    # configuration. Only this explicit ORA store may supply content.
-    git(destination, "annex", "initremote", "read-store", "--sameas", "site-storage", "type=external",
-        "externaltype=ora", "encryption=none", "autoenable=false",
-        f"archive-id={dataset_id}", f"url={url}", f"push-url={url}", env=env)
-    git(destination, "annex", "untrust", "read-store", env=env)
-    git(destination, "annex", "copy", "--from", "read-store", "--", ".",
-        env=env, timeout=86400)
-    # Prevent accidental writes through either Git or annex. The original URL
-    # stored in git-annex was never enabled; the reader has explicit URLs.
-    git(destination, "config", "remote.read-store.annex-readonly", "true", env=env)
-    git(destination, "config", "remote.read-store.annex-ignore", "true", env=env)
-    for remote in git(destination, "remote", env=env).splitlines():
-        git(destination, "config", f"remote.{remote}.pushurl", "/dev/null", env=env)
-    return destination
 
 
 def tracked_repositories(root):
@@ -79,7 +33,7 @@ def tracked_repositories(root):
         commit = git(path, "rev-parse", "HEAD")
         entry = {"path": prefix, "id": identity(path), "commit": commit}
         found.append(entry)
-        tree = git(path, "ls-tree", "-rz", "HEAD")
+        tree = git(path, "ls-tree", "-rz", "HEAD", strip=False)
         for item in tree.split("\0"):
             if not item:
                 continue
@@ -144,23 +98,16 @@ def capsule(source, image, spec, destination):
                     *[r["bundle"] for r in repositories]])}
     atomic(destination / "manifest.json", manifest)
     save(destination, "Freeze execution inputs, software and source revisions")
+    uncommitted = {*manifest["files"], "manifest.json"} - set(payload_files(destination))
+    if uncommitted:
+        raise JobError("DataLad did not commit these snapshot files: "
+                       + ", ".join(sorted(uncommitted)))
     return manifest
 
 
 def payload_files(dataset):
-    return [p for p in git(dataset, "ls-files", "-z").split("\0")
+    return [p for p in git(dataset, "ls-files", "-z", strip=False).split("\0")
             if p and not p.startswith(".datalad/") and p != ".gitattributes"]
-
-
-def verified_publication(dataset, store, receipt):
-    publish(dataset, store_url(store))
-    receipt.update(dataset_id=identity(dataset), commit=git(dataset, "rev-parse", "HEAD"),
-                   files=inventory(dataset, payload_files(dataset)))
-    with tempfile.TemporaryDirectory(prefix="verify-", dir=Path(dataset).parent) as temp:
-        restored = checkout(store_url(store), receipt["dataset_id"], receipt["commit"],
-                            Path(temp) / "result")
-        verify(restored, receipt["files"])
-    return receipt
 
 
 def archive_payload(dataset, target):
