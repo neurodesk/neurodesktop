@@ -51,7 +51,10 @@ The Neurodesk section includes a **Getting started** tile that opens the
 tutorial as a notebook inside JupyterLab. On first use it downloads
 `accessing_neurodesk_tools.ipynb` from the `main` branch of
 [neurodesk/neurodeskedu](https://github.com/neurodesk/neurodeskedu) into
-`neurodesk-getting-started/` under the Jupyter server root. Later clicks open
+`neurodesk-getting-started/` under the Jupyter server root. The book resolves
+root-relative image paths such as `/static/...` against its `books/` directory,
+so the copy rewrites those Markdown and `<img>` paths to the matching
+`raw.githubusercontent.com` URLs. Later clicks open
 that copy without downloading again, so the user's edits and outputs are kept.
 If the download fails, a notification reports the error. It follows the server-proxy tiles and precedes
 the terminal. The launcher registers it before requesting server-proxy metadata,

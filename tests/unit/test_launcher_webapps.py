@@ -135,6 +135,26 @@ def test_getting_started_tile_copies_the_tutorial_notebook_into_the_workspace():
 ''')
 
 
+def test_getting_started_notebook_images_resolve_against_the_published_book():
+    run_main_plugin_case(r'''
+  const book = 'https://raw.githubusercontent.com/neurodesk/neurodeskedu/main/books';
+  const external = '![Desktop](https://example.org/desktop.png)';
+  const code = "!ls /static/x.png";
+  serveNotebook({ ok: true, status: 200, json: async () => ({ cells: [
+    { cell_type: 'markdown', source: ['Intro\n', '![Sidebar](/static/a/sidebar.png)\n'] },
+    { cell_type: 'markdown', source: '<img alt="menu" src="/static/a/menu.png">' },
+    { cell_type: 'markdown', source: external },
+    { cell_type: 'code', source: code, outputs: [] }
+  ], metadata: {}, nbformat: 4, nbformat_minor: 5 }) });
+  await gettingStartedCommand(await activateLauncher()).execute();
+  const cells = files.get(NOTEBOOK_PATH).content.cells;
+  assert.equal(cells[0].source, `Intro\n![Sidebar](${book}/static/a/sidebar.png)\n`);
+  assert.equal(cells[1].source, `<img alt="menu" src="${book}/static/a/menu.png">`);
+  assert.equal(cells[2].source, external);
+  assert.equal(cells[3].source, code, 'code cells must be left unchanged');
+''')
+
+
 def test_getting_started_tile_reopens_an_existing_copy_without_overwriting_it():
     run_main_plugin_case(r'''
   const progress = { type: 'notebook', content: 'user edits' };
