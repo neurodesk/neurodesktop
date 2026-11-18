@@ -112,6 +112,8 @@ def prepare(value):
         if {k: v for k, v in existing.items() if k != "helper"} != {
                 k: v for k, v in value.items() if k != "helper"}:
             raise JobError("Run ID already belongs to a different request") from None
+        if existing != value and not (directory / "submit.claim").exists():
+            atomic(directory / "request.json", value)  # submit uses the new helper
     else:
         atomic(directory / "request.json", value)
     (directory / "attempts").mkdir(exist_ok=True, mode=0o700)

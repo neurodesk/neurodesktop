@@ -356,8 +356,8 @@ def test_nul_delimited_listings_keep_leading_spaces(jobs, tmp_path):
     core.git(tmp_path, "init", "-q")
     (tmp_path / " result.txt").write_text("x")
     core.git(tmp_path, "add", " result.txt")
-    listing = core.git(tmp_path, "ls-files", "-z", strip=False)
-    assert listing.split("\0")[0] == " result.txt"
+    from neurodesk_jobs import data
+    assert data.payload_files(tmp_path) == [" result.txt"]
 
 
 def test_cluster_helper_parses_as_python_39():
@@ -409,10 +409,18 @@ def test_uncollectable_outputs_are_not_published(jobs, cluster, site, tmp_path, 
     assert attempt["state"] == "failed" and "receipt" not in attempt
 
 
-def test_helper_upgrade_can_restage_an_unsubmitted_run(scheduler):
-    value, accepted, _, remote = scheduler
+def test_helper_upgrade_can_restage_an_unsubmitted_run(scheduler, tmp_path):
+    value, accepted, core, remote = scheduler
     assert remote.prepare(dict(value, helper="/upgraded-helper.pyz")) == {"prepared": True}
     assert not accepted.exists()
+    directory = remote.run_directory(value["site"], value["run_id"])
+    assert core.read(directory / "request.json")["helper"] == "/upgraded-helper.pyz"
+    script = Path(os.environ["PATH"].split(":")[0]) / "sbatch"
+    script.write_text(f"#!{sys.executable}\nimport pathlib, sys\n"
+                      f"pathlib.Path({str(tmp_path / 'script')!r}).write_text(sys.stdin.read())\n"
+                      "print('1234')\n")
+    remote.submit(value)
+    assert "/upgraded-helper.pyz" in (tmp_path / "script").read_text()
 
 
 @pytest.fixture
