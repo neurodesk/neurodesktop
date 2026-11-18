@@ -37,8 +37,9 @@ interface IServersInfoResponse {
   server_processes: IServerProcess[];
 }
 
-const GETTING_STARTED_NOTEBOOK_URL =
-  'https://raw.githubusercontent.com/neurodesk/neurodeskedu/main/books/tutorials/about_neurodesk/accessing_neurodesk_tools.ipynb';
+const GETTING_STARTED_BOOK_URL =
+  'https://raw.githubusercontent.com/neurodesk/neurodeskedu/main/books';
+const GETTING_STARTED_NOTEBOOK_URL = `${GETTING_STARTED_BOOK_URL}/tutorials/about_neurodesk/accessing_neurodesk_tools.ipynb`;
 const GETTING_STARTED_DIRECTORY = 'neurodesk-getting-started';
 const GETTING_STARTED_PATH = `${GETTING_STARTED_DIRECTORY}/accessing_neurodesk_tools.ipynb`;
 
@@ -109,6 +110,31 @@ async function contentsExist(
   }
 }
 
+interface INotebookCell {
+  cell_type: string;
+  source: string | string[];
+}
+
+// The book resolves root-relative image paths such as /static/... against its
+// books/ directory; a copy in the workspace would resolve them against the
+// Jupyter server instead, so point them at the published book files.
+function resolveBookImages(notebook: { cells: INotebookCell[] }): void {
+  for (const cell of notebook.cells) {
+    if (cell.cell_type !== 'markdown') {
+      continue;
+    }
+    const source = Array.isArray(cell.source)
+      ? cell.source.join('')
+      : cell.source;
+    cell.source = source
+      .replace(/(!\[[^\]]*\]\()\/(?!\/)/g, `$1${GETTING_STARTED_BOOK_URL}/`)
+      .replace(
+        /(<img\b[^>]*\bsrc=["'])\/(?!\/)/gi,
+        `$1${GETTING_STARTED_BOOK_URL}/`
+      );
+  }
+}
+
 // An existing copy holds the user's progress, so it is opened, never replaced.
 async function openGettingStarted(app: JupyterFrontEnd): Promise<void> {
   const { contents } = app.serviceManager;
@@ -120,6 +146,7 @@ async function openGettingStarted(app: JupyterFrontEnd): Promise<void> {
       );
     }
     const notebook = await response.json();
+    resolveBookImages(notebook);
     if (!(await contentsExist(app, GETTING_STARTED_DIRECTORY))) {
       await contents.save(GETTING_STARTED_DIRECTORY, { type: 'directory' });
     }
