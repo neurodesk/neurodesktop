@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import pwd
+import shlex
 import socket
 import subprocess
 import tempfile
@@ -51,7 +52,14 @@ def test_neurodesk_update_launcher_and_checkout_permissions():
     assert "/usr/local/bin/neurodesk-update" in launcher.read_text()
     assert os.access(launcher, os.X_OK)
     desktop = Path("/usr/share/applications/neurodesk/update.desktop")
-    assert "/bin/bash /neurocommand/local/bin/update.sh" in desktop.read_text()
+    exec_lines = [line.removeprefix("Exec=") for line in desktop.read_text().splitlines()
+                  if line.startswith("Exec=")]
+    assert len(exec_lines) == 1, exec_lines
+    # neurocommand may pass bash options (menu entries use `bash -i` to load bind paths).
+    shell, *options, script = shlex.split(exec_lines[0])
+    assert shell == "/bin/bash"
+    assert all(option.startswith("-") for option in options), options
+    assert script == str(launcher)
     # Foreign-UID HPC startup cannot change ownership of the image checkout.
     if any(os.environ.get(name) for name in (
         "APPTAINER_CONTAINER", "SINGULARITY_CONTAINER", "APPTAINER_NAME", "SINGULARITY_NAME",
