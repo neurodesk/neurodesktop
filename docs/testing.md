@@ -685,6 +685,7 @@ non-obvious tiers protect.
 | Notebook Intelligence / MyST and standalone RISE | `pytest tests/unit/test_nbi_settings_patch.py tests/unit/test_myst_build_workaround.py tests/unit/test_jupyterlab_rise_patch.py` | `pytest /opt/tests/test_nbi_labextension_patch.py /opt/tests/test_rise_slides_image.py` |
 | Launcher extension, workspace link routing | `pytest tests/unit/test_workspace_link_routing.py tests/unit/test_jupyterlab_url.py` | `pytest /opt/tests/test_workspace_link_routing_image.py` |
 | Slurm dashboard launcher and user identity | `pytest tests/unit/test_launcher_webapps.py tests/unit/test_slurm_user_identity.py tests/unit/test_jupyterlab_slurm_build.py` | `pytest /opt/tests/test_slurm.py /opt/tests/test_workspace_link_routing_image.py` |
+| Slurm private-worker source fetch and build | `pytest tests/unit/test_slurm_env_compat.py` (needs GNU `sha256sum`) | `bash scripts/verify_slurm_image.sh IMAGE` |
 | Subscription agent workflows and failure reporting | `pytest tests/unit/test_agentic_*.py tests/unit/test_report_workflow_failure.py` | Worker Docker sandbox probe |
 
 ### Jupyter Server Proxy response limits

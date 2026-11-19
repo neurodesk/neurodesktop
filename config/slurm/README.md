@@ -152,6 +152,11 @@ The image applies [a narrow source patch](user-env-25.11.2.patch) that routes
 this permission denial through Slurm's existing fallback. Successful namespace
 creation and other clone errors keep their upstream behavior. The build verifies
 the release archive and complete `env.c` SHA-256 before applying the patch.
+[`fetch_slurm_source.sh`](fetch_slurm_source.sh) downloads the archive from
+`download.schedmd.com`. If that server is unreachable, it uses the same tarball
+from SchedMD's GitHub release (tag `slurm-X-Y-Z-1`). Either copy must match
+the pinned SHA-256. A mismatched download fails the build instead of trying the
+next source.
 It compiles that source into a library exporting only `env_array_user_default`.
 Only the private `/opt/neurodesktop/slurm-env/slurmd` executable links this library.
 The packaged worker, clients, plugins, and job processes remain unchanged.
