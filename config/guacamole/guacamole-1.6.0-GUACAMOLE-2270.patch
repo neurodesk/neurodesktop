@@ -1,0 +1,29 @@
+Backport of apache/guacamole-server commit
+6f4b4516350605f7a3135ef7db18b367d4188ae9 (GUACAMOLE-2270):
+https://github.com/apache/guacamole-server/commit/6f4b4516350605f7a3135ef7db18b367d4188ae9
+Upstream patch SHA-256: ce137cf5270dbc693a9c4692871e051781e46999554de38cd975313e3bb64998
+
+guac_display_dup() held last_frame.lock and then took pending_frame.lock
+through guac_display_layer_get_bounds(), the reverse of the frame flush
+order. A user joining while the first frame flushed could deadlock both
+threads. Applies unchanged to the released 1.6.0 display.c.
+
+--- a/src/libguac/display.c
++++ b/src/libguac/display.c
+@@ -255,8 +255,14 @@
+ 
+         const guac_layer* layer = current->layer;
+ 
+-        guac_rect layer_bounds;
+-        guac_display_layer_get_bounds(current, &layer_bounds);
++        /* Determine layer bounds from last frame, NOT pending frame as
++         * provided by guac_display_layer_get_bounds() */
++        guac_rect layer_bounds = {
++            .left   = 0,
++            .top    = 0,
++            .right  = current->last_frame.width,
++            .bottom = current->last_frame.height
++        };
+ 
+         int width = guac_rect_width(&layer_bounds);
+         int height = guac_rect_height(&layer_bounds);

@@ -143,6 +143,7 @@ RUN mkdir -p /opt/glass/bin \
 
 # Build Guacamole server
 RUN --mount=type=bind,source=config/guacamole/guacamole-1.6.0-GUACAMOLE-2328.patch,target=/tmp/guacamole/guacamole-1.6.0-GUACAMOLE-2328.patch,ro \
+    --mount=type=bind,source=config/guacamole/guacamole-1.6.0-GUACAMOLE-2270.patch,target=/tmp/guacamole/guacamole-1.6.0-GUACAMOLE-2270.patch,ro \
     (curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 \
         "https://downloads.apache.org/guacamole/${GUACAMOLE_VERSION}/source/guacamole-server-${GUACAMOLE_VERSION}.tar.gz" \
         -o /tmp/guacamole-server-${GUACAMOLE_VERSION}.tar.gz \
@@ -154,6 +155,8 @@ RUN --mount=type=bind,source=config/guacamole/guacamole-1.6.0-GUACAMOLE-2328.pat
     && cd /tmp/guacamole-server-${GUACAMOLE_VERSION} \
     && echo 'aee31274ae1a17ced186b2ea4a54fb4f9d2ce76992c156b7371f6a540ee41461  /tmp/guacamole/guacamole-1.6.0-GUACAMOLE-2328.patch' | sha256sum -c - \
     && patch --batch --fuzz=0 -p1 < /tmp/guacamole/guacamole-1.6.0-GUACAMOLE-2328.patch \
+    && echo '828714cd5e38e39ed7b13ce46e40a66b30ad9612ea7b696987805a63ac871089  /tmp/guacamole/guacamole-1.6.0-GUACAMOLE-2270.patch' | sha256sum -c - \
+    && patch --batch --fuzz=0 -p1 < /tmp/guacamole/guacamole-1.6.0-GUACAMOLE-2270.patch \
     && CFLAGS="-std=gnu17 -Wno-error=deprecated-declarations" ./configure --with-init-dir=/etc/init.d \
     && grep -qx '#define _XOPEN_SOURCE 700' config.h \
     && sed -i '/^#define _XOPEN_SOURCE 700$/d' config.h \
