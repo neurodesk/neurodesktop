@@ -10,6 +10,10 @@ import sys
 from tornado.httpclient import AsyncHTTPClient
 
 
+# Cold CVMFS reads can delay container Python and ipykernel imports. The
+# patched documents WebSocket bridge inherits this same readiness budget.
+c.MappingKernelManager.kernel_info_timeout = 180.0
+
 if os.environ.get('NEURODESKTOP_DISABLE_SSH') == 'true':
     from importlib.metadata import entry_points as _proxy_entry_points
 

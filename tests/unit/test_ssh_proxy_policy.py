@@ -38,7 +38,10 @@ def test_jupyter_filters_only_the_ssh_entrypoint_before_loading(
     monkeypatch.delenv("NEURODESKTOP_DISABLE_SSH", raising=False)
     if disable_ssh is not None:
         monkeypatch.setenv("NEURODESKTOP_DISABLE_SSH", disable_ssh)
-    config = SimpleNamespace(FileContentsManager=SimpleNamespace())
+    config = SimpleNamespace(
+        FileContentsManager=SimpleNamespace(),
+        MappingKernelManager=SimpleNamespace(),
+    )
 
     saved_configuration = AsyncHTTPClient._save_configuration()
     try:

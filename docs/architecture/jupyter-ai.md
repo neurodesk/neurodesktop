@@ -160,8 +160,13 @@ message prove the bridge, before the channel listen tasks start. The transient
 sockets keep nudge replies away from the frontend, and the proving IOPub
 message is forwarded to the WebSocket rather than consumed. A busy kernel is
 skipped (its subscriptions are long established, and shell requests would
-queue behind the running execution), and the nudge is bounded at ten seconds,
-after which the connection proceeds with the old behavior. The logic lives in
+queue behind the running execution), and the nudge uses the connection's
+`kernel_info_timeout`. The image sets
+`MappingKernelManager.kernel_info_timeout` to 180 seconds to allow cold CVMFS
+container startup. An explicit server configuration override applies to both
+upstream connections and this bridge. After that timeout, the connection
+proceeds with the old behavior. The probe exits early if the kernel is removed
+or restarts on different ports. The logic lives in
 `config/jupyter/neurodesktop_kernel_nudge.py`, installed into the package as
 `jupyter_server_documents/_neurodesktop_kernel_nudge.py`; the frontend probe,
 reconnect, and retry bounds above remain as defense in depth.
