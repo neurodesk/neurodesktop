@@ -23,7 +23,8 @@ def test_source_download_uses_current_release_then_archive(tmp_path, available, 
     dockerfile = repo_path("Dockerfile").read_text()
     layers = re.findall(r"^[A-Z]+ .*?(?=^[A-Z]+ |\Z)", dockerfile, re.MULTILINE | re.DOTALL)
     layer, = [item for item in layers if "source=config/guacamole/" in item]
-    command = layer.split("\n", 1)[1].split("&& rm", 1)[0].replace("\\\n", "")
+    command = re.sub(r"\ARUN\s+(?:--mount=\S+\s*\\\n\s*)+", "", layer)
+    command = command.split("&& rm", 1)[0].replace("\\\n", "")
     command = command.replace("/tmp", '"$DOWNLOAD_DIR"')
     archive = tmp_path / "fixture.tar.gz"
     with tarfile.open(archive, "w:gz") as bundle:
