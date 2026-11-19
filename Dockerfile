@@ -223,9 +223,9 @@ ARG SLURM_ENV_VERSION="25.11.2"
 ARG SLURM_ENV_SHA256="9bfd844f746c1268d6e0cb14bda586b548b1c4b12f8c72181397d0cec9ce5d39"
 RUN apt-install-retry patchelf \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-COPY config/slurm/build_env_compat.sh config/slurm/user-env-25.11.2.patch /tmp/slurm-env/
-RUN curl -fsSL --retry 5 "https://download.schedmd.com/slurm/slurm-${SLURM_ENV_VERSION}.tar.bz2" -o /tmp/slurm.tar.bz2 \
-    && echo "${SLURM_ENV_SHA256}  /tmp/slurm.tar.bz2" | sha256sum --check --strict \
+COPY config/slurm/build_env_compat.sh config/slurm/fetch_slurm_source.sh config/slurm/user-env-25.11.2.patch /tmp/slurm-env/
+# Falls back to SchedMD's GitHub release asset; both must match the pinned SHA-256.
+RUN bash /tmp/slurm-env/fetch_slurm_source.sh "${SLURM_ENV_VERSION}" "${SLURM_ENV_SHA256}" /tmp/slurm.tar.bz2 \
     && mkdir /tmp/slurm-source \
     && tar -xjf /tmp/slurm.tar.bz2 -C /tmp/slurm-source --strip-components=1 \
     && bash /tmp/slurm-env/build_env_compat.sh /tmp/slurm-source /opt/slurm-env \
