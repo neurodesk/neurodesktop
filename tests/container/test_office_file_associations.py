@@ -8,6 +8,7 @@ generated .desktop files. Without those, .odt/.docx used to open in
 xarchiver because ODF/OOXML files are zip containers.
 """
 import configparser
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -70,7 +71,10 @@ def test_office_mimetype_defaults_to_libreoffice(mimetype, component):
     assert f"{mimetype};" in entry["MimeType"]
 
     # The wrapper script must forward the document path even with spaces
-    wrapper = entry["Exec"].replace(" %F", "").removeprefix("/bin/bash ")
+    shell, *options, wrapper, files = shlex.split(entry["Exec"])
+    assert shell == "/bin/bash"
+    assert all(option.startswith("-") for option in options), options
+    assert files == "%F"
     assert '"$@"' in Path(wrapper).read_text()
 
 
