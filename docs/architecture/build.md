@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-11-16"
+last-reviewed: "2026-11-19"
 ---
 
 # Build-Time Behaviors
@@ -68,6 +68,18 @@ after FreeRDP creates the connection cache. This prevents the RDP worker crash
 with FreeRDP 3.31 and later. The 1.6.0 backport preserves its existing RAIL and
 static-channel loading in PreConnect. The installed RDP test requires desktop
 pixels and a command executed through the authenticated Guacamole tunnel.
+
+It also backports [GUACAMOLE-2270](https://issues.apache.org/jira/browse/GUACAMOLE-2270)
+from upstream commit
+[`6f4b4516350605f7a3135ef7db18b367d4188ae9`](https://github.com/apache/guacamole-server/commit/6f4b4516350605f7a3135ef7db18b367d4188ae9),
+which upstream merged for 1.6.1. In 1.6.0, `guac_display_dup()` holds the
+last-frame lock and the render-state flag while it takes the pending-frame lock,
+the reverse of the frame flush order. A user who joins while a frame is
+rendering can deadlock the connection's display: guacd never syncs that user,
+and Tomcat closes the tunnel after 15 seconds with "Connection to guacd timed
+out". The hash-checked [patch](../../config/guacamole/guacamole-1.6.0-GUACAMOLE-2270.patch)
+reads the layer size from the last frame instead. Remove both backports when
+the image moves to a Guacamole release that contains them.
 
 The generated Guacamole header drops its fixed `_XOPEN_SOURCE` definition;
 its `_GNU_SOURCE` definition lets libc choose the matching feature level.
