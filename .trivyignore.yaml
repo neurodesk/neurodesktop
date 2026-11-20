@@ -5,14 +5,16 @@
 # finding is not exploitable in this image.
 #
 # The kernel CVEs below are reported against linux-libc-dev, the UAPI header
-# package that CVMFS pulls in through uuid-dev. On 2026-11-19 the Ubuntu CVE
-# tracker listed each as "needed" for linux in Ubuntu 26.04, so no fixed
-# header package exists yet. Remove each entry once a rebuild installs the
+# package that CVMFS pulls in through uuid-dev. On 2026-11-19, and again on
+# 2026-11-21 after Ubuntu published headers 7.0.0-44.44, the Ubuntu CVE tracker
+# listed each as "needed" for linux in Ubuntu 26.04, so no fixed header package
+# exists yet. Remove each entry once a rebuild installs the
 # fixed headers; the exception stops matching as soon as the version changes.
 vulnerabilities:
   - id: CVE-2026-99287
     purls:
       - pkg:deb/ubuntu/linux-libc-dev@7.0.0-43.43
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-44.44
     expired_at: 2027-01-19
     statement: >-
       Denial of service in the kernel xen-netback driver. linux-libc-dev only
@@ -21,6 +23,7 @@ vulnerabilities:
   - id: CVE-2026-99306
     purls:
       - pkg:deb/ubuntu/linux-libc-dev@7.0.0-43.43
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-44.44
     expired_at: 2027-01-19
     statement: >-
       Out-of-bounds access in the kernel ceph client while decoding an MDS map.
@@ -29,6 +32,7 @@ vulnerabilities:
   - id: CVE-2026-99310
     purls:
       - pkg:deb/ubuntu/linux-libc-dev@7.0.0-43.43
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-44.44
     expired_at: 2027-01-19
     statement: >-
       Use-after-free in the kernel NFS server. linux-libc-dev only installs

@@ -3,6 +3,7 @@
 import importlib.metadata
 import json
 import os
+import random
 import re
 import socket
 import subprocess
@@ -442,10 +443,22 @@ SCENE_SYNC_COUNT_EXPRESSION = (
 )
 
 
+# Kept in step with test_rise_slides_image._unused_port; unit tests load this
+# module on its own, so it cannot import that sibling. Ports come from below
+# Linux's default ephemeral range so an outbound connection cannot take one
+# before the server binds it.
+_LISTEN_PORTS = range(20000, 32768)
+
+
 def _unused_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+    for port in random.sample(_LISTEN_PORTS, 200):
+        with socket.socket() as sock:
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    raise RuntimeError("no free listening port below the ephemeral range")
 
 
 def _wait_for_server(

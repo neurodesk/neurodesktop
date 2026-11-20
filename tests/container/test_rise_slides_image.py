@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import socket
 import subprocess
 import time
@@ -16,10 +17,22 @@ import pytest
 import websocket
 
 
+# Listening ports come from below Linux's default ephemeral range
+# (32768-60999). A port obtained by binding port 0 is itself ephemeral, so any
+# outbound connection made before the server binds, by Firefox or another
+# process in the container, can take it as its local port.
+_LISTEN_PORTS = range(20000, 32768)
+
+
 def _unused_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+    for port in random.sample(_LISTEN_PORTS, 200):
+        with socket.socket() as sock:
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    raise RuntimeError("no free listening port below the ephemeral range")
 
 
 def _wait_for_server(

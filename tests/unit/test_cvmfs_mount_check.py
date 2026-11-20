@@ -23,6 +23,7 @@ def run_health(
     first_read="",
     first_mount=None,
     clock_advances=(),
+    apt_install_status=0,
 ):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -47,7 +48,8 @@ def run_health(
 printf 'sudo %s\n' "$*" >> "$CALLS"
 [[ "$1" != -n ]] || shift
 case "$1" in
-  apt-get|dpkg|mkdir) exit 0 ;;
+  apt-get) [[ "$2" == install && "$3" == cvmfs ]] && exit "$APT_INSTALL_STATUS"; exit 0 ;;
+  dpkg|mkdir) exit 0 ;;
   tee) cat >/dev/null; exit 0 ;;
   timeout|cvmfs_config|systemctl|journalctl|tail) exec "$@" ;;
   *) exit 99 ;;
@@ -153,6 +155,7 @@ sleep() {
         READ_STATUS="0" if readable else "2",
         DIAGNOSTIC=diagnostic,
         HANG_PROBE=hang_probe,
+        APT_INSTALL_STATUS=str(apt_install_status),
     )
     result = subprocess.run(
         ["bash", str(repo_path(f".github/workflows/{script}")), "example.invalid"],
@@ -162,6 +165,17 @@ sleep() {
         timeout=30,
     )
     return result, calls.read_text() if calls.exists() else ""
+
+
+@pytest.mark.parametrize("script", HEALTH_SCRIPTS)
+def test_failed_client_install_is_reported_without_testing_the_mirror(tmp_path, script):
+    result, calls = run_health(tmp_path, script, mounted=True, apt_install_status=100)
+    assert result.returncode == 1
+    assert result.stdout.count("::error::Could not install the CVMFS client") == 1
+    assert "CVMFS mount unavailable" not in result.stdout
+    assert "cvmfs_config" not in calls
+    assert "read" not in calls
+    assert "inventory" not in calls
 
 
 @pytest.mark.parametrize("script", HEALTH_SCRIPTS)
