@@ -903,7 +903,7 @@ runs the launcher against fake Xvfb, session, and `voxl` executables. It checks:
   refusing invalid values before anything starts;
 - refusing a framebuffer that cannot be made private;
 - the missing-token refusal;
-- SIGTERM stopping voxl before Xvfb.
+- SIGTERM stopping voxl and the desktop session before Xvfb.
 
 [`pytest tests/unit/test_shm_private.py`](../tests/unit/test_shm_private.py)
 compiles the framebuffer helper and runs it on real mode-`0777` SysV segments.

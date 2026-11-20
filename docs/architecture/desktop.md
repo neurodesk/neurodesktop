@@ -241,8 +241,9 @@ never appears on a command line or in the logs. voxl's own login stays
 enabled. `--allowed-hosts '*'` accepts the browser's Jupyter host name,
 because the token, not the host name, admits a request. The launcher turns off
 desktop audio and voxl's file transfer panel. When Jupyter Server Proxy stops
-the launcher, the launcher stops voxl, then the desktop session, then Xvfb,
-and removes the display's cookie.
+the launcher, the launcher stops voxl, waits for the desktop session to stop,
+then stops Xvfb and removes the display's cookie. A five-second watchdog
+forcibly stops a custom session script that ignores termination.
 
 The launcher is hidden in Glass and when `/usr/local/bin/voxl` is missing.
 Limits:
