@@ -63,7 +63,7 @@ jobs:
   candidate:
     needs: prepare
     if: needs.prepare.result == 'success' && needs.prepare.outputs.skip == 'false'
-    runs-on: ${{ vars.AGENTIC_RUNNER || 'neurodesk-syd-arcrunner-neurodesktop' }}
+    runs-on: ${{ vars.AGENTIC_RUNNER || 'neurodesk-syd-arcrunner-neurodesktop-agentic' }}
     timeout-minutes: 125
     permissions:
       contents: read

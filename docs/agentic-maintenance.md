@@ -1,14 +1,14 @@
 ---
 title: Agentic maintenance workflows
-description: Run subscription-authenticated Codex on the existing self-hosted runner and review its proposed fixes
+description: Run subscription-authenticated Codex on the agentic ARC runner pool and review its proposed fixes
 parent: index.md
 status: current
-last-reviewed: "2026-11-09"
+last-reviewed: "2026-11-20"
 ---
 
 # Agentic maintenance workflows
 
-Neurodesktop uses the existing self-hosted Actions runner to run Codex with a
+Neurodesktop uses a dedicated Actions Runner Controller (ARC) pool to run Codex with a
 dedicated ChatGPT subscription login. New issues lead to investigation and a
 proposed fix in a draft pull request. Scheduled jobs cover five maintenance
 categories each week. GitHub-hosted jobs prepare tasks and publish changes.
@@ -27,22 +27,34 @@ first live run. Repository changes do not provision these resources.
 | Repository variable | Default | Purpose |
 | --- | --- | --- |
 | `AGENTIC_ENABLED` | unset | Set to `true` after runner readiness checks to enable issue, maintenance, and review execution |
-| `AGENTIC_RUNNER` | `neurodesk-syd-arcrunner-neurodesktop` | Runner label for the Codex job |
+| `AGENTIC_RUNNER` | `neurodesk-syd-arcrunner-neurodesktop-agentic` | Runner label for the Codex job |
 | `AGENTIC_CODEX_HOME` | `/var/lib/neurodesktop-codex` | Persistent dedicated Codex authentication directory on that runner |
 | `AGENTIC_CODEX_MODEL` | `gpt-5.6-sol` | Explicit model for the agent |
 
 The directory must survive replacement of the runner process or pod. The
-existing Actions Runner Controller setup uses a Docker-in-Docker sidecar.
+ARC pools use a Docker-in-Docker sidecar.
 Bind-mount sources must exist at identical absolute paths in both the runner
 container and the Docker daemon's container. That includes the checkout,
 `RUNNER_TEMP`, and the persistent authentication directory. A path visible
 only in the runner container cannot be mounted by the sidecar's Docker daemon.
 
-An administrator must provide the persistent volume claim and mount the
-credential directory into both containers. Match ownership to the account
-that launches the worker. Do not use a personal home directory containing
-unrelated credentials. The repository does not configure the runner's PVC or
-Kubernetes mounts.
+The default label names a one-runner pool defined in
+[neurodesk/self-hosted-runner-infra](https://github.com/neurodesk/self-hosted-runner-infra)
+(`manifests/gha-scale-set/runner-scale-set-syd-neurodesktop-agentic.values.yaml`).
+It mounts the ReadWriteOnce persistent volume claim `neurodesktop-codex` at
+`/var/lib/neurodesktop-codex` in both containers, and an init container keeps
+that directory owned by the runner UID with no group or other access. The
+cluster has no shared-access storage class, so the claim cannot be mounted in
+the multi-runner `neurodesk-syd-arcrunner-neurodesktop` build pool. That
+repository owns the claim, the pool and their installation; this repository
+does not configure Kubernetes. Do not use a personal home directory containing
+unrelated credentials.
+
+Agentic jobs ran on the standalone VM `github-action-runner` until its Docker
+bridge failed in November 2026 ([#1343](https://github.com/neurodesk/neurodesktop/issues/1343)).
+After the pool is installed and logged in, delete the repository variables
+`AGENTIC_RUNNER` and `AGENTIC_CODEX_HOME` if they still name that VM and its
+`/home/ubuntu/.codex` directory, so the defaults apply.
 
 Each worker run builds `neurodesktop-agentic:codex-0.168.0` from a staged trusted
 context containing [`config/agentic/Dockerfile`](../config/agentic/Dockerfile)
@@ -63,8 +75,18 @@ The image pins Codex CLI `0.168.0`. Verify Docker can build and
 run that image on the selected runner. The first build needs outbound access
 to its package and base-image sources.
 
-On the trusted runner, build the image and create the private directory as
-an administrator. Run these commands as the account that runs Actions jobs:
+Complete the dedicated account's device login with the one-off pod in
+`manifests/gha-scale-set/neurodesktop-codex-login.yaml` of the infrastructure
+repository, while no agentic job holds the pool's runner. Its header has the
+exact commands. The pod runs the Codex version pinned here and writes
+file-backed credentials into the claim as the runner UID. Do not replace a
+healthy existing authentication file. Do not copy `auth.json` between hosts.
+If device login is unavailable, follow OpenAI's headless-login alternatives
+linked from the [authentication research](designs/agentic-codex-auth-research.md).
+
+To reproduce the worker locally, build its image with the runner's UID and GID.
+The build arguments create that user entry inside the image, which tools such
+as `ssh-keygen` require:
 
 ```bash
 agentic_control=$(mktemp -d)
@@ -73,23 +95,7 @@ python3 .github/scripts/agentic_worker.py stage \
 docker build --tag neurodesktop-agentic:codex-0.168.0 \
   --build-arg WORKER_UID="$(id -u)" --build-arg WORKER_GID="$(id -g)" \
   "$agentic_control/config/agentic"
-sudo install -d -m 700 -o "$(id -u)" -g "$(id -g)" /var/lib/neurodesktop-codex
-docker run --rm -it --user "$(id -u):$(id -g)" \
-  --env CODEX_HOME=/codex \
-  --mount type=bind,src=/var/lib/neurodesktop-codex,dst=/codex \
-  neurodesktop-agentic:codex-0.168.0 \
-  codex -c 'cli_auth_credentials_store="file"' login --device-auth
 ```
-
-Complete the device login in your browser. Use the configured path if
-`AGENTIC_CODEX_HOME` differs from the default. If the directory already exists,
-check that it belongs to the runner account before changing its ownership.
-Do not replace a healthy existing authentication file. The image's pinned CLI
-creates file-backed credentials in the same directory used by normal jobs.
-The build arguments create the runner's UID/GID entry inside the image, which
-tools such as `ssh-keygen` require.
-If device login is unavailable, follow OpenAI's headless-login alternatives
-linked from the [authentication research](designs/agentic-codex-auth-research.md).
 
 After building the image, run the credential-free sandbox check:
 
@@ -141,7 +147,7 @@ workflow is cancelled.
 Set the repository variable `AGENTIC_ENABLED=true`, then manually dispatch
 the issue workflow for a small existing bug. Verify that
 preparation completes on a hosted runner, the Codex job acquires the configured
-self-hosted runner, and validation runs in a separate container.
+ARC runner, and validation runs in a separate container.
 
 A successful fix produces a draft PR with the issue link, the concrete change,
 and checkout test evidence. Required image validation that could not run must
@@ -330,8 +336,8 @@ compiled locks, or custom gh-aw timeout detector to regenerate.
 
 ## Recover a stopped run
 
-For authentication failures, sign in again on the runner using its dedicated
-Codex home. Do not reset that directory during a healthy run. Subscription
+For authentication failures, repeat the device login with the infrastructure
+repository's login pod, which mounts the same claim. Do not reset that directory during a healthy run. Subscription
 limits are shared with other work on the account, so exhausted capacity needs
 the allowance to reset or the account's available credits to change.
 
