@@ -153,7 +153,7 @@ def parse_snapshot_date(data):
     day, hour, minute, second, year = map(int, fields)
     try:
         return datetime.datetime(year, MONTHS.index(month) + 1, day, hour, minute, second,
-                                 tzinfo=datetime.UTC).timestamp()
+                                 tzinfo=datetime.timezone.utc).timestamp()
     except ValueError:
         return None
 

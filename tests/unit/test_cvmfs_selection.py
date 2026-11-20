@@ -962,6 +962,23 @@ def _snapshot_text(seconds_ago):
     return time.strftime("%a %b %e %H:%M:%S UTC %Y", stamp).encode() + b"\n"
 
 
+def test_snapshot_date_parsing_supports_python_310_datetime_api(monkeypatch):
+    selector = _selector("cvmfs_python_310_snapshot_date")
+    current_datetime = selector.datetime
+
+    class Python310DateTime:
+        datetime = current_datetime.datetime
+        timezone = current_datetime.timezone
+
+    monkeypatch.setattr(selector, "datetime", Python310DateTime)
+
+    parsed = selector.parse_snapshot_date(b"Thu Nov 20 01:00:00 UTC 2026\n")
+    expected = current_datetime.datetime(
+        2026, 11, 20, 1, tzinfo=current_datetime.timezone.utc
+    ).timestamp()
+    assert parsed == expected
+
+
 class _Mirror:
     """A local mirror whose manifest, snapshot date and chunks are adjustable.
 
