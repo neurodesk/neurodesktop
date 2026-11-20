@@ -10,9 +10,9 @@ import urllib.request
 
 import pytest
 
-from test_rise_slides_image import _BidiSession, _unused_port, _wait_for_server, _stop
+from test_rise_slides_image import _BidiSession, _wait_for_server, _stop
 
-from testlib import assert_jupyterlab_url, run_cmd
+from testlib import assert_jupyterlab_url, reserved_tcp_ports, run_cmd
 
 
 LABEXTENSION = Path(
@@ -150,9 +150,14 @@ def check_slurm_launcher(bidi, context):
 
 @pytest.mark.parametrize("base", ["/", "/user/workspace-test/"])
 def test_clicking_workspace_links_opens_rendered_documents(tmp_path, base):
+    with reserved_tcp_ports(2) as reservations:
+        _run_workspace_link_browser_test(tmp_path, base, reservations)
+
+
+def _run_workspace_link_browser_test(tmp_path, base, reservations):
     (tmp_path / "a report.md").write_text("# Workspace link opened\n")
     (tmp_path / "report.html").write_text("<h1>HTML workspace report</h1>")
-    server_port, browser_port = _unused_port(), _unused_port()
+    server_port, browser_port = [sock.getsockname()[1] for sock in reservations]
     prefix = f"http://127.0.0.1:{server_port}{base}"
     token = "workspace-links-test"
     environment = {
@@ -168,6 +173,7 @@ def test_clicking_workspace_links_opens_rendered_documents(tmp_path, base):
     profile.mkdir()
     log_path = tmp_path / "jupyter.log"
     with log_path.open("w") as log, (tmp_path / "firefox.log").open("w") as browser_log:
+        reservations[0].close()
         server = subprocess.Popen([
             "jupyter", "lab", "--no-browser", "--ServerApp.allow_root=True",
             f"--config={server_config}",
@@ -180,10 +186,6 @@ def test_clicking_workspace_links_opens_rendered_documents(tmp_path, base):
         browser = None
         bidi = None
         try:
-            browser = subprocess.Popen([
-                "/usr/bin/firefox", "--headless", "--profile", str(profile),
-                f"--remote-debugging-port={browser_port}", "about:blank",
-            ], env=environment, stdout=browser_log, stderr=subprocess.STDOUT)
             _wait_for_server(prefix + "api/status?token=" + token, server, log_path)
             with urllib.request.urlopen(
                 prefix + "jupyterlab_slurm/squeue?token=" + token, timeout=10
@@ -198,6 +200,11 @@ def test_clicking_workspace_links_opens_rendered_documents(tmp_path, base):
             assert capabilities["tour_overrides"] == json.loads(
                 Path("/opt/jovyan_defaults/.jupyter/nbi/tour_config.json").read_text()
             ), "Browser server must use the image's disabled first-run tour"
+            reservations[1].close()
+            browser = subprocess.Popen([
+                "/usr/bin/firefox", "--headless", "--profile", str(profile),
+                f"--remote-debugging-port={browser_port}", "about:blank",
+            ], env=environment, stdout=browser_log, stderr=subprocess.STDOUT)
             bidi = _BidiSession(f"ws://127.0.0.1:{browser_port}/session", browser)
             bidi.request("session.new", {"capabilities": {}})
             context = bidi.request("browsingContext.create", {"type": "tab"})["context"]
