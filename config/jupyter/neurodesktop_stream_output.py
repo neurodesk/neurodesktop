@@ -61,11 +61,24 @@ class StreamState(NamedTuple):
 
     Named fields keep the cursor bookkeeping readable while the tuple base
     preserves compatibility with state returned by earlier installed copies.
+    Each state owns its hasher snapshot even though hashlib objects are
+    mutable, so advancing a stream cannot change a retained earlier state.
     """
 
     text_length: int
     cursor: int
     running_hash: object
+
+    def appended(self, text: str) -> StreamState:
+        """Return the independently owned state after a blind append."""
+        running_hash = self.running_hash.copy()
+        running_hash.update(text.encode("utf-8"))
+        grown = len(text)
+        return StreamState(
+            self.text_length + grown,
+            self.cursor + grown,
+            running_hash,
+        )
 
 
 def _hasher(text: str = ""):
@@ -152,13 +165,7 @@ def write_stream_output(outputs, content: dict, state=None):
             ytext += new_text
             if state is None:
                 return None
-            state.running_hash.update(new_text.encode("utf-8"))
-            grown = len(new_text)
-            return StreamState(
-                state.text_length + grown,
-                state.cursor + grown,
-                state.running_hash,
-            )
+            return state.appended(new_text)
 
         current = str(ytext)
         valid = (
