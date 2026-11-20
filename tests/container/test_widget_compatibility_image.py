@@ -4,7 +4,6 @@ import importlib.metadata
 import json
 import os
 import re
-import socket
 import subprocess
 import sys
 import time
@@ -18,6 +17,8 @@ from pathlib import Path
 import nbformat
 import pytest
 import websocket
+
+from test_rise_slides_image import _unused_port
 
 
 WEBGL2_DIAGNOSTICS_EXPRESSION = """JSON.stringify((() => {
@@ -440,12 +441,6 @@ SCENE_SYNC_COUNT_EXPRESSION = (
     "node => node.textContent.startsWith('scene-sync-count:')"
     ")?.textContent || 'scene-sync-count:-1').split(':').at(-1)))"
 )
-
-
-def _unused_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 def _wait_for_server(

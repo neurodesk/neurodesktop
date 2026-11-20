@@ -9,7 +9,12 @@ sudo dpkg -i cvmfs-release-latest_all.deb
 echo "[DEBUG]: apt-get update"
 sudo apt-get update --allow-unauthenticated
 echo "[DEBUG]: apt-get install cvmfs"
-sudo apt-get install cvmfs --allow-unauthenticated
+if ! sudo apt-get install cvmfs --allow-unauthenticated; then
+    # A runner without working package sources cannot test the mirrors; say so
+    # rather than reporting an unreadable repository later.
+    echo "::error::Could not install the CVMFS client on this runner; no mirror was tested."
+    exit 1
+fi
 
 sudo mkdir -p /etc/cvmfs/keys/ardc.edu.au/
 
