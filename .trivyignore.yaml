@@ -1,8 +1,36 @@
-# Reviewed image-scan exceptions. None are currently required: scanning the
-# 2026-11-14 release on both architectures without this file reports no
-# CRITICAL findings.
+# Reviewed image-scan exceptions.
 #
 # Any exception added here must name the exact affected packages in `purls`,
 # carry an `expired_at` reassessment date, and explain in `statement` why the
 # finding is not exploitable in this image.
-vulnerabilities: []
+#
+# The kernel CVEs below are reported against linux-libc-dev, the UAPI header
+# package that CVMFS pulls in through uuid-dev. On 2026-11-19 the Ubuntu CVE
+# tracker listed each as "needed" for linux in Ubuntu 26.04, so no fixed
+# header package exists yet. Remove each entry once a rebuild installs the
+# fixed headers; the exception stops matching as soon as the version changes.
+vulnerabilities:
+  - id: CVE-2026-99287
+    purls:
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-43.43
+    expired_at: 2027-01-19
+    statement: >-
+      Denial of service in the kernel xen-netback driver. linux-libc-dev only
+      installs kernel headers; containers run the host kernel, so the image
+      ships none of the affected driver code.
+  - id: CVE-2026-99306
+    purls:
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-43.43
+    expired_at: 2027-01-19
+    statement: >-
+      Out-of-bounds access in the kernel ceph client while decoding an MDS map.
+      linux-libc-dev only installs kernel headers; containers run the host
+      kernel, so the image ships none of the affected client code.
+  - id: CVE-2026-99310
+    purls:
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-43.43
+    expired_at: 2027-01-19
+    statement: >-
+      Use-after-free in the kernel NFS server. linux-libc-dev only installs
+      kernel headers; containers run the host kernel, so the image ships none
+      of the affected server code.
