@@ -17,10 +17,10 @@ def _write_executable(path, text):
     return path
 
 
-def _long_running(log, name):
+def _long_running(log, name, *, stop_delay="0"):
     """Shell that logs its start and SIGTERM, then idles until stopped."""
     return (
-        f'trap \'echo "{name} stopped" >> "{log}"; exit 0\' TERM\n'
+        f'trap \'sleep "{stop_delay}"; echo "{name} stopped" >> "{log}"; exit 0\' TERM\n'
         "while :; do sleep 0.05; done\n"
     )
 
@@ -32,7 +32,8 @@ def launcher(tmp_path):
     log = tmp_path / "calls.log"
     _write_executable(
         home / ".vnc" / "xstartup",
-        f'#!/usr/bin/env bash\necho "session DISPLAY=$DISPLAY" >> "{log}"\n' + _long_running(log, "session"),
+        f'#!/usr/bin/env bash\necho "session DISPLAY=$DISPLAY" >> "{log}"\n'
+        + _long_running(log, "session", stop_delay='${FAKE_SESSION_STOP_DELAY:-0}'),
     )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -50,6 +51,10 @@ def launcher(tmp_path):
         'echo "${1#:}" >&"$fd"\n' + _long_running(log, "xvfb"),
     )
     _write_executable(bin_dir / "xset", "#!/bin/sh\nexit 0\n")
+    # Fake Xvfb cannot own a real SysV framebuffer. Keep the launcher test
+    # independent of the host's /proc mount; test_shm_private.py covers the
+    # real segment behavior.
+    _write_executable(bin_dir / "awk", "#!/bin/sh\nexit 0\n")
     _write_executable(bin_dir / "mcookie", "#!/bin/sh\necho 0123456789abcdef0123456789abcdef\n")
     _write_executable(bin_dir / "xauth", f'#!/bin/sh\necho "xauth $*" >> "{log}"\n')
     _write_executable(
@@ -96,6 +101,8 @@ def _start(env):
 
 def test_streams_a_private_xvfb_through_an_authenticated_loopback_voxl(launcher):
     env, log = launcher
+    # Make the old fire-and-forget session cleanup deterministically race Xvfb.
+    env["FAKE_SESSION_STOP_DELAY"] = "0.2"
     proc = _start(env)
     try:
         calls = _wait_for(log, "voxl DISPLAY=")
@@ -133,8 +140,9 @@ def test_streams_a_private_xvfb_through_an_authenticated_loopback_voxl(launcher)
         calls = log.read_text()
         for name in ("voxl", "session", "xvfb"):
             assert f"{name} stopped" in calls
-        # voxl stops before the X server it reads from.
+        # voxl and the desktop session stop before the X server they use.
         assert calls.index("voxl stopped") < calls.index("xvfb stopped")
+        assert calls.index("session stopped") < calls.index("xvfb stopped")
         assert f"xauth remove {display}" in calls
     finally:
         if proc.poll() is None:

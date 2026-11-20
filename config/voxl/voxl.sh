@@ -60,6 +60,19 @@ cleanup() {
     fi
     if [ -n "${session_pid}" ]; then
         kill -- "-${session_pid}" 2>/dev/null || true
+        # Do not remove the display while the desktop is still handling TERM.
+        # A watchdog keeps a custom xstartup that ignores TERM from hanging the
+        # proxy shutdown forever.
+        (
+            trap - EXIT TERM INT HUP
+            sleep 5
+            kill -KILL -- "-${session_pid}" 2>/dev/null || true
+        ) &
+        local session_watchdog_pid
+        session_watchdog_pid=$!
+        wait "${session_pid}" 2>/dev/null || true
+        kill "${session_watchdog_pid}" 2>/dev/null || true
+        wait "${session_watchdog_pid}" 2>/dev/null || true
     fi
     if [ -n "${xvfb_pid}" ]; then
         kill "${xvfb_pid}" 2>/dev/null || true
