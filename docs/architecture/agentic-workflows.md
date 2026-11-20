@@ -147,7 +147,7 @@ itself cannot fit,
 the record names the exact omitted job and step counts and links the source
 attempt. Generic context trimming does not trim packed failure evidence again.
 
-The Codex job runs on the configured existing self-hosted runner. It invokes
+The Codex job runs on the configured ARC runner pool. It invokes
 `codex exec` in a disposable Docker container using a persistent dedicated
 ChatGPT login. Global Actions concurrency queues worker jobs, and a host lock
 serializes access to the authentication directory. The CLI refreshes that
@@ -284,7 +284,8 @@ Both workflows run unconditional cleanup through the staged controller before
 uploading canary evidence, including after cancellation or failure.
 
 `AGENTIC_CODEX_MODEL` defaults to `gpt-5.6-sol`.
-`AGENTIC_RUNNER` defaults to `neurodesk-syd-arcrunner-neurodesktop` and
+`AGENTIC_RUNNER` defaults to `neurodesk-syd-arcrunner-neurodesktop-agentic`, a
+one-runner pool that holds the ReadWriteOnce login claim, and
 `AGENTIC_CODEX_HOME` defaults to `/var/lib/neurodesktop-codex`. The persistent
 directory must survive runner replacement. The runner uses a Docker-in-Docker
 sidecar, so checkout, temporary, and authentication paths must be visible at
