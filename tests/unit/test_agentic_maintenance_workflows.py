@@ -56,7 +56,7 @@ def test_model_runner_and_publisher_have_separate_permissions_and_artifacts():
     assert "if: vars.AGENTIC_ENABLED == 'true'" in prepare
     candidate, publish = candidate.split('  publish:\n')
     assert 'runs-on: ubuntu-latest' in prepare and 'runs-on: ubuntu-latest' in publish
-    assert "vars.AGENTIC_RUNNER || 'neurodesk-syd-arcrunner-neurodesktop-agentic'" in candidate
+    assert "vars.AGENTIC_RUNNER || 'neurodesk-syd-arcrunner-neurodesktop'" in candidate
     assert "vars.AGENTIC_CODEX_HOME || '/var/lib/neurodesktop-codex'" in candidate
     assert 'group: neurodesktop-codex-subscription' in candidate
     assert 'queue: max' in candidate and 'cancel-in-progress: false' in candidate
