@@ -259,7 +259,8 @@ delegating methods, so the algorithm stays reviewable and is pinned by parity
 vectors in `tests/unit/test_neurodesktop_stream_output.py`. Between messages
 the processor retains only a per-cell `StreamState` named tuple
 `(text_length, cursor, running_hash)` — never the accumulated text — and
-appends blindly while the cursor sits at
+each state owns its incremental hash snapshot rather than mutating a retained
+earlier state. The processor appends blindly while the cursor sits at
 the end and the fragment contains no `\r` or `\b`, so ordinary
 newline-terminated output of any size is neither held in memory for the life
 of the room nor rebuilt on every fragment. Rewinding fragments materialize
