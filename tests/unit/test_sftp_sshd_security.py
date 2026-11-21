@@ -293,10 +293,15 @@ def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup, sudo_avai
             "fi\n"
             f'for arg in "$@"; do [[ "$arg" == PidFile=* ]] && echo {os.getpid()} > "${{arg#PidFile=}}"; done\n'
             'case "$STARTUP" in\n'
-            "  duplicate-bind) echo 'Bind to port 2222 on 127.0.0.1 failed: Address already in use.'; (sleep 0.3; touch \"$LISTENING\") >/dev/null 2>&1 & ;;\n"
-            '  delayed|hidden-owner|foreign-owner) (sleep 0.3; touch "$LISTENING") >/dev/null 2>&1 & ;;\n'
+            "  duplicate-bind) echo 'Bind to port 2222 on 127.0.0.1 failed: Address already in use.' ;;\n"
             "  never) echo 'daemon could not bind' ;;\n"
             "  failed) echo 'daemon launch failed'; exit 1 ;;\n"
+            "esac\n"
+        ),
+        # Advance the fake daemon after the first poll, without wall-clock waits.
+        "sleep": (
+            'case "$STARTUP" in\n'
+            '  delayed|hidden-owner|foreign-owner|duplicate-bind) : > "$LISTENING" ;;\n'
             "esac\n"
         ),
         "ss": (
@@ -342,6 +347,8 @@ def test_sftp_publication_waits_for_daemon_listener(tmp_path, startup, sudo_avai
     else:
         assert result.returncode != 0
         assert not (runtime / "sftp_port").exists()
+        if startup == "foreign-owner":
+            assert marker.exists(), "The competing listener never appeared"
         expected = {
             "foreign-owner": "did not start listening",
             "never": "daemon could not bind",

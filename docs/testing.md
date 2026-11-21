@@ -871,9 +871,11 @@ to win the race between automatic port selection and sshd's bind, then requires
 startup to retry and publish the new listener. It also covers runtimes that
 hide `ss` process annotations: startup must match the listener socket inode to
 the daemon process and must reject the same port when another process owns its
-socket. SSH-disabled cases start with
-stale SFTP port state, require the SFTP connection to be disabled without a new SSH daemon, and
-receive desktop frames through the authenticated VNC tunnel. The combined-backend
+socket. The readiness tests advance the fake listener on the first polling
+sleep and exercise both successful and failed startup without waiting in real
+time. SSH-disabled cases start with stale SFTP port state, require the SFTP
+connection to be disabled without a new SSH daemon, and receive desktop frames
+through the authenticated VNC tunnel. The combined-backend
 case exercises the template that enables SFTP by default. The installed
 SSH proxy tests load the shipped Jupyter configuration and verify that the
 `sshd` route and its host-key generation disappear only when
