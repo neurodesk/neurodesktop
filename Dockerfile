@@ -756,7 +756,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     watermark \
     ipyniivue==${IPYNIIVUE_VERSION} \
     jupyterlab-niivue==0.2.7 \
-    jupyter-server-proxy==4.6.0 \
+    jupyter-server-proxy==4.6.1 \
     jupyterlmod \
     jupyterlab-git \
     notebook_intelligence==6.3.0 \
