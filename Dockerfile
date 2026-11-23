@@ -741,7 +741,7 @@ RUN --mount=type=bind,source=config/jupyter/patch_ipyniivue.py,target=/tmp/patch
     && runuser -u ${NB_USER} -- env "PATH=${PATH}" /opt/conda/bin/pip install --build-constraint /tmp/build-constraints.txt --upgrade \
     # Pin JupyterLab itself instead of inheriting the base image's release, so
     # upgrades are explicit and Renovate tracks them.
-    jupyterlab==4.6.5 \
+    jupyterlab==4.6.6 \
     datalad \
     nipype \
     niwrap \
