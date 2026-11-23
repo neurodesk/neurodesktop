@@ -25,13 +25,28 @@ def click(bidi, context, expression):
             const deadline = performance.now() + 20000;
             let previous = null;
             let stableFrames = 0;
+            let lastReason = 'not evaluated';
             globalThis.__neurodesktopAstraClickOffset = null;
+            const describe = (element) => {
+                if (!element) return 'none';
+                const id = element.id ? '#' + element.id : '';
+                const cls = typeof element.className === 'string' && element.className.trim()
+                    ? '.' + element.className.trim().split(/\\s+/).slice(0, 3).join('.') : '';
+                return element.tagName.toLowerCase() + id + cls;
+            };
             while (performance.now() < deadline) {
                 await new Promise(requestAnimationFrame);
                 const node = """ + expression + """;
-                if (!node?.checkVisibility()) {
+                if (!node) {
                     previous = null;
                     stableFrames = 0;
+                    lastReason = 'element not found';
+                    continue;
+                }
+                if (!node.checkVisibility()) {
+                    previous = null;
+                    stableFrames = 0;
+                    lastReason = 'element not visible: ' + describe(node);
                     continue;
                 }
                 node.scrollIntoView({block: 'center', behavior: 'instant'});
@@ -40,6 +55,7 @@ def click(bidi, context, expression):
                 if (!clientRects.length) {
                     previous = null;
                     stableFrames = 0;
+                    lastReason = 'element has no client rects: ' + describe(node);
                     continue;
                 }
                 const originRect = clientRects[0];
@@ -55,6 +71,7 @@ def click(bidi, context, expression):
                     [0.5, 0.8],
                 ];
                 let offset = null;
+                let lastHit = null;
                 for (const clientRect of clientRects) {
                     const clientLeft = Math.max(0, clientRect.left);
                     const clientRight = Math.min(innerWidth, clientRect.right);
@@ -66,16 +83,24 @@ def click(bidi, context, expression):
                             clientLeft + (clientRight - clientLeft) * xFraction);
                         const y = Math.round(
                             clientTop + (clientBottom - clientTop) * yFraction);
-                        if (node.contains(document.elementFromPoint(x, y))) {
+                        const hit = document.elementFromPoint(x, y);
+                        if (node.contains(hit)) {
                             offset = {x: x - originX, y: y - originY};
                             break;
                         }
+                        lastHit = `${describe(hit)} at (${x},${y})`;
                     }
                     if (offset) break;
+                }
+                if (!offset) {
+                    lastReason = `obscured (${lastHit || 'outside viewport'}) rect=${JSON.stringify([rect.x, rect.y, rect.width, rect.height])}`;
                 }
                 const geometry = offset && JSON.stringify([
                     rect.x, rect.y, rect.width, rect.height, offset.x, offset.y,
                 ]);
+                if (geometry && geometry !== previous) {
+                    lastReason = `geometry unstable (${previous} -> ${geometry})`;
+                }
                 stableFrames = geometry && geometry === previous
                     ? stableFrames + 1 : 0;
                 if (stableFrames >= 2) {
@@ -84,11 +109,13 @@ def click(bidi, context, expression):
                 }
                 previous = geometry;
             }
-            throw new Error('ASTRA click target did not become stable and unobscured');
+            throw new Error(`ASTRA click target did not become stable and unobscured: ${lastReason}`);
         })()""",
         "target": {"context": context}, "awaitPromise": True,
     })
-    assert target["type"] == "success", target.get("exceptionDetails", {}).get("text", target)
+    assert target["type"] == "success", (
+        f"{expression}: {target.get('exceptionDetails', {}).get('text', target)}"
+    )
     origin = {"type": "element", "element": {"sharedId": target["result"]["sharedId"]}}
     offset_x = evaluate(bidi, context, "globalThis.__neurodesktopAstraClickOffset.x")
     offset_y = evaluate(bidi, context, "globalThis.__neurodesktopAstraClickOffset.y")
@@ -122,7 +149,11 @@ def test_file_browser_astra_document_refreshes_saved_spec_and_run(tmp_path):
     server_port, browser_port = _unused_port(), _unused_port()
     prefix = f"http://127.0.0.1:{server_port}/user/astra-test/"
     token = "astra-document-test"
-    environment = {**os.environ, "HOME": str(tmp_path)}
+    environment = {
+        **os.environ,
+        "HOME": str(tmp_path),
+        "NBI_TOUR_CONFIG_PATH": "/opt/jovyan_defaults/.jupyter/nbi/tour_config.json",
+    }
     config = tmp_path / "jupyter_server_config.py"
     config.write_text(
         'c = get_config()\nc.SlurmCommandPaths.squeue_path = "/usr/bin/true"\n'

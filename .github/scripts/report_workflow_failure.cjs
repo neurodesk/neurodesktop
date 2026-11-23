@@ -138,8 +138,12 @@ function observationOf(run, jobs) {
 function meaningfulDiagnosis(text, run) {
   const lines = text.split("\n");
   const exit = lines.findLastIndex((line) => /^##\[error\]Process completed with exit code [1-9]\d*\.$/.test(line));
+  const isObjectStorageFragment = lines.some((line) =>
+    /^\s*ERROR:\s*(?:object-storage\b|\d+\s+of\s+\d+\s+object-storage\b)/i.test(line) ||
+    /^\s*##\[error\]\S+ is missing from https?:\/\//.test(line));
+  const isObjectStorageStep = run?.name === "Test Objectstorage" || isObjectStorageFragment;
   if (text.includes("Report Summary")) {
-    if (exit < 0) return null;
+    if (isObjectStorageStep || exit < 0) return null;
     const sections = [];
     for (let index = 0; index < exit; index++) {
       const total = lines[index].match(/^Total: (\d+) \(/);
@@ -165,6 +169,111 @@ function meaningfulDiagnosis(text, run) {
     if (!sections.length) return null;
     const errors = lines.filter((line) => line.startsWith("##[error]") && !line.includes("Process completed with exit code"));
     return {trivy: sections, errors};
+  }
+  if (isObjectStorageStep) {
+    if (exit < 0 || lines[exit] !== "##[error]Process completed with exit code 2.") return null;
+    const headerStartPattern = /^##\[group\]Run \/bin\/bash \.github\/workflows\/test_objectstorage\.sh(?:\s+https?:\/\/\S+)?$/;
+    const headerCommandPattern = /^\/bin\/bash \.github\/workflows\/test_objectstorage\.sh(?:\s+https?:\/\/\S+)?$/;
+    const headerShellPattern = /^shell: \/\S+.*$/;
+    const headerEnvEntryPattern = /^  [A-Z][A-Z0-9_]*:.*$/;
+    const headerForbiddenEnvPattern = /^  (?:ERROR|FATAL):/;
+    const debugPattern = /^\[DEBUG\] \S+\.simg exists in https?:\/\/\S+$/;
+    const retryPattern = /^WARNING: retrying [1-9]\d* missing entr(?:y|ies) after \d+ seconds \(attempt [1-9]\d*\/[1-9]\d*\)\.$/;
+    const summaryPattern = /^ERROR: ([1-9]\d*) of ([1-9]\d*) object-storage inventory entries are missing\.$/;
+    const missingPattern = /^ERROR: object-storage inventory entry is missing: (\S+)$/;
+    const annotationPattern = /^##\[error\](\S+) is missing from (https?:\/\/\S+)$/;
+    const postExitErrorPattern = /(?:##\[error\]|^\s*(?:ERROR|FATAL|\w*Error|Exception)\s*:|^\s*FAILED |^\s*=+ (?:FAILURES|ERRORS) =+$)/i;
+    let summary = null;
+    let inHeaderGroup = false;
+    let headerStage = "start";
+    let sawOutput = false;
+    let inPostCleanup = false;
+    const missing = [];
+    const annotations = [];
+    const annotatedEntries = [];
+    for (let index = 0; index < lines.length; index++) {
+      if (index === exit) continue;
+      const line = lines[index];
+      if (index > exit) {
+        if (!line.trim()) continue;
+        if (postExitErrorPattern.test(line)) return null;
+        if (!inPostCleanup) {
+          if (line === "Post job cleanup.") { inPostCleanup = true; continue; }
+          return null;
+        }
+        continue;
+      }
+      if (!line.trim()) continue;
+      if (!sawOutput && !inHeaderGroup && headerStartPattern.test(line)) {
+        inHeaderGroup = true;
+        headerStage = "command";
+        continue;
+      }
+      if (inHeaderGroup) {
+        if (line === "##[endgroup]") {
+          if (headerStage !== "after_shell" && headerStage !== "env") return null;
+          inHeaderGroup = false;
+          sawOutput = true;
+          continue;
+        }
+        if (headerStage === "command" && headerCommandPattern.test(line)) {
+          headerStage = "shell";
+          continue;
+        }
+        if ((headerStage === "command" || headerStage === "shell") && headerShellPattern.test(line)) {
+          headerStage = "after_shell";
+          continue;
+        }
+        if (headerStage === "after_shell" && line === "env:") {
+          headerStage = "env";
+          continue;
+        }
+        if (headerStage === "env" && headerEnvEntryPattern.test(line) && !headerForbiddenEnvPattern.test(line)) {
+          continue;
+        }
+        return null;
+      }
+      sawOutput = true;
+      if (debugPattern.test(line) || retryPattern.test(line)) continue;
+      const summaryMatch = line.match(summaryPattern);
+      if (summaryMatch) {
+        if (summary) return null;
+        summary = summaryMatch;
+        continue;
+      }
+      const missingMatch = line.match(missingPattern);
+      if (missingMatch) {
+        missing.push(missingMatch[1]);
+        continue;
+      }
+      const annotationMatch = line.match(annotationPattern);
+      if (annotationMatch) {
+        annotations.push(line);
+        annotatedEntries.push(annotationMatch[1]);
+        continue;
+      }
+      return null;
+    }
+    if (inHeaderGroup || !summary) return null;
+    const expectedMissing = Number(summary[1]);
+    const total = Number(summary[2]);
+    const missingSet = new Set(missing);
+    const annotationsConsistent = annotations.length === 0 || (
+      annotations.length === missing.length &&
+      new Set(annotatedEntries).size === missing.length &&
+      annotatedEntries.every((entry) => missingSet.has(entry))
+    );
+    if (annotationsConsistent && expectedMissing <= total &&
+        missing.length === expectedMissing && missingSet.size === expectedMissing) {
+      return {
+        objectStorage: {
+          total,
+          missing: [...missing].sort(),
+          annotations: [...annotations].sort(),
+        },
+      };
+    }
+    return null;
   }
   const pytest = text.match(/=+ (?:FAILURES|ERRORS) =+\n[\s\S]*?=+ short test summary info =+\n[\s\S]*?(?=^=+ .*\b(?:failed|errors?)\b.*=+$)/m);
   if (pytest) return {pytest: pytest[0].trim()};

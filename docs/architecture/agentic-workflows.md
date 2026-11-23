@@ -3,7 +3,7 @@ title: Agentic CI workflows
 description: Failure reporting, issue repair, scheduled maintenance, and subscription-authenticated Codex execution through conventional Actions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-11-14"
+last-reviewed: "2026-11-23"
 ---
 
 # Agentic CI workflows
@@ -30,8 +30,9 @@ recursively launch agents to repair their own unavailable authentication or runn
 The reporter groups unresolved failures only when the workflow ID, head
 repository, exact branch or PR scope, source SHA, and complete failure bundle
 match. Matrix job names and failed step names remain part of the identity.
-Complete Trivy finding tables and pytest failure sections supply diagnostic
-identity. Successful setup output, runner IDs, and run-specific image tags do
+Complete Trivy finding tables, pytest failure sections, and exit-2
+object-storage missing-entry reports supply diagnostic identity (still scoped
+to the same source SHA and failure bundle). Successful setup output, runner IDs, and run-specific image tags do
 not define a failure. Missing, oversized, incomplete, or unrecognized diagnostics
 remain specific to the run and attempt. A different SHA or failure bundle can
 create a separate incident even when a human later identifies a shared cause.

@@ -4,7 +4,7 @@ description: Container-backed and hosted webapps, launcher tiles and icons,
   and the build-time Jupyter config generation that wires them up
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-11-11"
+last-reviewed: "2026-11-23"
 ---
 
 # Webapp System
@@ -25,7 +25,15 @@ in [`config/jupyter/webapp_links.json`](../../config/jupyter/webapp_links.json) 
 applied by [`scripts/generate_jupyter_config.py`](../../scripts/generate_jupyter_config.py)
 when generating Jupyter Server Proxy entries. The same merged webapp config is
 written to `/opt/neurodesktop/webapps.json` so runtime wrapper settings such as
-path rewrites use the local overrides too. The wrapper streams fixed-length
+path rewrites and `rewrite_location` use the local overrides too. By default
+the wrapper injects `<base href>` and a `History.replaceState` snippet into
+uncompressed main HTML so root-relative single-page apps work under `/<app>/`;
+base-path-aware apps can set `"rewrite_location": false` in `webapps.json` (or
+a local override) to inject only the heartbeat/close-beacon script and keep
+`/<app>/` in the address bar across reloads. When a local test container is
+mounted at `/opt/neurodesktop-test-webapps/<app>/<app>.sif`, the wrapper splits
+`startup_command` with shell-style quoting before passing it to
+`apptainer exec`, matching multi-word commands such as `<app> start`. The wrapper streams fixed-length
 request bodies to the backend in bounded chunks, so large uploads are not
 duplicated in wrapper memory; Jupyter Server and the hosting proxy still apply
 their own request-size and multipart limits before the wrapper receives a
