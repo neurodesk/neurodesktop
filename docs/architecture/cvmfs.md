@@ -182,9 +182,9 @@ that its winner will remain fastest for every object or future workload.
 
 Configuration lives in [`config/cvmfs/`](../../config/cvmfs/). CVMFS can be
 disabled with `CVMFS_DISABLE=true`. The Dockerfile pins both the CVMFS client
-package and the repository bootstrap package; the bootstrap download is also
-verified by SHA-256 so the `latest` URL cannot silently change a reproducible
-build.
+package and the repository bootstrap package. It downloads the bootstrap from
+the versioned upstream pool path and verifies it by SHA-256, so a moving
+`latest` alias cannot change or interrupt a reproducible build.
 
 The scheduled [CVMFS health workflow](../../.github/workflows/test-cvmfs.yml)
 first mounts the authoritative Stratum 0 repository and compares it with

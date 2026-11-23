@@ -484,14 +484,14 @@ ARG CVMFS_RELEASE_SHA256
 RUN mv /usr/bin/systemctl /usr/bin/systemctl.build-original \
     && printf '#!/bin/sh\nexit 0\n' > /usr/bin/systemctl \
     && chmod 0755 /usr/bin/systemctl \
-    && retry wget -q https://cvmrepo.s3.cern.ch/cvmrepo/apt/cvmfs-release-latest_all.deb -P /tmp \
-    && if ! echo "${CVMFS_RELEASE_SHA256}  /tmp/cvmfs-release-latest_all.deb" | sha256sum -c -; then \
+    && retry wget -q "https://cvmrepo.s3.cern.ch/cvmrepo/apt/pool/common/main/cvmfs-release_${CVMFS_RELEASE_VERSION}_all.deb" -O /tmp/cvmfs-release.deb \
+    && if ! echo "${CVMFS_RELEASE_SHA256}  /tmp/cvmfs-release.deb" | sha256sum -c -; then \
         echo "CVMFS release bootstrap changed; update CVMFS_RELEASE_VERSION and CVMFS_RELEASE_SHA256 together." >&2; \
         exit 1; \
     fi \
-    && dpkg -i /tmp/cvmfs-release-latest_all.deb \
+    && dpkg -i /tmp/cvmfs-release.deb \
     && test "$(dpkg-query -W -f='${Version}' cvmfs-release)" = "${CVMFS_RELEASE_VERSION}" \
-    && rm /tmp/cvmfs-release-latest_all.deb \
+    && rm /tmp/cvmfs-release.deb \
     && apt-install-retry \
     autofs \
     cvmfs="${CVMFS_VERSION}" \
