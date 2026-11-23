@@ -23,6 +23,7 @@ import os
 import json
 import re
 import select
+import shlex
 import time
 import signal
 import sys
@@ -140,6 +141,17 @@ class WebappConfig:
         # Add default rewrite for the app's own path (e.g., /ezbids/ -> base_path)
         if f"/{self.app_name}/" not in self.path_rewrites:
             self.path_rewrites.append(f"/{self.app_name}/")
+
+        # Whether to inject <base href> and rewrite window.location via
+        # History.replaceState on uncompressed main HTML. Base-path-aware apps
+        # can set "rewrite_location": false in webapps.json so reloads keep
+        # their /<app>/ URL instead of landing on JupyterLab.
+        rewrite_location = config.get("rewrite_location", True)
+        if not isinstance(rewrite_location, bool):
+            raise ValueError(
+                f"rewrite_location for {self.app_name} must be a boolean"
+            )
+        self.rewrite_location = rewrite_location
 
         # Paths
         self.logfile = f"/tmp/{self.app_name}_wrapper.log"
@@ -629,6 +641,20 @@ def monitor_idle_timeout():
             stop_backend_for_idle(idle_for)
 
 
+def build_local_sif_command(local_sif, startup_command):
+    """Build the apptainer exec argv for a local test SIF image."""
+    startup_args = shlex.split(startup_command or "")
+    if not startup_args:
+        raise ValueError("startup_command must not be empty")
+    return [
+        "apptainer", "exec", "--writable-tmpfs",
+        "-B", "/neurodesktop-storage:/neurodesktop-storage",
+        "-B", "/home/jovyan:/home/jovyan",
+        local_sif,
+        *startup_args,
+    ]
+
+
 def start_container():
     """Start the webapp container in background."""
     global container_ready, container_error, container_process, container_pgid, startup_start_time
@@ -662,12 +688,7 @@ def start_container():
             log(f"Using local test image: {local_sif}")
             log(f"Startup command: {config.startup_command}")
             # Bind mount storage and home directories so apps can access user files
-            cmd = [
-                "apptainer", "exec", "--writable-tmpfs",
-                "-B", "/neurodesktop-storage:/neurodesktop-storage",
-                "-B", "/home/jovyan:/home/jovyan",
-                local_sif, config.startup_command
-            ]
+            cmd = build_local_sif_command(local_sif, config.startup_command)
             log(f"Full command: {cmd}")
         else:
             log("Using CVMFS module system")
@@ -1145,12 +1166,15 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
         Uses a sliding-window overlap buffer so that rewrite patterns spanning
         chunk boundaries are still matched correctly.
 
-        For main HTML pages from compressed backends (gzip/br), we decompress
-        via iter_bytes() and inject a heartbeat-only script (no base-href or
-        replaceState — those break apps like RStudio that read window.location).
-        For uncompressed main HTML, we inject the full script (base-href +
-        replaceState + heartbeat) using iter_raw(), preserving the old behavior
-        that apps like dicompare depend on.
+        For main HTML pages from compressed backends (gzip/br), or when an app
+        sets ``"rewrite_location": false`` in ``webapps.json``, we inject a
+        heartbeat-only script (no base-href or replaceState — those break apps
+        like RStudio that read window.location, and cause reloads of
+        base-path-aware apps to navigate to JupyterLab). Compressed responses
+        are decompressed via iter_bytes() first. For uncompressed main HTML
+        with ``rewrite_location`` enabled (the default), we inject the full
+        script (base-href + replaceState + heartbeat) using iter_raw(),
+        preserving the behavior that apps like dicompare depend on.
         """
         base_path = self._get_base_path()
         is_compressed = bool(response.headers.get("content-encoding"))
@@ -1212,10 +1236,13 @@ class WebappHandler(http.server.BaseHTTPRequestHandler):
                     break
 
             # Choose injection: full script (base-href + replaceState + heartbeat)
-            # for uncompressed content; heartbeat-only for compressed content
-            # (replaceState breaks apps like RStudio that read window.location).
+            # for uncompressed content unless the app opts out via
+            # rewrite_location=False; heartbeat-only for compressed content or
+            # base-path-aware apps (replaceState breaks apps like RStudio and
+            # redirects reloads to JupyterLab).
             head_buffer = rewrite(head_buffer)
-            if is_compressed:
+            rewrite_location = getattr(config, "rewrite_location", True)
+            if is_compressed or not rewrite_location:
                 inject_bytes = self._build_heartbeat_only_script(base_path)
             else:
                 inject_bytes = self._build_inject_script(base_path)

@@ -655,3 +655,145 @@ def test_pytest_failure_sections_keep_assertions_and_ignore_setup(same_error):
         later["logs"]["12352"] = later["logs"]["12352"].replace("Guacamole protocol error", "Connection refused")
     output = run_reporter(runs=[first, later])
     assert len(output["issues"]) == (1 if same_error else 2)
+
+
+def _object_storage_log(missing, total=790, server="https://object-store.rc.nectar.org.au/v1/AUTH_test/neurodesk/",
+                        *, include_exit=True, exit_code=2, extra_error=None, trailing_error=None,
+                        include_annotations=True):
+    lines = [
+        f"[DEBUG] fsl_6.0.5.1_20221016.simg exists in {server}",
+        f"WARNING: retrying {len(missing)} missing entries after 30 seconds (attempt 2/3).",
+        f"WARNING: retrying {len(missing)} missing entries after 30 seconds (attempt 3/3).",
+    ]
+    if extra_error:
+        lines.append(extra_error)
+    for image in missing:
+        lines.append(f"ERROR: object-storage inventory entry is missing: {image}")
+        if include_annotations:
+            lines.append(f"##[error]{image} is missing from {server}")
+    lines.append(f"ERROR: {len(missing)} of {total} object-storage inventory entries are missing.")
+    if include_exit:
+        lines.append(f"##[error]Process completed with exit code {exit_code}.")
+    if trailing_error:
+        lines.append(trailing_error)
+    return "\n".join(lines) + "\n"
+
+
+def _object_storage_run(number, hour, log):
+    run = incident_run(number, hour, name="Test Objectstorage", workflow_id=49800492, event="schedule")
+    run["jobs"] = [{
+        "id": number * 10,
+        "name": "test_objectstorage (https://object-store.rc.nectar.org.au/v1/AUTH_test/neurodesk/)",
+        "conclusion": "failure",
+        "status": "completed",
+        "started_at": run["run_started_at"],
+        "completed_at": run["updated_at"],
+        "steps": [{
+            "name": "check if https://object-store.rc.nectar.org.au/v1/AUTH_test/neurodesk/ is online and up-to-date",
+            "conclusion": "failure",
+        }],
+    }]
+    run["logs"] = {str(number * 10): log}
+    return run
+
+
+def test_complete_object_storage_missing_entries_group_across_runs():
+    missing = ["code_20261114.simg", "mne_20261114.simg"]
+    header = (
+        "##[group]Run /bin/bash .github/workflows/test_objectstorage.sh https://object-store.rc.nectar.org.au/v1/AUTH_test/neurodesk/\n"
+        "/bin/bash .github/workflows/test_objectstorage.sh https://object-store.rc.nectar.org.au/v1/AUTH_test/neurodesk/\n"
+        "shell: /usr/bin/bash -e {0}\n"
+        "env:\n"
+        "  DOCKERHUB_ORG: vnmd\n"
+        "##[endgroup]\n"
+    )
+    first = _object_storage_run(44928390055, 17, header + _object_storage_log(missing))
+    later = _object_storage_run(45047696727, 18, header + "[DEBUG] extra_ok.simg exists in https://object-store.rc.nectar.org.au/v1/AUTH_test/neurodesk/\n" + _object_storage_log(list(reversed(missing))))
+    output = run_reporter(runs=[first, later])
+    assert len(output["issues"]) == 1
+    assert "opaque:" not in output["issues"][0]["body"]
+
+
+@pytest.mark.parametrize("mutator", [
+    lambda: _object_storage_log(["code_20261114.simg", "other_20261114.simg"]),
+    lambda: _object_storage_log(["code_20261114.simg", "mne_20261114.simg"], total=791),
+    lambda: _object_storage_log(["code_20261114.simg", "mne_20261114.simg"], server="https://other.example.org/neurodesk/"),
+])
+def test_object_storage_diagnosis_changes_never_group(mutator):
+    first = _object_storage_run(44928390055, 17, _object_storage_log(["code_20261114.simg", "mne_20261114.simg"]))
+    later = _object_storage_run(45047696727, 18, mutator())
+    output = run_reporter(runs=[first, later])
+    assert len(output["issues"]) == 2
+    assert all("opaque:" not in issue["body"] for issue in output["issues"])
+
+
+@pytest.mark.parametrize("malformed_log", [
+    lambda: "ERROR: 2 of 790\n",
+    lambda: "ERROR: 2 of 790 object-storage inventory entries are missing.\n",
+    lambda: "ERROR: 2 of 790 object-storage inventory entries are missing\n",
+    lambda: "ERROR: object-storage inventory entry is missing: code_20261114.simg\n",
+    lambda: "ERROR: object-storage inventory entry is missing\n",
+    lambda: _object_storage_log(["code_20261114.simg", "mne_20261114.simg"], include_exit=False),
+    lambda: _object_storage_log(["code_20261114.simg", "mne_20261114.simg"], exit_code=1),
+    lambda: _object_storage_log(["code_20261114.simg", "mne_20261114.simg"], extra_error="ERROR: object-storage request failed for foo.simg (curl status 28, HTTP status 000)."),
+    lambda: _object_storage_log(["code_20261114.simg", "mne_20261114.simg"], extra_error="FATAL: curl aborted unexpectedly"),
+    lambda: _object_storage_log(["code_20261114.simg", "mne_20261114.simg"], extra_error="FATAL:connection lost"),
+    lambda: _object_storage_log(["code_20261114.simg", "mne_20261114.simg"], extra_error="  ERROR: indented failure"),
+    lambda: _object_storage_log(["code_20261114.simg", "mne_20261114.simg"], extra_error="##[error]Runner lost communication with the server."),
+    lambda: _object_storage_log(["code_20261114.simg", "mne_20261114.simg"], trailing_error="##[error]Runner lost communication with the server."),
+    lambda: _object_storage_log(["code_20261114.simg", "mne_20261114.simg"], trailing_error="  ##[error]Runner lost communication with the server."),
+    lambda: _object_storage_log(["code_20261114.simg", "mne_20261114.simg"], trailing_error="Post job cleanup.\n  ##[error]Runner lost communication with the server."),
+    lambda: _object_storage_log(["code_20261114.simg", "mne_20261114.simg"], trailing_error="FATAL:connection lost"),
+    lambda: _object_storage_log(["code_20261114.simg", "mne_20261114.simg"]).replace("2 of 790", "3 of 790"),
+    lambda: (
+        "##[group]Run /bin/bash .github/workflows/test_objectstorage.sh https://object-store.rc.nectar.org.au/v1/AUTH_test/neurodesk/\n"
+        "/bin/bash .github/workflows/test_objectstorage.sh https://object-store.rc.nectar.org.au/v1/AUTH_test/neurodesk/\n"
+        "##[endgroup]\n"
+        + _object_storage_log(["code_20261114.simg", "mne_20261114.simg"])
+    ),
+    lambda: (
+        "##[group]Run /bin/bash .github/workflows/test_objectstorage.sh https://object-store.rc.nectar.org.au/v1/AUTH_test/neurodesk/\n"
+        "  ERROR: runner lost communication\n"
+        "shell: /usr/bin/bash -e {0}\n"
+        "##[endgroup]\n"
+        + _object_storage_log(["code_20261114.simg", "mne_20261114.simg"])
+    ),
+    lambda: (
+        "##[group]Run /bin/bash .github/workflows/test_objectstorage.sh https://object-store.rc.nectar.org.au/v1/AUTH_test/neurodesk/\n"
+        "  AssertionError: pytest assertion failed\n"
+        "shell: /usr/bin/bash -e {0}\n"
+        "##[endgroup]\n"
+        + _object_storage_log(["code_20261114.simg", "mne_20261114.simg"])
+    ),
+    lambda: (
+        "##[group]Run /bin/bash .github/workflows/test_objectstorage.sh https://object-store.rc.nectar.org.au/v1/AUTH_test/neurodesk/\n"
+        "shell: /usr/bin/bash -e {0}\n"
+        "env:\n"
+        "  ERROR: runner lost communication\n"
+        "##[endgroup]\n"
+        + _object_storage_log(["code_20261114.simg", "mne_20261114.simg"])
+    ),
+    lambda: (
+        "##[group]Run /bin/bash .github/workflows/test_objectstorage.sh https://object-store.rc.nectar.org.au/v1/AUTH_test/neurodesk/\n"
+        "================ FAILURES ================\n"
+        "FAILED test_guac - AssertionError: Guacamole protocol error\n"
+        "##[endgroup]\n"
+        + _object_storage_log(["code_20261114.simg", "mne_20261114.simg"])
+    ),
+    lambda: (
+        "================ FAILURES ================\n"
+        "________________ test_guac ________________\n"
+        "E AssertionError: Guacamole protocol error\n"
+        "================ short test summary info ================\n"
+        "FAILED test_guac - AssertionError: Guacamole protocol error\n"
+        "================ 1 failed in 1.00s ================\n"
+        + _object_storage_log(["code_20261114.simg", "mne_20261114.simg"])
+    ),
+])
+def test_malformed_or_mixed_object_storage_logs_stay_opaque_and_never_group(malformed_log):
+    log = malformed_log()
+    first = _object_storage_run(44928390055, 17, log)
+    later = _object_storage_run(45047696727, 18, log)
+    output = run_reporter(runs=[first, later])
+    assert len(output["issues"]) == 2
+    assert all("opaque:" in issue["body"] for issue in output["issues"])

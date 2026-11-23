@@ -1,3 +1,5 @@
+import io
+import json
 import os
 from pathlib import Path
 import socket
@@ -5,6 +7,7 @@ import stat
 import threading
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from testlib import load_source_module
@@ -277,3 +280,156 @@ def test_websocket_upgrade_requests_are_tunneled_to_backend(tmp_path):
     assert received["payload"] == b"client-data"
     assert received["request"].startswith(b"GET /abc123/coms HTTP/1.1\r\n")
     assert f"Host: localhost:{backend_port}\r\n".encode() in received["request"]
+
+
+def test_local_sif_start_container_splits_multiword_startup_command(tmp_path, monkeypatch):
+    wrapper = _load_webapp_wrapper_module()
+    expected_sif = "/opt/neurodesktop-test-webapps/neurovue/neurovue.sif"
+    launched = {}
+
+    class FakeProcess:
+        pid = 43210
+
+        def __init__(self):
+            self.stdout = io.StringIO("")
+
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, **kwargs):
+        launched["cmd"] = cmd
+        launched["env"] = kwargs["env"]
+        return FakeProcess()
+
+    wrapper.config = SimpleNamespace(
+        app_name="neurovue",
+        title="NeuroVue",
+        module="neurovue",
+        version=None,
+        startup_command='neurovue start --title "My Viewer"',
+        target_port=3000,
+        default_port=3000,
+        routes=[("/neurovue", 3000)],
+        startup_timeout=1,
+        logfile=str(tmp_path / "neurovue_wrapper.log"),
+    )
+    wrapper.container_ready = False
+    wrapper.container_error = None
+
+    monkeypatch.setattr(wrapper, "find_free_port", lambda: 34567)
+    monkeypatch.setattr(wrapper.os.path, "exists", lambda path: path == expected_sif)
+    monkeypatch.setattr(wrapper.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(wrapper.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(wrapper, "check_app_ready", lambda: True)
+
+    wrapper.start_container()
+
+    assert wrapper.container_ready is True
+    assert wrapper.container_error is None
+    assert launched["cmd"] == [
+        "apptainer", "exec", "--writable-tmpfs",
+        "-B", "/neurodesktop-storage:/neurodesktop-storage",
+        "-B", "/home/jovyan:/home/jovyan",
+        expected_sif,
+        "neurovue", "start", "--title", "My Viewer",
+    ]
+    assert launched["env"]["NEURODESK_WEBAPP_PORT"] == "34567"
+    assert launched["env"]["APPTAINERENV_NEURODESK_WEBAPP_PORT"] == "34567"
+
+
+def test_build_local_sif_command_rejects_empty_startup_command():
+    wrapper = _load_webapp_wrapper_module()
+
+    with pytest.raises(ValueError, match="must not be empty"):
+        wrapper.build_local_sif_command("/opt/test/app.sif", "   ")
+
+
+def test_webapp_config_loads_rewrite_location_and_rejects_non_boolean(tmp_path, monkeypatch):
+    wrapper = _load_webapp_wrapper_module()
+    config_file = tmp_path / "webapps.json"
+    config_file.write_text(
+        json.dumps(
+            {
+                "webapps": {
+                    "defaultapp": {"startup_command": "defaultapp start"},
+                    "neurovue": {
+                        "startup_command": "neurovue start",
+                        "rewrite_location": False,
+                    },
+                    "badapp": {
+                        "startup_command": "badapp start",
+                        "rewrite_location": "false",
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(wrapper, "CONFIG_PATH", config_file)
+
+    assert wrapper.WebappConfig("defaultapp").rewrite_location is True
+    assert wrapper.WebappConfig("neurovue").rewrite_location is False
+
+    with pytest.raises(ValueError, match="rewrite_location for badapp must be a boolean"):
+        wrapper.WebappConfig("badapp")
+
+
+def _decode_chunked_body(raw_body):
+    chunks = []
+    pos = 0
+    while pos < len(raw_body):
+        line_end = raw_body.index(b"\r\n", pos)
+        size = int(raw_body[pos:line_end], 16)
+        pos = line_end + 2
+        if size == 0:
+            break
+        chunks.append(raw_body[pos:pos + size])
+        pos += size + 2
+    return b"".join(chunks)
+
+
+@pytest.mark.parametrize("rewrite_location", [True, False])
+def test_uncompressed_main_html_respects_rewrite_location_opt_out(rewrite_location):
+    wrapper = _load_webapp_wrapper_module()
+    wrapper.config = SimpleNamespace(
+        app_name="neurovue",
+        path_rewrites=["/neurovue/"],
+        status_endpoint="neurovue-wrapper-status",
+        heartbeat_interval=60,
+        rewrite_location=rewrite_location,
+    )
+
+    class FakeTextResponse:
+        status_code = 200
+        headers = httpx.Headers({"Content-Type": "text/html; charset=utf-8"})
+
+        def iter_raw(self, _chunk_size):
+            yield b"<!doctype html><html><head><title>NeuroVue</title></head><body>ok</body></html>"
+
+        def iter_bytes(self, _chunk_size):
+            yield from self.iter_raw(_chunk_size)
+
+    handler = object.__new__(wrapper.WebappHandler)
+    handler.path = "/user/alice/neurovue/"
+    handler.wfile = io.BytesIO()
+    handler.responses = []
+    handler.sent_headers = []
+    handler.send_response = lambda code: handler.responses.append(code)
+    handler.send_header = lambda name, value: handler.sent_headers.append((name, value))
+    handler.end_headers = lambda: None
+
+    wrapper.WebappHandler._send_streamed_text_response(
+        handler, FakeTextResponse(), 3000, is_main_html=True
+    )
+
+    body = _decode_chunked_body(handler.wfile.getvalue()).decode("utf-8")
+    assert handler.responses == [200]
+    assert "neurovue-wrapper-status" in body
+    assert "sendHeartbeat" in body
+    if rewrite_location:
+        assert '<base href="/user/alice/neurovue/">' in body
+        assert "History.prototype.replaceState" in body
+    else:
+        assert "var statusUrl = '/user/alice/neurovue/neurovue-wrapper-status';" in body
+        assert "<base href=" not in body
+        assert "History.prototype.replaceState" not in body

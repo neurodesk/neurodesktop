@@ -129,7 +129,10 @@ def test_astra_click_rejects_a_persistently_covered_target(browser):
         return true;
     })()""")
 
-    with pytest.raises(AssertionError, match="did not become stable and unobscured"):
+    with pytest.raises(AssertionError, match="did not become stable and unobscured") as exc_info:
         click(session, context, "document.querySelector('#target')")
 
+    message = str(exc_info.value)
+    assert "document.querySelector('#target')" in message
+    assert "#cover" in message
     assert evaluate(session, context, "window.clicked.join(',')") == ""
