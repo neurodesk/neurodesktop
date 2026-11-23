@@ -2,7 +2,9 @@
 
 set -euo pipefail
 
-INVENTORY_URL="${OBJECT_STORAGE_INVENTORY_URL:-https://raw.githubusercontent.com/NeuroDesk/neurocommand/main/cvmfs/log.txt}"
+INVENTORY_URL="${OBJECT_STORAGE_INVENTORY_URL:-}"
+CATALOG_URL="${OBJECT_STORAGE_CATALOG_URL:-https://apps-catalog.scigetorg.workers.dev/domains.json}"
+CATALOG_USER_AGENT="${OBJECT_STORAGE_CATALOG_USER_AGENT:-neurodesk-objectstorage-check}"
 CHECK_ATTEMPTS="${OBJECT_STORAGE_CHECK_ATTEMPTS:-3}"
 RETRY_DELAY="${OBJECT_STORAGE_RETRY_DELAY:-30}"
 SERVER_ADDRESS="${1:-}"
@@ -22,19 +24,136 @@ if [[ ! "$RETRY_DELAY" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-inventory_file=$(mktemp) || {
-    echo "ERROR: could not create a temporary object-storage inventory file."
+workdir=$(mktemp -d) || {
+    echo "ERROR: could not create a temporary object-storage inventory directory."
     exit 1
 }
-trap 'rm -f "$inventory_file"' EXIT
+trap 'rm -rf "$workdir"' EXIT
+inventory_file="$workdir/inventory.txt"
 
-if ! wget --quiet --output-document="$inventory_file" "$INVENTORY_URL"; then
-    echo "ERROR: could not download object-storage inventory from $INVENTORY_URL."
-    exit 1
-fi
-if [[ ! -s "$inventory_file" ]]; then
-    echo "ERROR: object-storage inventory download was empty: $INVENTORY_URL"
-    exit 1
+if [[ -n "$INVENTORY_URL" ]]; then
+    if ! wget --quiet --output-document="$inventory_file" "$INVENTORY_URL"; then
+        echo "ERROR: could not download object-storage inventory from $INVENTORY_URL."
+        exit 1
+    fi
+    if [[ ! -s "$inventory_file" ]]; then
+        echo "ERROR: object-storage inventory download was empty: $INVENTORY_URL"
+        exit 1
+    fi
+else
+    domains_file="$workdir/domains.json"
+    if ! wget --quiet --timeout=30 --tries=3 --user-agent="$CATALOG_USER_AGENT" \
+        --output-document="$domains_file" "$CATALOG_URL"; then
+        echo "ERROR: could not download object-storage inventory from $CATALOG_URL."
+        exit 1
+    fi
+    if [[ ! -s "$domains_file" ]]; then
+        echo "ERROR: object-storage inventory download was empty: $CATALOG_URL"
+        exit 1
+    fi
+
+    domains_output=$(python3 - "$domains_file" <<'PY'
+import json
+import re
+import sys
+
+DOMAIN_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        doc = json.load(fh)
+except Exception as exc:
+    print(f"ERROR: invalid object-storage catalog domains.json: {exc}")
+    raise SystemExit(1)
+
+domains = doc.get("domains") if isinstance(doc, dict) else None
+if not isinstance(domains, dict) or not domains:
+    print("ERROR: object-storage catalog domains.json has no configured domains.")
+    raise SystemExit(1)
+
+for domain in sorted(domains):
+    if not isinstance(domain, str) or not DOMAIN_RE.fullmatch(domain):
+        print(f"ERROR: invalid domain in object-storage catalog: {domain!r}")
+        raise SystemExit(1)
+    print(domain)
+PY
+    ) || {
+        echo "$domains_output"
+        exit 1
+    }
+    mapfile -t domains <<< "$domains_output"
+
+    catalog_base="${CATALOG_URL%/*}"
+    domain_files=()
+    for domain in "${domains[@]}"; do
+        [[ -n "$domain" ]] || continue
+        domain_url="${catalog_base}/${domain}/apps.json"
+        domain_file="$workdir/${domain}.apps.json"
+        if ! wget --quiet --timeout=30 --tries=3 --user-agent="$CATALOG_USER_AGENT" \
+            --output-document="$domain_file" "$domain_url"; then
+            echo "ERROR: could not download object-storage inventory from $domain_url."
+            exit 1
+        fi
+        if [[ ! -s "$domain_file" ]]; then
+            echo "ERROR: object-storage inventory download was empty: $domain_url"
+            exit 1
+        fi
+        domain_files+=("$domain_file")
+    done
+
+    python3 - "$inventory_file" "${domain_files[@]}" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+out_path = Path(sys.argv[1])
+catalog_paths = sys.argv[2:]
+IMAGE_ID_RE = re.compile(r"^[A-Za-z0-9._+-]+$")
+
+
+def is_primary_container_app(menu_name: str, app_name: str) -> bool:
+    if "-" not in app_name:
+        return True
+    parts = app_name.rsplit(" ", 1)
+    return len(parts) == 2 and parts[0] == menu_name
+
+
+images = set()
+for raw_path in catalog_paths:
+    try:
+        catalog = json.loads(Path(raw_path).read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"ERROR: invalid object-storage domain catalog {raw_path}: {exc}")
+        raise SystemExit(1)
+    if not isinstance(catalog, dict):
+        print(f"ERROR: invalid object-storage domain catalog {raw_path}: expected object.")
+        raise SystemExit(1)
+    for menu_name, menu_data in catalog.items():
+        if not isinstance(menu_name, str) or not isinstance(menu_data, dict):
+            print(f"ERROR: invalid container entry in object-storage catalog: {menu_name!r}")
+            raise SystemExit(1)
+        apps = menu_data.get("apps")
+        if not isinstance(apps, dict):
+            print(f"ERROR: invalid apps mapping in object-storage catalog for {menu_name!r}")
+            raise SystemExit(1)
+        for app_name, app_data in apps.items():
+            if not isinstance(app_name, str) or not isinstance(app_data, dict):
+                print(f"ERROR: invalid app entry in object-storage catalog: {app_name!r}")
+                raise SystemExit(1)
+            if not is_primary_container_app(menu_name, app_name):
+                continue
+            version = app_data.get("version")
+            if not isinstance(version, str) or not version or any(ch.isspace() for ch in version):
+                print(f"ERROR: invalid container version in object-storage catalog for {app_name!r}: {version!r}")
+                raise SystemExit(1)
+            image_id = f"{app_name.replace(' ', '_')}_{version}"
+            if image_id in {".", ".."} or not IMAGE_ID_RE.fullmatch(image_id):
+                print(f"ERROR: invalid container identifier in object-storage inventory: {image_id!r}")
+                raise SystemExit(1)
+            images.add(image_id)
+
+out_path.write_text("".join(f"{image}\n" for image in sorted(images)), encoding="utf-8")
+PY
 fi
 
 images=()
