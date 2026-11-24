@@ -7,9 +7,10 @@
 # The kernel CVEs below are reported against linux-libc-dev, the UAPI header
 # package that CVMFS pulls in through uuid-dev. On 2026-11-19, and again on
 # 2026-11-21 after Ubuntu published headers 7.0.0-44.44, the Ubuntu CVE tracker
-# listed each as "needed" for linux in Ubuntu 26.04, so no fixed header package
-# exists yet. Remove each entry once a rebuild installs the
-# fixed headers; the exception stops matching as soon as the version changes.
+# listed the first three as "needed" for linux in Ubuntu 26.04. On 2026-11-24,
+# it listed the seven newer findings as vulnerable with fixes still in progress
+# in 7.0.0-45.45, so no fixed header package exists yet. Remove each entry once
+# a rebuild installs fixed headers; every exception is version-specific.
 vulnerabilities:
   - id: CVE-2026-99287
     purls:
@@ -38,3 +39,59 @@ vulnerabilities:
       Use-after-free in the kernel NFS server. linux-libc-dev only installs
       kernel headers; containers run the host kernel, so the image ships none
       of the affected server code.
+  - id: CVE-2026-99343
+    purls:
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-44.44
+    expired_at: 2027-01-19
+    statement: >-
+      Out-of-bounds access in the kernel KVM MMU page walker. linux-libc-dev
+      only installs kernel headers; containers run the host kernel, so the
+      image ships none of the affected virtualization code.
+  - id: CVE-2026-99344
+    purls:
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-44.44
+    expired_at: 2027-01-19
+    statement: >-
+      Improper nested guest state handling in the kernel KVM implementation.
+      linux-libc-dev only installs kernel headers; containers run the host
+      kernel, so the image ships none of the affected virtualization code.
+  - id: CVE-2026-99355
+    purls:
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-44.44
+    expired_at: 2027-01-19
+    statement: >-
+      Oversized token copy in the kernel SUNRPC GSS proxy implementation.
+      linux-libc-dev only installs kernel headers; containers run the host
+      kernel, so the image ships none of the affected RPC code.
+  - id: CVE-2026-99362
+    purls:
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-44.44
+    expired_at: 2027-01-19
+    statement: >-
+      Out-of-bounds write in the kernel NFS server while processing SEQUENCE
+      requests. linux-libc-dev only installs kernel headers; containers run
+      the host kernel, so the image ships none of the affected server code.
+  - id: CVE-2026-99366
+    purls:
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-44.44
+    expired_at: 2027-01-19
+    statement: >-
+      Concurrent replay corruption in the kernel NFS server session cache.
+      linux-libc-dev only installs kernel headers; containers run the host
+      kernel, so the image ships none of the affected server code.
+  - id: CVE-2026-99441
+    purls:
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-44.44
+    expired_at: 2027-01-19
+    statement: >-
+      Use-after-free in the kernel NVMe target authentication implementation.
+      linux-libc-dev only installs kernel headers; containers run the host
+      kernel, so the image ships none of the affected target code.
+  - id: CVE-2026-99460
+    purls:
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-44.44
+    expired_at: 2027-01-19
+    statement: >-
+      Use-after-free while the kernel MPTCP implementation clones a request
+      socket. linux-libc-dev only installs kernel headers; containers run the
+      host kernel, so the image ships none of the affected networking code.
