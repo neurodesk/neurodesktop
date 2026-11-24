@@ -224,10 +224,19 @@ def drain_process_output(proc):
             if not line and proc.poll() is not None:
                 break
             if line:
-                container_output.append(line.rstrip())
-                log(f"Container output: {line.rstrip()}")
+                text = line.rstrip()
+                container_output.append(text)
+                try:
+                    log(f"Container output: {text}")
+                except OSError:
+                    # Keep draining stdout when the wrapper log path is refused
+                    # or unavailable so a full pipe buffer cannot block the backend.
+                    pass
     except Exception as e:
-        log(f"Error draining output: {e}")
+        try:
+            log(f"Error draining output: {e}")
+        except OSError:
+            pass
 
 
 def log(message):

@@ -133,6 +133,49 @@ def test_wrapper_log_refuses_links(tmp_path, link_kind):
     assert target.read_text() == "preserve\n"
 
 
+def test_wrapper_log_refuses_fifo_without_blocking(tmp_path):
+    wrapper = _load_webapp_wrapper_module()
+    logfile = tmp_path / "webapp.log"
+    os.mkfifo(logfile)
+    wrapper.config = SimpleNamespace(logfile=str(logfile))
+
+    # Without a reader, O_WRONLY | O_NONBLOCK fails immediately instead of blocking.
+    with pytest.raises(OSError):
+        wrapper.log("must not block")
+
+    # Even with a reader open, fstat rejects the non-regular file before writing.
+    reader_fd = os.open(logfile, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        with pytest.raises(PermissionError, match="Refusing unsafe webapp wrapper log"):
+            wrapper.log("must not be written")
+        assert os.read(reader_fd, 64) == b""
+    finally:
+        os.close(reader_fd)
+
+
+def test_drain_process_output_continues_after_log_refusal(tmp_path):
+    wrapper = _load_webapp_wrapper_module()
+    logfile = tmp_path / "webapp.log"
+    logfile.write_text("initial\n")
+    hard_link = tmp_path / "hard-link.log"
+    os.link(logfile, hard_link)
+    wrapper.config = SimpleNamespace(logfile=str(logfile))
+    wrapper.container_output = []
+
+    class FakeProcess:
+        def __init__(self):
+            self.stdout = io.StringIO("first line\nsecond line\nthird line\n")
+
+        def poll(self):
+            return 0 if self.stdout.tell() == len(self.stdout.getvalue()) else None
+
+    wrapper.drain_process_output(FakeProcess())
+
+    assert wrapper.container_output == ["first line", "second line", "third line"]
+    assert logfile.read_text() == "initial\n"
+    assert hard_link.read_text() == "initial\n"
+
+
 def test_close_beacon_does_not_schedule_immediate_backend_stop(monkeypatch):
     wrapper = _load_webapp_wrapper_module()
     scheduled_close_checks = []
