@@ -4,7 +4,7 @@ description: Container-backed and hosted webapps, launcher tiles and icons,
   and the build-time Jupyter config generation that wires them up
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-11-23"
+last-reviewed: "2026-11-24"
 ---
 
 # Webapp System
@@ -42,7 +42,10 @@ request. Container-backed webapps launch through
 use Unix sockets such as `/tmp/neurodesk_webapp_{name}.sock` to avoid port
 conflicts. The wrapper creates each socket mode `0600`; only the notebook user
 and its Jupyter Server Proxy can connect, so another user on a shared host
-cannot bypass Jupyter authentication through the local proxy. Entries with
+cannot bypass Jupyter authentication through the local proxy. Wrapper logs can
+include backend output, so they are also created mode `0600`; each append
+repairs an older permissive mode and refuses links or non-regular files at the
+predictable `/tmp/{name}_wrapper.log` path. Entries with
 `direct_url` open the hosted application directly from the Neurodesk launcher.
 Launcher tile icons for retained container-backed entries are downloaded from
 the URLs in neurocommand's catalog during Jupyter config generation. The local

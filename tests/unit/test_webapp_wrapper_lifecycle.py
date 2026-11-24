@@ -87,6 +87,95 @@ def test_wrapper_removes_socket_when_private_mode_cannot_be_set(tmp_path, monkey
     assert not socket_path.exists()
 
 
+def test_wrapper_log_is_private_even_with_permissive_umask(tmp_path):
+    wrapper = _load_webapp_wrapper_module()
+    logfile = tmp_path / "webapp.log"
+    wrapper.config = SimpleNamespace(logfile=str(logfile))
+
+    previous_umask = os.umask(0o022)
+    try:
+        wrapper.log("backend output: private-session-detail")
+    finally:
+        os.umask(previous_umask)
+
+    assert stat.S_IMODE(logfile.stat().st_mode) == 0o600
+    assert "private-session-detail" in logfile.read_text()
+
+
+def test_wrapper_log_repairs_legacy_permissions(tmp_path):
+    wrapper = _load_webapp_wrapper_module()
+    logfile = tmp_path / "webapp.log"
+    logfile.write_text("older output\n")
+    logfile.chmod(0o644)
+    wrapper.config = SimpleNamespace(logfile=str(logfile))
+
+    wrapper.log("new output")
+
+    assert stat.S_IMODE(logfile.stat().st_mode) == 0o600
+    assert logfile.read_text().endswith("new output\n")
+
+
+@pytest.mark.parametrize("link_kind", ["symbolic", "hard"])
+def test_wrapper_log_refuses_links(tmp_path, link_kind):
+    wrapper = _load_webapp_wrapper_module()
+    target = tmp_path / "user-file"
+    target.write_text("preserve\n")
+    logfile = tmp_path / "webapp.log"
+    if link_kind == "symbolic":
+        logfile.symlink_to(target)
+    else:
+        os.link(target, logfile)
+    wrapper.config = SimpleNamespace(logfile=str(logfile))
+
+    with pytest.raises(OSError):
+        wrapper.log("must not be written")
+
+    assert target.read_text() == "preserve\n"
+
+
+def test_wrapper_log_refuses_fifo_without_blocking(tmp_path):
+    wrapper = _load_webapp_wrapper_module()
+    logfile = tmp_path / "webapp.log"
+    os.mkfifo(logfile)
+    wrapper.config = SimpleNamespace(logfile=str(logfile))
+
+    # Without a reader, O_WRONLY | O_NONBLOCK fails immediately instead of blocking.
+    with pytest.raises(OSError):
+        wrapper.log("must not block")
+
+    # Even with a reader open, fstat rejects the non-regular file before writing.
+    reader_fd = os.open(logfile, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        with pytest.raises(PermissionError, match="Refusing unsafe webapp wrapper log"):
+            wrapper.log("must not be written")
+        assert os.read(reader_fd, 64) == b""
+    finally:
+        os.close(reader_fd)
+
+
+def test_drain_process_output_continues_after_log_refusal(tmp_path):
+    wrapper = _load_webapp_wrapper_module()
+    logfile = tmp_path / "webapp.log"
+    logfile.write_text("initial\n")
+    hard_link = tmp_path / "hard-link.log"
+    os.link(logfile, hard_link)
+    wrapper.config = SimpleNamespace(logfile=str(logfile))
+    wrapper.container_output = []
+
+    class FakeProcess:
+        def __init__(self):
+            self.stdout = io.StringIO("first line\nsecond line\nthird line\n")
+
+        def poll(self):
+            return 0 if self.stdout.tell() == len(self.stdout.getvalue()) else None
+
+    wrapper.drain_process_output(FakeProcess())
+
+    assert wrapper.container_output == ["first line", "second line", "third line"]
+    assert logfile.read_text() == "initial\n"
+    assert hard_link.read_text() == "initial\n"
+
+
 def test_close_beacon_does_not_schedule_immediate_backend_stop(monkeypatch):
     wrapper = _load_webapp_wrapper_module()
     scheduled_close_checks = []

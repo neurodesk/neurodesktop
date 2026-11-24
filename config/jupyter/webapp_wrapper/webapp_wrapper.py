@@ -24,6 +24,7 @@ import json
 import re
 import select
 import shlex
+import stat
 import time
 import signal
 import sys
@@ -223,16 +224,44 @@ def drain_process_output(proc):
             if not line and proc.poll() is not None:
                 break
             if line:
-                container_output.append(line.rstrip())
-                log(f"Container output: {line.rstrip()}")
+                text = line.rstrip()
+                container_output.append(text)
+                try:
+                    log(f"Container output: {text}")
+                except OSError:
+                    # Keep draining stdout when the wrapper log path is refused
+                    # or unavailable so a full pipe buffer cannot block the backend.
+                    pass
     except Exception as e:
-        log(f"Error draining output: {e}")
+        try:
+            log(f"Error draining output: {e}")
+        except OSError:
+            pass
 
 
 def log(message):
-    """Log message to file with timestamp."""
-    with open(config.logfile, "a") as f:
-        f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {message}\n")
+    """Append to an owner-only regular log without following filesystem links."""
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW
+    # Avoid blocking on a pre-created FIFO. O_NONBLOCK has no effect on regular
+    # files and remains set only for the short-lived descriptor below.
+    descriptor = os.open(config.logfile, flags | os.O_NONBLOCK, 0o600)
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_nlink != 1
+        ):
+            raise PermissionError("Refusing unsafe webapp wrapper log")
+        # Repair logs created by images that used the process umask (commonly
+        # 0644) before writing any new backend output.
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "a", encoding="utf-8") as stream:
+            descriptor = -1
+            stream.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {message}\n")
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 def find_free_port():
