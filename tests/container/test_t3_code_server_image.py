@@ -67,9 +67,9 @@ def test_t3_code_image_ships_the_release_build_without_per_user_downloads():
     assert os.access("/opt/neurodesktop/t3-provider-bin/opencode", os.X_OK)
 
 
-@pytest.mark.parametrize("legacy_default", [False, True])
-def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_default):
-    """Exercise the installed server and provider against fresh and legacy defaults."""
+@pytest.mark.parametrize("previous_default", ["fresh", "legacy", "instance"])
+def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, previous_default):
+    """Exercise the installed server and provider with fresh and upgraded settings."""
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
@@ -96,10 +96,14 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
     from neurodesk_t3_code import supervisor
     from types import SimpleNamespace
     settings_path = tmp_path / ".t3/userdata/settings.json"
-    if legacy_default:
+    codex_binary = {"binaryPath": "/opt/neurodesktop/t3-provider-bin/codex"}
+    if previous_default != "fresh":
         settings_path.parent.mkdir(parents=True)
-        settings_path.write_text(json.dumps({"providers": {"codex": {
-            "binaryPath": "/opt/neurodesktop/t3-provider-bin/codex"}}}))
+        if previous_default == "legacy":
+            settings_path.write_text(json.dumps({"providers": {"codex": codex_binary}}))
+        else:
+            settings_path.write_text(json.dumps({"providerInstances": {"codex": {
+                "driver": "codex", "config": codex_binary}}}))
     supervisor.prepare_startup_settings(SimpleNamespace(
         base_dir=tmp_path / ".t3", provider_bin=Path("/opt/neurodesktop/t3-provider-bin")
     ))
@@ -107,7 +111,7 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
     assert settings["enableProviderUpdateChecks"] is False
     seeded = settings["providerInstances"]
     assert seeded["codex"] == {
-        "driver": "codex", "config": {"binaryPath": "/opt/neurodesktop/t3-provider-bin/codex"}}
+        "driver": "codex", "config": {**codex_binary, "setupMode": "existing"}}
     assert seeded["opencode"] == {
         "driver": "opencode", "enabled": True,
         "config": {"binaryPath": "/opt/neurodesktop/t3-provider-bin/opencode"}}
@@ -161,8 +165,14 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, legacy_d
             if cache.exists():
                 snapshot = json.loads(cache.read_text())
                 if snapshot.get("version") or snapshot.get("status") == "error":
-                    assert snapshot["installed"] is True
+                    assert snapshot["installed"] is True, snapshot.get("message")
                     assert snapshot["version"] is not None, snapshot.get("message")
+                    # The temporary home has no saved login. T3 marks that as
+                    # an error after a successful app-server initialization.
+                    if snapshot["status"] == "error":
+                        assert snapshot["message"] == (
+                            "Codex CLI is not authenticated. Run `codex login` and try again."
+                        ), snapshot
                     assert "decode-wire-message" not in (snapshot.get("message") or "")
                     assert "decode-payload" not in (snapshot.get("message") or ""), snapshot
                     break
