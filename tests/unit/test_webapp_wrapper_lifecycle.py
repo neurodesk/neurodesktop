@@ -87,6 +87,52 @@ def test_wrapper_removes_socket_when_private_mode_cannot_be_set(tmp_path, monkey
     assert not socket_path.exists()
 
 
+def test_wrapper_log_is_private_even_with_permissive_umask(tmp_path):
+    wrapper = _load_webapp_wrapper_module()
+    logfile = tmp_path / "webapp.log"
+    wrapper.config = SimpleNamespace(logfile=str(logfile))
+
+    previous_umask = os.umask(0o022)
+    try:
+        wrapper.log("backend output: private-session-detail")
+    finally:
+        os.umask(previous_umask)
+
+    assert stat.S_IMODE(logfile.stat().st_mode) == 0o600
+    assert "private-session-detail" in logfile.read_text()
+
+
+def test_wrapper_log_repairs_legacy_permissions(tmp_path):
+    wrapper = _load_webapp_wrapper_module()
+    logfile = tmp_path / "webapp.log"
+    logfile.write_text("older output\n")
+    logfile.chmod(0o644)
+    wrapper.config = SimpleNamespace(logfile=str(logfile))
+
+    wrapper.log("new output")
+
+    assert stat.S_IMODE(logfile.stat().st_mode) == 0o600
+    assert logfile.read_text().endswith("new output\n")
+
+
+@pytest.mark.parametrize("link_kind", ["symbolic", "hard"])
+def test_wrapper_log_refuses_links(tmp_path, link_kind):
+    wrapper = _load_webapp_wrapper_module()
+    target = tmp_path / "user-file"
+    target.write_text("preserve\n")
+    logfile = tmp_path / "webapp.log"
+    if link_kind == "symbolic":
+        logfile.symlink_to(target)
+    else:
+        os.link(target, logfile)
+    wrapper.config = SimpleNamespace(logfile=str(logfile))
+
+    with pytest.raises(OSError):
+        wrapper.log("must not be written")
+
+    assert target.read_text() == "preserve\n"
+
+
 def test_close_beacon_does_not_schedule_immediate_backend_stop(monkeypatch):
     wrapper = _load_webapp_wrapper_module()
     scheduled_close_checks = []
