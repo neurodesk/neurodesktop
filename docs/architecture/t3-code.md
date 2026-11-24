@@ -351,6 +351,13 @@ Antigravity drivers disabled, so the OpenCode instance carries an explicit
 `enabled` flag. That flag belongs on the instance envelope, because T3 folds an
 in-config flag into the envelope on every load.
 
+The bundled Codex instance uses `config.setupMode: "existing"` so T3 probes
+the installed CLI and reuses its login under the notebook user's home. The
+supervisor adds the mode in place to an earlier bundled instance whose only
+configuration was the image's binary path. If a profile is already set to
+managed mode, use **Add provider → Codex → Configure manually** with the
+bundled binary path to use the CLI's login.
+
 Seeding never overwrites a user's choice. An instance under the seed's own id,
 or any instance that declares the same driver, prevents that driver's seed, and
 so does a `providers.<driver>` entry that configures the driver. The supervisor

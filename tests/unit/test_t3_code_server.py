@@ -487,7 +487,7 @@ def test_opencode_is_seeded_enabled_because_t3_ships_that_driver_off(tmp_path):
     }
     assert instances["codex"] == {
         "driver": "codex",
-        "config": {"binaryPath": str(policy.provider_bin / "codex")},
+        "config": {"binaryPath": str(policy.provider_bin / "codex"), "setupMode": "existing"},
     }
     assert path.stat().st_mode & 0o077 == 0
     before = path.read_bytes()
@@ -539,7 +539,7 @@ def test_opencode_seed_leaves_a_configured_opencode_alone(tmp_path, existing):
     assert settings["providerInstances"] == {
         **existing.get("providerInstances", {}),
         "codex": {"driver": "codex",
-                  "config": {"binaryPath": str(policy.provider_bin / "codex")}},
+                  "config": {"binaryPath": str(policy.provider_bin / "codex"), "setupMode": "existing"}},
     }
 
 
@@ -603,7 +603,7 @@ def test_provider_seed_promotes_only_exact_previous_default(tmp_path):
     prepare_startup_settings(policy)
     actual = json.loads(path.read_text())
     assert actual == {**settings, "enableProviderUpdateChecks": False, "providerInstances": {
-        "claudeAgent": other, "codex": {"driver": "codex", "config": default},
+        "claudeAgent": other, "codex": {"driver": "codex", "config": {**default, "setupMode": "existing"}},
         "opencode": opencode}}
     assert path.stat().st_mode & 0o077 == 0
     before = path.read_bytes()
@@ -647,7 +647,7 @@ def test_update_notice_policy_preserves_malformed_settings(tmp_path):
         "enableProviderUpdateChecks": False,
         "providerInstances": {
             "codex": {"driver": "codex",
-                      "config": {"binaryPath": str(policy.provider_bin / "codex")}},
+                      "config": {"binaryPath": str(policy.provider_bin / "codex"), "setupMode": "existing"}},
             "opencode": {"driver": "opencode", "enabled": True,
                          "config": {"binaryPath": str(policy.provider_bin / "opencode")}},
         },

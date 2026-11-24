@@ -30,7 +30,9 @@ def test_fresh_preparation_applies_both_policies_and_stays_private(prepare, prof
 
     assert json.loads(path.read_text()) == {
         "providerInstances": {
-            "codex": {"driver": "codex", "config": {"binaryPath": str(policy.provider_bin / "codex")}},
+            "codex": {"driver": "codex", "config": {
+                "binaryPath": str(policy.provider_bin / "codex"), "setupMode": "existing",
+            }},
             "opencode": {"driver": "opencode", "enabled": True,
                          "config": {"binaryPath": str(policy.provider_bin / "opencode")}},
         },
@@ -39,6 +41,47 @@ def test_fresh_preparation_applies_both_policies_and_stays_private(prepare, prof
     assert path.stat().st_mode & 0o777 == 0o600
     assert path.parent.stat().st_mode & 0o777 == 0o700
     assert list(path.parent.iterdir()) == [path]
+
+
+@pytest.mark.parametrize("envelope", [{}, {"enabled": True}])
+def test_migrates_bundled_codex_instance_in_place(prepare, profile, envelope):
+    policy, path = profile
+    path.parent.mkdir(parents=True)
+    old_config = {"binaryPath": str(policy.provider_bin / "codex")}
+    original = {"driver": "codex", "config": old_config, **envelope}
+    second = {"driver": "codex", "config": {"binaryPath": "/custom/codex"}}
+    path.write_text(json.dumps({"providerInstances": {"codex": original, "work": second}}))
+
+    prepare(policy)
+
+    instances = json.loads(path.read_text())["providerInstances"]
+    assert instances["codex"] == {
+        **original, "config": {**old_config, "setupMode": "existing"},
+    }
+    assert instances["work"] == second
+
+
+@pytest.mark.parametrize("instance_id, envelope, extra_config", [
+    ("codex", {}, {"setupMode": "managed"}),
+    ("codex", {}, {"homePath": "/custom/home"}),
+    ("codex", {}, {"binaryPath": "/custom/codex"}),
+    ("codex", {"enabled": False}, {}),
+    ("work", {}, {}),
+])
+def test_keeps_configured_codex_instances(prepare, profile, instance_id, envelope, extra_config):
+    policy, path = profile
+    path.parent.mkdir(parents=True)
+    original = {"driver": "codex", "config": {
+        "binaryPath": str(policy.provider_bin / "codex"), **extra_config,
+    }, **envelope}
+    path.write_text(json.dumps({"providerInstances": {instance_id: original}}))
+
+    prepare(policy)
+
+    instances = json.loads(path.read_text())["providerInstances"]
+    assert {key: value for key, value in instances.items() if value["driver"] == "codex"} == {
+        instance_id: original,
+    }
 
 
 @pytest.mark.parametrize("provider_fields", [

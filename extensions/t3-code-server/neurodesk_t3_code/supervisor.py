@@ -186,16 +186,41 @@ class ProviderSeed:
     # Only such a driver can own an entry matching the config seeded below;
     # for every other driver an identical entry was authored by the user.
     promotes_image_default: bool = False
+    setup_mode: str | None = None
 
-    def config(self, provider_bin: Path) -> dict[str, str]:
+    def binary_config(self, provider_bin: Path) -> dict[str, str]:
         return {"binaryPath": str(provider_bin / self.driver)}
 
     def instance(self, provider_bin: Path) -> dict[str, object]:
+        config = self.binary_config(provider_bin)
+        if self.setup_mode is not None:
+            config["setupMode"] = self.setup_mode
         instance: dict[str, object] = {"driver": self.driver}
         if self.disabled_by_default:
             instance["enabled"] = True
-        instance["config"] = self.config(provider_bin)
+        instance["config"] = config
         return instance
+
+    def prepare_instance(
+        self,
+        instances: Mapping[str, object],
+        providers: Mapping[str, object],
+        provider_bin: Path,
+    ) -> dict[str, object] | None:
+        current = instances.get(self.driver)
+        if self.setup_mode is not None and isinstance(current, dict):
+            previous: dict[str, object] = {
+                "driver": self.driver,
+                "config": self.binary_config(provider_bin),
+            }
+            # T3 can write the enabled flag back when saving a seeded instance.
+            if current.get("enabled") is True:
+                previous["enabled"] = True
+            if current == previous:
+                return {**current, **self.instance(provider_bin)}
+        if self.is_user_owned(instances, providers, provider_bin):
+            return None
+        return self.instance(provider_bin)
 
     def is_user_owned(
         self,
@@ -213,13 +238,13 @@ class ProviderSeed:
         if self.driver not in providers:
             return False
         legacy = providers[self.driver]
-        if self.promotes_image_default and legacy == self.config(provider_bin):
+        if self.promotes_image_default and legacy == self.binary_config(provider_bin):
             return False
         return legacy not in self.inert_legacy
 
 
 PROVIDER_SEEDS = (
-    ProviderSeed("codex", promotes_image_default=True),
+    ProviderSeed("codex", promotes_image_default=True, setup_mode="existing"),
     ProviderSeed(
         "opencode", disabled_by_default=True, inert_legacy=({}, {"enabled": False})
     ),
@@ -248,11 +273,11 @@ def prepare_startup_settings(policy: Policy) -> None:
         and isinstance(providers, dict)
         and all(isinstance(instance, dict) for instance in instances.values())
     ):
-        seeded = {
-            seed.driver: seed.instance(policy.provider_bin)
-            for seed in PROVIDER_SEEDS
-            if not seed.is_user_owned(instances, providers, policy.provider_bin)
-        }
+        seeded = {}
+        for seed in PROVIDER_SEEDS:
+            instance = seed.prepare_instance(instances, providers, policy.provider_bin)
+            if instance is not None:
+                seeded[seed.driver] = instance
         if seeded:
             settings["providerInstances"] = {**instances, **seeded}
             changed = True
