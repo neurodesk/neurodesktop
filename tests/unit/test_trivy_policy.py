@@ -49,3 +49,23 @@ def test_resolved_kernel_header_exceptions_are_not_reintroduced():
     }
 
     assert not excepted & resolved
+
+
+def test_unfixed_kernel_header_findings_are_scoped_to_the_affected_headers():
+    """The 24 November scan findings must not hide fixed or future packages."""
+    findings = {finding["id"]: finding for finding in load_policy()["vulnerabilities"]}
+    incident_cves = {
+        "CVE-2026-99343",
+        "CVE-2026-99344",
+        "CVE-2026-99355",
+        "CVE-2026-99362",
+        "CVE-2026-99366",
+        "CVE-2026-99441",
+        "CVE-2026-99460",
+    }
+
+    assert incident_cves <= findings.keys()
+    for cve in incident_cves:
+        assert findings[cve]["purls"] == [
+            "pkg:deb/ubuntu/linux-libc-dev@7.0.0-44.44"
+        ]
