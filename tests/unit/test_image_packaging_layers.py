@@ -18,6 +18,25 @@ def instruction_containing(text):
     return matches[0]
 
 
+def test_every_build_argument_changes_an_instruction():
+    """Reject inert cache-busting knobs and other unused build arguments."""
+    declarations = re.findall(
+        r"^ARG ([A-Za-z_][A-Za-z0-9_]*)", DOCKERFILE, re.MULTILINE
+    )
+    instructions = "\n".join(
+        instruction
+        for instruction in INSTRUCTIONS
+        if not instruction.startswith("ARG ")
+    )
+    unused = {
+        name
+        for name in declarations
+        if not re.search(rf"\$(?:{name}\b|\{{{name}(?:\}}|[:?+%-]))", instructions)
+    }
+
+    assert unused == set()
+
+
 def test_guacamole_archive_is_extracted_and_removed_in_its_download_layer():
     """Prevent the WAR archive from surviving in a lower image layer."""
     layer = instruction_containing("-o /tmp/guacamole-${GUACAMOLE_VERSION}.war")
