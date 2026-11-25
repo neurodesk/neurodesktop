@@ -5,7 +5,7 @@ description: Image build steps with non-obvious behavior — the Notebook
   stage, and user permissions
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-11-24"
+last-reviewed: "2026-11-25"
 ---
 
 # Build-Time Behaviors
@@ -30,14 +30,12 @@ checksum before installing. Scan and SBOM actions reuse that binary rather
 than downloading it through `get.trivy.dev`.
 
 The shared [Trivy policy](../../.trivyignore.yaml) records individual scan
-exceptions. It currently excepts ten kernel CVEs in `linux-libc-dev` until
-2027-01-19. The first three cover 7.0.0-43.43 and 7.0.0-44.44; the seven found
-on 2026-11-24 cover only 7.0.0-44.44. Ubuntu had not published fixed headers:
-its tracker listed fixes for the new findings as work in progress for
-7.0.0-45.45. An exception must name the exact affected packages as package
+exceptions. The first three kernel CVE exceptions cover `linux-libc-dev`
+7.0.0-43.43 and 7.0.0-44.44. The exceptions for the nine findings from the
+November 24 and 25 scans cover only 7.0.0-44.44. All twelve exceptions expire
+on 2027-01-19. An exception must name the exact affected packages as package
 URLs, carry an `expired_at` date at most 90 days ahead, and state why the
-finding is not exploitable in this image. Other package versions and CVEs
-remain subject to the scan gate.
+finding is not exploitable in this image.
 
 `linux-libc-dev` stays installed because the CVMFS package depends on
 `uuid-dev`, which pulls in `libc6-dev` and the kernel UAPI headers. Trivy
