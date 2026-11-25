@@ -58,6 +58,7 @@ def opencode_server(home, cwd):
     environment = {
         **{k: v for k, v in os.environ.items() if not k.startswith(("OPENCODE_", "XDG_"))},
         "HOME": str(home),
+        "PWD": str(cwd),
         "OPENCODE_PASSWORD": password,
         "OPENCODE_DISABLE_MODELS_FETCH": "true",
     }
@@ -400,6 +401,8 @@ def test_opencode_adapter_runs_the_upstream_astra_hooks(tmp_path):
         environment = {
             **{k: v for k, v in os.environ.items() if not k.startswith(("OPENCODE_", "XDG_"))},
             "HOME": str(home),
+            # OpenCode 2 prefers PWD over the cwd passed to subprocess.run.
+            "PWD": str(project),
             "OPENCODE_CONFIG_CONTENT": json.dumps(inline),
             "OPENCODE_DISABLE_MODELS_FETCH": "true",
         }

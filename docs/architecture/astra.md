@@ -4,7 +4,7 @@ description: The astra/lc command-line tools, Lightcone agent skills and hooks
   for the bundled coding agents, and the read-only provenance viewer
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-09-21"
+last-reviewed: "2026-11-25"
 ---
 
 # ASTRA integration
@@ -208,7 +208,10 @@ Those hooks parse their payloads with `jq`, which the image installs for that
 purpose. Without it every hook exits non-zero and silently contributes no
 validation context, so `tests/container/test_astra_agent_skills_image.py`
 drives the real hook scripts end to end through an OpenCode session with a
-scripted model, rather than only checking that the plugin is listed. That test also asserts that the pinned marketplace commit's
+scripted model, rather than only checking that the plugin is listed. The test
+sets `PWD` to its temporary project because OpenCode 2 chooses that variable
+before the subprocess working directory when starting a run. That test also
+asserts that the pinned marketplace commit's
 `astra-pins.sh` matches the installed `astra-tools` and `astra-spec`: the skill
 must teach the schema version that `astra validate` actually speaks.
 
