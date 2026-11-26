@@ -26,6 +26,7 @@ def test_codespell_skips_generated_dependency_locks():
     assert skipped == {
         "./extensions/neurodesk-launcher/package-lock.json",
         "./config/jupyter/notebook-intelligence-*.yarn.lock",
+        "./tests/fixtures/freebrowse",
     }
 
 
