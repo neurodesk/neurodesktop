@@ -56,7 +56,7 @@ def opencode_server(home, cwd):
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
     environment = {
-        **{k: v for k, v in os.environ.items() if not k.startswith(("OPENCODE_", "XDG_"))},
+        **{k: v for k, v in os.environ.items() if not k.startswith(("OPENCODE_", "XDG_", "NEURODESKTOP_SLURM_"))},
         "HOME": str(home),
         "OPENCODE_PASSWORD": password,
         "OPENCODE_DISABLE_MODELS_FETCH": "true",
@@ -398,7 +398,7 @@ def test_opencode_adapter_runs_the_upstream_astra_hooks(tmp_path):
             "model": "scripted/m",
         }
         environment = {
-            **{k: v for k, v in os.environ.items() if not k.startswith(("OPENCODE_", "XDG_"))},
+            **{k: v for k, v in os.environ.items() if not k.startswith(("OPENCODE_", "XDG_", "NEURODESKTOP_SLURM_"))},
             "HOME": str(home),
             "OPENCODE_CONFIG_CONTENT": json.dumps(inline),
             "OPENCODE_DISABLE_MODELS_FETCH": "true",
