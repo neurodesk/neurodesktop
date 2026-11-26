@@ -1,8 +1,8 @@
 # FreeBrowse integration fixtures
 
-The integration files and `test_handlers.py` are unmodified copies from
-[neurodesk/freebrowse](https://github.com/neurodesk/freebrowse/tree/5f64059c81b7b9eb01ca6a0d261aeb17d27053d2/jupyter),
-commit `5f64059c81b7b9eb01ca6a0d261aeb17d27053d2`, pinned by `FREEBROWSE_REF` in the Dockerfile.
+The integration files and `test_handlers.py` (copied from `tests/test_jupyterhub_auth.py`) are unmodified copies from
+[neurodesk/freebrowse](https://github.com/neurodesk/freebrowse/tree/c5b3e6195fcc00ae901bdfb5592ea0e954da6f95/jupyter),
+commit `c5b3e6195fcc00ae901bdfb5592ea0e954da6f95`, pinned by `FREEBROWSE_REF` in the Dockerfile.
 The original upstream project distributes the source under the BSD 2-Clause
 license reproduced in `LICENSE`.
 
