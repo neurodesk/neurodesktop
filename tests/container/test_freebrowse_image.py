@@ -6,7 +6,6 @@ import json
 import os
 import subprocess
 import time
-from urllib.parse import urlsplit, parse_qs
 
 import nibabel as nib
 import numpy as np
@@ -89,27 +88,31 @@ def test_document_viewers_open_and_render_local_volume(tmp_path, graphics_displa
                 bidi.evaluate(context,
                     "window.jupyterapp.commands.execute('docmanager:open', "
                     + json.dumps({"path": filename, "factory": viewer}) + ").then(() => true)")
-            frame = ("document.querySelector('iframe[title=\"FreeBrowse\"]')" if viewer == "FreeBrowse"
-                     else "document.querySelector('.jp-NiivueWidget iframe')")
-            _wait_for_expression(bidi, context, f"Boolean({frame})", log_paths=logs)
-            contexts = bidi.request("browsingContext.getTree", {})["contexts"]
-            assert {tab["context"] for tab in contexts} == original_tabs, "Viewer opened an external browser tab"
-            assert bidi.evaluate(context, "window.__opened.length") == 0
             if viewer == "FreeBrowse":
-                _wait_for_expression(bidi, context,
-                    f"new URL({frame}.src, location.href).searchParams.has('vol')",
-                    log_paths=logs)
-                viewer_url = bidi.evaluate(context, f"{frame}.src")
-                query = parse_qs(urlsplit(viewer_url).query)
-                assert query["vol"][0].startswith(f"blob:{origin}/")
-                assert query["filename"] == [filename]
-                assert token not in viewer_url
-            canvas = f"{frame}?.contentDocument?.querySelector('canvas')"
-            _wait_for_expression(bidi, context, f"Boolean({canvas})", log_paths=logs)
-            rectangle = json.loads(bidi.evaluate(context,
-                f"JSON.stringify((() => {{ const r = {canvas}.getBoundingClientRect();"
-                f"const f = {frame}.getBoundingClientRect();"
-                "return {type:'box', x:f.x+r.x, y:f.y+r.y, width:r.width, height:r.height}; })())"))
+                widget_expr = "document.querySelector('.jp-FreeBrowseWidget')"
+                _wait_for_expression(bidi, context, f"Boolean({widget_expr})", log_paths=logs)
+                contexts = bidi.request("browsingContext.getTree", {})["contexts"]
+                assert {tab["context"] for tab in contexts} == original_tabs, "Viewer opened an external browser tab"
+                assert bidi.evaluate(context, "window.__opened.length") == 0
+                assert bidi.evaluate(context, "document.querySelector('iframe[title=\"FreeBrowse\"]') === null")
+                assert bidi.evaluate(context, f"{widget_expr}.querySelector('iframe') === null")
+                canvas = f"{widget_expr}?.querySelector('canvas')"
+                _wait_for_expression(bidi, context, f"Boolean({canvas})", log_paths=logs)
+                rectangle = json.loads(bidi.evaluate(context,
+                    f"JSON.stringify((() => {{ const r = {canvas}.getBoundingClientRect();"
+                    "return {type:'box', x:r.x, y:r.y, width:r.width, height:r.height}; })())"))
+            else:
+                frame = "document.querySelector('.jp-NiivueWidget iframe')"
+                _wait_for_expression(bidi, context, f"Boolean({frame})", log_paths=logs)
+                contexts = bidi.request("browsingContext.getTree", {})["contexts"]
+                assert {tab["context"] for tab in contexts} == original_tabs, "Viewer opened an external browser tab"
+                assert bidi.evaluate(context, "window.__opened.length") == 0
+                canvas = f"{frame}?.contentDocument?.querySelector('canvas')"
+                _wait_for_expression(bidi, context, f"Boolean({canvas})", log_paths=logs)
+                rectangle = json.loads(bidi.evaluate(context,
+                    f"JSON.stringify((() => {{ const r = {canvas}.getBoundingClientRect();"
+                    f"const f = {frame}.getBoundingClientRect();"
+                    "return {type:'box', x:f.x+r.x, y:f.y+r.y, width:r.width, height:r.height}; })())"))
             deadline = time.monotonic() + 60
             while True:
                 screenshot = bidi.request("browsingContext.captureScreenshot", {
@@ -125,10 +128,11 @@ def test_document_viewers_open_and_render_local_volume(tmp_path, graphics_displa
                 time.sleep(0.2)
             if viewer == "FreeBrowse":
                 _wait_for_expression(bidi, context,
-                    f"{frame}.contentDocument.body.innerText.includes({json.dumps(filename)})", log_paths=logs)
+                    f"{widget_expr}.innerText.includes({json.dumps(filename)})", log_paths=logs)
             _click_dom_element(bidi, context,
                 "document.querySelector('.lm-TabBar-tab.lm-mod-current .lm-TabBar-tabCloseIcon')")
-            _wait_for_expression(bidi, context, f"!({frame})", log_paths=logs)
+            close_target = widget_expr if viewer == "FreeBrowse" else frame
+            _wait_for_expression(bidi, context, f"!({close_target})", log_paths=logs)
         finally:
             if browser is not None:
                 browser.close()

@@ -6,7 +6,7 @@ from pathlib import Path
 
 def configure_defaults(path: Path) -> None:
     source = path.read_text()
-    original = 'defaultFor: ["nifti", "nifti-gz", "nvd"],'
+    original = 'defaultFor: ["nifti", "nifti-gz", "mgh", "mgz", "nvd"],'
     replacement = 'defaultFor: ["nvd"],'
     if source.count(original) != 1:
         raise ValueError("FreeBrowse default factory registration changed")

@@ -48,13 +48,17 @@ const assert = require('assert/strict');
 const ts = require('typescript');
 const { JSDOM } = require('jsdom');
 const { Signal } = require('@lumino/signaling');
+class MockFile extends Blob {
+  constructor(parts, name, opts = {}) { super(parts, opts); this.name = name; }
+}
 (async () => {
 const source = ts.transpileModule(fs.readFileSync(process.argv[1], 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2018 }
 }).outputText;
 for (const base of ['/', '/user/alice/', 'https://mgh.neurodesk.org/user/stebo85/']) {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {url: 'https://mgh.neurodesk.org'});
-  const opened = [], types = [], factories = [], menus = [], downloads = [], requests = [];
+  const opened = [], types = [], factories = [], modelFactories = [], menus = [], downloads = [], requests = [];
+  const mounts = [];
   const blobs = new Map();
   let nextBlob = 0;
   const browserURL = class extends URL {};
@@ -66,29 +70,50 @@ for (const base of ['/', '/user/alice/', 'https://mgh.neurodesk.org/user/stebo85
   const services = { serverSettings: settings, contents: {
     getDownloadUrl: async path => { downloads.push(path); return `https://mgh.neurodesk.org/download/${encodeURIComponent(path)}?_xsrf=session-xsrf`; }
   }};
-  const settle = async () => { for (let i=0; i<10; i++) await new Promise(resolve => setImmediate(resolve)); };
+  const settle = async () => { for (let i=0; i<15; i++) await new Promise(resolve => setImmediate(resolve)); };
   let selected;
   const commands = new Map();
   class Widget {
     constructor() { this.node = dom.window.document.createElement('div'); this.isDisposed = false; }
+    addClass(cls) { this.node.classList.add(cls); }
+    onResize() {}
     dispose() { this.isDisposed = true; }
   }
   class Factory { constructor(options) { this.options = options; } }
   class DocumentWidget { constructor(options) { Object.assign(this, options); } close() {} }
+  const liveMounts = () => mounts.filter(m => !m.destroyed);
+  const embedMock = {
+    mountFreeBrowse(container, options) {
+      const record = {
+        container, options, loadedFiles: [], resized: 0, destroyed: false,
+        nv: { resize() { record.resized += 1; } },
+        async loadFile(file) { record.loadedFiles.push(file); },
+        async loadVolumeUrl() { throw Error('Unexpected URL load in default blob mode'); },
+        destroy() { record.destroyed = true; container.replaceChildren(); },
+      };
+      const marker = dom.window.document.createElement('div');
+      marker.className = 'freebrowse-root';
+      container.appendChild(marker);
+      mounts.push(record);
+      return record;
+    },
+  };
   const modules = {
     '@jupyterlab/application': {},
-    '@jupyterlab/docregistry': { ABCWidgetFactory: Factory, DocumentWidget },
+    '@jupyterlab/docregistry': { ABCWidgetFactory: Factory, DocumentWidget, DocumentModel: class {} },
     '@jupyterlab/filebrowser': { IFileBrowserFactory: Symbol() },
-    '@jupyterlab/coreutils': { PageConfig: { getBaseUrl: () => base } },
+    '@jupyterlab/coreutils': { PageConfig: { getBaseUrl: () => base, getOption: () => '' } },
     '@lumino/widgets': { Widget },
     '@jupyterlab/services': { ServerConnection: { makeRequest: async (url, init, supplied) => {
       assert.equal(supplied, settings); assert.equal(init.method, 'GET');
       requests.push(url);
       return responseFor(url, init);
-    } }}
+    } }},
+    '../embed/freebrowse-embed.js': embedMock,
+    '../embed/freebrowse-embed.css': {},
   };
   const sandbox = { exports: {}, require: name => modules[name], console,
-    document: dom.window.document, URL: browserURL, AbortController,
+    document: dom.window.document, URL: browserURL, AbortController, File: MockFile, Blob,
     window: { open: () => { throw Error('Unexpected external browser tab'); } },
     setTimeout: () => { throw Error('Unexpected auto-close'); } };
   vm.runInNewContext(source, sandbox);
@@ -97,13 +122,16 @@ for (const base of ['/', '/user/alice/', 'https://mgh.neurodesk.org/user/stebo85
     commands: { addCommand: (id, command) => commands.set(id, command),
       execute: (id, args) => { assert.equal(id, 'docmanager:open'); opened.push(args); } },
     contextMenu: { addItem: item => menus.push(item) },
-    docRegistry: { addFileType: type => types.push(type), addWidgetFactory: f => factories.push(f) }
+    docRegistry: { addFileType: type => types.push(type), addWidgetFactory: f => factories.push(f),
+      addModelFactory: f => modelFactories.push(f) }
   }, { tracker: { currentWidget: { selectedItems: function* () { if (selected) yield selected; } } } });
   assert.deepEqual(Array.from(factories[0].options.defaultFor), ['nvd']);
   assert.equal(factories[0].options.name, 'FreeBrowse');
+  assert.equal(modelFactories.length, 1);
+  assert.equal(modelFactories[0].fileFormat, null);
   assert.equal(menus[0].command, 'freebrowse:open');
   const command = commands.get('freebrowse:open');
-  for (const name of ['brain.nii', 'brain.nii.gz', 'scene.nvd', 'Bräin # & ? 100%.NII.GZ', 'scene # &.NVD']) {
+  for (const name of ['brain.nii', 'brain.nii.gz', 'orig.mgh', 'aseg.mgz', 'scene.nvd', 'Bräin # & ? 100%.NII.GZ', 'scene # &.NVD']) {
     const path = `data folder/${name}`;
     selected = { name, path };
     assert.equal(command.isVisible(), true);
@@ -116,39 +144,41 @@ for (const base of ['/', '/user/alice/', 'https://mgh.neurodesk.org/user/stebo85
     const widget = factories[0].createNewWidget(context);
     await settle();
     assert.equal(downloads.at(-1), path, 'Use the Jupyter contents service to resolve the file');
-    assert.equal(requests.at(-1), `https://mgh.neurodesk.org/download/${encodeURIComponent(path)}?_xsrf=session-xsrf`);
-    const frame = widget.content.node.querySelector('iframe');
-    assert.equal(frame.title, 'FreeBrowse');
-    for (const value of [frame.src]) {
-      const url = new URL(value, 'https://hub.example');
-      assert.equal(url.pathname, new URL(`${base}freebrowse/`, 'https://hub.example').pathname);
-      assert.equal(url.hash, '');
-      const parameter = name.toLowerCase().endsWith('.nvd') ? 'nvd' : 'vol';
-      assert.equal(Array.from(url.searchParams).length, 2);
-      assert.equal(url.searchParams.get('filename'), name);
-      const file = url.searchParams.get(parameter);
-      assert.ok(blobs.has(file), 'The viewer receives locally fetched bytes');
-      assert.equal(url.href.includes(settings.token), false);
-      assert.equal(url.href.includes('session-xsrf'), false);
-    }
+    assert.equal(requests.at(-1), `https://mgh.neurodesk.org/download/${encodeURIComponent(path)}`, 'Strip _xsrf query param because ServerConnection sends X-XSRFToken header');
+    assert.equal(widget.content.node.querySelector('iframe'), null, 'In-DOM document mode embeds no iframe');
+    assert.notEqual(widget.content.node.querySelector('.freebrowse-root'), null);
+    assert.equal(blobs.size, 0, 'In-DOM document mode creates no blob: URLs');
+    const firstMount = mounts.at(-1);
+    assert.equal(firstMount.options.allowExternalDocumentUrls, false);
+    assert.equal(firstMount.options.dragDrop, false);
+    assert.equal(firstMount.options.persist, false);
+    assert.equal(firstMount.loadedFiles.length, 1);
+    assert.equal(firstMount.loadedFiles[0].name, name);
+
     const secondContext = { path: 'another.nii' };
     secondContext.pathChanged = new Signal(secondContext);
     const second = factories[0].createNewWidget(secondContext);
     await settle();
-    const originalBlob = new URL(frame.src).searchParams.get(name.toLowerCase().endsWith('.nvd') ? 'nvd' : 'vol');
+    const secondMount = mounts.at(-1);
+    assert.equal(liveMounts().length, 2);
+
     context.path = 'renamed #.nii.gz';
     context.pathChanged.emit(context.path);
     await settle();
-    assert.equal(new URL(frame.src).searchParams.get('filename'), 'renamed #.nii.gz');
-    assert.equal(blobs.has(originalBlob), false);
-    assert.equal(new URL(second.content.node.querySelector('iframe').src).searchParams.get('filename'), 'another.nii');
+    assert.equal(firstMount.destroyed, true);
+    const renamedMount = mounts.at(-1);
+    assert.equal(renamedMount.loadedFiles[0].name, 'renamed #.nii.gz');
+    assert.equal(secondMount.destroyed, false);
+
     widget.content.dispose();
-    assert.equal(frame.src, 'about:blank');
+    assert.equal(renamedMount.destroyed, true);
+    const countAfterDispose = mounts.length;
     context.path = 'after-close.nii';
     context.pathChanged.emit(context.path);
     await settle();
-    assert.equal(frame.src, 'about:blank');
+    assert.equal(mounts.length, countAfterDispose);
     second.content.dispose();
+    assert.equal(liveMounts().length, 0);
     assert.equal(blobs.size, 0);
   }
   for (const response of [{ok: false, status: 403}, {ok: true, status: 200}]) {
@@ -159,6 +189,7 @@ for (const base of ['/', '/user/alice/', 'https://mgh.neurodesk.org/user/stebo85
     await settle();
     assert.equal(failed.content.node.textContent, 'FreeBrowse could not load this file through Jupyter.');
     assert.equal(failed.content.node.querySelector('iframe'), null);
+    assert.equal(liveMounts().length, 0);
     failed.content.dispose();
   }
   let finishOld;
@@ -171,12 +202,11 @@ for (const base of ['/', '/user/alice/', 'https://mgh.neurodesk.org/user/stebo85
   pendingContext.path = 'new.nii';
   pendingContext.pathChanged.emit(pendingContext.path);
   await settle();
-  const liveFrame = pending.content.node.querySelector('iframe');
-  const latest = liveFrame.src;
+  const live = mounts.at(-1);
   finishOld(new Blob(['stale bytes']));
   await settle();
-  assert.equal(liveFrame.src, latest, 'A stale download cannot replace the renamed file');
-  assert.equal(new URL(latest).searchParams.get('filename'), 'new.nii');
+  assert.equal(mounts.at(-1), live, 'A stale download cannot replace the renamed file');
+  assert.equal(live.loadedFiles[0].name, 'new.nii');
   pending.content.dispose();
   responseFor = async () => ({...goodResponse(), blob: () => new Promise(resolve => { finishOld = resolve; })});
   const closedContext = {path: 'closed.nii'};
@@ -186,7 +216,8 @@ for (const base of ['/', '/user/alice/', 'https://mgh.neurodesk.org/user/stebo85
   closed.content.dispose();
   finishOld(new Blob(['discarded bytes']));
   await settle();
-  assert.equal(blobs.size, 0, 'A download completing after close must not retain a blob');
+  assert.equal(liveMounts().length, 0, 'A download completing after close must not mount a viewer');
+  assert.equal(blobs.size, 0);
   selected = { name: 'notes.txt', path: 'notes.txt' };
   assert.equal(command.isVisible(), false);
   selected = undefined;
@@ -215,12 +246,13 @@ def test_frontend_preserves_filename_when_loading_a_blob(tmp_path):
     script = r'''
 const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
 const ts = require('typescript');
-const source = ts.transpileModule(fs.readFileSync(process.argv[1], 'utf8').replace('import.meta.env.VITE_SERVERLESS', '"true"'), {
+const source = ts.transpileModule(fs.readFileSync(process.argv[1], 'utf8'), {
   compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2018}
 }).outputText;
 (async () => {
-  for (const filename of ['tof_sub004.nii', 'brain # & ü.nii.gz', undefined]) {
-    const effects = [], volumes = [];
+  class File extends Blob { constructor(parts, name) { super(parts); this.name = name; } }
+  for (const filename of ['tof_sub004.nii', 'brain # & ü.nii.gz', 'aseg.mgz', undefined]) {
+    const effects = [], volumes = [], fetched = [];
     const noop = () => {};
     const state = {showUploader: true, setShowUploader: noop, setCurrentImageIndex: noop,
       incrementVolumeVersion: noop, setCurrentSurfaceIndex: noop, setActiveTab: noop};
@@ -229,17 +261,29 @@ const source = ts.transpileModule(fs.readFileSync(process.argv[1], 'utf8').repla
     const modules = {
       react: {useCallback: f => f, useRef: value => ({current: value}), useEffect: f => effects.push(f)},
       '@/store': {useFreeBrowseStore: selector => selector(state)},
+      '@/lib/deployment-config': {deploymentConfig: {serverless: true}, getFreeBrowseConfig: () => ({readUrlParams: true, allowExternalDocumentUrls: true})},
+      '@/lib/load-file': {assertNotLegacyDocument: noop, assertSelfContainedNvd: noop, prepareNvdBytes: b => b, stripLoadedDocumentUrls: noop},
+      '@/hooks/use-volumes': {applyLabelColormapsAfterLoad: async () => {}},
       '@niivue/niivue': {}
     };
-    const sandbox = {exports: {}, require: name => modules[name], console, URLSearchParams,
+    const sandbox = {exports: {}, require: name => modules[name], console, URLSearchParams, File,
+      fetch: async url => { fetched.push(url); return {blob: async () => new Blob(['local bytes'])}; },
       window: {location: {search: '?' + query}, addEventListener: noop, removeEventListener: noop}};
     vm.runInNewContext(source, sandbox);
-    sandbox.exports.useFileLoading({current: {canvas: {}, opts: {}, volumes: [], addVolumeFromUrl: async volume => volumes.push(volume)}}, noop, noop, noop, noop, noop);
+    sandbox.exports.useFileLoading({current: {canvas: {}, opts: {}, volumes: [], addVolume: async volume => volumes.push(volume), addEventListener: noop, removeEventListener: noop}}, noop, noop, noop, noop, noop);
     effects.forEach(effect => effect());
     for (let i=0; i<10; i++) await new Promise(resolve => setImmediate(resolve));
     assert.equal(volumes.length, 1);
     assert.equal(volumes[0].name, filename || 'legacy.nii');
-    assert.equal(volumes[0].url, query.get('vol'));
+    if (filename) {
+      assert.deepEqual(fetched, [query.get('vol')]);
+      assert.ok(volumes[0].url instanceof File);
+      assert.equal(volumes[0].url.name, filename);
+      assert.equal(await volumes[0].url.text(), 'local bytes');
+    } else {
+      assert.deepEqual(fetched, []);
+      assert.equal(volumes[0].url, query.get('vol'));
+    }
   }
 })().catch(error => {console.error(error); process.exitCode=1;});
 '''

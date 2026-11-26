@@ -1231,7 +1231,7 @@ RUN --mount=type=bind,source=config/lightcone,target=/tmp/lightcone-adapter,ro \
 
 # Neurodesk's FreeBrowse fork supplies the optional authenticated document viewer.
 # Build both the serverless app and federated extension from the same source.
-ARG FREEBROWSE_REF="5f64059c81b7b9eb01ca6a0d261aeb17d27053d2"
+ARG FREEBROWSE_REF="c5b3e6195fcc00ae901bdfb5592ea0e954da6f95"
 RUN --mount=type=bind,source=config/jupyter/configure_freebrowse_defaults.py,target=/tmp/configure_freebrowse_defaults.py,ro \
     retry git clone https://github.com/neurodesk/freebrowse.git /tmp/freebrowse \
     && git -C /tmp/freebrowse checkout --detach "${FREEBROWSE_REF}" \

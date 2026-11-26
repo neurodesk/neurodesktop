@@ -1,131 +1,138 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useFreeBrowseStore } from "@/store";
-import { NVDocument, NVImage, type Niivue } from "@niivue/niivue";
+import type { NiiVue } from "@niivue/niivue";
 import type { FileItem } from "@/components/file-list";
+import { applyLabelColormapsAfterLoad } from "@/hooks/use-volumes";
+import {
+  deploymentConfig,
+  getFreeBrowseConfig,
+  type FreeBrowseConfig,
+} from "@/lib/deployment-config";
+import {
+  assertNotLegacyDocument,
+  assertSelfContainedNvd,
+  prepareNvdBytes,
+  stripLoadedDocumentUrls,
+} from "@/lib/load-file";
 
 export function useFileLoading(
-  nvRef: React.RefObject<Niivue | null>,
+  nvRef: React.RefObject<NiiVue | null>,
   applyViewerOptions: () => void,
-  syncViewerOptionsFromNiivue: () => void,
+  syncViewerOptionsFromNiiVue: () => void,
   updateSurfaceDetails: () => void,
-  handleLocationChange: (locationObject: any) => void,
-  syncDrawingOptionsFromNiivue: () => void,
+  instanceConfig?: Readonly<FreeBrowseConfig>,
 ) {
+  const hasInstanceConfig =
+    instanceConfig != null && typeof instanceConfig === "object";
+  const effectiveConfig = hasInstanceConfig
+    ? instanceConfig
+    : getFreeBrowseConfig();
   const showUploader = useFreeBrowseStore((s) => s.showUploader);
   const setShowUploader = useFreeBrowseStore((s) => s.setShowUploader);
   const currentImageIndex = useFreeBrowseStore((s) => s.currentImageIndex);
-  const setCurrentImageIndex = useFreeBrowseStore((s) => s.setCurrentImageIndex);
+  const setCurrentImageIndex = useFreeBrowseStore(
+    (s) => s.setCurrentImageIndex,
+  );
   const volumeVersion = useFreeBrowseStore((s) => s.volumeVersion);
-  const incrementVolumeVersion = useFreeBrowseStore((s) => s.incrementVolumeVersion);
+  const incrementVolumeVersion = useFreeBrowseStore(
+    (s) => s.incrementVolumeVersion,
+  );
   const currentSurfaceIndex = useFreeBrowseStore((s) => s.currentSurfaceIndex);
-  const setCurrentSurfaceIndex = useFreeBrowseStore((s) => s.setCurrentSurfaceIndex);
+  const setCurrentSurfaceIndex = useFreeBrowseStore(
+    (s) => s.setCurrentSurfaceIndex,
+  );
   const setActiveTab = useFreeBrowseStore((s) => s.setActiveTab);
 
-  const serverlessMode = import.meta.env.VITE_SERVERLESS === 'true';
+  const serverlessMode = hasInstanceConfig
+    ? instanceConfig.backend === null
+    : deploymentConfig.serverless;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const surfaceFileInputRef = useRef<HTMLInputElement>(null);
+  const mountedRef = useRef(true);
 
-  // Helper function to load NVD data
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Load a niivue Document (.nvd) into the scene.
+  //
+  // Accepts either raw bytes (from a file upload / server fetch) or an
+  // already-parsed JSON object (the embedded single-file path). niivue sniffs
+  // JSON vs CBOR itself (NVDocument.deserialize -> looksLikeJSON), so both
+  // encodings pass through unchanged and FreeBrowse no longer transcodes. The
+  // store follows via documentLoaded/volumeLoaded/meshLoaded (niivue-store-sync).
   const loadNvdData = useCallback(
-    async (jsonData: any) => {
-      if (!nvRef.current) return;
+    async (data: ArrayBuffer | Uint8Array | Record<string, unknown>) => {
       const nv = nvRef.current;
+      if (!nv) return;
+      void syncViewerOptionsFromNiiVue;
+      void updateSurfaceDetails;
 
-      setCurrentImageIndex(null);
+      let file: File;
+      if (data instanceof ArrayBuffer || data instanceof Uint8Array) {
+        const rawBytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+        const bytes = prepareNvdBytes(rawBytes);
+        assertNotLegacyDocument(bytes);
+        if (effectiveConfig.allowExternalDocumentUrls === false) {
+          assertSelfContainedNvd(bytes);
+        }
+        file = new File([bytes], "scene.nvd", {
+          type: "application/octet-stream",
+        });
+      } else {
+        // Already-parsed JSON object (embedded __EMBEDDED_NVD_DATA__ path).
+        // Serialize first so validation inspects the exact JSON bytes NiiVue
+        // will deserialize with its `$num` / `$ta` reviver.
+        const jsonBytes = new TextEncoder().encode(JSON.stringify(data));
+        assertNotLegacyDocument(jsonBytes);
+        if (effectiveConfig.allowExternalDocumentUrls === false) {
+          assertSelfContainedNvd(jsonBytes);
+        }
+        file = new File([jsonBytes], "scene.nvd", {
+          type: "application/json",
+        });
+      }
 
-      console.log("loadNvdData() -- jsonData: ", jsonData);
-
-      const document = await NVDocument.loadFromJSON(jsonData);
-      await document.fetchLinkedData();
-      console.log("loadNvdData() document: ", document);
-
+      // `fill: "current"`: a setting the document OMITS keeps the instance's
+      // value. v9 documents are sparse (a setting equal to its default is not
+      // written), and niivue's default policy would reset every omitted setting
+      // to its built-in default, silently changing e.g. crosshair colour or view
+      // mode on every load. A document should only change what it sets.
       try {
-        await nv.loadDocument(document);
-
-        if (
-          jsonData.encodedImageBlobs &&
-          jsonData.encodedImageBlobs.length > 0
-        ) {
-          console.log(
-            "Loading encoded image blobs:",
-            jsonData.encodedImageBlobs.length,
-          );
-          for (let i = 0; i < jsonData.encodedImageBlobs.length; i++) {
-            const blob = jsonData.encodedImageBlobs[i];
-            if (blob) {
-              try {
-                const imageOptions = jsonData.imageOptionsArray?.[i] || {};
-                const nvimage = await NVImage.loadFromBase64({
-                  base64: blob,
-                  ...imageOptions,
-                });
-                nv.addVolume(nvimage);
-                console.log(
-                  `Loaded encoded image blob ${i + 1}/${jsonData.encodedImageBlobs.length}`,
-                );
-              } catch (error) {
-                console.error(`Failed to load encoded image blob ${i}:`, error);
-              }
-            }
-          }
-        }
-
-        syncViewerOptionsFromNiivue();
-      } catch (error) {
-        console.error("nv.loadDocument failed:", error);
-        console.log("Current nv.volumes:", nv.volumes);
-        console.log("Current nv.meshes:", nv.meshes);
-        console.log("Current nv.drawBitmap:", nv.drawBitmap);
-        throw error;
-      }
-
-      if (jsonData.imageOptionsArray && nv.volumes) {
-        for (
-          let i = 0;
-          i < nv.volumes.length && i < jsonData.imageOptionsArray.length;
-          i++
-        ) {
-          const imageOption = jsonData.imageOptionsArray[i];
-          if (imageOption.url) {
-            nv.volumes[i].url = imageOption.url;
-          }
+        await nv.loadDocument(file, { fill: "current" });
+      } finally {
+        if (effectiveConfig.allowExternalDocumentUrls === false) {
+          stripLoadedDocumentUrls(nv);
         }
       }
+      // Migrated legacy documents name label palettes by `colormap` only.
+      await applyLabelColormapsAfterLoad(nv);
 
-      if (jsonData.meshes && jsonData.meshes.length > 0) {
-        console.log("Loading meshes:", jsonData.meshes);
-        await nv.loadMeshes(jsonData.meshes);
-
-        // WORKAROUND: NiiVue's loadLayer doesn't persist layer names on the
-        // layer objects it creates. Backfill from the original JSON URLs.
-        // Remove after niivue PR that adds `newLayer.name = layerName` is merged.
-        for (const meshJson of jsonData.meshes) {
-          if (!meshJson.layers || meshJson.layers.length === 0) continue;
-
-          // Match the loaded mesh by name (extracted from URL basename)
-          const meshName = meshJson.name || meshJson.url?.split("/").pop() || "";
-          const mesh = nv.meshes.find((m: any) => m.name === meshName);
-          if (!mesh?.layers) continue;
-
-          for (let li = 0; li < mesh.layers.length && li < meshJson.layers.length; li++) {
-            const layerJson = meshJson.layers[li];
-            const layerName = layerJson.name || layerJson.url?.split("/").pop() || "";
-            if (layerName && !mesh.layers[li].name) {
-              mesh.layers[li].name = layerName;
-            }
-          }
-        }
+      // Select a first volume / surface so the details tabs have a target. The
+      // lists themselves follow via events.
+      if (currentImageIndex === null && nv.volumes.length > 0) {
+        setCurrentImageIndex(0);
       }
-
-      setCurrentImageIndex(0);
-      incrementVolumeVersion();
-      updateSurfaceDetails();
-      nv.setCrosshairColor([0, 1, 0, 0.1]);
+      if (currentSurfaceIndex === null && nv.meshes.length > 0) {
+        setCurrentSurfaceIndex(0);
+      }
     },
-    [nvRef, setCurrentImageIndex, syncViewerOptionsFromNiivue, incrementVolumeVersion, updateSurfaceDetails],
+    [
+      nvRef,
+      effectiveConfig.allowExternalDocumentUrls,
+      syncViewerOptionsFromNiiVue,
+      updateSurfaceDetails,
+      currentImageIndex,
+      currentSurfaceIndex,
+      setCurrentImageIndex,
+      setCurrentSurfaceIndex,
+    ],
   );
 
-  // Add uploaded files to Niivue
+  // Add uploaded files to NiiVue
   const handleFileUpload = useCallback(
     async (files: File[]) => {
       if (!nvRef.current) return;
@@ -157,24 +164,24 @@ export function useFileLoading(
       if (nvdFiles.length > 0) {
         const nvdFile = nvdFiles[0];
         try {
-          const text = await nvdFile.text();
-          const jsonData = JSON.parse(text);
-          console.log("NVD data loaded from uploaded file:", jsonData);
-          await loadNvdData(jsonData);
+          // Pass raw bytes: loadNvdData sniffs JSON vs CBOR.
+          const bytes = await nvdFile.arrayBuffer();
+          if (!mountedRef.current) return;
+          console.log("NVD file loaded:", nvdFile.name, bytes.byteLength, "bytes");
+          await loadNvdData(bytes);
         } catch (error) {
           console.error("Error loading uploaded NVD file:", error);
         }
       } else {
+        if (!mountedRef.current) return;
         const promises = files.map(async (file) => {
-          const nvimage = await NVImage.loadFromFile({
-            file: file,
-          });
-          console.log("nv", nv);
-          nv.addVolume(nvimage);
-          return nvimage;
+          // niivue-mono: addVolume accepts a File directly (url: string | File);
+          // the separate NVImage.loadFromFile step is gone.
+          await nv.addVolume({ url: file, name: file.name });
         });
 
         await Promise.all(promises);
+        if (!mountedRef.current) return;
 
         applyViewerOptions();
         incrementVolumeVersion();
@@ -184,7 +191,16 @@ export function useFileLoading(
         }
       }
     },
-    [nvRef, showUploader, currentImageIndex, loadNvdData, applyViewerOptions, incrementVolumeVersion, setShowUploader, setCurrentImageIndex],
+    [
+      nvRef,
+      showUploader,
+      currentImageIndex,
+      loadNvdData,
+      applyViewerOptions,
+      incrementVolumeVersion,
+      setShowUploader,
+      setCurrentImageIndex,
+    ],
   );
 
   const handleImagingFileSelect = useCallback(
@@ -211,13 +227,21 @@ export function useFileLoading(
         }
 
         const basename = file.filename.split("/").pop() || file.filename;
+        // niivue picks the reader from the extension of `url`, not from
+        // `name`, and a blob: URL has none, so anything but NIfTI (the
+        // fallback reader) fails to parse. Hand it a named File instead.
+        let url: string | File = file.url;
+        if (file.url.startsWith("blob:")) {
+          const response = await fetch(file.url);
+          url = new File([await response.blob()], basename);
+        }
         const volume = {
-          url: file.url,
+          url,
           name: basename,
         };
 
         console.log("Adding imaging file to scene:", volume);
-        await nv.addVolumeFromUrl(volume);
+        await nv.addVolume(volume);
 
         applyViewerOptions();
         incrementVolumeVersion();
@@ -231,7 +255,14 @@ export function useFileLoading(
         console.error("Error loading imaging file:", error);
       }
     },
-    [nvRef, showUploader, applyViewerOptions, incrementVolumeVersion, setShowUploader, setCurrentImageIndex],
+    [
+      nvRef,
+      showUploader,
+      applyViewerOptions,
+      incrementVolumeVersion,
+      setShowUploader,
+      setCurrentImageIndex,
+    ],
   );
 
   const handleNvdFileSelect = useCallback(
@@ -244,15 +275,17 @@ export function useFileLoading(
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
-        const jsonData = await response.json();
-        console.log("json data returned from server:");
-        console.log(jsonData);
+        // Fetch raw bytes: loadNvdData sniffs JSON vs CBOR.
+        const bytes = await response.arrayBuffer();
+        console.log(`NVD fetched from ${file.url}: ${bytes.byteLength} bytes`);
 
         setShowUploader(false);
 
         let retries = 0;
         while (!nv.canvas && retries < 20) {
-          console.log(`Waiting for canvas to be ready... attempt ${retries + 1}`);
+          console.log(
+            `Waiting for canvas to be ready... attempt ${retries + 1}`,
+          );
           await new Promise((resolve) => setTimeout(resolve, 100));
           retries++;
         }
@@ -261,7 +294,7 @@ export function useFileLoading(
           throw new Error("Canvas failed to initialize after 2 seconds");
         }
 
-        await loadNvdData(jsonData);
+        await loadNvdData(bytes);
       } catch (error) {
         console.error("Error loading NVD:", error);
       }
@@ -309,21 +342,22 @@ export function useFileLoading(
           return;
         }
 
-        const meshOptionsList = files.map((file) => ({
-          url: URL.createObjectURL(file),
-          name: file.name,
-          rgba255: [255, 255, 0, 255] as [number, number, number, number],
-          meshShaderIndex: 14,
-        }));
-
+        // addMesh (not loadMeshes) — loadMeshes replaces all meshes; addMesh
+        // appends. niivue-mono accepts a File directly (no blob URL), a 0-1
+        // `color`, and a shader `shaderType` name. The surfaces list follows via
+        // meshLoaded -> event adapter.
         try {
-          await nv.addMeshesFromUrl(meshOptionsList);
-          nv.updateGLVolume();
+          for (const file of files) {
+            await nv.addMesh({
+              url: file,
+              name: file.name,
+              color: [1, 1, 0, 1] as [number, number, number, number],
+              shaderType: "phong",
+            });
+          }
         } catch (error) {
           console.error("Error loading surface files:", error);
         }
-
-        updateSurfaceDetails();
 
         if (currentSurfaceIndex === null && nv.meshes.length > 0) {
           setCurrentSurfaceIndex(nv.meshes.length - files.length);
@@ -331,30 +365,45 @@ export function useFileLoading(
       }
       e.target.value = "";
     },
-    [nvRef, showUploader, currentSurfaceIndex, updateSurfaceDetails, setShowUploader, setCurrentSurfaceIndex],
+    [
+      nvRef,
+      showUploader,
+      currentSurfaceIndex,
+      setShowUploader,
+      setCurrentSurfaceIndex,
+    ],
   );
 
-  // Set up Niivue callbacks
+  // Re-read the volume list after a drag ends (niivue-mono uses the EventTarget
+  // API rather than assignable onXxx callback props). The crosshair readout is
+  // NOT handled here: `locationChange` reaches the store through the event
+  // adapter (niivue-store-sync `onLocationChange`), the single path for it.
   useEffect(() => {
-    if (nvRef.current) {
-      nvRef.current.onDragRelease = async () => {
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-        incrementVolumeVersion();
-      };
+    const nv = nvRef.current;
+    if (!nv) return;
 
-      nvRef.current.onLocationChange = handleLocationChange;
-      nvRef.current.onOptsChange = syncDrawingOptionsFromNiivue;
-    }
-  }, [nvRef, handleLocationChange, syncDrawingOptionsFromNiivue, incrementVolumeVersion]);
+    const onDragRelease = () => {
+      requestAnimationFrame(() => incrementVolumeVersion());
+    };
 
-  // Enable/disable drag-and-drop based on whether volumes are loaded
+    nv.addEventListener("dragRelease", onDragRelease);
+    return () => {
+      nv.removeEventListener("dragRelease", onDragRelease);
+    };
+  }, [nvRef, incrementVolumeVersion]);
+
+  // niivue's own canvas drag-and-drop: only while the drop zone is up and
+  // nothing is loaded, and never when the host switched drag-and-drop off.
+  const dragDropEnabled = useFreeBrowseStore((s) => s.dragDropEnabled);
   useEffect(() => {
     void volumeVersion;
     if (nvRef.current) {
-      nvRef.current.opts.dragAndDropEnabled =
-        showUploader && (nvRef.current.volumes?.length ?? 0) === 0;
+      nvRef.current.isDragDropEnabled =
+        dragDropEnabled &&
+        showUploader &&
+        (nvRef.current.volumes?.length ?? 0) === 0;
     }
-  }, [nvRef, volumeVersion, showUploader]);
+  }, [nvRef, volumeVersion, showUploader, dragDropEnabled]);
 
   // If in serverless mode, switch to sceneDetails tab by default
   useEffect(() => {
@@ -363,8 +412,10 @@ export function useFileLoading(
     }
   }, [serverlessMode, setActiveTab]);
 
-  // Load NVD from URL parameter on initial load
+  // Load NVD from URL parameter on initial load (app only: an embedding host
+  // keeps its own query string, see config.readUrlParams).
   useEffect(() => {
+    if (!effectiveConfig.readUrlParams) return;
     const urlParams = new URLSearchParams(window.location.search);
     const nvdParam = urlParams.get("nvd");
 
@@ -378,8 +429,9 @@ export function useFileLoading(
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load volume from URL parameter on initial load
+  // Load volume from URL parameter on initial load (app only, as above).
   useEffect(() => {
+    if (!effectiveConfig.readUrlParams) return;
     const urlParams = new URLSearchParams(window.location.search);
     const volParam = urlParams.get("vol");
 
@@ -391,20 +443,21 @@ export function useFileLoading(
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load embedded NVD data (for self-contained HTML files)
+  // Load embedded NVD data (for self-contained HTML files; app only, not multi-mount hosts)
   useEffect(() => {
+    if (!effectiveConfig.readUrlParams) return;
     const handleEmbeddedNvd = async (event: CustomEvent) => {
       if (!event.detail || !nvRef.current) return;
 
-      if ((window as any).__EMBEDDED_NVD_LOADED__) return;
-      (window as any).__EMBEDDED_NVD_LOADED__ = true;
+      if (window.__EMBEDDED_NVD_LOADED__) return;
+      window.__EMBEDDED_NVD_LOADED__ = true;
 
-      console.log('Loading embedded NVD data');
+      console.log("Loading embedded NVD data");
       setShowUploader(false);
 
       let retries = 0;
       while (!nvRef.current.canvas && retries < 20) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, 100));
         retries++;
       }
 
@@ -413,15 +466,24 @@ export function useFileLoading(
       }
     };
 
-    window.addEventListener('loadEmbeddedNvd', handleEmbeddedNvd as unknown as EventListener);
+    window.addEventListener(
+      "loadEmbeddedNvd",
+      handleEmbeddedNvd as unknown as EventListener,
+    );
 
-    if ((window as any).__EMBEDDED_NVD_DATA__ && !(window as any).__EMBEDDED_NVD_LOADED__) {
-      window.dispatchEvent(new CustomEvent('loadEmbeddedNvd', {
-        detail: (window as any).__EMBEDDED_NVD_DATA__
-      }));
+    if (window.__EMBEDDED_NVD_DATA__ && !window.__EMBEDDED_NVD_LOADED__) {
+      window.dispatchEvent(
+        new CustomEvent("loadEmbeddedNvd", {
+          detail: window.__EMBEDDED_NVD_DATA__,
+        }),
+      );
     }
 
-    return () => window.removeEventListener('loadEmbeddedNvd', handleEmbeddedNvd as unknown as EventListener);
+    return () =>
+      window.removeEventListener(
+        "loadEmbeddedNvd",
+        handleEmbeddedNvd as unknown as EventListener,
+      );
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
