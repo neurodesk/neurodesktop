@@ -56,6 +56,9 @@ case "$1" in
 esac
 """,
         "wget": """
+if [[ "$*" == *cvmfs-release-latest_all.deb* ]]; then
+  printf 'bootstrap %s\n' "$*" >> "$CALLS"
+fi
 for arg in "$@"; do
   case "$arg" in
     --output-document=*) echo inventory >> "$CALLS"; echo sample_1 > "${arg#*=}" ;;
@@ -165,6 +168,18 @@ sleep() {
         timeout=30,
     )
     return result, calls.read_text() if calls.exists() else ""
+
+
+@pytest.mark.parametrize("script", HEALTH_SCRIPTS)
+def test_client_bootstrap_uses_primary_production_endpoint(tmp_path, script):
+    result, calls = run_health(tmp_path, script, mounted=True)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (
+        "bootstrap https://cvmrepo.s3.cern.ch/cvmrepo/apt/"
+        "cvmfs-release-latest_all.deb\n"
+    ) in calls
+    assert "cvmrepo.web.cern.ch" not in calls
 
 
 @pytest.mark.parametrize("script", HEALTH_SCRIPTS)
