@@ -8,7 +8,8 @@
 # package that CVMFS pulls in through uuid-dev. On 2026-11-19, and again on
 # 2026-11-21 after Ubuntu published headers 7.0.0-44.44, the Ubuntu CVE tracker
 # listed the first three as "needed" for linux in Ubuntu 26.04. Scans on
-# 2026-11-24 and 2026-11-25 reported the remaining findings against 7.0.0-44.44.
+# 2026-11-24, 2026-11-25 and 2026-11-26 reported the remaining findings against
+# 7.0.0-44.44.
 # Remove each entry once a rebuild installs fixed headers. Every exception
 # applies only to the listed package versions.
 vulnerabilities:
@@ -110,3 +111,11 @@ vulnerabilities:
       Out-of-bounds write in the kernel Ceph client. linux-libc-dev only
       installs kernel headers, so the image ships none of the affected client
       code.
+  - id: CVE-2026-99676
+    purls:
+      - pkg:deb/ubuntu/linux-libc-dev@7.0.0-44.44
+    expired_at: 2027-01-19
+    statement: >-
+      Denial of service from socket reference-count memory ordering in the
+      kernel. linux-libc-dev only installs kernel headers; containers run the
+      host kernel, so the image ships none of the affected networking code.
