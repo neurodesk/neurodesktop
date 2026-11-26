@@ -5,6 +5,7 @@ import subprocess
 import time
 
 import pytest
+import yaml
 
 LC = "/opt/uv/tools/lightcone-cli/bin/lc"
 CATALOG = "/opt/neurodesktop/lightcone-compute.yaml"
@@ -39,6 +40,35 @@ def wait_ended(root, cluster, env):
             return
         time.sleep(1)
     pytest.fail(f"owned allocation did not reach ended state: {snapshot}")
+
+
+RECIPE_MEMORY_MB = 1024  # the project() recipe requests 1Gi
+
+
+def node_fitting_catalog(tmp_path):
+    """Copy the installed offer, shrunk to what its Slurm partition can allocate.
+
+    The installed catalog requests a fixed two-CPU, 8-GiB shape. Hosts with
+    less (Docker Desktop's default VM, a memory-limited container) reject that
+    job, so exercise the same partition and interpreter at the node's size.
+    """
+    catalog = yaml.safe_load(Path(CATALOG).read_text())
+    (offer,) = catalog["offers"]
+    resources = offer["resources"]
+    node = command(
+        Path.cwd(), "sinfo", "-h", "-p", offer["config"]["partition"], "-o", "%c %m"
+    ).split()
+    cpus = min(int(resources["cpus"]), int(node[0]))
+    memory_mb = min(int(resources["memory"] * 1024), int(node[1]))
+    if memory_mb < RECIPE_MEMORY_MB:
+        pytest.skip(
+            f"Slurm node offers {memory_mb} MiB; the test recipe needs "
+            f"{RECIPE_MEMORY_MB} MiB"
+        )
+    resources.update(cpus=cpus, memory=f"{memory_mb}MB")
+    path = tmp_path / "compute.yaml"
+    path.write_text(yaml.safe_dump(catalog))
+    return path, str(cpus), f"{memory_mb}MB"
 
 
 def project(tmp_path, recipe, *, modules=False, fmt="txt"):
@@ -120,12 +150,15 @@ def test_native_slurm_materializes_and_rebuilds(tmp_path):
 
     if os.environ.get("NEURODESKTOP_SLURM_ENABLE", "1") in {"0", "false", "no"}:
         pytest.skip("Slurm is explicitly disabled")
+    if os.environ.get("NEURODESKTOP_SLURM_MODE", "local") != "local":
+        pytest.skip("the installed catalog targets the integrated local queue")
     command(Path.cwd(), "scontrol", "ping")
+    catalog, cpus, memory = node_fitting_catalog(tmp_path)
     root = project(
         tmp_path,
         "python -c \"from pathlib import Path; Path('{output}').write_text('42')\"",
     )
-    env = {**os.environ, "LC_COMPUTE_CONFIG": CATALOG}
+    env = {**os.environ, "LC_COMPUTE_CONFIG": str(catalog)}
     launched = json.loads(
         command(
             root,
@@ -133,9 +166,9 @@ def test_native_slurm_materializes_and_rebuilds(tmp_path):
             "compute",
             "launch",
             "--cpus",
-            "2",
+            cpus,
             "--memory",
-            "8",
+            memory,
             "--json",
             env=env,
         )
