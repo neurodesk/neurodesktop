@@ -979,6 +979,10 @@ before invoking the worker.
 In the built image, run `pytest /opt/tests/test_astra_lc_run_image.py` with Slurm
 enabled. This executes a real native allocation, a Python probe, materialization,
 a no-op, freshness checks, a recipe rebuild, viewer ingestion, and cleanup.
+The allocation uses a copy of the installed catalog whose fixed two-CPU, 8-GiB
+shape is reduced to the Slurm node's `CPUTot` and `RealMemory` when either is
+smaller, so memory-limited containers and Docker Desktop VMs still run it.
+`test_lc05_installed_native_contract` keeps checking the installed shape itself.
 It also verifies private per-user connection storage without changing home
 permissions and retains rejection of writable connection-path ancestors.
 In the privileged science profile, also set

@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import time
 
@@ -39,6 +40,30 @@ def wait_ended(root, cluster, env):
             return
         time.sleep(1)
     pytest.fail(f"owned allocation did not reach ended state: {snapshot}")
+
+
+INSTALLED_SHAPE = "resources: {cpus: 2, memory: 8}"
+
+
+def node_fitting_catalog(tmp_path):
+    """Copy the installed offer, shrunk to what this Slurm node can allocate.
+
+    The installed catalog requests a fixed two-CPU, 8-GiB shape. Hosts with
+    less (Docker Desktop's default VM, a memory-limited container) reject that
+    job, so exercise the same partition and interpreter at the node's size.
+    """
+    node = command(Path.cwd(), "scontrol", "show", "node", "-o")
+    cpus = min(2, int(re.search(r"\bCPUTot=(\d+)", node)[1]))
+    memory_mb = min(8 * 1024, int(re.search(r"\bRealMemory=(\d+)", node)[1]))
+    installed = Path(CATALOG).read_text()
+    assert installed.count(INSTALLED_SHAPE) == 1, installed
+    catalog = tmp_path / "compute.yaml"
+    catalog.write_text(
+        installed.replace(
+            INSTALLED_SHAPE, f"resources: {{cpus: {cpus}, memory: {memory_mb}MB}}"
+        )
+    )
+    return catalog, str(cpus), f"{memory_mb}MB"
 
 
 def project(tmp_path, recipe, *, modules=False, fmt="txt"):
@@ -121,11 +146,12 @@ def test_native_slurm_materializes_and_rebuilds(tmp_path):
     if os.environ.get("NEURODESKTOP_SLURM_ENABLE", "1") in {"0", "false", "no"}:
         pytest.skip("Slurm is explicitly disabled")
     command(Path.cwd(), "scontrol", "ping")
+    catalog, cpus, memory = node_fitting_catalog(tmp_path)
     root = project(
         tmp_path,
         "python -c \"from pathlib import Path; Path('{output}').write_text('42')\"",
     )
-    env = {**os.environ, "LC_COMPUTE_CONFIG": CATALOG}
+    env = {**os.environ, "LC_COMPUTE_CONFIG": str(catalog)}
     launched = json.loads(
         command(
             root,
@@ -133,9 +159,9 @@ def test_native_slurm_materializes_and_rebuilds(tmp_path):
             "compute",
             "launch",
             "--cpus",
-            "2",
+            cpus,
             "--memory",
-            "8",
+            memory,
             "--json",
             env=env,
         )
