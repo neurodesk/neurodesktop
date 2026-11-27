@@ -163,13 +163,33 @@ def test_active_chat_check_fails_closed(manager):
     assert manager.active_chats()
     path = manager.service.policy.base_dir / 'userdata'
     path.mkdir()
+    # A legacy V1 database does not satisfy the V2 restart-safety check.
     with sqlite3.connect(path / 'state.sqlite') as db:
         db.execute('CREATE TABLE projection_thread_sessions(status TEXT, active_turn_id TEXT)')
         db.execute("INSERT INTO projection_thread_sessions VALUES ('ready', NULL)")
-    assert not manager.active_chats()
-    with sqlite3.connect(path / 'state.sqlite') as db:
-        db.execute("UPDATE projection_thread_sessions SET active_turn_id='turn-1'")
     assert manager.active_chats()
+    # Missing V2 tables also fail closed.
+    with sqlite3.connect(path / 'statev2.sqlite') as db:
+        db.execute('PRAGMA journal_mode = WAL')
+        db.execute('CREATE TABLE projection_thread_sessions(status TEXT, active_turn_id TEXT)')
+    assert manager.active_chats()
+    with sqlite3.connect(path / 'statev2.sqlite') as db:
+        db.execute('CREATE TABLE orchestration_v2_projection_threads(thread_id TEXT PRIMARY KEY, deleted_at TEXT)')
+        db.execute('CREATE TABLE orchestration_v2_projection_runs(run_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, status TEXT NOT NULL)')
+        db.execute("INSERT INTO orchestration_v2_projection_threads VALUES ('t-live', NULL)")
+        db.execute("INSERT INTO orchestration_v2_projection_threads VALUES ('t-deleted', '2026-01-01T00:00:00Z')")
+        # Active runs on soft-deleted threads and non-active statuses must not block restarts.
+        db.execute("INSERT INTO orchestration_v2_projection_runs VALUES ('r-del', 't-deleted', 'running')")
+        for index, status in enumerate(('completed', 'interrupted', 'failed', 'cancelled', 'rolled_back', 'queued')):
+            db.execute("INSERT INTO orchestration_v2_projection_runs VALUES (?, 't-live', ?)", (f'r-idle-{index}', status))
+    assert not manager.active_chats()
+    for status in ('preparing', 'starting', 'running', 'waiting'):
+        with sqlite3.connect(path / 'statev2.sqlite') as db:
+            db.execute("INSERT OR REPLACE INTO orchestration_v2_projection_runs VALUES ('r-active', 't-live', ?)", (status,))
+        assert manager.active_chats(), status
+    with sqlite3.connect(path / 'statev2.sqlite') as db:
+        db.execute("UPDATE orchestration_v2_projection_runs SET status = 'completed' WHERE run_id = 'r-active'")
+    assert not manager.active_chats()
 
 
 def test_readiness_never_sends_oauth_token_to_environment(manager):
