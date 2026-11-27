@@ -48,6 +48,28 @@ CODEX_ENV = {"HOME": "/opt/jovyan_defaults", "CODEX_HOME": "/opt/jovyan_defaults
 CLAUDE_ENV = {"HOME": "/opt/jovyan_defaults", "DISABLE_TELEMETRY": "1"}
 
 
+def opencode_environment(home, *, base_env=None, **overrides):
+    """Build an isolated OpenCode 2 environment without a stale ``PWD``.
+
+    Python's ``subprocess`` changes the OS working directory without updating
+    or clearing ``PWD`` in ``env``. Interactive terminals (such as JupyterLab
+    terminals) export ``PWD``, and OpenCode 2 prefers ``PWD`` over
+    ``process.cwd()`` when resolving its session directory, which would point
+    hooks at the caller's directory instead of ``cwd``.
+    """
+    source = os.environ if base_env is None else base_env
+    return {
+        **{
+            k: v
+            for k, v in source.items()
+            if k != "PWD" and not k.startswith(("OPENCODE_", "XDG_"))
+        },
+        "HOME": str(home),
+        "OPENCODE_DISABLE_MODELS_FETCH": "true",
+        **overrides,
+    }
+
+
 @contextmanager
 def opencode_server(home, cwd):
     """Serve OpenCode 2 for ``home`` and yield a reader for its location API."""
@@ -55,12 +77,7 @@ def opencode_server(home, cwd):
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    environment = {
-        **{k: v for k, v in os.environ.items() if not k.startswith(("OPENCODE_", "XDG_"))},
-        "HOME": str(home),
-        "OPENCODE_PASSWORD": password,
-        "OPENCODE_DISABLE_MODELS_FETCH": "true",
-    }
+    environment = opencode_environment(home, OPENCODE_PASSWORD=password)
     log = home / "opencode-serve.log"
     with log.open("w") as stream:
         server = subprocess.Popen(
@@ -360,7 +377,7 @@ def test_opencode_finds_every_reproduction_skill_in_a_restored_home(tmp_path):
     assert skill_names <= discovered, discovered
 
 
-def test_opencode_adapter_runs_the_upstream_astra_hooks(tmp_path):
+def test_opencode_adapter_runs_the_upstream_astra_hooks(tmp_path, monkeypatch):
     """An OpenCode 2 session must return hook context to the model.
 
     A scripted model reads the ASTRA spec twice and then rewrites it unchanged.
@@ -388,6 +405,9 @@ def test_opencode_adapter_runs_the_upstream_astra_hooks(tmp_path):
         ("read", {"path": str(spec)}),
         ("write", {"path": str(spec), "content": spec.read_text(encoding="utf-8")}),
     ]
+    # Simulate an interactive JupyterLab terminal where PWD points outside
+    # ``project`` (docker exec in CI leaves PWD unset).
+    monkeypatch.setenv("PWD", str(home))
     with scripted_model(script) as (endpoint, requests):
         inline = {
             "provider": {"scripted": {
@@ -397,12 +417,9 @@ def test_opencode_adapter_runs_the_upstream_astra_hooks(tmp_path):
             }},
             "model": "scripted/m",
         }
-        environment = {
-            **{k: v for k, v in os.environ.items() if not k.startswith(("OPENCODE_", "XDG_"))},
-            "HOME": str(home),
-            "OPENCODE_CONFIG_CONTENT": json.dumps(inline),
-            "OPENCODE_DISABLE_MODELS_FETCH": "true",
-        }
+        environment = opencode_environment(
+            home, OPENCODE_CONFIG_CONTENT=json.dumps(inline)
+        )
         result = subprocess.run(
             ["/usr/bin/opencode", "run", "--standalone", "--auto", "-m", "scripted/m",
              "Check the ASTRA spec."],
