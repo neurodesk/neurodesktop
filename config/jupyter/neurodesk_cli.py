@@ -26,35 +26,26 @@ CVMFS_REPOSITORY = Path("/cvmfs/neurodesk.ardc.edu.au")
 DOCS_URL = "https://neurodesk.org/getting-started/neurodesktop/neurodesk-cli/"
 GROUPS = ("Analysis", "Environment", "Agents")
 
+Exec = Callable[[str, list[str]], object]
+Builtin = Callable[[Sequence[str], Exec], int]
+
 
 @dataclass(frozen=True)
 class Command:
     words: tuple[str, ...]
     group: str
     summary: str
-    # Executable under BIN_DIR that implements the command; None for a
-    # command the dispatcher runs itself.
     executable: str | None = None
+    builtin: Builtin | None = None
+
+    def __post_init__(self) -> None:
+        """Require each registry entry to own exactly one dispatch target."""
+        if (self.executable is None) == (self.builtin is None):
+            raise ValueError("a command needs exactly one executable or built-in handler")
 
     @property
     def name(self) -> str:
         return " ".join(self.words)
-
-
-COMMANDS = (
-    Command(("cite",), "Analysis", "Write CITATIONS.md for the Neurodesk tools you loaded", "neurodesk-cite"),
-    Command(("kernel",), "Analysis", "Use a tool container's Python as a notebook kernel", "neurodesk-kernel"),
-    Command(("uv",), "Analysis", "Create per-project uv notebook environments", "neurodesk-uv"),
-    Command(("jobs",), "Analysis", "Run analyses on remote SSH/Slurm sites (experimental)", "neurodesk-jobs"),
-    Command(("update",), "Environment", "Update the Neurodesk application menu", "neurodesk-update"),
-    Command(("check",), "Environment", "Check CVMFS, GPU, Slurm and T3 remote access"),
-    Command(("test",), "Environment", "Run the installed image test suite"),
-    Command(("info",), "Environment", "Show image version, resources, GPU and CVMFS"),
-    Command(("t3",), "Environment", "Set up T3 Code remote access through Tailscale", "t3_neurodesk_setup"),
-    Command(("agent", "preflight"), "Agents", "Show modules and Slurm limits before agent analysis", "neurodesk-agent-preflight"),
-    Command(("astra",), "Agents", "Publish ASTRA outputs and check their provenance", "neurodesk-astra-provenance"),
-    Command(("lightcone", "materialize"), "Agents", "Materialize a Lightcone output outside sbatch", "neurodesk-lc-materialize"),
-)
 
 
 def usage() -> str:
@@ -238,7 +229,7 @@ Each check prints PASS, FAIL or SKIP. The exit status is 1 when a check fails.
 """
 
 
-def command_check(args: Sequence[str]) -> int:
+def command_check(args: Sequence[str], _execv: Exec = os.execv) -> int:
     if any(arg in {"-h", "--help"} for arg in args):
         print(CHECK_HELP, end="")
         return 0
@@ -270,7 +261,7 @@ narrow it, for example:
 """
 
 
-def command_test(args: Sequence[str], execv: Callable[[str, list[str]], object]) -> int:
+def command_test(args: Sequence[str], execv: Exec = os.execv) -> int:
     if any(arg in {"-h", "--help"} for arg in args):
         print(TEST_HELP, end="")
         return 0
@@ -310,7 +301,7 @@ def cpu_limit() -> str:
     return str(available)
 
 
-def command_info(args: Sequence[str]) -> int:
+def command_info(args: Sequence[str], _execv: Exec = os.execv) -> int:
     if args:
         print("usage: neurodesk info\n\nShow the image version, resources, GPU and CVMFS state.",
               file=sys.stdout if args[0] in {"-h", "--help"} else sys.stderr)
@@ -341,8 +332,37 @@ def command_info(args: Sequence[str]) -> int:
 
 # --- dispatch ----------------------------------------------------------------
 
-def main(argv: Sequence[str] | None = None,
-         execv: Callable[[str, list[str]], object] = os.execv) -> int:
+COMMANDS = (
+    Command(("cite",), "Analysis", "Write CITATIONS.md for the Neurodesk tools you loaded",
+            executable="neurodesk-cite"),
+    Command(("kernel",), "Analysis", "Use a tool container's Python as a notebook kernel",
+            executable="neurodesk-kernel"),
+    Command(("uv",), "Analysis", "Create per-project uv notebook environments",
+            executable="neurodesk-uv"),
+    Command(("jobs",), "Analysis", "Run analyses on remote SSH/Slurm sites (experimental)",
+            executable="neurodesk-jobs"),
+    Command(("update",), "Environment", "Update the Neurodesk application menu",
+            executable="neurodesk-update"),
+    Command(("check",), "Environment", "Check CVMFS, GPU, Slurm and T3 remote access",
+            builtin=command_check),
+    Command(("test",), "Environment", "Run the installed image test suite",
+            builtin=command_test),
+    Command(("info",), "Environment", "Show image version, resources, GPU and CVMFS",
+            builtin=command_info),
+    Command(("t3",), "Environment", "Set up T3 Code remote access through Tailscale",
+            executable="t3_neurodesk_setup"),
+    Command(("agent", "preflight"), "Agents",
+            "Show modules and Slurm limits before agent analysis",
+            executable="neurodesk-agent-preflight"),
+    Command(("astra",), "Agents", "Publish ASTRA outputs and check their provenance",
+            executable="neurodesk-astra-provenance"),
+    Command(("lightcone", "materialize"), "Agents",
+            "Materialize a Lightcone output outside sbatch",
+            executable="neurodesk-lc-materialize"),
+)
+
+
+def main(argv: Sequence[str] | None = None, execv: Exec = os.execv) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in {"-h", "--help"}:
         print(usage(), end="")
@@ -364,13 +384,9 @@ def main(argv: Sequence[str] | None = None,
             return 2
         return unknown(args[0])
     rest = args[len(command.words):]
-    if command.name == "check":
-        return command_check(rest)
-    if command.name == "test":
-        return command_test(rest, execv)
-    if command.name == "info":
-        return command_info(rest)
-    assert command.executable is not None
+    if command.builtin is not None:
+        return command.builtin(rest, execv)
+    assert command.executable is not None  # Command's invariant narrows the type.
     target = BIN_DIR / command.executable
     if not os.access(target, os.X_OK):
         print(f"neurodesk {command.name}: {target} is not installed in this image.", file=sys.stderr)

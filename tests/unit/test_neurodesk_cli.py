@@ -116,6 +116,41 @@ def test_missing_helper_is_reported_without_a_traceback(neurodesk):
     assert "Traceback" not in result.stderr
 
 
+def test_registered_builtin_owns_its_dispatch_behavior(monkeypatch):
+    cli = load_cli()
+    calls = []
+
+    def inspect(args, execv):
+        calls.append((list(args), execv))
+        return 23
+
+    command = cli.Command(
+        ("inspect",), "Environment", "Inspect this image", builtin=inspect
+    )
+    monkeypatch.setattr(cli, "COMMANDS", (command,))
+
+    def execute(path, argv):
+        pass
+
+    assert cli.main(["inspect", "resources"], execv=execute) == 23
+    assert calls == [(["resources"], execute)]
+
+
+@pytest.mark.parametrize(
+    "targets",
+    [
+        {},
+        {"executable": "neurodesk-inspect", "builtin": lambda args, execv: 0},
+    ],
+    ids=("targetless", "ambiguous"),
+)
+def test_command_requires_exactly_one_owned_dispatch_target(targets):
+    cli = load_cli()
+
+    with pytest.raises(ValueError, match="exactly one"):
+        cli.Command(("inspect",), "Environment", "Inspect this image", **targets)
+
+
 def test_version_reports_the_image_version(neurodesk):
     assert neurodesk.run("--version").stdout == "neurodesk 2026-11-13\n"
 
