@@ -1,11 +1,10 @@
 import json
 import os
 import subprocess
-from pathlib import Path
 
 import pytest
 
-from testlib import load_source_module
+from testlib import load_source_module, resolve_source
 
 
 def load_update_page_config_module():
@@ -159,11 +158,14 @@ def test_page_config_unreadable_file_is_not_overwritten(tmp_path):
 
 def test_restore_defaults_plus_migration_preserves_user_page_config(tmp_path):
     """Verify restore_home_defaults.sh does not clobber existing page_config.json before migration."""
-    repo_root = Path(__file__).resolve().parents[2]
-    restore_script = repo_root / "config/jupyter/restore_home_defaults.sh"
-    seed_src = repo_root / "config/jupyter/page_config.json"
-    if not restore_script.exists() or not seed_src.exists():
-        pytest.skip("repo source scripts not available")
+    restore_script = resolve_source(
+        "/opt/neurodesktop/restore_home_defaults.sh",
+        "config/jupyter/restore_home_defaults.sh",
+    )
+    seed_src = resolve_source(
+        "/opt/jovyan_defaults/.jupyter/labconfig/page_config.json",
+        "config/jupyter/page_config.json",
+    )
 
     defaults_dir = tmp_path / "defaults"
     seed_dest = defaults_dir / ".jupyter" / "labconfig" / "page_config.json"
@@ -205,8 +207,9 @@ def test_restore_defaults_plus_migration_preserves_user_page_config(tmp_path):
 
 def test_default_user_page_config_does_not_disable_server_proxy():
     """Verify /opt/jovyan_defaults seed config does not disable server-proxy in user home."""
-    repo_default = Path(__file__).resolve().parents[2] / "config/jupyter/page_config.json"
-    if not repo_default.exists():
-        repo_default = Path("/opt/jovyan_defaults/.jupyter/labconfig/page_config.json")
-    data = json.loads(repo_default.read_text(encoding="utf-8"))
+    seed_path = resolve_source(
+        "/opt/jovyan_defaults/.jupyter/labconfig/page_config.json",
+        "config/jupyter/page_config.json",
+    )
+    data = json.loads(seed_path.read_text(encoding="utf-8"))
     assert "@jupyterhub/jupyter-server-proxy" not in data.get("disabledExtensions", {})
