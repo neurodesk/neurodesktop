@@ -6,7 +6,7 @@ T3's private store; only a bounded device code is exposed to the signed-in user.
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
+from contextlib import closing, suppress
 import json
 import ipaddress
 import os
@@ -186,13 +186,16 @@ class ConnectManager:
             self.expires_at = time.time() + min(int(expiry[1]) * 60, AUTH_TIMEOUT)
 
     def active_chats(self):
-        """Fail closed when the pinned projection cannot establish restart safety."""
-        path = self.service.policy.base_dir / 'userdata/state.sqlite'
+        """Fail closed when the pinned V2 projection cannot establish restart safety."""
+        path = self.service.policy.base_dir / 'userdata/statev2.sqlite'
         try:
-            with sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=1) as db:
+            with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=1)) as db:
                 return db.execute(
-                    'SELECT count(*) FROM projection_thread_sessions '
-                    "WHERE active_turn_id IS NOT NULL OR status IN ('running', 'starting')"
+                    'SELECT count(*) FROM orchestration_v2_projection_runs AS runs '
+                    'JOIN orchestration_v2_projection_threads AS threads '
+                    'ON threads.thread_id = runs.thread_id '
+                    'WHERE threads.deleted_at IS NULL '
+                    "AND runs.status IN ('preparing', 'starting', 'running', 'waiting')"
                 ).fetchone()[0] != 0
         except sqlite3.Error:
             return True

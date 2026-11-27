@@ -155,6 +155,17 @@ def test_real_t3_server_starts_on_loopback_with_private_state(tmp_path, previous
         else:
             raise AssertionError("T3 did not answer HTTP within 20 seconds")
 
+        # T3 Connect checks the live V2 SQLite projection before restarting T3.
+        # Verify the pinned database path, WAL read-only access, and V2 tables
+        # match the running server so future T3 upgrades cannot break linking.
+        from neurodesk_t3_code.connect import ConnectManager
+
+        assert (tmp_path / ".t3/userdata/statev2.sqlite").is_file()
+        connect_manager = ConnectManager(
+            SimpleNamespace(policy=SimpleNamespace(base_dir=tmp_path / ".t3"))
+        )
+        assert not connect_manager.active_chats()
+
         # Server startup reloads the login-shell PATH, which can put the
         # interactive Codex wrapper ahead of the quiet provider directory.
         # A listening port alone misses protocol-breaking wrapper banners.
