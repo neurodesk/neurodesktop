@@ -53,6 +53,18 @@ def test_neither_rendering_viewer_is_disabled_in_page_config():
         ), extension
 
 
+def test_server_proxy_disabled_at_sys_prefix_not_user_defaults():
+    sys_prefix = json.loads(
+        Path("/opt/conda/etc/jupyter/labconfig/page_config.json").read_text(encoding="utf-8")
+    ).get("disabledExtensions", {})
+    assert sys_prefix.get("@jupyterhub/jupyter-server-proxy") is True, sys_prefix
+
+    user_defaults = json.loads(
+        Path("/opt/jovyan_defaults/.jupyter/labconfig/page_config.json").read_text(encoding="utf-8")
+    ).get("disabledExtensions", {})
+    assert "@jupyterhub/jupyter-server-proxy" not in user_defaults, user_defaults
+
+
 def test_jupyterlab_accepts_the_rebuilt_extension():
     code, output = run_cmd("jupyter labextension list --verbose", timeout=60)
 
