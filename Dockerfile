@@ -1269,7 +1269,8 @@ RUN --mount=type=bind,source=extensions/neurodesk-launcher,target=/tmp/neurodesk
         /tmp/neurodesk-launcher/tsconfig.tsbuildinfo \
     && cd /tmp/neurodesk-launcher \
     && npm_config_cache=/tmp/neurodesk-launcher-npm-cache /opt/conda/bin/pip install --build-constraint /tmp/build-constraints.txt . \
-    && /opt/conda/bin/jupyter labextension disable @jupyterhub/jupyter-server-proxy \
+    && /opt/conda/bin/jupyter labextension disable --level=sys_prefix @jupyterhub/jupyter-server-proxy \
+    && /opt/conda/bin/python -c 'import json; d = json.load(open("/opt/conda/etc/jupyter/labconfig/page_config.json")); assert d.get("disabledExtensions", {}).get("@jupyterhub/jupyter-server-proxy") is True, d' \
     && rm -rf /tmp/neurodesk-launcher /tmp/neurodesk-launcher-npm-cache /home/${NB_USER}/.cache
 
 # Install the offline anywidget ASTRA viewer. The frontend is a

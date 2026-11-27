@@ -65,6 +65,7 @@ destination_has_symlink_component() {
 sync_file_from_defaults() {
     local src="$1"
     local dest="$2"
+    local seed_only="${3:-0}"
     local dest_dir
     local action
 
@@ -91,7 +92,7 @@ sync_file_from_defaults() {
     action=""
     if [ ! -e "$dest" ]; then
         action="Restoring missing file"
-    elif [ "$src" -nt "$dest" ]; then
+    elif [ "$seed_only" != "1" ] && [ "$src" -nt "$dest" ]; then
         action="Migrating updated default"
     fi
 
@@ -252,7 +253,13 @@ restore_defaults() {
         dest_file="${HOME_DIR}/${rel_path}"
 
         log_info "Processing: $rel_path"
-        sync_file_from_defaults "$src_file" "$dest_file"
+        # Seed page_config.json only when missing; update_page_config.py merges
+        # and migrates existing user settings without erasing user overrides.
+        if [ "$rel_path" = ".jupyter/labconfig/page_config.json" ]; then
+            sync_file_from_defaults "$src_file" "$dest_file" 1
+        else
+            sync_file_from_defaults "$src_file" "$dest_file"
+        fi
     done < <(find "$DEFAULTS_DIR" -type f -print0)
 
     # Handle special cases
