@@ -48,10 +48,12 @@ def isolated_environment(home):
             ),
             plugin,
         )
+    # Drop PWD so OpenCode 2 child processes started with cwd=... resolve their
+    # actual working directory rather than an inherited shell PWD.
     environment = {
         key: value
         for key, value in os.environ.items()
-        if not key.startswith(("T3", "OPENCODE_", "XDG_"))
+        if key != "PWD" and not key.startswith(("T3", "OPENCODE_", "XDG_"))
     }
     environment.update(
         {

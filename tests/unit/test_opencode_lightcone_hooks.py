@@ -7,6 +7,7 @@ scripts stand in for the reproduction checkout; the installed-image test in
 through a real OpenCode session.
 """
 
+import importlib.util
 import json
 import shutil
 import subprocess
@@ -124,3 +125,48 @@ def test_failed_tools_are_left_alone(run_plugin):
     }
     result, _, _ = run_plugin([failed])
     assert result["events"] == [failed]
+
+
+def _load_container_test(name, relative):
+    spec = importlib.util.spec_from_file_location(name, repo_path(relative))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_opencode_container_environments_drop_inherited_pwd(tmp_path, monkeypatch):
+    """OpenCode 2 prefers PWD over process.cwd(), so inherited shell PWD must be stripped."""
+    skills_module = _load_container_test(
+        "astra_agent_skills_image_subject",
+        "tests/container/test_astra_agent_skills_image.py",
+    )
+    home = tmp_path / "home"
+    env = skills_module.opencode_environment(
+        home,
+        base_env={
+            "PATH": "/usr/bin",
+            "PWD": "/home/jovyan",
+            "OPENCODE_CONFIG": "/stale/opencode.json",
+            "XDG_CONFIG_HOME": "/stale/xdg",
+            "NEURODESKTOP_SLURM_MODE": "local",
+        },
+        OPENCODE_CONFIG_CONTENT='{"model":"scripted/m"}',
+    )
+    assert "PWD" not in env
+    assert "OPENCODE_CONFIG" not in env
+    assert "XDG_CONFIG_HOME" not in env
+    assert env["HOME"] == str(home)
+    assert env["PATH"] == "/usr/bin"
+    assert env["NEURODESKTOP_SLURM_MODE"] == "local"
+    assert env["OPENCODE_DISABLE_MODELS_FETCH"] == "true"
+    assert env["OPENCODE_CONFIG_CONTENT"] == '{"model":"scripted/m"}'
+
+    t3_ollama_module = _load_container_test(
+        "t3_ollama_image_subject",
+        "tests/container/test_t3_ollama.py",
+    )
+    monkeypatch.setenv("PWD", "/home/jovyan")
+    t3_env = t3_ollama_module.isolated_environment(tmp_path / "t3-home")
+    assert "PWD" not in t3_env
+    assert t3_env["HOME"] == str(tmp_path / "t3-home")
