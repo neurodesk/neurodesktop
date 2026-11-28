@@ -36,7 +36,7 @@ def load_cli():
 
 
 COMMANDS = load_cli().COMMANDS
-EXTERNAL = [command for command in COMMANDS if command.executable]
+EXTERNAL = [command for command in COMMANDS if isinstance(command.target, str)]
 
 
 class Neurodesk:
@@ -86,10 +86,10 @@ def test_help_lists_every_command_by_group(neurodesk):
 
 @pytest.mark.parametrize("command", EXTERNAL, ids=lambda command: command.name)
 def test_command_runs_its_helper_with_remaining_arguments(neurodesk, command):
-    neurodesk.helper(command.executable)
+    neurodesk.helper(command.target)
     result = neurodesk.run(*command.words, "--flag", "two words")
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == [command.executable, "--flag", "two words"]
+    assert result.stdout.splitlines() == [command.target, "--flag", "two words"]
 
 
 def test_help_subcommand_asks_the_helper_for_its_help(neurodesk):
@@ -125,7 +125,7 @@ def test_registered_builtin_owns_its_dispatch_behavior(monkeypatch):
         return 23
 
     command = cli.Command(
-        ("inspect",), "Environment", "Inspect this image", builtin=inspect
+        ("inspect",), "Environment", "Inspect this image", target=inspect
     )
     monkeypatch.setattr(cli, "COMMANDS", (command,))
 
@@ -138,17 +138,14 @@ def test_registered_builtin_owns_its_dispatch_behavior(monkeypatch):
 
 @pytest.mark.parametrize(
     "targets",
-    [
-        {},
-        {"executable": "neurodesk-inspect", "builtin": lambda args, execv: 0},
-    ],
+    [(), ("neurodesk-inspect", lambda args, execv: 0)],
     ids=("targetless", "ambiguous"),
 )
 def test_command_requires_exactly_one_owned_dispatch_target(targets):
     cli = load_cli()
 
-    with pytest.raises(ValueError, match="exactly one"):
-        cli.Command(("inspect",), "Environment", "Inspect this image", **targets)
+    with pytest.raises(TypeError):
+        cli.Command(("inspect",), "Environment", "Inspect this image", *targets)
 
 
 def test_version_reports_the_image_version(neurodesk):
@@ -158,14 +155,14 @@ def test_version_reports_the_image_version(neurodesk):
 def test_every_helper_is_installed_under_its_registered_name():
     dockerfile = repo_path("Dockerfile").read_text()
     for command in EXTERNAL:
-        assert re.search(rf"/usr/local/bin/{re.escape(command.executable)}(?:\s|$)",
-                         dockerfile), command.executable
+        assert re.search(rf"/usr/local/bin/{re.escape(command.target)}(?:\s|$)",
+                         dockerfile), command.target
     assert "/tmp/jupyter/neurodesk_cli.py /usr/local/bin/neurodesk " in dockerfile
 
 
 def test_every_installed_neurodesk_helper_is_a_neurodesk_command():
     installed = set(re.findall(r"/usr/local/bin/(neurodesk-[\w-]+)", repo_path("Dockerfile").read_text()))
-    assert installed <= {command.executable for command in EXTERNAL}
+    assert installed <= {command.target for command in EXTERNAL}
 
 
 # --- test ----------------------------------------------------------------

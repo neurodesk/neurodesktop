@@ -35,13 +35,7 @@ class Command:
     words: tuple[str, ...]
     group: str
     summary: str
-    executable: str | None = None
-    builtin: Builtin | None = None
-
-    def __post_init__(self) -> None:
-        """Require each registry entry to own exactly one dispatch target."""
-        if (self.executable is None) == (self.builtin is None):
-            raise ValueError("a command needs exactly one executable or built-in handler")
+    target: str | Builtin
 
     @property
     def name(self) -> str:
@@ -334,31 +328,31 @@ def command_info(args: Sequence[str], _execv: Exec = os.execv) -> int:
 
 COMMANDS = (
     Command(("cite",), "Analysis", "Write CITATIONS.md for the Neurodesk tools you loaded",
-            executable="neurodesk-cite"),
+            target="neurodesk-cite"),
     Command(("kernel",), "Analysis", "Use a tool container's Python as a notebook kernel",
-            executable="neurodesk-kernel"),
+            target="neurodesk-kernel"),
     Command(("uv",), "Analysis", "Create per-project uv notebook environments",
-            executable="neurodesk-uv"),
+            target="neurodesk-uv"),
     Command(("jobs",), "Analysis", "Run analyses on remote SSH/Slurm sites (experimental)",
-            executable="neurodesk-jobs"),
+            target="neurodesk-jobs"),
     Command(("update",), "Environment", "Update the Neurodesk application menu",
-            executable="neurodesk-update"),
+            target="neurodesk-update"),
     Command(("check",), "Environment", "Check CVMFS, GPU, Slurm and T3 remote access",
-            builtin=command_check),
+            target=command_check),
     Command(("test",), "Environment", "Run the installed image test suite",
-            builtin=command_test),
+            target=command_test),
     Command(("info",), "Environment", "Show image version, resources, GPU and CVMFS",
-            builtin=command_info),
+            target=command_info),
     Command(("t3",), "Environment", "Set up T3 Code remote access through Tailscale",
-            executable="t3_neurodesk_setup"),
+            target="t3_neurodesk_setup"),
     Command(("agent", "preflight"), "Agents",
             "Show modules and Slurm limits before agent analysis",
-            executable="neurodesk-agent-preflight"),
+            target="neurodesk-agent-preflight"),
     Command(("astra",), "Agents", "Publish ASTRA outputs and check their provenance",
-            executable="neurodesk-astra-provenance"),
+            target="neurodesk-astra-provenance"),
     Command(("lightcone", "materialize"), "Agents",
             "Materialize a Lightcone output outside sbatch",
-            executable="neurodesk-lc-materialize"),
+            target="neurodesk-lc-materialize"),
 )
 
 
@@ -384,10 +378,9 @@ def main(argv: Sequence[str] | None = None, execv: Exec = os.execv) -> int:
             return 2
         return unknown(args[0])
     rest = args[len(command.words):]
-    if command.builtin is not None:
-        return command.builtin(rest, execv)
-    assert command.executable is not None  # Command's invariant narrows the type.
-    target = BIN_DIR / command.executable
+    if not isinstance(command.target, str):
+        return command.target(rest, execv)
+    target = BIN_DIR / command.target
     if not os.access(target, os.X_OK):
         print(f"neurodesk {command.name}: {target} is not installed in this image.", file=sys.stderr)
         return 1

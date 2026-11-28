@@ -4,7 +4,7 @@ description: The `neurodesk` dispatcher for the Neurodesktop helper commands,
   its built-in check, test and info commands, and the older command names
 parent: ../architecture.md
 status: current
-last-reviewed: "2026-11-27"
+last-reviewed: "2026-11-28"
 ---
 
 # Neurodesk command
@@ -17,9 +17,9 @@ image's system Python in isolated mode.
 ## Commands
 
 `neurodesk --help` lists every command, grouped as below. The `COMMANDS` table
-in the dispatcher is the only list; the help screen is generated from it and
-each entry owns exactly one dispatch target: an installed executable or a
-built-in handler.
+in the dispatcher supplies the help text and the required `target` for each
+command. A target is either the name of an installed executable or a built-in
+handler.
 
 | Command | Runs | Purpose |
 | --- | --- | --- |
